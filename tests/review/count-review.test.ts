@@ -11,6 +11,48 @@ import { ReviewDataManager } from '../../src/review/data';
 import { UIManager } from '../../src/review/ui';
 import type { CountPick } from '../../src/review/count';
 
+// 模拟做题家懒加载域：ai 初始为 null（本会话未 ensureQuiz 过的状态），ensureQuiz 幂等补上 ai
+vi.mock('../../src/quiz', () => {
+  const quiz: any = {
+    ai: null,
+    popup: null as any,
+    mask: null as any,
+    _cb: null as any,
+    startCalls: 0,
+    endCalls: 0,
+    startReviewSession(opts: any) {
+      this.startCalls++;
+      this.popup = document.createElement('div');
+      this.popup.id = 'quiz-popup';
+      this.mask = document.createElement('div');
+      document.body.appendChild(this.mask);
+      document.body.appendChild(this.popup);
+      this._cb = opts.onComplete;
+    },
+    endReviewSession() {
+      this.endCalls++;
+    },
+    close() {
+      if (this.popup && this.popup.parentNode) this.popup.remove();
+      if (this.mask && this.mask.parentNode) this.mask.remove();
+      this.popup = null;
+      this.mask = null;
+    },
+    manager: {
+      getQuestionsForNote: async () => [],
+      saveQuestionsForNote: async () => {},
+    },
+    ensureQuestions: async () => {},
+  };
+  return {
+    quizUI: quiz,
+    ensureQuiz: () => {
+      quiz.ai = {};
+    },
+    QuizMasterUI: { ai: null, settings: null },
+  };
+});
+
 function makeApp(vault: MockVault) {
   return mockAppWithVault(vault);
 }
@@ -250,6 +292,26 @@ describe('startCountSession（ticket 02：候选空态 / AI 未配置 / 正常�
     (reviewApp as any)._quizOverride = { ai: null };
     await reviewApp.startCountSession(2);
     expect(getNoticeMessages().join('|')).toContain('AI 服务未配置');
+  });
+
+  it('AI 已配置但做题家本会话未初始化（quiz.ai 为 null）→ 自动 ensureQuiz 后正常启动（回归：设置已配 AI 却误报未配置）', async () => {
+    const vault = new MockVault();
+    vault.files.set('卡片盒/笔记盒/A.md', '正文');
+    const app = makeApp(vault);
+    setApp(app);
+    setSettingsProvider(() => ({ reviewCountFolder: '卡片盒/笔记盒', reviewCountLastInput: 0 }) as any);
+    vi.spyOn(reviewApp, 'regenerateQuestions').mockResolvedValue(Q);
+    const p = reviewApp.startCountSession(1);
+    await new Promise((r) => setTimeout(r, 30));
+    // 未设 _quizOverride：getQuiz 拿到被 ensureQuiz 补上 ai 的 quizUI → 进入做题，而非误报
+    const quiz: any = await reviewApp.getQuiz();
+    expect(quiz.ai).toBeTruthy();
+    expect(quiz.startCalls).toBe(1);
+    expect(getNoticeMessages().join('|')).not.toContain('AI 服务未配置');
+    void quiz._cb({ correct: 1, wrong: 0, total: 1, accuracy: 100 });
+    await new Promise((r) => setTimeout(r, 30));
+    quiz.popup.querySelector('#quiz-end-review')!.click();
+    await p;
   });
 
   it('正常启动：逾期优先安排、记忆上次输入、走逐篇做题', async () => {

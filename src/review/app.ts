@@ -475,7 +475,22 @@ export const reviewApp = {
       s.reviewCountLastInput = n;
       await saveSettings();
     }
-    const quiz = await this.getQuiz();
+    let quiz: any = null;
+    try {
+      quiz = await this.getQuiz();
+    } catch {
+      /* ignore */
+    }
+    // 做题家域懒加载：设置里配了 AI 但本会话还没初始化过做题家时 quiz.ai 为 null（ensureQuiz 幂等：AI 注入）
+    if (quiz && !quiz.ai) {
+      try {
+        const { ensureQuiz } = await import('../quiz');
+        ensureQuiz(app);
+        quiz = await this.getQuiz();
+      } catch {
+        /* ignore */
+      }
+    }
     if (!quiz || !quiz.ai) {
       notice('AI 服务未配置，无法按数量复习', 'warning');
       return;
