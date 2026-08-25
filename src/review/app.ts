@@ -515,7 +515,19 @@ export const reviewApp = {
     // 逐篇出题：复用重做链路（清旧题 → AI 全新生成 → 补 notePath/_index）；失败跳过该篇
     const questions = await this.regenerateQuestions(pick.filePath);
     if (!questions.length) {
-      notice(`「${file.basename}」出题失败，已跳过`, 'warning');
+      // 区分原因：文档内容为空（被 ensureQuestions 的 content.trim() 排除，无任何报错通知）→ 明确提示，避免误判为 AI 异常
+      let contentEmpty = false;
+      try {
+        contentEmpty = !(await app.vault.read(file)).trim();
+      } catch {
+        contentEmpty = true;
+      }
+      notice(
+        contentEmpty
+          ? `「${file.basename}」内容为空，无法出题，已跳过`
+          : `「${file.basename}」出题失败，已跳过`,
+        'warning'
+      );
       await this.countReviewLoop(picks, index + 1, results);
       return;
     }

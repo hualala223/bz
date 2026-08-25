@@ -171,6 +171,29 @@ describe('countReviewLoop（ticket 02 骨架：逐篇做题 + 正确率 + 下一
     expect(quiz.endCalls).toBe(1); // 汇总页结束
   });
 
+  it('文档内容为空 → 提示「内容为空，无法出题」，区别于 AI 失败', async () => {
+    const vault = new MockVault();
+    vault.files.set('A.md', '   \n  '); // 纯空白
+    vault.files.set('B.md', '正文');
+    const app = makeApp(vault);
+    setApp(app);
+    const quiz = makeQuizMock();
+    (reviewApp as any)._quizOverride = quiz;
+    let call = 0;
+    // A（空内容）→ 返回空触发「内容为空」分支；B（有内容）→ 正常出题，验证跳过 A 后流程继续
+    vi.spyOn(reviewApp, 'regenerateQuestions').mockImplementation(async () => (call++ === 0 ? [] : Q));
+    const p = reviewApp.countReviewLoop([pick('A.md', 'new'), pick('B.md', 'new')], 0);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(getNoticeMessages().join('|')).toContain('「A」内容为空，无法出题，已跳过');
+    expect(quiz.startCalls).toBe(1); // 跳过 A，进入 B 做题
+    void quiz._cb({ correct: 2, wrong: 0, total: 2, accuracy: 100 });
+    await new Promise((r) => setTimeout(r, 30));
+    quiz.popup.querySelector('#quiz-next-note')!.click();
+    await p;
+    expect(quiz.popup.innerHTML).toContain('总正确率');
+    quiz.popup.querySelector('#quiz-end-summary')!.click();
+  });
+
   it('文件不存在：静默跳过（挂起清理上游已做）', async () => {
     const vault = new MockVault();
     vault.files.set('B.md', '正文');
