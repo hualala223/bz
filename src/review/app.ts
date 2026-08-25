@@ -888,35 +888,22 @@ export const reviewApp = {
   /** 文件树染色 + 阶段徽标（源码 L719-772 逐字；ticket 100 加「文件树标记」开关）
    *  2026-08 稳健化：原用 CSS 属性选择器 `div[data-path="..."]` 精确取值，中文/斜杠路径在部分环境转义失配，
    *  Obsidian 文件树 DOM 各版本亦有差异——改为遍历 `[data-path]` 精确比对取值，目标文本层多备选退避，
-   *  最大化命中已渲染的文件树节点。 */
+   *  最大化命中已渲染的文件树节点。
+   *  自愈重试：移动端抽屉/懒渲染导致文件树未渲染或目标节点未出现时（计划里该染的文档一个都没染上），
+   *  每 2s 自动重试（最多 8 次 ≈16s；之后交 60s 轮询与 startFileTreeWatch 负责）。 */
   async applyReviewStyles(app: App, changedFile?: TFile): Promise<void> {
     if ((getSettings() as any).reviewTreeBadge === false) return; // ticket 100：关=清爽文件树（不染色不挂徽章）
     this.ensure(app);
     const dm = this.dataManager!;
     const files = changedFile ? [changedFile] : app.vault.getMarkdownFiles();
-    // 文件树懒渲染/抽屉未开（移动端启动时文件树 DOM 不存在）：[data-path]=0 → 2s 后自动重试，
-    // 直到文件树节点出现（最多 8 次 ≈16s；之后交 60s 轮询与 startFileTreeWatch 负责）
-    if (!changedFile && files.length > 0) {
-      const dpCount = document.querySelectorAll('[data-path]').length;
-      if (dpCount === 0) {
-        this._stainRetries = (this._stainRetries || 0) + 1;
-        if ((this._stainRetries || 0) <= 8) {
-          const retry = this._stainRetries;
-          console.warn('[bz/stain] 文件树未渲染，2s 后重试 (' + retry + '/8)');
-          setTimeout(() => {
-            this._stainRetries = (this._stainRetries || 0) - 1;
-            void this.applyReviewStyles(app);
-          }, 2000);
-        }
-        return;
-      }
-      this._stainRetries = 0;
-    }
     const allItems = await dm.loadItems();
     const fsrs = new FSRS();
+    const planPaths = new Set(allItems.map((i) => i.filePath));
+    const _DP_ = Array.from(document.querySelectorAll<HTMLElement>('[data-path]'));
+
     // 一次性诊断（字符串化；定位染色不生效时的文件树 DOM 结构）
     console.warn('[bz/stain] 结构=' + this._stainDiag());
-    const _DP_ = Array.from(document.querySelectorAll<HTMLElement>('[data-path]'));
+    let stainedCount = 0;
 
     for (const file of files) {
       // 遍历 [data-path] 节点精确比对，避开 CSS 属性选择器对中文/斜杠的转义问题
@@ -927,7 +914,7 @@ export const reviewApp = {
             path: file.path,
             totalDP: _DP_.length,
             sampleNode: _DP_[0] ? (_DP_[0].getAttribute('data-path')) : null,
-            inPlan: allItems.some((i) => i.filePath === file.path),
+            inPlan: planPaths.has(file.path),
           });
         }
         continue;
@@ -946,6 +933,7 @@ export const reviewApp = {
         target.style.color = '';
         continue;
       }
+      stainedCount++;
       const currentStage = item.stage || 0;
       const now = new Date();
       const nextReview = item.nextReviewDate ? new Date(item.nextReviewDate) : null;
@@ -991,6 +979,24 @@ export const reviewApp = {
         badgeEl.textContent = timeText;
         badgeEl.style.cssText = `font-size:0.7em;opacity:0.8;margin-left:6px;color:${color};background:color-mix(in srgb, ${color} 10%, transparent);padding:1px 4px;border-radius:3px;border:1px solid color-mix(in srgb, ${color} 30%, transparent);font-weight:500;`;
         target.appendChild(badgeEl);
+      }
+    }
+
+    // 自愈重试：全量扫描且计划里有该染的文档，但本次一个都没染上（文件树未渲染 / 折叠 / 移动端抽屉未开）
+    if (!changedFile && files.length > 0) {
+      const planInFiles = files.filter((f) => planPaths.has(f.path)).length;
+      if (planInFiles > 0 && stainedCount === 0) {
+        this._stainRetries = (this._stainRetries || 0) + 1;
+        if ((this._stainRetries || 0) <= 8) {
+          const retry = this._stainRetries;
+          console.warn('[bz/stain] 计划文档均未染色（渲染中/抽屉未开？），2s 后重试 (' + retry + '/8)');
+          setTimeout(() => {
+            this._stainRetries = (this._stainRetries || 0) - 1;
+            void this.applyReviewStyles(app);
+          }, 2000);
+        }
+      } else {
+        this._stainRetries = 0;
       }
     }
   },
