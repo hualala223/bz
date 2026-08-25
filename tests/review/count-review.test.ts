@@ -94,10 +94,14 @@ describe('countReviewLoop（ticket 02 骨架：逐篇做题 + 正确率 + 下一
     expect(quiz.popup.innerHTML).toContain('正确率 50%');
     expect(quiz.popup.innerHTML).toContain('📌 逾期 · 刚学');
     expect(quiz.popup.innerHTML).toContain('自动标记：困难');
-    // 末篇按钮为「查看汇总」；点结束 → 会话结束、循环中止
+    // 末篇按钮为「查看汇总」；点结束 → 进汇总页（总正确率），结束按钮终结会话
     expect(quiz.popup.innerHTML).toContain('查看汇总');
     quiz.popup.querySelector('#quiz-end-review')!.click();
     await p;
+    expect(quiz.popup.innerHTML).toContain('总正确率');
+    expect(quiz.endCalls).toBe(0); // 会话仍在，等待汇总页「结束这次复习」
+    quiz.popup.querySelector('#quiz-end-summary')!.click();
+    await new Promise((r) => setTimeout(r, 20));
     expect(quiz.endCalls).toBe(1);
     expect(quiz.startCalls).toBe(2);
   });
@@ -120,8 +124,9 @@ describe('countReviewLoop（ticket 02 骨架：逐篇做题 + 正确率 + 下一
     await new Promise((r) => setTimeout(r, 30));
     quiz.popup.querySelector('#quiz-next-note')!.click();
     await p;
-    expect(quiz.endCalls).toBe(1);
-    expect(getNoticeMessages().join('|')).toContain('本次按数量复习已完成');
+    expect(quiz.popup.innerHTML).toContain('总正确率');
+    quiz.popup.querySelector('#quiz-end-summary')!.click();
+    expect(quiz.endCalls).toBe(1); // 汇总页结束
   });
 
   it('文件不存在：静默跳过（挂起清理上游已做）', async () => {
@@ -139,13 +144,73 @@ describe('countReviewLoop（ticket 02 骨架：逐篇做题 + 正确率 + 下一
     await new Promise((r) => setTimeout(r, 30));
     quiz.popup.querySelector('#quiz-next-note')!.click();
     await p;
+    expect(quiz.popup.innerHTML).toContain('总正确率');
+    expect(quiz.popup.innerHTML).toContain('已跳过'); // GONE 行
+    quiz.popup.querySelector('#quiz-end-summary')!.click();
     expect(quiz.endCalls).toBe(1);
+  });
+
+  it('结果卡「查看原文档」（ticket 04）：内嵌预览弹层渲染全文，关闭后回到结果卡', async () => {
+    const vault = new MockVault();
+    vault.files.set('A.md', '# 标题\n正文内容ABC');
+    const app = makeApp(vault);
+    setApp(app);
+    const quiz = makeQuizMock();
+    (reviewApp as any)._quizOverride = quiz;
+    vi.spyOn(reviewApp, 'regenerateQuestions').mockResolvedValue(Q);
+    const p = reviewApp.countReviewLoop([pick('A.md', 'new')], 0);
+    await new Promise((r) => setTimeout(r, 20));
+    void quiz._cb({ correct: 2, wrong: 0, total: 2, accuracy: 100 });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(quiz.popup.innerHTML).toContain('查看原文档');
+    (quiz.popup.querySelector('#quiz-view-note') as HTMLElement).click();
+    await new Promise((r) => setTimeout(r, 50));
+    // 预览渲染全文（mock MarkdownRenderer 写 textContent）
+    const body = document.querySelector('#note-preview-body');
+    expect(body).toBeTruthy();
+    expect(body!.textContent).toContain('正文内容ABC');
+    // ❌ 关闭预览 → 回到结果卡 → 下一篇照常推进（末篇按钮为「查看汇总」，id 不变）
+    (document.querySelector('#note-preview-popup button:last-child') as HTMLElement).click();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(document.querySelector('#note-preview-popup')).toBeNull();
+    expect(quiz.popup.innerHTML).toContain('查看原文档');
+    expect(quiz.popup.querySelector('#quiz-next-note')).toBeTruthy();
+    quiz.popup.querySelector('#quiz-next-note')!.click();
+    await p;
+    expect(quiz.popup.innerHTML).toContain('总正确率'); // 末篇 → 汇总页
+    quiz.popup.querySelector('#quiz-end-summary')!.click();
+    expect(quiz.endCalls).toBe(1);
+  });
+
+  it('预览「在 Obsidian 打开」：调用 openLinkText 并关闭预览', async () => {
+    const vault = new MockVault();
+    vault.files.set('A.md', '正文');
+    const app = makeApp(vault);
+    setApp(app);
+    const openLinkText = vi.fn().mockResolvedValue(undefined);
+    (app.workspace as any).openLinkText = openLinkText;
+    const quiz = makeQuizMock();
+    (reviewApp as any)._quizOverride = quiz;
+    vi.spyOn(reviewApp, 'regenerateQuestions').mockResolvedValue(Q);
+    const p = reviewApp.countReviewLoop([pick('A.md', 'new')], 0);
+    await new Promise((r) => setTimeout(r, 20));
+    void quiz._cb({ correct: 2, wrong: 0, total: 2, accuracy: 100 });
+    await new Promise((r) => setTimeout(r, 30));
+    (quiz.popup.querySelector('#quiz-view-note') as HTMLElement).click();
+    await new Promise((r) => setTimeout(r, 50));
+    const btn = [...document.querySelectorAll('#note-preview-popup button')].find((b) => b.textContent === '在 Obsidian 打开') as HTMLElement;
+    btn.click();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(openLinkText).toHaveBeenCalledWith('A.md', '', false, { active: true });
+    expect(document.querySelector('#note-preview-popup')).toBeNull();
+    quiz.popup.querySelector('#quiz-end-review')!.click();
+    await p;
   });
 });
 
 describe('buildCountResultCard（纯渲染：kind 标注 + 正确率 + 按钮）', () => {
   it('renders kind/bucket 与正确率', () => {
-    const html = reviewApp.buildCountResultCard(pick('X.md', 'due-today', 3, '短期'), '《X》', { correct: 3, wrong: 1, total: 4, accuracy: 75 }, 'good', false);
+    const html = reviewApp.buildCountResultCard(pick('X.md', 'due-today', 3, '短期'), '《X》', { correct: 3, wrong: 1, total: 4, accuracy: 75 }, 'good', '下一篇');
     expect(html).toContain('🎯 X');
     expect(html).toContain('📌 今天到期 · 短期');
     expect(html).toContain('3/4');
@@ -405,6 +470,67 @@ describe('countReviewLoop 排期写入（ticket 03：首次评级写排期 / 新
     expect(after.lastReviewed).toBeTruthy();
     quiz.popup.querySelector('#quiz-end-review')!.click();
     await p;
+  });
+});
+
+describe('汇总页与重做本篇（ticket 05）', () => {
+  beforeEach(() => {
+    resetObsidianMocks();
+    clearNotices();
+    setSettingsProvider(() => ({}) as any);
+    (reviewApp as any).dataManager = null;
+    (reviewApp as any)._quizOverride = null;
+    vi.restoreAllMocks();
+  });
+
+  it('汇总页：总正确率 + 未通过标红 + 重做本篇刷新该行（重做语义：通过清标记不写排期）', async () => {
+    const vault = new MockVault();
+    vault.files.set('A.md', '正文');
+    vault.files.set('B.md', '正文');
+    const now = new Date();
+    vault.files.set('CONFIG/STORAGE/review.json', JSON.stringify([
+      {
+        id: 'a', filePath: 'A.md', name: 'A',
+        reviewStart: now.toISOString(), stage: 2, phase: 'ladder', stability: 1, difficulty: 0.3,
+        reviewHistory: [], totalReviews: 0, averageConfidence: 0,
+        nextReviewDate: new Date(now.getTime() - 1000).toISOString(), lastReviewed: null, lastDifficulty: null, completed: false,
+      },
+    ]));
+    const app = makeApp(vault);
+    setApp(app);
+    const quiz = makeQuizMock();
+    (reviewApp as any)._quizOverride = quiz;
+    vi.spyOn(reviewApp, 'regenerateQuestions').mockResolvedValue(Q);
+    const dm = new ReviewDataManager(app);
+    const p = reviewApp.countReviewLoop([pick('A.md', 'overdue', 2, '刚学'), pick('B.md', 'new')], 0);
+    await new Promise((r) => setTimeout(r, 20));
+    void quiz._cb({ correct: 0, wrong: 2, total: 2, accuracy: 0 }); // A 失败
+    await new Promise((r) => setTimeout(r, 30));
+    quiz.popup.querySelector('#quiz-next-note')!.click();
+    await new Promise((r) => setTimeout(r, 30));
+    void quiz._cb({ correct: 2, wrong: 0, total: 2, accuracy: 100 }); // B 通过
+    await new Promise((r) => setTimeout(r, 30));
+    quiz.popup.querySelector('#quiz-next-note')!.click(); // 末篇 → 汇总
+    await p;
+    expect(quiz.popup.innerHTML).toContain('总正确率');
+    expect(quiz.popup.innerHTML).toContain('50%'); // (0+2)/(2+2)
+    expect(quiz.popup.innerHTML).toContain('未通过');
+    expect(quiz.popup.innerHTML).toContain('通过');
+    expect((await dm.loadItems()).find((i) => i.filePath === 'A.md')!.pendingRedo).toBe(true);
+    // 重做本篇 A：重新出题单篇重做 → 通过 → 汇总行刷新
+    (quiz.popup.querySelectorAll('#count-summary-redo')[0] as HTMLElement).click();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(quiz.startCalls).toBe(3); // 第三篇会话（重做）
+    void quiz._cb({ correct: 2, wrong: 0, total: 2, accuracy: 100 });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(quiz.popup.innerHTML).toContain('返回汇总');
+    quiz.popup.querySelector('#quiz-next-note')!.click();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(quiz.popup.innerHTML).toContain('总正确率');
+    expect(quiz.popup.innerHTML).not.toContain('未通过'); // 两篇均通过
+    expect((await dm.loadItems()).find((i) => i.filePath === 'A.md')!.pendingRedo).toBe(false);
+    quiz.popup.querySelector('#quiz-end-summary')!.click();
+    expect(quiz.endCalls).toBe(1);
   });
 });
 

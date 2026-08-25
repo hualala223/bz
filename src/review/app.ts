@@ -10,7 +10,27 @@ import { FSRS, FSRS_FIRST_INTERVALS, FSRS_FIRST_TEXTS, LADDER_MAX } from './fsrs
 import type { Rating } from './fsrs';
 import type { ReviewItem } from './data';
 import { ReviewDataManager } from './data';
-import { collectFolderFiles, eligibleCount, selectCountReview, type CountPick } from './count';
+import { collectFolderFiles, eligibleCount, selectCountReview, type CountPick, type CountPickKind } from './count';
+import { showNotePreview } from './preview';
+
+/** 按数量复习单篇结果（汇总页数据源） */
+export interface CountSessionResult {
+  filePath: string;
+  name: string;
+  kind: CountPickKind;
+  bucket: string | null;
+  correct: number;
+  wrong: number;
+  total: number;
+  accuracy: number;
+  rating: Rating;
+  failed: boolean;
+}
+
+/** 已完成（有答题）篇数 */
+function doneCount(results: CountSessionResult[]): number {
+  return results.filter((r) => r.total > 0).length;
+}
 
 export const reviewApp = {
   checkInterval: null as ReturnType<typeof setInterval> | null,
@@ -463,85 +483,203 @@ export const reviewApp = {
     await this.countReviewLoop(picks, 0);
   },
 
-  /** 按数量复习逐篇循环（ticket 02）：进篇逐篇出题（复用 AI 出题器）→ 做题会话 → 正确率结果卡 → 下一篇/结束
-   *  T03 在 onComplete 接入排期写入；T04 在结果卡加「查看原文档」；T05 末篇接汇总页。 */
-  async countReviewLoop(picks: CountPick[], index: number): Promise<void> {
+  /** 按数量复习逐篇循环（ticket 02/05）：进篇逐篇出题 → 单篇做题 → 收集结果 → 末篇/结束进汇总页 */
+  async countReviewLoop(picks: CountPick[], index: number, results: CountSessionResult[] = []): Promise<void> {
     const app = getApp();
     this.ensure(app);
-    const quiz = await this.getQuiz();
     if (index >= picks.length) {
-      quiz.endReviewSession();
-      notice('本次按数量复习已完成', 'success');
+      await this.showCountSummary(picks, results);
       return;
     }
     const pick = picks[index];
     const file = app.vault.getAbstractFileByPath(pick.filePath) as TFile | null;
     if (!file) {
-      await this.countReviewLoop(picks, index + 1);
+      await this.countReviewLoop(picks, index + 1, results);
       return;
     }
     // 逐篇出题：复用重做链路（清旧题 → AI 全新生成 → 补 notePath/_index）；失败跳过该篇
     const questions = await this.regenerateQuestions(pick.filePath);
     if (!questions.length) {
       notice(`「${file.basename}」出题失败，已跳过`, 'warning');
-      await this.countReviewLoop(picks, index + 1);
+      await this.countReviewLoop(picks, index + 1, results);
       return;
     }
+    const isLast = index >= picks.length - 1;
+    const out = await this.runCountItem(pick, file, questions, isLast ? '查看汇总' : '下一篇');
+    if (out === null) {
+      await this.showCountSummary(picks, results); // 用户提前结束：汇总已完成部分
+      return;
+    }
+    results.push(out);
+    await this.countReviewLoop(picks, index + 1, results);
+  },
+
+  /** 单篇做题会话（ticket 05）：做题 → 排期写入 → 结果卡（查看原文档/下一篇/结束）
+   *  返回该篇结果；「结束这次复习」返回 null（不终结会话弹窗，由调用方决定收尾）。 */
+  async runCountItem(pick: CountPick, file: TFile, questions: any[], nextLabel: string, redoSemantic: boolean = false): Promise<CountSessionResult | null> {
+    const app = getApp();
+    const quiz = await this.getQuiz();
     return new Promise((resolve) => {
       quiz.startReviewSession({
         questions,
-        onComplete: async (results: any) => {
-          const rating = this.accuracyToRating(results.accuracy);
-          // 排期写入（T03）：普通文档（逾期/今天到期/新文件/阶段采样）首次评级写排期 + autoPending（<70% 置待重做）；
-          // 新文件先加入 review.json 再写排期；待重做走重做语义——≥70%（一般/简单）仅清标记不写排期，<70% 保持待重做且不中断流程。
-          const itemPath = pick.filePath;
-          const dm = this.dataManager!;
-          const items = await dm.loadItems();
-          const item = items.find((i) => i.filePath === itemPath);
-          const failed = rating === 'again' || rating === 'hard';
-          if (pick.kind === 'redo') {
-            if (item && !failed) {
-              await dm.updateItem(itemPath, (it) => {
-                it.pendingRedo = false;
-              });
-            }
-          } else if (item) {
-            await this.markReview(itemPath, rating, { autoPending: true, force: true });
-          } else {
-            // 新文件：先入计划（首次评级 = 唯一排期来源，ADR-0044）
-            try {
-              await dm.addItem(itemPath, file.basename);
-            } catch {
-              /* 并发已加入 → 忽略 */
-            }
-            await this.markReview(itemPath, rating, { autoPending: true, force: true });
-          }
-          await this.applyReviewStyles(app);
+        onComplete: async (q: any) => {
+          const rating = this.accuracyToRating(q.accuracy);
+          await this.applyCountScheduling(pick, file.basename, rating, redoSemantic);
+          const result: CountSessionResult = {
+            filePath: pick.filePath,
+            name: file.basename,
+            kind: pick.kind,
+            bucket: pick.bucket,
+            correct: q.correct,
+            wrong: q.wrong,
+            total: q.total,
+            accuracy: q.accuracy,
+            rating,
+            failed: rating === 'again' || rating === 'hard',
+          };
           const popup = quiz.popup;
           if (!popup) {
-            resolve();
-            await this.countReviewLoop(picks, index + 1);
+            resolve(result); // 弹窗被关闭（如 ESC 结算）：本篇已结算，继续流程
             return;
           }
-          const isLast = index >= picks.length - 1;
-          popup.innerHTML = this.buildCountResultCard(pick, file.basename, results, rating, isLast);
+          popup.innerHTML = this.buildCountResultCard(pick, file.basename, q, rating, nextLabel);
+          // 查看原文档（T04）：内嵌预览弹层，不推进流程；关闭后回到结果卡
+          popup.querySelector('#quiz-view-note')!.addEventListener('click', () => {
+            void showNotePreview(app, pick.filePath, file.basename);
+          });
           const action = await new Promise<string>((resolveAction) => {
             popup.querySelector('#quiz-next-note')!.onclick = () => resolveAction('next');
             popup.querySelector('#quiz-end-review')!.onclick = () => resolveAction('end');
           });
-          resolve();
           if (action === 'end') {
-            quiz.endReviewSession();
+            resolve(null);
             return;
           }
-          await this.countReviewLoop(picks, index + 1);
+          resolve(result);
         },
       });
     });
   },
 
-  /** 按数量复习结果卡：kind 标注 + 正确率 + 下一篇/结束（T04 加「查看原文档」按钮） */
-  buildCountResultCard(pick: CountPick, name: string, results: any, rating: Rating, isLast: boolean): string {
+  /** 排期写入（T03）：普通文档（逾期/今天到期/新文件/阶段采样）首次评级写排期 + autoPending（<70% 置待重做）；
+   *  新文件先加入 review.json 再写排期；待重做/重做语义——≥70%（一般/简单）仅清标记不写排期，<70% 保持待重做（ADR-0044）。 */
+  async applyCountScheduling(pick: CountPick, name: string, rating: Rating, redoSemantic: boolean = false): Promise<void> {
+    const app = getApp();
+    this.ensure(app);
+    const dm = this.dataManager!;
+    const items = await dm.loadItems();
+    const item = items.find((i) => i.filePath === pick.filePath);
+    const failed = rating === 'again' || rating === 'hard';
+    if (redoSemantic || pick.kind === 'redo') {
+      if (item && !failed) {
+        await dm.updateItem(pick.filePath, (it) => {
+          it.pendingRedo = false;
+        });
+      }
+    } else if (item) {
+      await this.markReview(pick.filePath, rating, { autoPending: true, force: true });
+    } else {
+      // 新文件：先入计划（首次评级 = 唯一排期来源，ADR-0044）
+      try {
+        await dm.addItem(pick.filePath, name);
+      } catch {
+        /* 并发已加入 → 忽略 */
+      }
+      await this.markReview(pick.filePath, rating, { autoPending: true, force: true });
+    }
+    await this.applyReviewStyles(app);
+  },
+
+  /** 按数量复习汇总页（ticket 05）：总正确率 + 每篇一行（正确率/查看原文档/重做本篇；未通过标红） */
+  async showCountSummary(picks: CountPick[], results: CountSessionResult[]): Promise<void> {
+    const quiz = await this.getQuiz();
+    if (!quiz.popup) return;
+    const done = results.filter((r) => r.total > 0);
+    const totalCorrect = done.reduce((s, r) => s + r.correct, 0);
+    const totalQ = done.reduce((s, r) => s + r.total, 0);
+    const acc = totalQ > 0 ? Math.round((totalCorrect / totalQ) * 100) : 0;
+    quiz.popup.innerHTML = this.buildCountSummary(picks, results, acc);
+    quiz.popup.querySelectorAll('#count-summary-view').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const path = (btn as HTMLElement).dataset.path || '';
+        const name = (btn as HTMLElement).dataset.name || '';
+        void showNotePreview(getApp(), path, name);
+      });
+    });
+    quiz.popup.querySelectorAll('#count-summary-redo').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const idx = Number((btn as HTMLElement).dataset.idx);
+        const pk = picks[idx];
+        if (pk) void this.countRedoOne(pk, idx, picks, results);
+      });
+    });
+    quiz.popup.querySelector('#quiz-end-summary')!.addEventListener('click', () => {
+      quiz.endReviewSession();
+    });
+  },
+
+  /** 汇总页模板：总正确率 + 每篇一行；未完成篇显示「已跳过」 */
+  buildCountSummary(picks: CountPick[], results: CountSessionResult[], acc: number): string {
+    const byPath = new Map(results.map((r) => [r.filePath, r]));
+    const rows = picks
+      .map((p, idx) => {
+        const r = byPath.get(p.filePath);
+        const name = r ? r.name : (p.filePath.split('/').pop() || '').replace(/\.md$/, '');
+        if (!r) {
+          return `
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--background-modifier-border);">
+              <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);">${name}</div>
+              <span style="font-size:12px;color:var(--text-muted);flex-shrink:0;">已跳过</span>
+              <button id="count-summary-view" data-path="${p.filePath}" data-name="${name}" style="flex-shrink:0;padding:4px 10px;border:none;border-radius:6px;background:var(--background-secondary);color:var(--text-normal);cursor:pointer;font-size:12px;">查看原文档</button>
+            </div>`;
+        }
+        const color = r.failed ? '#ff4757' : '#2ed573';
+        const status = r.failed ? '未通过' : '通过';
+        return `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--background-modifier-border);">
+            <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-normal);">🎯 ${name}</div>
+            <span style="font-size:13px;color:var(--text-muted);flex-shrink:0;">${r.correct}/${r.total}（${r.accuracy}%）</span>
+            <span style="font-size:12px;color:${color};flex-shrink:0;">${status}</span>
+            <button id="count-summary-view" data-path="${p.filePath}" data-name="${name}" style="flex-shrink:0;padding:4px 10px;border:none;border-radius:6px;background:var(--background-secondary);color:var(--text-normal);cursor:pointer;font-size:12px;">查看原文档</button>
+            <button id="count-summary-redo" data-idx="${idx}" style="flex-shrink:0;padding:4px 10px;border:none;border-radius:6px;background:var(--interactive-accent);color:var(--text-on-accent);cursor:pointer;font-size:12px;">重做本篇</button>
+          </div>`;
+      })
+      .join('');
+    return `
+      <div style="padding:24px;">
+        <div style="font-size:18px;font-weight:600;margin-bottom:4px;color:var(--text-normal);">📊 复习汇总</div>
+        <div style="font-size:32px;font-weight:700;margin:8px 0 16px;color:var(--text-normal);">${acc}%</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">总正确率（已完成 ${doneCount(results)}/${picks.length} 篇）</div>
+      </div>
+      <div style="padding:0 24px;">${rows || '<div style="font-size:13px;color:var(--text-muted);padding:8px 0;">未完成任何复习</div>'}</div>
+      <div style="padding:16px 24px 24px;">
+        <button id="quiz-end-summary" style="display:block;width:100%;padding:10px;border:none;border-radius:6px;background:var(--interactive-accent);color:var(--text-on-accent);cursor:pointer;font-size:13px;font-weight:500;">结束这次复习</button>
+      </div>
+    `;
+  },
+
+  /** 重做本篇（ticket 05）：重新出题单篇重做（重做语义——通过清标记不写排期、未通过保持待重做），完成后刷新汇总行 */
+  async countRedoOne(pick: CountPick, idx: number, picks: CountPick[], results: CountSessionResult[]): Promise<void> {
+    const app = getApp();
+    const quiz = await this.getQuiz();
+    const file = app.vault.getAbstractFileByPath(pick.filePath) as TFile | null;
+    if (!file) return;
+    const questions = await this.regenerateQuestions(pick.filePath);
+    if (!questions.length) {
+      notice('重做失败：无题目可用', 'warning');
+      return;
+    }
+    const out = await this.runCountItem(pick, file, questions, '返回汇总', true);
+    if (out === null) {
+      quiz.endReviewSession(); // 重做中点「结束这次复习」→ 会话结束
+      return;
+    }
+    results[idx] = out;
+    await this.showCountSummary(picks, results);
+  },
+
+  /** 按数量复习结果卡：kind 标注 + 正确率 + 查看原文档/下一篇/结束 */
+  buildCountResultCard(pick: CountPick, name: string, results: any, rating: Rating, nextLabel: string): string {
     const ratingNames: Record<string, string> = { again: '忘了', hard: '困难', good: '一般', easy: '简单' };
     const tagColors: Record<string, string> = { again: '#ff4757', hard: '#ff9f43', good: '#2ed573', easy: '#7bed9f' };
     const kindTexts: Record<string, string> = { redo: '待重做', overdue: '逾期', 'due-today': '今天到期', new: '新文件', stage: '复习' };
@@ -553,7 +691,8 @@ export const reviewApp = {
         <div style="font-size:14px;color:var(--text-muted);margin-bottom:12px;">✅ 答对 ${results.correct} 题　❌ 答错 ${results.wrong} 题</div>
         <div style="display:inline-block;padding:6px 16px;border-radius:16px;font-size:14px;font-weight:500;background:${tagColors[rating]}22;color:${tagColors[rating]};margin-bottom:20px;">正确率 ${results.accuracy}% · 自动标记：${ratingNames[rating]}</div>
       </div>
-      <button id="quiz-next-note" style="display:block;width:100%;padding:10px;border:none;border-radius:6px;background:var(--interactive-accent);color:var(--text-on-accent);cursor:pointer;font-size:13px;font-weight:500;">${isLast ? '查看汇总' : '下一篇'}</button>
+      <button id="quiz-view-note" style="display:block;width:100%;padding:10px;border:none;border-radius:6px;background:var(--background-secondary);color:var(--text-normal);cursor:pointer;font-size:13px;">查看原文档</button>
+      <button id="quiz-next-note" style="display:block;width:100%;padding:10px;border:none;border-radius:6px;background:var(--interactive-accent);color:var(--text-on-accent);cursor:pointer;font-size:13px;font-weight:500;">${nextLabel || '下一篇'}</button>
       <button id="quiz-end-review" style="display:block;width:100%;padding:10px;margin-top:8px;border:1px solid var(--background-modifier-border);border-radius:6px;background:var(--background-secondary);color:var(--text-muted);cursor:pointer;font-size:13px;">结束这次复习</button>
     `;
   },
