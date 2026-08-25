@@ -545,6 +545,31 @@ describe('applyReviewStyles 着色矩阵', () => {
     else expect(inB.style.color).toBe('rgb(255, 159, 67)');
     expect(inC.style.color).toBe('rgb(255, 159, 67)'); // R<0.7 橙
   });
+
+  it('稳健化：中文路径 + .nav-file-title-content 备选结构也能染色（遍历 [data-path] 定位，不依赖 CSS 选择器转义）', async () => {
+    const now = Date.now();
+    const path = '卡片盒/笔记盒/我的笔记.md';
+    vault.files.set(path, 'x');
+    // 模拟另一种 Obsidian 文件树结构：节点带 data-path，文本层用 .nav-file-title-content（无 .tree-item-inner）
+    const el = document.createElement('div');
+    el.setAttribute('data-path', path);
+    const nav = document.createElement('div');
+    nav.className = 'nav-file-title-content';
+    el.appendChild(nav);
+    document.body.appendChild(el);
+    vault.files.set(
+      REVIEW_FILE_PATH,
+      JSON.stringify([
+        row({ filePath: path, stage: 1, nextReviewDate: new Date(now - 60000).toISOString() }), // 逾期红
+      ])
+    );
+    const app = makeApp(vault);
+    setApp(app);
+    await reviewApp.applyReviewStyles(app);
+    // 遍历 [data-path] 精确比对命中中文/斜杠路径；目标层退避到 .nav-file-title-content
+    expect(nav.style.color).toBe('rgb(255, 71, 87)');
+    expect(nav.querySelector('.review-stage-badge')).not.toBeNull();
+  });
 });
 
 describe('checkOverdueAndNotify 异常兜底', () => {

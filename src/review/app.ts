@@ -834,7 +834,10 @@ export const reviewApp = {
     notice('已加入复习计划，首次复习：1分钟后', 'success');
   },
 
-  /** 文件树染色 + 阶段徽标（源码 L719-772 逐字；ticket 100 加「文件树标记」开关） */
+  /** 文件树染色 + 阶段徽标（源码 L719-772 逐字；ticket 100 加「文件树标记」开关）
+   *  2026-08 稳健化：原用 CSS 属性选择器 `div[data-path="..."]` 精确取值，中文/斜杠路径在部分环境转义失配，
+   *  Obsidian 文件树 DOM 各版本亦有差异——改为遍历 `[data-path]` 精确比对取值，目标文本层多备选退避，
+   *  最大化命中已渲染的文件树节点。 */
   async applyReviewStyles(app: App, changedFile?: TFile): Promise<void> {
     if ((getSettings() as any).reviewTreeBadge === false) return; // ticket 100：关=清爽文件树（不染色不挂徽章）
     this.ensure(app);
@@ -844,10 +847,16 @@ export const reviewApp = {
     const fsrs = new FSRS();
 
     for (const file of files) {
-      const el = document.querySelector(`div[data-path="${file.path}"]`);
-      if (!el) continue;
-      const target = el.querySelector('div.tree-item-inner') as HTMLElement | null;
-      if (!target) continue;
+      // 遍历 [data-path] 节点精确比对，避开 CSS 属性选择器对中文/斜杠的转义问题
+      const nodes = Array.from(document.querySelectorAll<HTMLElement>('[data-path]'));
+      const node = nodes.find((n) => n.getAttribute('data-path') === file.path);
+      if (!node) continue;
+      // 目标文本层多备选：.tree-item-inner（Obsidian 文件树旧结构）→ .nav-file-title-content（部分主题/旧版）
+      // → 容器本身；取能挂内联色+徽标的最内层可染文本
+      const target =
+        (node.querySelector('div.tree-item-inner') as HTMLElement | null) ||
+        (node.querySelector('.nav-file-title-content') as HTMLElement | null) ||
+        node;
       const badge = target.querySelector('.review-stage-badge');
       if (badge) badge.remove();
 
