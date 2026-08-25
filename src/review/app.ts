@@ -849,19 +849,6 @@ export const reviewApp = {
     notice('已加入复习计划，首次复习：1分钟后', 'success');
   },
 
-  /** 文件树结构诊断（字符串化，用户可直接复制） */
-  _stainDiag(): string {
-    const dp = Array.from(document.querySelectorAll<HTMLElement>('[data-path]'));
-    return JSON.stringify({
-      dataPathCount: dp.length,
-      treeItemSelf: document.querySelectorAll('.tree-item-self').length,
-      treeItemInner: document.querySelectorAll('.tree-item-inner').length,
-      navFileTitle: document.querySelectorAll('.nav-file-title').length,
-      navFileTitleContent: document.querySelectorAll('.nav-file-title-content').length,
-      dpSamples: dp.slice(0, 6).map((n) => n.getAttribute('data-path')),
-    });
-  },
-
   /** 文件树变更即染色：Obsidian 文件树懒渲染（折叠时节点不存在），且无展开事件可监听——
    *  MutationObserver 观察文件树容器，节点出现/变化（如展开文件夹）节流触发染色，
    *  根治「60s 轮询恰好错过渲染时机就不染色」的场景。
@@ -902,23 +889,12 @@ export const reviewApp = {
     const _DP_ = Array.from(document.querySelectorAll<HTMLElement>('[data-path]'));
 
     // 一次性诊断（字符串化；定位染色不生效时的文件树 DOM 结构）
-    console.warn('[bz/stain] 结构=' + this._stainDiag());
     let stainedCount = 0;
 
     for (const file of files) {
       // 遍历 [data-path] 节点精确比对，避开 CSS 属性选择器对中文/斜杠的转义问题
       const node = _DP_.find((n) => n.getAttribute('data-path') === file.path);
-      if (!node) {
-        if (file.path === files[0]?.path) {
-          console.warn('[bz/stain] 未找到 data-path 节点', {
-            path: file.path,
-            totalDP: _DP_.length,
-            sampleNode: _DP_[0] ? (_DP_[0].getAttribute('data-path')) : null,
-            inPlan: planPaths.has(file.path),
-          });
-        }
-        continue;
-      }
+      if (!node) continue;
       // 目标文本层多备选：.tree-item-inner（Obsidian 文件树旧结构）→ .nav-file-title-content（部分主题/旧版）
       // → 容器本身；取能挂内联色+徽标的最内层可染文本
       const target =
@@ -988,8 +964,6 @@ export const reviewApp = {
       if (planInFiles > 0 && stainedCount === 0) {
         this._stainRetries = (this._stainRetries || 0) + 1;
         if ((this._stainRetries || 0) <= 8) {
-          const retry = this._stainRetries;
-          console.warn('[bz/stain] 计划文档均未染色（渲染中/抽屉未开？），2s 后重试 (' + retry + '/8)');
           setTimeout(() => {
             this._stainRetries = (this._stainRetries || 0) - 1;
             void this.applyReviewStyles(app);
@@ -998,35 +972,6 @@ export const reviewApp = {
       } else {
         this._stainRetries = 0;
       }
-    }
-
-    // 诊断落盘（定位移动端染色失败：无需开发者控制台，直接写 vault 文件供排查）
-    try {
-      const fe = document.querySelector('.workspace-leaf-content[data-type="file-explorer"]');
-      const dpSamples = _DP_.slice(0, 10).map((n) => n.getAttribute('data-path'));
-      const diag = JSON.stringify(
-        {
-          ts: new Date().toISOString(),
-          stained: stainedCount,
-          planInVault: files.length,
-          planMatched: files.filter((f) => planPaths.has(f.path)).length,
-          totalDP: _DP_.length,
-          treeItemSelf: document.querySelectorAll('.tree-item-self').length,
-          treeItemInner: document.querySelectorAll('.tree-item-inner').length,
-          navFileTitle: document.querySelectorAll('.nav-file-title').length,
-          navFileTitleContent: document.querySelectorAll('.nav-file-title-content').length,
-          navFilesContainer: document.querySelectorAll('.nav-files-container').length,
-          hasFileExplorerLeaf: !!fe,
-          feHTML: fe ? fe.outerHTML.slice(0, 300) : null,
-          dpSamples,
-          sampleDP0HTML: _DP_[0] ? _DP_[0].outerHTML.slice(0, 200) : null,
-        },
-        null,
-        2
-      );
-      await app.vault.adapter.write('CONFIG/STORAGE/bz-stain-diag.json', diag);
-    } catch (e) {
-      console.warn('[bz/stain] 诊断落盘失败', e);
     }
   },
 
