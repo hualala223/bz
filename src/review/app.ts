@@ -41,6 +41,8 @@ export const reviewApp = {
   _reviewNotice: null as NoticeHandle | null,
   /** 已通知逾期的笔记路径（ticket 100：diff 记忆集合，避免重复刷屏） */
   _notifiedOverdue: new Set<string>(),
+  /** 文件树未渲染重试计数（applyReviewStyles 自愈：抽屉未开/懒渲染时 2s 重试） */
+  _stainRetries: 0,
 
   async getQuiz(): Promise<any> {
     if (this._quizOverride) return this._quizOverride;
@@ -862,12 +864,15 @@ export const reviewApp = {
 
   /** 文件树变更即染色：Obsidian 文件树懒渲染（折叠时节点不存在），且无展开事件可监听——
    *  MutationObserver 观察文件树容器，节点出现/变化（如展开文件夹）节流触发染色，
-   *  根治「60s 轮询恰好错过渲染时机就不染色」的场景。 */
+   *  根治「60s 轮询恰好错过渲染时机就不染色」的场景。
+   *  移动端（抽屉式文件树）容器选择器与桌面同源，另加入 .workspace-leaf[data-type=file-explorer]
+   *  作为移动端抽屉结构候选。 */
   async startFileTreeWatch(app: App): Promise<void> {
     const container =
       (document.querySelector('.workspace-leaf-content[data-type="file-explorer"] .nav-files-container') as HTMLElement | null) ||
       (document.querySelector('.nav-files-container') as HTMLElement | null) ||
-      (document.querySelector('.workspace-leaf-content[data-type="file-explorer"]') as HTMLElement | null);
+      (document.querySelector('.workspace-leaf-content[data-type="file-explorer"]') as HTMLElement | null) ||
+      (document.querySelector('.workspace-leaf[data-type="file-explorer"]') as HTMLElement | null);
     // 找不到文件树容器（如 jsdom 测试环境）则不启动观察，避免对 document.body 全量 DOM 变动误触发
     if (!container) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -888,8 +893,26 @@ export const reviewApp = {
     if ((getSettings() as any).reviewTreeBadge === false) return; // ticket 100：关=清爽文件树（不染色不挂徽章）
     this.ensure(app);
     const dm = this.dataManager!;
-    const allItems = await dm.loadItems();
     const files = changedFile ? [changedFile] : app.vault.getMarkdownFiles();
+    // 文件树懒渲染/抽屉未开（移动端启动时文件树 DOM 不存在）：[data-path]=0 → 2s 后自动重试，
+    // 直到文件树节点出现（最多 8 次 ≈16s；之后交 60s 轮询与 startFileTreeWatch 负责）
+    if (!changedFile && files.length > 0) {
+      const dpCount = document.querySelectorAll('[data-path]').length;
+      if (dpCount === 0) {
+        this._stainRetries = (this._stainRetries || 0) + 1;
+        if ((this._stainRetries || 0) <= 8) {
+          const retry = this._stainRetries;
+          console.warn('[bz/stain] 文件树未渲染，2s 后重试 (' + retry + '/8)');
+          setTimeout(() => {
+            this._stainRetries = (this._stainRetries || 0) - 1;
+            void this.applyReviewStyles(app);
+          }, 2000);
+        }
+        return;
+      }
+      this._stainRetries = 0;
+    }
+    const allItems = await dm.loadItems();
     const fsrs = new FSRS();
     // 一次性诊断（字符串化；定位染色不生效时的文件树 DOM 结构）
     console.warn('[bz/stain] 结构=' + this._stainDiag());

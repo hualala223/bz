@@ -570,6 +570,31 @@ describe('applyReviewStyles 着色矩阵', () => {
     expect(nav.style.color).toBe('rgb(255, 71, 87)');
     expect(nav.querySelector('.review-stage-badge')).not.toBeNull();
   });
+
+  it('自愈重试：文件树未渲染（[data-path]=0）→ 不再立即返回，2s 后自动重试直到节点出现', async () => {
+    const vault = new MockVault();
+    vault.files.set('A.md', 'x');
+    vault.files.set(REVIEW_FILE_PATH, JSON.stringify([row({ filePath: 'A.md', stage: 1, nextReviewDate: new Date(Date.now() - 60000).toISOString() })]));
+    const app = makeApp(vault);
+    setApp(app);
+    vi.useFakeTimers();
+    // 第一次调用：文件树没有任何 data-path 节点 → 排队 2s 重试（本调用不再往下染色）
+    const p = reviewApp.applyReviewStyles(app);
+    await vi.advanceTimersByTimeAsync(0); // 让同步段先跑到重试排队
+    expect((reviewApp as any)._stainRetries).toBe(1);
+    // 抽屉打开：文件树节点出现后，2s 到点重试 → 染色成功
+    const el = document.createElement('div');
+    el.setAttribute('data-path', 'A.md');
+    const inner = document.createElement('div');
+    inner.className = 'tree-item-inner';
+    el.appendChild(inner);
+    document.body.appendChild(el);
+    await vi.advanceTimersByTimeAsync(2000);
+    await p;
+    expect((reviewApp as any)._stainRetries).toBe(0);
+    expect(inner.style.color).toBe('rgb(255, 71, 87)');
+    vi.useRealTimers();
+  });
 });
 
 describe('checkOverdueAndNotify 异常兜底', () => {
