@@ -999,6 +999,35 @@ export const reviewApp = {
         this._stainRetries = 0;
       }
     }
+
+    // 诊断落盘（定位移动端染色失败：无需开发者控制台，直接写 vault 文件供排查）
+    try {
+      const fe = document.querySelector('.workspace-leaf-content[data-type="file-explorer"]');
+      const dpSamples = _DP_.slice(0, 10).map((n) => n.getAttribute('data-path'));
+      const diag = JSON.stringify(
+        {
+          ts: new Date().toISOString(),
+          stained: stainedCount,
+          planInVault: files.length,
+          planMatched: files.filter((f) => planPaths.has(f.path)).length,
+          totalDP: _DP_.length,
+          treeItemSelf: document.querySelectorAll('.tree-item-self').length,
+          treeItemInner: document.querySelectorAll('.tree-item-inner').length,
+          navFileTitle: document.querySelectorAll('.nav-file-title').length,
+          navFileTitleContent: document.querySelectorAll('.nav-file-title-content').length,
+          navFilesContainer: document.querySelectorAll('.nav-files-container').length,
+          hasFileExplorerLeaf: !!fe,
+          feHTML: fe ? fe.outerHTML.slice(0, 300) : null,
+          dpSamples,
+          sampleDP0HTML: _DP_[0] ? _DP_[0].outerHTML.slice(0, 200) : null,
+        },
+        null,
+        2
+      );
+      await app.vault.adapter.write('CONFIG/STORAGE/bz-stain-diag.json', diag);
+    } catch (e) {
+      console.warn('[bz/stain] 诊断落盘失败', e);
+    }
   },
 
   /**
