@@ -158,6 +158,14 @@ export default interface BzSettings {
   reviewWatchedFolders: string[];
   /** 🚫 排除名单（不参与监听自动加入的笔记路径数组；手动移除/确认移除/批量取消/不更新落此名单） */
   reviewExcludedNotes: string[];
+  /** 🆕 按数量复习（ticket 01）：候选文件夹（目录内全部 .md 为候选池，含未入计划=新文件） */
+  reviewCountFolder: string;
+  /** 🆕 按数量复习：默认篇数 */
+  reviewCountDefault: number;
+  /** 🆕 按数量复习：历史:新配比（历史占百分比，默认 70＝历史 70%；一侧不足另一侧补齐） */
+  reviewCountHistoryRatio: number;
+  /** 🆕 按数量复习：上次输入篇数记忆（运行时字段，不进设置 UI） */
+  reviewCountLastInput: number;
 
   // ===== 🧩 入口页（2 项）=====
   // 列数自 launcher.json v3 起存储（桌面/移动独立配置，域内设置页可调），
@@ -391,6 +399,10 @@ export const DEFAULT_SETTINGS: BzSettings = {
   reviewTreeBadge: true,
   reviewWatchedFolders: [],
   reviewExcludedNotes: [],
+  reviewCountFolder: '卡片盒/笔记盒',
+  reviewCountDefault: 5,
+  reviewCountHistoryRatio: 70,
+  reviewCountLastInput: 0,
 
   // 入口页
   launcherShowText: true,
