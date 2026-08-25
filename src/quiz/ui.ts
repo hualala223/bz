@@ -320,6 +320,19 @@ export class QuizMasterUI {
     questionDiv.textContent = q.question;
     popup.appendChild(questionDiv);
 
+    // 题型标识（ticket: 单/多选题明确提示——多选还注明需选几项）
+    const isSingleQ = (q.correctIndices || []).length === 1;
+    const typeBadge = document.createElement('div');
+    typeBadge.className = 'quiz-type-badge';
+    typeBadge.style.cssText = 'display:inline-block;font-size:12px;font-weight:600;padding:2px 10px;border-radius:10px;margin-bottom:12px;' +
+      (isSingleQ
+        ? 'background:var(--interactive-accent);color:var(--text-on-accent);'
+        : 'background:#ff9f43;color:#fff;');
+    typeBadge.textContent = isSingleQ
+      ? '单选题'
+      : `多选题（选 ${(q.correctIndices || []).length} 项）`;
+    popup.appendChild(typeBadge);
+
     // 选项容器
     const optionsContainer = document.createElement('div');
     optionsContainer.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
@@ -357,7 +370,7 @@ export class QuizMasterUI {
       btn.className = 'quiz-option-btn';
       // 清理选项文本，避免重复前缀
       const cleanText = cleanOptionText(opt);
-      btn.innerHTML = `<span>${optionLabels[idx]}.</span><span style="flex:1">${escapeHtml(cleanText)}</span><span class="check-mark">✔️</span>`;
+      btn.innerHTML = `<span>${optionLabels[idx]}.</span><span style="flex:1">${escapeHtml(cleanText)}</span><span class="check-mark">✔️</span><span class="feedback-mark"></span>`;
       btn.dataset.index = String(idx);
 
       btn.onclick = () => {
@@ -369,7 +382,11 @@ export class QuizMasterUI {
           const isCorrect = idx === q.correctIndices[0];
 
           if (isCorrect) {
-            // 答对：删除该题（计数在 _answerCorrect 持久化成功后递增）
+            // 答对：选项打 ✅、弹出成功反馈，1.5s 让用户看清后再切换（计数在 _answerCorrect 持久化成功后递增）
+            btn.classList.add('correct');
+            const fbk = btn.querySelector('.feedback-mark');
+            if (fbk) fbk.textContent = '✅';
+            this.addFeedbackBanner(optionsContainer, '✅ 回答正确！', true);
             this._answerCorrect(q, app, () => {
               answeredRef.value = false;
               optionElements.forEach((b) => b.classList.remove('disabled'));
@@ -377,14 +394,21 @@ export class QuizMasterUI {
               optionElements.forEach((b, i) => {
                 if (i === q.correctIndices[0]) b.classList.add('correct');
               });
-            });
+            }, 1500);
           } else {
-            // 答错：显示正确答案，不删除，添加"下一题"按钮
+            // 答错：正确选项标绿 ✅、选中项标红 ❌、加文字提示 + 「下一题」按钮
             this.wrongCount++;
             optionElements.forEach((b, i) => {
-              if (i === q.correctIndices[0]) b.classList.add('correct');
+              if (i === q.correctIndices[0]) {
+                b.classList.add('correct');
+                const fb = b.querySelector('.feedback-mark');
+                if (fb) fb.textContent = '✅';
+              }
               if (i === idx) b.classList.add('wrong');
             });
+            const fb = btn.querySelector('.feedback-mark');
+            if (fb) fb.textContent = '❌';
+            this.addFeedbackBanner(optionsContainer, '❌ 回答错误，正确答案已标绿', false);
             this.addNextButton(optionsContainer);
           }
         } else {
@@ -418,19 +442,27 @@ export class QuizMasterUI {
 
         optionElements.forEach((b, i) => {
           b.classList.add('disabled');
-          if (correct.includes(i)) b.classList.add('correct'); // ✅ 正确选项变绿
-          else if (selectedIndices.has(i) && !isCorrect) b.classList.add('wrong'); // ❌ 错误选中变红
+          const fb = b.querySelector('.feedback-mark');
+          if (correct.includes(i)) {
+            b.classList.add('correct'); // ✅ 正确选项变绿
+            if (fb) fb.textContent = '✅';
+          } else if (selectedIndices.has(i) && !isCorrect) {
+            b.classList.add('wrong'); // ❌ 错误选中变红
+            if (fb) fb.textContent = '❌';
+          }
         });
 
         if (isCorrect) {
           // ticket 098（ADR-0044）：多选计数 bug 解冻——答对也递增 correctCount（唯一破铁律 1 项；
           // 递增时机在 _answerCorrect 持久化成功后，失败恢复作答态不重复计）
+          this.addFeedbackBanner(optionsContainer, `✅ 回答正确！共选 ${correct.length} 项`, true);
           this._answerCorrect(q, app, () => {
             answeredRef.value = false;
             submitBtn.disabled = false;
             optionElements.forEach((b) => b.classList.remove('disabled'));
-          });
+          }, undefined, 1500);
         } else {
+          this.addFeedbackBanner(optionsContainer, '❌ 回答错误，正确答案已标绿', false);
           this.addNextButton(optionsContainer);
         }
       };
@@ -440,10 +472,10 @@ export class QuizMasterUI {
     return optionElements;
   }
 
-  /** 答对公共链路：稳定定位删题 → 计数 → splice 出当前题 → （单选补高亮）→ 800ms 后下一题；
+  /** 答对公共链路：稳定定位删题 → 计数 → splice 出当前题 → （单选补高亮）→ delay 后下一题；
    *  删除按题目内容在存储数组定位（P0-2），不再依赖会话期 _index 快照；
    *  持久化成功后才计数（P2：失败恢复作答态时不重复计数），失败通知并恢复作答状态。 */
-  private _answerCorrect(q: QuizQuestion, app: App, onFailRestore: () => void, onSplice?: () => void): void {
+  private _answerCorrect(q: QuizQuestion, app: App, onFailRestore: () => void, onSplice?: () => void, delay = 800): void {
     this.manager
       .removeQuestion(app, q.notePath!, { question: q.question, options: q.options, correctIndices: q.correctIndices })
       .then(() => {
@@ -452,7 +484,7 @@ export class QuizMasterUI {
         onSplice?.();
         setTimeout(() => {
           this.showQuestion();
-        }, 800);
+        }, delay);
       })
       .catch((e) => {
         notice('删除题目失败：' + e.message, 'error');
@@ -505,6 +537,20 @@ export class QuizMasterUI {
       return;
     }
     this.renderModal(this.currentQuestions[this.currentIndex]);
+  }
+
+  /** 辅助：答对/答错后的文字反馈条（定位在选项下方） */
+  addFeedbackBanner(container: HTMLElement, text: string, success: boolean): void {
+    const old = container.querySelector('.quiz-feedback');
+    if (old) old.remove();
+    const banner = document.createElement('div');
+    banner.className = 'quiz-feedback';
+    banner.style.cssText = 'margin-top:12px;padding:8px 12px;border-radius:6px;font-size:14px;font-weight:600;' +
+      (success
+        ? 'background:rgba(82,196,26,0.15);color:#52c41a;border:1px solid rgba(82,196,26,0.4);'
+        : 'background:rgba(255,71,87,0.15);color:#ff4757;border:1px solid rgba(255,71,87,0.4);');
+    banner.textContent = text;
+    container.appendChild(banner);
   }
 
   /** 辅助：添加"下一题"按钮（用于错题后，源码 L702-713） */

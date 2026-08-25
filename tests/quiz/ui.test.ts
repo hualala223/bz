@@ -68,8 +68,8 @@ describe('QuizMasterUI', () => {
     const texts = [...spans].map((s) => s.textContent || '');
     expect(texts.some((t) => t.includes('a < b & c'))).toBe(true);
     expect(texts.some((t) => t.includes('x>y'))).toBe(true);
-    // 未被当作 HTML 解析（每个按钮 3 个 span：标签/文本/check-mark，4 按钮 = 12）
-    expect(popup.querySelectorAll('.quiz-option-btn span').length).toBe(12);
+    // 未被当作 HTML 解析（每个按钮 4 个 span：标签/文本/check-mark/feedback-mark，4 按钮 = 16）
+    expect(popup.querySelectorAll('.quiz-option-btn span').length).toBe(16);
   });
 
   it('单选答对：标绿 + 800ms 自动下一题（splice 不 ++）+ 移除题目（落盘终态断言）', async () => {
@@ -90,7 +90,7 @@ describe('QuizMasterUI', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
     (document.querySelectorAll('.quiz-option-btn')[0] as HTMLElement).click();
     // P2：计数在持久化成功后递增
-    await vi.advanceTimersByTimeAsync(900);
+    await vi.advanceTimersByTimeAsync(1600);
     expect(ui.correctCount).toBe(1);
     expect(document.getElementById('quiz-popup')!.textContent).toContain('Q2?');
     // 题号用已完成数+1：答对 Q1（splice 不递增 currentIndex）后第二题显示 2/2
@@ -102,7 +102,7 @@ describe('QuizMasterUI', () => {
     const onComplete = vi.fn();
     ui.onComplete = onComplete;
     (document.querySelectorAll('.quiz-option-btn')[1] as HTMLElement).click();
-    await vi.advanceTimersByTimeAsync(900);
+    await vi.advanceTimersByTimeAsync(1600);
     expect(ui.correctCount).toBe(2);
     expect(onComplete).toHaveBeenCalledWith({ correct: 2, wrong: 0, total: 2, accuracy: 100 });
     expect(document.getElementById('quiz-popup')).not.toBeNull(); // 回调不关弹窗
@@ -127,7 +127,7 @@ describe('QuizMasterUI', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
     for (let round = 1; round <= 5; round++) {
       (document.querySelectorAll('.quiz-option-btn')[0] as HTMLElement).click();
-      await vi.advanceTimersByTimeAsync(900);
+      await vi.advanceTimersByTimeAsync(1600);
       expect(ui.correctCount).toBe(round);
     }
     expect(onComplete).toHaveBeenCalledWith({ correct: 5, wrong: 0, total: 5, accuracy: 100 });
@@ -163,7 +163,7 @@ describe('QuizMasterUI', () => {
     expect(btns()[0].classList.contains('disabled')).toBe(false);
     // 重答成功：只计一次
     (btns()[0] as HTMLElement).click();
-    await vi.advanceTimersByTimeAsync(900);
+    await vi.advanceTimersByTimeAsync(1600);
     expect(ui.correctCount).toBe(1);
     expect(removeSpy).toHaveBeenCalledTimes(2);
     const quiz = JSON.parse(vault.files.get(QUIZ_FILE_PATH)!);
@@ -234,7 +234,7 @@ describe('QuizMasterUI', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
     submit.click();
     expect(btns[0].classList.contains('correct')).toBe(true);
-    await vi.advanceTimersByTimeAsync(900);
+    await vi.advanceTimersByTimeAsync(1600);
     // ticket 098（ADR-0044）：多选计数 bug 解冻——答对递增 correctCount（唯一破铁律 1 项；
     // P2：递增时机为持久化成功后）
     expect(ui.correctCount).toBe(1);
@@ -430,12 +430,12 @@ describe('复习联动契约', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
     // 答对第一题 → 换题过渡（renderModal 内部只拆 DOM）
     (document.querySelectorAll('.quiz-option-btn')[0] as HTMLElement).click();
-    await vi.advanceTimersByTimeAsync(900);
+    await vi.advanceTimersByTimeAsync(1600);
     expect(onComplete).not.toHaveBeenCalled(); // 过渡不得误触发结算
     expect(document.getElementById('quiz-popup')!.textContent).toContain('RQ2?');
     // 答对第二题 → 会话完成 → 回调恰好一次
     (document.querySelectorAll('.quiz-option-btn')[1] as HTMLElement).click();
-    await vi.advanceTimersByTimeAsync(900);
+    await vi.advanceTimersByTimeAsync(1600);
     expect(onComplete).toHaveBeenCalledTimes(1);
     expect(onComplete).toHaveBeenCalledWith({ correct: 2, wrong: 0, total: 2, accuracy: 100 });
     vi.useRealTimers();
@@ -462,7 +462,7 @@ describe('复习联动契约', () => {
     ui.onComplete = newCb;
     vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
     (document.querySelectorAll('.quiz-option-btn')[0] as HTMLElement).click();
-    await vi.advanceTimersByTimeAsync(900);
+    await vi.advanceTimersByTimeAsync(1600);
     vi.useRealTimers();
     expect(staleCb).toHaveBeenCalledTimes(1);
     expect(newCb).toHaveBeenCalledWith({ correct: 1, wrong: 0, total: 1, accuracy: 100 });
@@ -477,7 +477,7 @@ describe('ticket 099：多选 UI（无徽标/无提示条，提交位置保留�
     QuizMasterUI.settings = { enableMultipleChoice: true, questionsPerNote: '0', shuffleQuestions: false, difficulty: 'random' };
   });
 
-  it('多选不显示「多选」徽标与提示条；提交按钮位于选项下方；单选不受影响', async () => {
+  it('题型徽标：多选显示「多选题（选 N 项）」+ 提交按钮在选项下方；单选显示「单选题」', async () => {
     const vault = new MockVault();
     vault.files.set('A.md', '内容');
     seedQuiz(vault, {
@@ -491,24 +491,20 @@ describe('ticket 099：多选 UI（无徽标/无提示条，提交位置保留�
     const ui = new QuizMasterUI();
     await ui.startQuiz();
     const popup = document.getElementById('quiz-popup')!;
-    // ticket 099：多选静默——无徽标、无提示条
-    expect(popup.querySelector('.quiz-multi-badge')).toBeNull();
-    expect(popup.textContent).not.toContain('本题为多选题');
-    // 标题仍显示笔记名与题号
+    // 多选：题型徽标 + 提交按钮（选项下方）
+    expect(popup.querySelector('.quiz-type-badge')!.textContent).toBe('多选题（选 2 项）');
     expect(popup.textContent).toContain('📝 A (1/2)');
-    // 提交按钮位于最后一个选项之后（DOM 顺序）
     const opts = popup.querySelectorAll('.quiz-option-btn');
     const submit = popup.querySelector('.quiz-submit-btn') as HTMLElement;
-    // submit 与最后一个选项同容器且位于其后（compareDocumentPosition：FOLLOWING=4）
     expect(opts[opts.length - 1].compareDocumentPosition(submit) & 4).toBeTruthy();
-    // 勾选正确项（0+2）→ 提交 → splice → 下一题（单选：同样无徽标/提示条/提交）
+    // 勾选正确项（0+2）→ 提交 → 正确反馈 → splice → 下一题（单选：显示「单选题」、无提交按钮）
     (opts[0] as HTMLElement).click();
     (opts[2] as HTMLElement).click();
     submit.click();
-    await new Promise((r) => setTimeout(r, 900));
+    expect(popup.textContent).toContain('✅ 回答正确！');
+    await new Promise((r) => setTimeout(r, 1600));
     const popup2 = document.getElementById('quiz-popup')!;
-    expect(popup2.querySelector('.quiz-multi-badge')).toBeNull();
-    expect(popup2.textContent).not.toContain('本题为多选题');
+    expect(popup2.querySelector('.quiz-type-badge')!.textContent).toBe('单选题');
     expect(popup2.querySelector('.quiz-submit-btn')).toBeNull();
   });
 
