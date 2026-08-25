@@ -227,6 +227,44 @@ describe('设置弹窗 onChange 写回（分组项逐个触发）', () => {
     ui.destroy();
   });
 
+  it('按数量复习组：候选文件夹按钮打开选择弹窗；默认篇数/历史配比写回并校验边界', async () => {
+    const settings: any = { reviewCountFolder: '卡片盒/笔记盒', reviewCountDefault: 5, reviewCountHistoryRatio: 70 };
+    setSettingsProvider(() => settings);
+    const ui = new UIManager(makeApp(vault), new ReviewDataManager(makeApp(vault)));
+    ui.showMain();
+    (document.getElementById('review-btn-settings') as HTMLElement).click();
+    const popup = document.getElementById('bz-settings-modal-popup')!;
+    const names = () => [...popup.querySelectorAll('.setting-item')].map((el) => (el as HTMLElement).dataset.name);
+    expect(names()).toContain('候选文件夹');
+    expect(names()).toContain('默认篇数');
+    expect(names()).toContain('历史配比');
+    // 候选文件夹按钮 → 打开附件搬移同款选择弹窗
+    const folderBtn = popup.querySelector('#review-count-folder button') as HTMLElement;
+    expect(folderBtn).toBeTruthy();
+    expect(folderBtn.textContent).toContain('卡片盒/笔记盒');
+    folderBtn.click();
+    for (let i = 0; i < 100 && !document.getElementById('bz-attach-folder-mask'); i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(document.getElementById('bz-attach-folder-mask')).not.toBeNull();
+    expect(document.querySelector('.bz-attach-title')!.textContent).toBe('选择按数量复习候选文件夹');
+    // 默认篇数：合法写回；非正数回 5
+    controlOf('默认篇数').trigger('10');
+    await new Promise((r) => setTimeout(r, 5));
+    expect(settings.reviewCountDefault).toBe(10);
+    controlOf('默认篇数').trigger('-3');
+    await new Promise((r) => setTimeout(r, 5));
+    expect(settings.reviewCountDefault).toBe(5);
+    // 历史配比：合法写回；越界回 70
+    controlOf('历史配比').trigger('50');
+    await new Promise((r) => setTimeout(r, 5));
+    expect(settings.reviewCountHistoryRatio).toBe(50);
+    controlOf('历史配比').trigger('101');
+    await new Promise((r) => setTimeout(r, 5));
+    expect(settings.reviewCountHistoryRatio).toBe(70);
+    ui.destroy();
+  });
+
   it('界面组文件树标记 + 移动端组默认全屏（仅移动端渲染该行）', async () => {
     const settings: any = { reviewTreeBadge: true };
     setSettingsProvider(() => settings);

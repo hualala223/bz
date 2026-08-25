@@ -149,15 +149,78 @@ export class UIManager {
     header.querySelector('#review-btn-close')!.addEventListener('click', () => this.hideMain());
   }
 
-  /** 复习设置弹窗项：分组卡片编排（检查提醒/做题家/复习节奏/自动化/界面/移动端），ticket 100 文案 + ADR-0009 分组卡片重设计 */
+  /** 复习设置弹窗项：分组卡片编排（检查提醒/做题家/复习节奏/按数量复习/自动化/界面/移动端），ticket 100 文案 + ADR-0009 分组卡片重设计 */
   _buildSettingsItems(el: HTMLElement): void {
     const s = getSettings() as any;
     this._addNotifySettings(el, s);
     this._addQuizSettings(el, s);
     this._addRhythmSettings(el, s);
+    this._addCountSettings(el, s);
     this._addWatchFolderSettings(el, s);
     this._addViewSettings(el, s);
     this._addMobileSettings(el, s);
+  }
+
+  /** 按数量复习组（ticket 06）：候选文件夹（复用附件搬移的 FolderSelectModal）/ 默认篇数 / 历史配比 */
+  private _addCountSettings(el: HTMLElement, s: any): void {
+    const countGroup = createSettingsGroup(el, { icon: 'list', name: '按数量复习' });
+    new Setting(countGroup)
+      .setName('候选文件夹')
+      .setDesc('按数量复习时从该文件夹中选择笔记（含子文件夹）');
+    // 纯操作行：复用监听文件夹同款（bz-setting-action-row 豁免徽标计数）
+    const folderBox = document.createElement('div');
+    folderBox.id = 'review-count-folder';
+    countGroup.appendChild(folderBox);
+    const renderFolderRow = () => {
+      folderBox.innerHTML = '';
+      const addRow = document.createElement('div');
+      addRow.className = 'setting-item bz-setting-action-row';
+      addRow.style.cssText = 'border:none;padding:8px 0;';
+      const ctl = document.createElement('div');
+      ctl.className = 'setting-item-control';
+      const addBtn = document.createElement('button');
+      addBtn.className = 'mod-cta';
+      addBtn.textContent = `📁 ${s.reviewCountFolder || '卡片盒/笔记盒'}`;
+      addBtn.onclick = () => {
+        new FolderSelectModal(this.app, async (picked) => {
+          const folder = picked.trim().replace(/^\/+|\/+$/g, '');
+          if (!folder) return;
+          s.reviewCountFolder = folder;
+          await saveSettings();
+          renderFolderRow();
+          notice(`候选文件夹已设为 ${folder}`, 'success');
+        }, {
+          title: '选择按数量复习候选文件夹',
+          okText: '确定',
+          placeholder: 'vault 内目录路径，如 卡片盒/笔记盒',
+          initial: s.reviewCountFolder || '',
+        }).open();
+      };
+      ctl.appendChild(addBtn);
+      addRow.appendChild(ctl);
+      folderBox.appendChild(addRow);
+    };
+    renderFolderRow();
+    new Setting(countGroup)
+      .setName('默认篇数')
+      .setDesc('点「复习（按数量）」时默认填写的复习篇数')
+      .addText((text) =>
+        text.setValue(String(s.reviewCountDefault ?? 5)).onChange(async (v) => {
+          const n = Number(v);
+          s.reviewCountDefault = n > 0 ? Math.floor(n) : 5;
+          await saveSettings();
+        })
+      );
+    new Setting(countGroup)
+      .setName('历史配比')
+      .setDesc('已复习笔记在本次安排中的占比（%，其余为新笔记）')
+      .addText((text) =>
+        text.setValue(String(s.reviewCountHistoryRatio ?? 70)).onChange(async (v) => {
+          const n = Number(v);
+          s.reviewCountHistoryRatio = n >= 0 && n <= 100 ? Math.floor(n) : 70;
+          await saveSettings();
+        })
+      );
   }
 
   /** 检查提醒组：到期提醒 / 新笔记加入提醒 */

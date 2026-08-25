@@ -197,7 +197,7 @@ describe('UIManager', () => {
     expect(names()).not.toContain('检查间隔（秒）');
     // 分组卡片头（组名；桌面端无「移动端」组）
     const groupNames = [...popup.querySelectorAll('.bz-settings-group-name')].map((el) => el.textContent);
-    expect(groupNames).toEqual(['检查提醒', '做题家', '复习节奏', '自动化', '界面']);
+    expect(groupNames).toEqual(['检查提醒', '做题家', '复习节奏', '按数量复习', '自动化', '界面']);
     // 检查提醒组
     expect(names()).toContain('到期提醒');
     expect(names()).toContain('新笔记加入提醒');
