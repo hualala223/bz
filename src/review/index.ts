@@ -144,6 +144,12 @@ export async function reviewStart(app: App): Promise<void> {
   await reviewApp.autoJumpOverdue();
 }
 
+/** 复习（按数量）（review-count，ticket 02）：打开篇数弹窗 → 自动安排 → 逐篇做题 */
+export function reviewCountStart(app: App): void {
+  ensureReview(app);
+  uiManager?.showCountReviewModal();
+}
+
 /** 复习（选择难度）（review-mark-dialog） */
 export async function reviewMarkDialog(app: App): Promise<void> {
   ensureReview(app);

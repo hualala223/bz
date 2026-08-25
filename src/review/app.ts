@@ -5,11 +5,12 @@ import type { App, TFile } from 'obsidian';
 import { notice, notify } from '../core/notice';
 import type { NoticeHandle } from '../core/notice';
 import { getApp } from '../core/app';
-import { getSettings } from '../core/settings-provider';
+import { getSettings, saveSettings } from '../core/settings-provider';
 import { FSRS, FSRS_FIRST_INTERVALS, FSRS_FIRST_TEXTS, LADDER_MAX } from './fsrs';
 import type { Rating } from './fsrs';
 import type { ReviewItem } from './data';
 import { ReviewDataManager } from './data';
+import { collectFolderFiles, eligibleCount, selectCountReview, type CountPick } from './count';
 
 export const reviewApp = {
   checkInterval: null as ReturnType<typeof setInterval> | null,
@@ -30,7 +31,7 @@ export const reviewApp = {
     if (!this.dataManager) this.dataManager = new ReviewDataManager(app);
   },
 
-  async markReview(filePath: string, selectedDifficulty: Rating, opts?: { autoPending?: boolean }): Promise<void> {
+  async markReview(filePath: string, selectedDifficulty: Rating, opts?: { autoPending?: boolean; force?: boolean }): Promise<void> {
     const app = getApp();
     this.ensure(app);
     const dm = this.dataManager!;
@@ -47,7 +48,8 @@ export const reviewApp = {
 
     const now = new Date();
     const nextReview = item.nextReviewDate ? new Date(item.nextReviewDate) : new Date(0);
-    if (now < nextReview) {
+    // 时间门仅挡手动路径；按数量复习（force）会选「今天到期/阶段采样」的未来排期文档，复习完成即合法排期
+    if (now < nextReview && !opts?.force) {
       const diff = nextReview.getTime() - now.getTime();
       const mins = Math.ceil(diff / 60000);
       notice(`还未到复习时间（${mins}分钟后）`);
@@ -420,6 +422,141 @@ export const reviewApp = {
     });
     });
 },
+
+  /** 按数量复习（ticket 02）：候选统计（篇数弹窗上限与空态） */
+  async countStats(): Promise<{ folder: string; files: string[]; available: number }> {
+    const app = getApp();
+    this.ensure(app);
+    const settings = getSettings() as any;
+    const folder = (settings.reviewCountFolder || '卡片盒/笔记盒').trim();
+    const files = collectFolderFiles(app, folder);
+    const items = await this.dataManager!.loadItems();
+    return { folder, files, available: eligibleCount(files, items, new Date()) };
+  },
+
+  /** 按数量复习（ticket 02 骨架）：选择安排 → 逐篇做题 → 正确率；排期写入 T03 接入 */
+  async startCountSession(count: number): Promise<void> {
+    const app = getApp();
+    this.ensure(app);
+    const stats = await this.countStats();
+    if (!stats.available) {
+      notice(`「${stats.folder}」下没有可复习的笔记`, 'warning');
+      return;
+    }
+    const n = Math.min(Math.max(1, Math.floor(count) || 1), stats.available);
+    if (n !== count) notice(`本次共 ${n} 篇（可用 ${stats.available} 篇）`, 'info');
+    const picks = selectCountReview(stats.files, await this.dataManager!.loadItems(), n, new Date());
+    if (!picks.length) {
+      notice('没有可复习的笔记', 'warning');
+      return;
+    }
+    const s = getSettings() as any;
+    if (s && s.reviewCountLastInput !== n) {
+      s.reviewCountLastInput = n;
+      await saveSettings();
+    }
+    const quiz = await this.getQuiz();
+    if (!quiz || !quiz.ai) {
+      notice('AI 服务未配置，无法按数量复习', 'warning');
+      return;
+    }
+    await this.countReviewLoop(picks, 0);
+  },
+
+  /** 按数量复习逐篇循环（ticket 02）：进篇逐篇出题（复用 AI 出题器）→ 做题会话 → 正确率结果卡 → 下一篇/结束
+   *  T03 在 onComplete 接入排期写入；T04 在结果卡加「查看原文档」；T05 末篇接汇总页。 */
+  async countReviewLoop(picks: CountPick[], index: number): Promise<void> {
+    const app = getApp();
+    this.ensure(app);
+    const quiz = await this.getQuiz();
+    if (index >= picks.length) {
+      quiz.endReviewSession();
+      notice('本次按数量复习已完成', 'success');
+      return;
+    }
+    const pick = picks[index];
+    const file = app.vault.getAbstractFileByPath(pick.filePath) as TFile | null;
+    if (!file) {
+      await this.countReviewLoop(picks, index + 1);
+      return;
+    }
+    // 逐篇出题：复用重做链路（清旧题 → AI 全新生成 → 补 notePath/_index）；失败跳过该篇
+    const questions = await this.regenerateQuestions(pick.filePath);
+    if (!questions.length) {
+      notice(`「${file.basename}」出题失败，已跳过`, 'warning');
+      await this.countReviewLoop(picks, index + 1);
+      return;
+    }
+    return new Promise((resolve) => {
+      quiz.startReviewSession({
+        questions,
+        onComplete: async (results: any) => {
+          const rating = this.accuracyToRating(results.accuracy);
+          // 排期写入（T03）：普通文档（逾期/今天到期/新文件/阶段采样）首次评级写排期 + autoPending（<70% 置待重做）；
+          // 新文件先加入 review.json 再写排期；待重做走重做语义——≥70%（一般/简单）仅清标记不写排期，<70% 保持待重做且不中断流程。
+          const itemPath = pick.filePath;
+          const dm = this.dataManager!;
+          const items = await dm.loadItems();
+          const item = items.find((i) => i.filePath === itemPath);
+          const failed = rating === 'again' || rating === 'hard';
+          if (pick.kind === 'redo') {
+            if (item && !failed) {
+              await dm.updateItem(itemPath, (it) => {
+                it.pendingRedo = false;
+              });
+            }
+          } else if (item) {
+            await this.markReview(itemPath, rating, { autoPending: true, force: true });
+          } else {
+            // 新文件：先入计划（首次评级 = 唯一排期来源，ADR-0044）
+            try {
+              await dm.addItem(itemPath, file.basename);
+            } catch {
+              /* 并发已加入 → 忽略 */
+            }
+            await this.markReview(itemPath, rating, { autoPending: true, force: true });
+          }
+          await this.applyReviewStyles(app);
+          const popup = quiz.popup;
+          if (!popup) {
+            resolve();
+            await this.countReviewLoop(picks, index + 1);
+            return;
+          }
+          const isLast = index >= picks.length - 1;
+          popup.innerHTML = this.buildCountResultCard(pick, file.basename, results, rating, isLast);
+          const action = await new Promise<string>((resolveAction) => {
+            popup.querySelector('#quiz-next-note')!.onclick = () => resolveAction('next');
+            popup.querySelector('#quiz-end-review')!.onclick = () => resolveAction('end');
+          });
+          resolve();
+          if (action === 'end') {
+            quiz.endReviewSession();
+            return;
+          }
+          await this.countReviewLoop(picks, index + 1);
+        },
+      });
+    });
+  },
+
+  /** 按数量复习结果卡：kind 标注 + 正确率 + 下一篇/结束（T04 加「查看原文档」按钮） */
+  buildCountResultCard(pick: CountPick, name: string, results: any, rating: Rating, isLast: boolean): string {
+    const ratingNames: Record<string, string> = { again: '忘了', hard: '困难', good: '一般', easy: '简单' };
+    const tagColors: Record<string, string> = { again: '#ff4757', hard: '#ff9f43', good: '#2ed573', easy: '#7bed9f' };
+    const kindTexts: Record<string, string> = { redo: '待重做', overdue: '逾期', 'due-today': '今天到期', new: '新文件', stage: '复习' };
+    return `
+      <div style="text-align:center;padding:24px;">
+        <div style="font-size:18px;font-weight:600;margin-bottom:16px;color:var(--text-normal);">🎯 ${name.replace(/^《|》$/g, '')}</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">📌 ${kindTexts[pick.kind] || ''}${pick.bucket ? ` · ${pick.bucket}` : ''}</div>
+        <div style="font-size:40px;margin-bottom:16px;">${results.correct}/${results.total}</div>
+        <div style="font-size:14px;color:var(--text-muted);margin-bottom:12px;">✅ 答对 ${results.correct} 题　❌ 答错 ${results.wrong} 题</div>
+        <div style="display:inline-block;padding:6px 16px;border-radius:16px;font-size:14px;font-weight:500;background:${tagColors[rating]}22;color:${tagColors[rating]};margin-bottom:20px;">正确率 ${results.accuracy}% · 自动标记：${ratingNames[rating]}</div>
+      </div>
+      <button id="quiz-next-note" style="display:block;width:100%;padding:10px;border:none;border-radius:6px;background:var(--interactive-accent);color:var(--text-on-accent);cursor:pointer;font-size:13px;font-weight:500;">${isLast ? '查看汇总' : '下一篇'}</button>
+      <button id="quiz-end-review" style="display:block;width:100%;padding:10px;margin-top:8px;border:1px solid var(--background-modifier-border);border-radius:6px;background:var(--background-secondary);color:var(--text-muted);cursor:pointer;font-size:13px;">结束这次复习</button>
+    `;
+  },
 
   /** 批量生成题目（返回 {filePath: questions[]} 映射） */
   async batchGenerateQuestions(items: ReviewItem[]): Promise<Record<string, any[]>> {

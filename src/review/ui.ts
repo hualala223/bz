@@ -62,6 +62,7 @@ export class UIManager {
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <button id="review-btn-add" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0;width:22px;height:26px;border-radius:4px;box-shadow:none;color:var(--text-muted);display:flex;align-items:center;justify-content:center;">➕</button>
         <button id="review-btn-start" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0;width:22px;height:26px;border-radius:4px;box-shadow:none;color:var(--text-muted);display:flex;align-items:center;justify-content:center;">▶️</button>
+        <button id="review-btn-count" title="按数量复习" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0;width:22px;height:26px;border-radius:4px;box-shadow:none;color:var(--text-muted);display:flex;align-items:center;justify-content:center;">🔢</button>
         <button id="review-btn-search" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0;width:22px;height:26px;border-radius:4px;box-shadow:none;color:var(--text-muted);display:flex;align-items:center;justify-content:center;">🔍</button>
         <button id="review-btn-archive" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0;width:22px;height:26px;border-radius:4px;box-shadow:none;color:var(--text-muted);display:flex;align-items:center;justify-content:center;">📁</button>
         <button id="review-btn-settings" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0;width:22px;height:26px;border-radius:4px;box-shadow:none;color:var(--text-muted);display:flex;align-items:center;justify-content:center;">⚙️</button>
@@ -115,6 +116,9 @@ export class UIManager {
     header.querySelector('#review-btn-start')!.addEventListener('click', async () => {
       const { reviewApp } = await import('./app');
       await reviewApp.autoJumpOverdue();
+    });
+    header.querySelector('#review-btn-count')!.addEventListener('click', () => {
+      this.showCountReviewModal();
     });
     let searchVisible = false;
     header.querySelector('#review-btn-search')!.addEventListener('click', () => {
@@ -396,6 +400,60 @@ export class UIManager {
   hideMain(): void {
     if (this.mask) this.mask.style.display = 'none';
     if (this.popup) this.popup.style.display = 'none';
+  }
+
+  /** 按数量复习篇数弹窗（ticket 02）：默认预填上次输入/设置默认、上限=可用候选、钳制、空态提示
+   *  确认后调用 reviewApp.startCountSession → 自动安排 → 逐篇做题。 */
+  showCountReviewModal(): void {
+    const app = this.app;
+    void (async () => {
+      const { reviewApp } = await import('./app');
+      const stats = await reviewApp.countStats();
+      if (!stats.available) {
+        notice(`「${stats.folder}」下没有可复习的笔记`, 'warning');
+        return;
+      }
+      const s = getSettings() as any;
+      const def = Math.max(1, Number(s.reviewCountDefault) || 5);
+      const last = Math.max(0, Number(s.reviewCountLastInput) || 0);
+      const initial = Math.max(1, Math.min(last || def, stats.available));
+
+      const mask = document.createElement('div');
+      Object.assign(mask.style, { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.3)', zIndex: '10050' });
+      const popup = document.createElement('div');
+      Object.assign(popup.style, { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', background: 'var(--background-primary)', borderRadius: '12px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)', zIndex: '10051', padding: '24px', maxWidth: '420px', width: '90%', display: 'flex', flexDirection: 'column', gap: '12px' });
+      popup.innerHTML = `
+        <h4 style="margin:0;font-size:17px;font-weight:600;">按数量复习</h4>
+        <p style="margin:0;font-size:13px;color:var(--text-muted);">候选：${stats.folder}（可用 ${stats.available} 篇）</p>
+        <input type="number" class="review-count-input" min="1" max="${stats.available}" value="${initial}" style="width:100%;padding:8px 10px;border-radius:6px;border:1px solid var(--background-modifier-border);background:var(--background-secondary);color:var(--text-normal);font-size:14px;box-sizing:border-box;" />
+        <div style="display:flex;gap:12px;">
+          <button class="review-count-cancel" style="flex:1;padding:8px;border:none;border-radius:6px;background:var(--background-secondary);color:var(--text-normal);cursor:pointer;">取消</button>
+          <button class="review-count-ok" style="flex:1;padding:8px;border:none;border-radius:6px;background:var(--interactive-accent);color:var(--text-on-accent);cursor:pointer;font-weight:500;">开始复习</button>
+        </div>
+      `;
+      const close = () => {
+        mask.remove();
+        popup.remove();
+      };
+      mask.onclick = close;
+      document.body.appendChild(mask);
+      document.body.appendChild(popup);
+      const input = popup.querySelector('.review-count-input') as HTMLInputElement;
+      input.focus();
+      input.select();
+      const submit = () => {
+        const raw = parseInt(input.value, 10);
+        const n = Number.isFinite(raw) && raw > 0 ? raw : def;
+        close();
+        void reviewApp.startCountSession(n);
+      };
+      popup.querySelector('.review-count-ok')!.addEventListener('click', submit);
+      popup.querySelector('.review-count-cancel')!.addEventListener('click', close);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') submit();
+        else if (e.key === 'Escape') close();
+      });
+    })();
   }
 
   createConfirmDialog(): void {
