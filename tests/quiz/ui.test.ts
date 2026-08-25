@@ -528,3 +528,70 @@ describe('ticket 099：多选 UI（无徽标/无提示条，提交位置保留�
     ui.close();
   });
 });
+
+describe('多选徽标：按数量复习（hideOptionCount）不提示正确选项数', () => {
+  beforeEach(() => {
+    resetObsidianMocks();
+    setApp(null as any);
+    document.body.innerHTML = '';
+    QuizMasterUI.ai = { json: vi.fn() } as any;
+    QuizMasterUI.settings = { enableMultipleChoice: true, questionsPerNote: '0', shuffleQuestions: false, difficulty: 'random' };
+  });
+
+  it('hideOptionCount=true：多选徽标仅「多选题」（不带数量），单选仍「单选题」', () => {
+    const vault = new MockVault();
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
+    ui.startReviewSession({
+      questions: [
+        { question: 'M?', options: ['甲', '乙', '丙', '丁'], correctIndices: [0, 2] },
+        { question: 'S?', options: ['甲', '乙', '丙', '丁'], correctIndices: [0] },
+      ],
+      onComplete: null,
+      hideOptionCount: true,
+    });
+    const popup = document.getElementById('quiz-popup')!;
+    expect(popup.querySelector('.quiz-type-badge')!.textContent).toBe('多选题');
+    // 多选作答交互不变：提交按钮仍在选项下方
+    expect(popup.querySelector('.quiz-submit-btn')).not.toBeNull();
+    ui.close();
+  });
+
+  it('不传 hideOptionCount（其他复习链路）：多选徽标保持「多选题（选 N 项）」', () => {
+    const vault = new MockVault();
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
+    ui.startReviewSession({
+      questions: [{ question: 'M?', options: ['甲', '乙', '丙', '丁'], correctIndices: [0, 2] }],
+      onComplete: null,
+    });
+    const popup = document.getElementById('quiz-popup')!;
+    expect(popup.querySelector('.quiz-type-badge')!.textContent).toBe('多选题（选 2 项）');
+    ui.close();
+  });
+
+  it('按数量复习后普通做题：多选徽标恢复「多选题（选 N 项）」（hideOptionCount 不残留）', async () => {
+    const vault = new MockVault();
+    vault.files.set('A.md', '内容');
+    seedQuiz(vault, {
+      'A.md': [{ question: 'M?', options: ['甲', '乙', '丙', '丁'], correctIndices: [0, 2] }],
+    });
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
+    // 先开一轮隐藏数量的复习会话
+    ui.startReviewSession({
+      questions: [{ question: 'M?', options: ['甲', '乙', '丙', '丁'], correctIndices: [0, 2] }],
+      onComplete: null,
+      hideOptionCount: true,
+    });
+    expect(document.getElementById('quiz-popup')!.querySelector('.quiz-type-badge')!.textContent).toBe('多选题');
+    ui.close();
+    // 普通做题（startQuiz）：会话重置，徽标恢复显示数量
+    await ui.startQuiz();
+    expect(document.getElementById('quiz-popup')!.querySelector('.quiz-type-badge')!.textContent).toBe('多选题（选 2 项）');
+    ui.close();
+  });
+});

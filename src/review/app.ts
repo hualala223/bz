@@ -551,6 +551,8 @@ export const reviewApp = {
     return new Promise((resolve) => {
       quiz.startReviewSession({
         questions,
+        // 按数量复习：多选徽标不提示正确选项数（hideOptionCount）
+        hideOptionCount: true,
         onComplete: async (q: any) => {
           const rating = this.accuracyToRating(q.accuracy);
           await this.applyCountScheduling(pick, file.basename, rating, redoSemantic);

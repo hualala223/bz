@@ -55,6 +55,8 @@ export class QuizMasterUI {
 
   // 复习联动（仅经 startReviewSession/endReviewSession 契约访问，复习域不得直接改写）
   _reviewMode = false;
+  /** 按数量复习（ticket: 多选徽标不提示正确选项数）：startReviewSession 传 hideOptionCount 时置位 */
+  _hideOptionCount = false;
   onComplete: ((results: QuizReviewResults) => void) | null = null;
   correctCount = 0;
   wrongCount = 0;
@@ -277,6 +279,8 @@ export class QuizMasterUI {
       this.currentIndex = 0;
       this.correctCount = 0;
       this.wrongCount = 0;
+      // 普通做题会话重置多选徽标数量提示（防按数量复习的 hideOptionCount 残留）
+      this._hideOptionCount = false;
       // 固定总题数（在本次会话中不变）
       this.totalQuestions = this.currentQuestions.length;
       this.showQuestion();
@@ -321,6 +325,7 @@ export class QuizMasterUI {
     popup.appendChild(questionDiv);
 
     // 题型标识（ticket: 单/多选题明确提示——多选还注明需选几项）
+    // 按数量复习（hideOptionCount）：多选只标「多选题」，不提示正确选项数（避免暗示答案）
     const isSingleQ = (q.correctIndices || []).length === 1;
     const typeBadge = document.createElement('div');
     typeBadge.className = 'quiz-type-badge';
@@ -330,7 +335,9 @@ export class QuizMasterUI {
         : 'background:#ff9f43;color:#fff;');
     typeBadge.textContent = isSingleQ
       ? '单选题'
-      : `多选题（选 ${(q.correctIndices || []).length} 项）`;
+      : this._hideOptionCount
+        ? '多选题'
+        : `多选题（选 ${(q.correctIndices || []).length} 项）`;
     popup.appendChild(typeBadge);
 
     // 选项容器
@@ -497,8 +504,9 @@ export class QuizMasterUI {
    * 会话状态（_reviewMode/currentQuestions/计数/onComplete）只允许在本方法内设置，
    * 复习域禁止直接改写——契约化后复习域只需调用本方法与 endReviewSession。
    */
-  startReviewSession(opts: { questions: QuizQuestion[]; onComplete: ((results: QuizReviewResults) => void) | null }): void {
+  startReviewSession(opts: { questions: QuizQuestion[]; onComplete: ((results: QuizReviewResults) => void) | null; hideOptionCount?: boolean }): void {
     this._reviewMode = true;
+    this._hideOptionCount = !!opts.hideOptionCount;
     this.currentQuestions = opts.questions;
     this.currentIndex = 0;
     this.correctCount = 0;

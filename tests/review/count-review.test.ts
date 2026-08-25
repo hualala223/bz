@@ -20,8 +20,10 @@ vi.mock('../../src/quiz', () => {
     _cb: null as any,
     startCalls: 0,
     endCalls: 0,
+    lastStartOpts: null as any,
     startReviewSession(opts: any) {
       this.startCalls++;
+      this.lastStartOpts = opts;
       this.popup = document.createElement('div');
       this.popup.id = 'quiz-popup';
       this.mask = document.createElement('div');
@@ -65,8 +67,10 @@ function makeQuizMock() {
     _cb: null as any,
     endCalls: 0,
     startCalls: 0,
+    lastStartOpts: null as any,
     startReviewSession(opts: any) {
       this.startCalls++;
+      this.lastStartOpts = opts;
       this.popup = document.createElement('div');
       this.popup.id = 'quiz-popup';
       this.mask = document.createElement('div');
@@ -121,6 +125,8 @@ describe('countReviewLoop（ticket 02 骨架：逐篇做题 + 正确率 + 下一
     const p = reviewApp.countReviewLoop([pick('A.md', 'new'), pick('B.md', 'overdue', 2, '刚学')], 0);
     await new Promise((r) => setTimeout(r, 20));
     expect(quiz.startCalls).toBe(1);
+    // 按数量复习：做题会话带 hideOptionCount（多选徽标不提示正确选项数）
+    expect(quiz.lastStartOpts.hideOptionCount).toBe(true);
     // 第一篇（新文件）：100% → 卡片含正确率与「新文件」标注
     void quiz._cb({ correct: 2, wrong: 0, total: 2, accuracy: 100 });
     await new Promise((r) => setTimeout(r, 30));
