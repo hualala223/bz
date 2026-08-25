@@ -52,6 +52,9 @@ export function ensureReview(app: App): void {
     checkInterval = setInterval(() => reviewApp.checkOverdueAndNotify(), 60000);
   }, 2000);
 
+  // 文件树懒渲染：展开/折叠/节点出现即触发染色（根治 60s 轮询错过渲染时机就不染色）
+  void reviewApp.startFileTreeWatch(app);
+
   // 事件监听（metadataCache resolved / vault modify / workspace quit 保持原生订阅；
   // created/deleted/renamed 已迁域事件总线，见下方总线接线）
   listen(app.metadataCache as any, 'resolved', async () => {

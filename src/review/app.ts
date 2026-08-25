@@ -9,7 +9,7 @@ import { getSettings, saveSettings } from '../core/settings-provider';
 import { FSRS, FSRS_FIRST_INTERVALS, FSRS_FIRST_TEXTS, LADDER_MAX } from './fsrs';
 import type { Rating } from './fsrs';
 import type { ReviewItem } from './data';
-import { ReviewDataManager } from './data';
+import { ReviewDataManager, getReviewFilePath } from './data';
 import { collectFolderFiles, eligibleCount, selectCountReview, type CountPick, type CountPickKind } from './count';
 import { showNotePreview } from './preview';
 
@@ -597,22 +597,35 @@ export const reviewApp = {
     const items = await dm.loadItems();
     const item = items.find((i) => i.filePath === pick.filePath);
     const failed = rating === 'again' || rating === 'hard';
-    if (redoSemantic || pick.kind === 'redo') {
-      if (item && !failed) {
-        await dm.updateItem(pick.filePath, (it) => {
-          it.pendingRedo = false;
-        });
+    console.warn('[bz/sched] 进入排期写入', {
+      kind: pick.kind, filePath: pick.filePath, hasItem: !!item, redoSemantic, itemsCount: items.length,
+      reviewFile: getReviewFilePath(),
+    });
+    try {
+      if (redoSemantic || pick.kind === 'redo') {
+        if (item && !failed) {
+          await dm.updateItem(pick.filePath, (it) => {
+            it.pendingRedo = false;
+          });
+          console.warn('[bz/sched] redo 清标记');
+        }
+      } else if (item) {
+        await this.markReview(pick.filePath, rating, { autoPending: true, force: true });
+        console.warn('[bz/sched] 老条目 markReview 完成');
+      } else {
+        // 新文件：先入计划（首次评级 = 唯一排期来源，ADR-0044）
+        try {
+          await dm.addItem(pick.filePath, name);
+          console.warn('[bz/sched] 新文件 addItem 完成');
+        } catch (e) {
+          /* 并发已加入 → 忽略 */
+          console.warn('[bz/sched] addItem 已存在/忽略', e);
+        }
+        await this.markReview(pick.filePath, rating, { autoPending: true, force: true });
+        console.warn('[bz/sched] 新文件 markReview 完成');
       }
-    } else if (item) {
-      await this.markReview(pick.filePath, rating, { autoPending: true, force: true });
-    } else {
-      // 新文件：先入计划（首次评级 = 唯一排期来源，ADR-0044）
-      try {
-        await dm.addItem(pick.filePath, name);
-      } catch {
-        /* 并发已加入 → 忽略 */
-      }
-      await this.markReview(pick.filePath, rating, { autoPending: true, force: true });
+    } catch (e) {
+      console.error('[bz/sched] 排期写入异常', e);
     }
     await this.applyReviewStyles(app);
   },
@@ -834,6 +847,39 @@ export const reviewApp = {
     notice('已加入复习计划，首次复习：1分钟后', 'success');
   },
 
+  /** 文件树结构诊断（字符串化，用户可直接复制） */
+  _stainDiag(): string {
+    const dp = Array.from(document.querySelectorAll<HTMLElement>('[data-path]'));
+    return JSON.stringify({
+      dataPathCount: dp.length,
+      treeItemSelf: document.querySelectorAll('.tree-item-self').length,
+      treeItemInner: document.querySelectorAll('.tree-item-inner').length,
+      navFileTitle: document.querySelectorAll('.nav-file-title').length,
+      navFileTitleContent: document.querySelectorAll('.nav-file-title-content').length,
+      dpSamples: dp.slice(0, 6).map((n) => n.getAttribute('data-path')),
+    });
+  },
+
+  /** 文件树变更即染色：Obsidian 文件树懒渲染（折叠时节点不存在），且无展开事件可监听——
+   *  MutationObserver 观察文件树容器，节点出现/变化（如展开文件夹）节流触发染色，
+   *  根治「60s 轮询恰好错过渲染时机就不染色」的场景。 */
+  async startFileTreeWatch(app: App): Promise<void> {
+    const container =
+      (document.querySelector('.workspace-leaf-content[data-type="file-explorer"] .nav-files-container') as HTMLElement | null) ||
+      (document.querySelector('.nav-files-container') as HTMLElement | null) ||
+      (document.querySelector('.workspace-leaf-content[data-type="file-explorer"]') as HTMLElement | null);
+    // 找不到文件树容器（如 jsdom 测试环境）则不启动观察，避免对 document.body 全量 DOM 变动误触发
+    if (!container) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    new MutationObserver(() => {
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        void this.applyReviewStyles(app);
+      }, 300);
+    }).observe(container, { childList: true, subtree: true });
+  },
+
   /** 文件树染色 + 阶段徽标（源码 L719-772 逐字；ticket 100 加「文件树标记」开关）
    *  2026-08 稳健化：原用 CSS 属性选择器 `div[data-path="..."]` 精确取值，中文/斜杠路径在部分环境转义失配，
    *  Obsidian 文件树 DOM 各版本亦有差异——改为遍历 `[data-path]` 精确比对取值，目标文本层多备选退避，
@@ -845,12 +891,24 @@ export const reviewApp = {
     const allItems = await dm.loadItems();
     const files = changedFile ? [changedFile] : app.vault.getMarkdownFiles();
     const fsrs = new FSRS();
+    // 一次性诊断（字符串化；定位染色不生效时的文件树 DOM 结构）
+    console.warn('[bz/stain] 结构=' + this._stainDiag());
+    const _DP_ = Array.from(document.querySelectorAll<HTMLElement>('[data-path]'));
 
     for (const file of files) {
       // 遍历 [data-path] 节点精确比对，避开 CSS 属性选择器对中文/斜杠的转义问题
-      const nodes = Array.from(document.querySelectorAll<HTMLElement>('[data-path]'));
-      const node = nodes.find((n) => n.getAttribute('data-path') === file.path);
-      if (!node) continue;
+      const node = _DP_.find((n) => n.getAttribute('data-path') === file.path);
+      if (!node) {
+        if (file.path === files[0]?.path) {
+          console.warn('[bz/stain] 未找到 data-path 节点', {
+            path: file.path,
+            totalDP: _DP_.length,
+            sampleNode: _DP_[0] ? (_DP_[0].getAttribute('data-path')) : null,
+            inPlan: allItems.some((i) => i.filePath === file.path),
+          });
+        }
+        continue;
+      }
       // 目标文本层多备选：.tree-item-inner（Obsidian 文件树旧结构）→ .nav-file-title-content（部分主题/旧版）
       // → 容器本身；取能挂内联色+徽标的最内层可染文本
       const target =

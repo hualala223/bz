@@ -90,6 +90,27 @@ describe('ensureReview', () => {
     expect(spy).toHaveBeenCalled();
   });
 
+  it('文件树变更监听：展开文件夹（nav-files-container 子节点变化）→ 节流触发染色（根治懒渲染错过轮询）', async () => {
+    const vault = new MockVault();
+    seed(vault);
+    const app = makeApp(vault);
+    // 造一个 Obsidian 文件树容器（保障 startFileTreeWatch 能找到容器并挂 MutationObserver）
+    const container = document.createElement('div');
+    container.className = 'nav-files-container';
+    document.body.appendChild(container);
+    const spy = vi.spyOn(reviewApp, 'applyReviewStyles').mockResolvedValue(undefined);
+    ensureReview(app);
+    spy.mockClear();
+    // 模拟用户展开文件夹：容器新增一个文档节点（带 data-path）
+    const item = document.createElement('div');
+    item.setAttribute('data-path', 'A.md');
+    container.appendChild(item);
+    // watcher 300ms 节流触发染色
+    await new Promise((r) => setTimeout(r, 400));
+    expect(spy).toHaveBeenCalledTimes(1);
+    container.remove();
+  });
+
   it('vault modify（md 文件）→ applyReviewStyles', async () => {
     const vault = new MockVault();
     seed(vault);
