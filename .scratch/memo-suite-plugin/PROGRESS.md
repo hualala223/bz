@@ -9,7 +9,7 @@
 - 兼容冻结：设置仅新增可选键（旧 data.json 缺省容忍零迁移）、smartcat.json 零改动、smartcatEnabled 默认值与既有测试 mock 全不动
 - 测试三既有 seam 零新增：settings-tab（渲染/条件显隐/三档驱动/关闭态切档对账/持久化）、power-state 新文件（模块入口：startHidden 装配/对账三档/重开/⚙️弹窗清理/守卫拒绝+放行+通知正文）、smoke（四态启动门控 spy + 命令表不变）
 - 文档：CONTEXT.md 新增「关闭方式 (Off Mode)」词条（隐藏≠关闭术语锐化）、spec.md 103 节、本 PROGRESS、issues 72/73
-- 门禁实录：tsc 0 错；全量 vitest 2634 绿 / 1 环境失败（diary/ui/real-data.test.ts 读真实 vault 路径 E:/Obsidian/叫我包仔/我的/日记 本机不存在——干净基线同样失败，非回归）；pnpm run build 通过（三件套同步仓库根 + vault 插件目录）
+- 门禁实录：tsc 0 错；全量 vitest 2634 绿（diary/ui/real-data.test.ts 曾读旧 vault 路径 E:/Obsidian/叫我包仔 而失败——真实库已迁 `N:/仓库/仓库-新/-0.笔记汇总库`，非回归；同日随部署目标一并改正，复测全绿）；pnpm run build 通过（三件套同步仓库根 + 真实 vault 插件目录，路径单点定义 scripts/vault-dir.mjs）
 - 提交：feat（ticket 103）合 master
 
 ## 2026-08-26 解散 AI Agent 域（ticket 102；worktree/dissolve-ai-agent）

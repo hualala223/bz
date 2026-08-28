@@ -3,11 +3,11 @@ import process from "process";
 import fs from "fs";
 import path from "path";
 import { buildStyles, watchStyles } from "./scripts/build-css.mjs";
+import { VAULT_PLUGIN_DIR } from "./scripts/vault-dir.mjs";
 
 const prod = process.argv[2] === "production";
 
-// 构建产物直接输出到 vault 的插件目录（安装即用）
-const VAULT_PLUGIN_DIR = "E:/Obsidian/叫我包仔/.obsidian/plugins/bz";
+// 构建产物直接输出到 vault 的插件目录（安装即用；路径单点定义见 scripts/vault-dir.mjs）
 // 发布版 main.js 同步到仓库根目录（git 跟踪，README「手动安装」/ GitHub Release 以此为准）
 const RELEASE_MAIN = path.join(process.cwd(), "main.js");
 

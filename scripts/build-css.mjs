@@ -16,11 +16,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { VAULT_PLUGIN_DIR } from "./vault-dir.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-// 与主构建一致的产物目录（esbuild.config.mjs 硬编码约定）
-const PLUGIN_DIR = "E:/Obsidian/叫我包仔/.obsidian/plugins/bz";
+// 与主构建一致的产物目录（单点定义见 scripts/vault-dir.mjs）
+const PLUGIN_DIR = VAULT_PLUGIN_DIR;
 
 // 聚合顺序清单（勿随意调整；新增域样式文件时在对应位置插入）
 const SOURCES = [

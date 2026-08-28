@@ -12,11 +12,25 @@ import { state } from '../../../src/diary/state';
 import { MockVault, mockAppWithVault } from '../../mock-vault';
 import { resetObsidianMocks } from '../../mock-obsidian-entry';
 
-const VAULT = 'E:/Obsidian/叫我包仔';
+const VAULT = 'N:/仓库/仓库-新/-0.笔记汇总库';
 
 function listFiles(dir: string): string[] {
   try {
     return fs.readdirSync(dir).filter((f) => f.endsWith('.md')).slice(0, 5);
+  } catch {
+    return [];
+  }
+}
+
+// 真实库里可能混有其他模板的日记文件（`# emoji HH:mm` 才是 bz 日记条目格式）——
+// 按内容筛选 bz 格式文件再采样，避免字母序前排全是异格式导致解析 0 条
+function listBzDiaryFiles(): string[] {
+  try {
+    return fs
+      .readdirSync(path.join(VAULT, '我的/日记'))
+      .filter((f) => f.endsWith('.md'))
+      .filter((f) => /^#\s*\S+\s+\d{2}:\d{2}/m.test(fs.readFileSync(path.join(VAULT, '我的/日记', f), 'utf-8')))
+      .slice(0, 5);
   } catch {
     return [];
   }
@@ -37,8 +51,8 @@ beforeEach(() => {
 });
 
 it('真实日记文件 → 解析 → 渲染卡片', async () => {
-  const diaryFiles = listFiles(path.join(VAULT, '我的/日记'));
-  console.log('真实日记文件数（抽样 5）:', diaryFiles);
+  const diaryFiles = listBzDiaryFiles();
+  console.log('真实 bz 格式日记文件数（抽样 5）:', diaryFiles);
   expect(diaryFiles.length).toBeGreaterThan(0);
 
   const vault = new MockVault();
