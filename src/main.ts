@@ -52,7 +52,7 @@ import { loadAll } from './diary/store';
 import { state as diaryState } from './diary/state';
 import { applyUiSettings, init as diaryInit, showDiaryPanel, unregisterEscLayer } from './diary/ui/panel';
 // 小橘陪伴猫（smartcat 域：桌面宠物 + AI 陪伴；AI 走 bz core/ai，数据单 json smartcat.json）
-import { ensureSmartCat, unloadSmartCat, openSmartCat, openSmartCatChat, hideSmartCat, openSmartcatDashboard } from './smartcat';
+import { ensureSmartCat, unloadSmartCat, openSmartCat, openSmartCatChat, hideSmartCat, openSmartcatDashboard, applySmartcatPowerState, normalizeSmartcatOffMode, type SmartcatOffMode } from './smartcat';
 
 /** 命令表：id/name 统一命名（spec「命令 id 全清单」第 9 轮：bz-<域>-<动作>，icon 与入口页磁贴一致） */
 const COMMANDS: { id: string; name: string; icon: string; callback: () => void }[] = [
@@ -230,8 +230,13 @@ export default class BzPlugin extends Plugin {
       if (this.settings.enableAutoNotify !== false) void ensureReview(this.app);
       // 番茄钟：启动即恢复（load+recover，正在倒计时则后台继续/按设置自动弹窗）
       void ensurePomodoro(this.app);
-      // 小橘：启动即挂载（smartcatEnabled 开关；桌面宠物常驻）
-      if (this.settings.smartcatEnabled) void ensureSmartCat(this.app);
+      // 小橘：启动按开关 + 关闭方式门控（ticket 103——开=装配显示；关+hide=隐藏启动装配；
+      // 关+lazy/stop=不自动挂载（命令可召唤/完全停机））
+      if (this.settings.smartcatEnabled) {
+        void ensureSmartCat(this.app);
+      } else if (normalizeSmartcatOffMode(this.settings.smartcatOffMode) === 'hide') {
+        void ensureSmartCat(this.app, { startHidden: true });
+      }
     });
     // 手势触发（设置页可配，默认关闭）
     this.syncGestures();
@@ -442,6 +447,43 @@ export class BzSettingTab extends PluginSettingTab {
       save,
       (v) => (s.storagePath = v)
     );
+
+    // 🐱 小橘区块（ticket 103：设置页开关 + 三档关闭方式，立即生效）
+    containerEl.createDiv({ cls: 'bz-setting-section-title', text: '🐱 小橘' });
+    let offModeRow: Setting | null = null;
+    const refreshOffModeRow = () => {
+      if (offModeRow) offModeRow.settingEl.toggleClass('bz-setting-hidden', !!s.smartcatEnabled);
+    };
+    // 关闭方式归一（旧数据/未知值 → stop；smartcat 模块提供共享判定）
+    const currentOffMode = (): SmartcatOffMode => normalizeSmartcatOffMode(s.smartcatOffMode);
+    new Setting(containerEl)
+      .setName('启用小橘')
+      .setDesc('关闭后按「关闭方式」处理；彻底停机期间的笔记活动不会进入小橘记忆，重开后也不补记')
+      .addToggle((toggle) =>
+        toggle.setValue(!!s.smartcatEnabled).onChange(async (v: boolean) => {
+          s.smartcatEnabled = v;
+          await save();
+          // 运行时对账：立即生效（Q2 拍板）
+          await applySmartcatPowerState(this.plugin.app, v, currentOffMode());
+          refreshOffModeRow();
+        })
+      );
+    offModeRow = new Setting(containerEl)
+      .setName('关闭方式')
+      .setDesc('彻底停机：猫与后台全部停止；仅隐藏：猫消失但后台仍感知记录；仅不自动启动：本次照旧、重启后需命令召唤')
+      .addDropdown((dd) => {
+        dd.addOption('stop', '彻底停机（后台全部停止）');
+        dd.addOption('hide', '仅隐藏（后台仍感知）');
+        dd.addOption('lazy', '仅不自动启动（召唤可用）');
+        dd.setValue(currentOffMode());
+        dd.onChange(async (v: string) => {
+          s.smartcatOffMode = v;
+          await save();
+          // 关闭状态下切换关闭方式 → 立即按新档对账（立即生效语义；开启状态下切换仅留待下次关闭）
+          if (!s.smartcatEnabled) await applySmartcatPowerState(this.plugin.app, false, currentOffMode());
+        });
+      });
+    refreshOffModeRow();
   }
 
   // ---- 设置项 helper ----

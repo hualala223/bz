@@ -22,6 +22,15 @@ vi.mock('../src/favorites', async (importOriginal) => ({
   ensureFavoritesFileSync: syncSpies.ensureFavoritesFileSync,
 }));
 
+// 小橘启动门控（ticket 103）：mock ensureSmartCat spy，同步断言四态启动姿态（不依赖异步装配完成）
+const smartcatSpies = vi.hoisted(() => ({
+  ensureSmartCat: vi.fn(),
+}));
+vi.mock('../src/smartcat', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ensureSmartCat: smartcatSpies.ensureSmartCat,
+}));
+
 /** 构造 mock app（workspace/vault/commands/metadataCache 最小面） */
 function makeMockApp() {
   const vault = new MockVault();
@@ -206,5 +215,45 @@ ${failures.join('\n')}`).toEqual([]);
     const plugin2 = await createPlugin(makeMockApp());
     expect(plugin2.settings.todoFilePath).toBe('自定义/路径');
     expect(plugin2.settings.movieFolderPath).toBe('我的/影视');
+  });
+});
+
+describe('小橘启动门控（ticket 103）', () => {
+  beforeEach(() => {
+    smartcatSpies.ensureSmartCat.mockClear();
+  });
+
+  it('开启：onLayoutReady 调 ensureSmartCat、无隐藏旗标', async () => {
+    await createPlugin(makeMockApp());
+    expect(smartcatSpies.ensureSmartCat).toHaveBeenCalledTimes(1);
+    expect(smartcatSpies.ensureSmartCat.mock.calls[0][1]).toBeUndefined();
+  });
+
+  it('关闭 + 彻底停机：不自动挂载', async () => {
+    diskData['bz'] = { smartcatEnabled: false, smartcatOffMode: 'stop' };
+    await createPlugin(makeMockApp());
+    expect(smartcatSpies.ensureSmartCat).not.toHaveBeenCalled();
+  });
+
+  it('关闭 + 仅不自动启动：不自动挂载', async () => {
+    diskData['bz'] = { smartcatEnabled: false, smartcatOffMode: 'lazy' };
+    await createPlugin(makeMockApp());
+    expect(smartcatSpies.ensureSmartCat).not.toHaveBeenCalled();
+  });
+
+  it('关闭 + 仅隐藏：隐藏启动装配（startHidden 旗标）', async () => {
+    diskData['bz'] = { smartcatEnabled: false, smartcatOffMode: 'hide' };
+    await createPlugin(makeMockApp());
+    expect(smartcatSpies.ensureSmartCat).toHaveBeenCalledTimes(1);
+    expect(smartcatSpies.ensureSmartCat.mock.calls[0][1]).toEqual({ startHidden: true });
+  });
+
+  it('四个小橘命令照常注册（开关不改变命令表）', async () => {
+    diskData['bz'] = { smartcatEnabled: false, smartcatOffMode: 'stop' };
+    await createPlugin(makeMockApp());
+    const ids = registeredCommands.map((c: any) => c.id);
+    for (const id of ['bz-smartcat-open', 'bz-smartcat-chat', 'bz-smartcat-hide', 'bz-smartcat-dashboard']) {
+      expect(ids).toContain(id);
+    }
   });
 });

@@ -10,6 +10,7 @@
 import type { App } from 'obsidian';
 import { notice } from '../core/notice';
 import { getSettings, saveSettings } from '../core/settings-provider';
+import { closeSettingsModal } from '../core/settings-modal';
 import { loadSmartCatData, saveSmartCatData, getSmartcatFilePath, smartcatStorageDir, defaultPersonalityGrowth, touchPresence, applyInsightPatch } from './data';
 import { eventSystem, setSmartcatApp, setupVisibilityCheck, __resetVisibilityForTests } from './state';
 import { mountCatContainer, unmountCatContainer, applyAppearance, createChatPanel, showChatPanel, hideChatPanel, openSmartcatSettings } from './ui';
@@ -182,9 +183,12 @@ async function saveConfig(c: SmartCatConfig): Promise<void> {
   await dataSaver(d);
 }
 
-/** 幂等初始化（懒加载；命令/onLayoutReady 触发） */
-export async function ensureSmartCat(app: App): Promise<void> {
+/** 幂等初始化（懒加载；命令/onLayoutReady 触发）。
+ *  opts.startHidden（ticket 103）：隐藏启动装配——子系统在线但容器不出现、不问好（终结态等效 hideSmartCat；
+ *  猫重开走 openSmartCat 幂等重挂；装配期容器 display:none 防闪现，功能性显隐内联）。 */
+export async function ensureSmartCat(app: App, opts?: { startHidden?: boolean }): Promise<void> {
   if (initialized) return;
+  const startHidden = opts?.startHidden === true;
   initialized = true;
   appRef = app;
   setSmartcatApp(app);
@@ -269,10 +273,14 @@ export async function ensureSmartCat(app: App): Promise<void> {
   // 猫容器 + 皮肤 + 动画 + 指示器
   const container = mountCatContainer()!;
   applyAppearance(container, data.config.appearance);
+  if (startHidden) container.style.display = 'none'; // 隐藏启动：装配期不闪现（功能性显隐内联；后续幂等重挂时恢复）
   animation = new SmartCatAnimation(container);
   animation.initialize();
-  // 100ms 后问候（原 SmartCatAnimation module.exports greet；定时器挂模块级供 unload 清理）
-  greetTimer = setTimeout(() => animation?.greet(), 100);
+  // 100ms 后问候（原 SmartCatAnimation module.exports greet；定时器挂模块级供 unload 清理；
+  // 隐藏启动跳过问候——气泡队列机制在容器缺失期自动挂起，重开时消费）
+  if (!startHidden) {
+    greetTimer = setTimeout(() => animation?.greet(), 100);
+  }
 
   // 交互（2026-08-23 用户拍板：删语音模块）
   interaction = new InteractionManager({
@@ -407,6 +415,9 @@ export async function ensureSmartCat(app: App): Promise<void> {
   void maybeDossierNarrative();
   // 情绪趋势回写心情（ADR-0025 A 面：30 分钟节流，declining/improving/高波动温和漂移 PAD）
   startTrendDrift();
+
+  // 隐藏启动：装配完成即卸容器（等效 hideSmartCat 终结态；强引用在重挂/卸载时统一处理）
+  if (startHidden) unmountCatContainer();
 
   eventSystem.emit('appInitialized');
 }
@@ -744,15 +755,39 @@ async function generateBookReview(): Promise<void> {
 
 // ---------------- 命令回调 ----------------
 
+/** 关闭方式（ticket 103）：stop 彻底停机 / hide 仅隐藏（后台仍感知）/ lazy 仅不自动启动 */
+export type SmartcatOffMode = 'stop' | 'hide' | 'lazy';
+
+/** 关闭方式归一（设置页与守卫共用，旧数据/未知值 → stop） */
+export function normalizeSmartcatOffMode(v: unknown): SmartcatOffMode {
+  return v === 'hide' || v === 'lazy' ? v : 'stop';
+}
+
+/** 停机档判定（ticket 103）：设置关闭且关闭方式为彻底停机 → 召唤类命令拒绝（不自动复活） */
+function isSmartcatStopped(): boolean {
+  const s = getSettings();
+  return !s?.smartcatEnabled && normalizeSmartcatOffMode(s?.smartcatOffMode) === 'stop';
+}
+
+/** 幂等重挂（P1-28 召回修复路径抽取）：已装配态恢复容器显示 + 重刷皮肤 + 推进气泡队列 */
+function remountVisibleCat(): void {
+  const container = mountCatContainer();
+  if (container && data) applyAppearance(container, data.config.appearance);
+  bubbleManager?.processBubbleQueue();
+}
+
 /** 打开（召唤/显示小橘） */
 export async function openSmartCat(app: App): Promise<void> {
+  // ticket 103：彻底停机档召唤被拒（toast 引导去设置开启；hide/lazy 档照常召唤即显示/启动）
+  if (isSmartcatStopped()) {
+    notice('小橘已在设置中关闭', 'info');
+    return;
+  }
   // P1-28 召回不能修复：hide 后 initialized 仍 true → ensureSmartCat 幂等早退，猫容器永不重挂。
   // 已初始化时幂等 remount（mountCatContainer 存在即复用）+ 重刷皮肤 + 推进气泡队列
   // （容器缺失期入队的消息此刻消费；打字锁已在 showBubbleInternal 早退分支复位）。
   if (initialized) {
-    const container = mountCatContainer();
-    if (container && data) applyAppearance(container, data.config.appearance);
-    bubbleManager?.processBubbleQueue();
+    remountVisibleCat();
     return;
   }
   await ensureSmartCat(app);
@@ -760,8 +795,39 @@ export async function openSmartCat(app: App): Promise<void> {
 
 /** 打开聊天面板 */
 export async function openSmartCatChat(app: App): Promise<void> {
+  // ticket 103：彻底停机档聊天同样拒绝（不装配、不弹聊天面板）
+  if (isSmartcatStopped()) {
+    notice('小橘已在设置中关闭', 'info');
+    return;
+  }
   await ensureSmartCat(app);
   openChat();
+}
+
+/** 设置页电源对账（ticket 103）：把运行态对齐到 {enabled, offMode} 目标姿态，立即生效。
+ *  on → 装配并显示（隐藏态走幂等重挂）；off+stop → 关残留 ⚙️ 弹窗 + 全量卸载（记忆流累积停止）；
+ *  off+hide → 未装配则隐藏启动装配、已装配则收起 DOM（后台感知照跑）；off+lazy → 当场不动（Q8）。 */
+export async function applySmartcatPowerState(app: App, enabled: boolean, offMode: SmartcatOffMode): Promise<void> {
+  if (enabled) {
+    if (initialized) remountVisibleCat();
+    else await ensureSmartCat(app);
+    return;
+  }
+  if (offMode === 'stop') {
+    // 停机清空 data/子系统，开着小橘 ⚙️ 弹窗将失去配置来源——先关弹窗再卸载
+    closeSettingsModal();
+    unloadSmartCat();
+    return;
+  }
+  if (offMode === 'hide') {
+    if (!initialized) {
+      await ensureSmartCat(app, { startHidden: true });
+      return;
+    }
+    hideSmartCat();
+    return;
+  }
+  // lazy：仅约束启动时机，当场不动作（重启后不自动挂载；命令可召唤）
 }
 
 /** 隐藏小橘（卸载 DOM 与常驻，数据保留） */

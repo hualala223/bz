@@ -1,3 +1,17 @@
+## 2026-08-28 小橘设置页开关与三档关闭方式（ticket 103；issues 72+73，主仓库直接实现）
+
+**状态：完成（grilling Q1–Q9 定稿 → spec issue 71 → tickets 72/73 拆分 → 实现+测试全绿）**
+
+- 插件设置页新增「🐱 小橘」区块：「启用小橘」开关（既有 smartcatEnabled 键补 UI，默认 true 不变）+「关闭方式」下拉（新键 smartcatOffMode=stop/hide/lazy，默认 stop，仅开关关闭时显示——复用 AI 区块 bz-setting-hidden 条件显隐）
+- 三档立即生效：stop=unloadSmartCat 全量停机（监听/定时器/记忆流累积全停，重启不挂载，期间笔记活动不进记忆流不补记）；hide=收起 DOM 后台照跑（未装配→ensureSmartCat(startHidden) 隐藏启动装配：容器不出现/问好不闪现/装配期 display:none 防闪现；已装配→hideSmartCat）；lazy=当场零变化（Q8）重启不自动挂载
+- 启动门控：开→ensure；关+hide→ensure(startHidden)；关+lazy/stop→跳过；命令守卫收在模块入口 openSmartCat/openSmartCatChat（isSmartcatStopped 读插件设置单点判定）：仅 stop 档拒绝 + toast「小橘已在设置中关闭」（notice info，ICONS 无新增），hide/lazy 召唤即启动；hide 命令停机档未初始化天然 no-op；dashboard 恒可用
+- 电源对账 applySmartcatPowerState：on→装配/幂等重挂（remountVisibleCat 抽取复用 P1-28 路径）；stop→closeSettingsModal（清 ⚙️ 弹窗残留）+unload；hide→隐藏启动/收起；lazy→不动；ensure 竞态守卫天然覆盖「快速开关」中间态
+- 兼容冻结：设置仅新增可选键（旧 data.json 缺省容忍零迁移）、smartcat.json 零改动、smartcatEnabled 默认值与既有测试 mock 全不动
+- 测试三既有 seam 零新增：settings-tab（渲染/条件显隐/三档驱动/关闭态切档对账/持久化）、power-state 新文件（模块入口：startHidden 装配/对账三档/重开/⚙️弹窗清理/守卫拒绝+放行+通知正文）、smoke（四态启动门控 spy + 命令表不变）
+- 文档：CONTEXT.md 新增「关闭方式 (Off Mode)」词条（隐藏≠关闭术语锐化）、spec.md 103 节、本 PROGRESS、issues 72/73
+- 门禁实录：tsc 0 错；全量 vitest 2634 绿 / 1 环境失败（diary/ui/real-data.test.ts 读真实 vault 路径 E:/Obsidian/叫我包仔/我的/日记 本机不存在——干净基线同样失败，非回归）；pnpm run build 通过（三件套同步仓库根 + vault 插件目录）
+- 提交：feat（ticket 103）合 master
+
 ## 2026-08-26 解散 AI Agent 域（ticket 102；worktree/dissolve-ai-agent）
 
 **状态：全量 2202 绿（148 文件）+ tsc 0；worktree/dissolve-ai-agent 已提交，待合并 master + 构建部署**
