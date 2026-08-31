@@ -30,6 +30,8 @@ Feature: memo-suite-plugin
 
 25. 作为用户，我希望小橘能感知日记本每条日记的写入与删除（每条独立 10 分钟静置结算：首次有字才生成、累计字数 >50 才追加更新观察、删除时原观察保留并追加删除观察），以便陪伴记忆细致准确。（2026-08-23 用户拍板，ticket 077，ADR-0030：**per-entry 独立 10 分钟结算**——vault create/modify/delete 监听 `我的/日记/*.md`（classifyPath==='diary' 走新链路，替换原 observationText 快照分支；原 diary 10 分钟去弹跳/信任成长不再执行，其它 kind 不动），per-entry 计时表 + 重启基线内存态不落盘（smartcat.json 零改动）；首落正文**有字（非空）**才生成「你在 <date> <time> 写了一篇日记（分类：…）：<正文全量不截断>」，空标题记已见防「标题即存」（补正文后走首落）；已有观察按「累计字数 = 每次结算累加（当前长度 − 上次生成基线），中文按字符数」**>50 才生成更新观察**（「你更新了日记（<date> <time>）：<新正文>」，分类有变化也更新进括号）并重置基线/累计，≤50 不生成但计入累计；删除（文件 delete / 条目块消失的 modify diff）→ 原观察保留 + 追加「你删除了 <date> <time> 的日记」（从未跟踪过的文件删除 → 文件级单条兜底「你删除了 <date> 的日记」）；重启 ensure 对当日文件建基线快照（不产出，防旧条目被当首次）；emoji→分类 import diary/config 的 emojiToTagMap（单向域间 import）；source 'diary' 恒 LLM（AI 未配置降级本地规则分 + 词法情绪））
 
+26. 作为用户，我希望日记「未解析行」不再在启动时弹数字 toast，而是在日记⚙️设置弹窗点「检测日记解析」主动检测：打开面板 → 进度条逐文件解析 → 可修项（头行补空格/时间补零，预览修改前后）确认后一键批量修复、正文归位不改写；不可修项（如时间越界 24:99）列清单点击跳转并定位到行手工改，以便我知道到底哪些日记哪里出错并能修好。（2026-08-27 用户拍板，ticket 121，ADR-0054：手动驱动修复、只修不合规头行、不额外备份、规则白名单 R1 补空格/R2 补零/R3 正文归位）
+
 ### 备忘录（Todo）
 
 9. 作为用户，我希望打开「备忘录」面板（ribbon 主入口）后界面与原脚本一致（#todo-popup 弹窗、场景分类筛选），以便沿用使用习惯。
@@ -94,7 +96,7 @@ Feature: memo-suite-plugin
 26. 作为用户，我希望阅读器内的摘要以 markdown 渲染（renderMarkdown），以便排版与原脚本一致。
 27. 作为用户，我希望聚合讯的约 196 行注入样式（弹窗/列表/统计）原样保留，以便视觉一致。
 28. 作为用户，我希望阅读器显示作者（👤）与日期（📅）、全部读完显示完成态（renderDoneState），以便与原脚本一致。
-29. 作为用户，我希望小橘能感知聚合讯逐篇阅读（打开记时长；下一篇/保存时按三态判定——保存优先、跳过 ≥2 分钟升阅读，时长取整分钟），保存联动 auto-summary（登记待补全 → 剪藏 modify 补全完整保存观察 / 2 分钟降级），以便陪伴记忆细致准确。（2026-08-23 用户拍板，ticket 076，ADR-0029：**逐篇三态方法监听**——news 域 reader 动作调 `notifyNewsRead`/`notifyNewsSaved`，文案构造集中 `news-source.ts` 纯函数；剪藏事件观察整体停用、domain:news 计数观察移除；news.json/news-stats.json/smartcat.json 零改动，时长仅观察携带）
+29. 作为用户，我希望小橘能感知聚合讯逐篇阅读（打开记时长；下一篇/保存时发观察——保存立即形态 + auto-summary 补全、跳过 `news:skipped` 入行为流，时长取整分钟），以便陪伴记忆细致准确。（2026-08-23 用户拍板，ticket 076，ADR-0029：**逐篇三态方法监听**——news 域 reader 动作调 `notifyNewsRead`/`notifyNewsSaved`，文案构造集中 `news-source.ts` 纯函数；剪藏事件观察整体停用、domain:news 计数观察移除；news.json/news-stats.json/smartcat.json 零改动，时长仅观察携带。2026-08-25 修订：仅保存发观察；**2026-08-27 追加拍板（ticket 123）**：跳过也发——`news:skipped` 入行为流，阅读无独立动作不发）
 ### 收藏本（Favorites）
 
 23. 作为用户，我希望 GitHub 收藏管理（列表、AI 生成标题/简介、打开链接、长按操作）与原脚本一致，以便管理我的 GitHub stars。
@@ -170,7 +172,9 @@ Feature: memo-suite-plugin
 46. 作为用户，我希望答题流程与原脚本一致：题目展示 → 提交答案 → 下一题 →（多选支持），以便沿用做题习惯。
 46b. 作为用户，我希望题型语义一致：单选题（四选一）/多选题（正确选项数量不限）；AI 出题难度三档（基础概念低难度/中等/高难度推理+多知识点交叉）；出题失败降级逐篇批量，以便与原脚本一致。
 
-### 闪念（Flash Thought）
+### 第二大脑（Second Brain）
+
+> ticket 103（ADR-0051）：原「闪念」正名接管——以下用户故事 41-51 由第二大脑承接；命名/命令 id/设置键/数据文件按 ADR-0051 换代（bz-secondbrain-*、secondBrain*、secondbrain_meta.json/vec），QuickAdd《闪念.js》为完整行为基准，差距 9/9 复刻并修复同源缺陷三处。
 
 41. 作为用户，我希望右侧窄窗（自动吸附缩起、悬停展开）与原脚本一致，以便快速记录闪念。
 42. 作为用户，我希望相关笔记随光标浮现（向量检索，Ollama bge-m3 嵌入），以便写作时发现关联。
@@ -178,12 +182,22 @@ Feature: memo-suite-plugin
 44. 作为用户，我希望 Ollama 服务不可用时有明确提示而非崩溃，以便知道是环境问题。
 45. 作为用户，我希望闪念的常驻监听可按设置开关，以便不需要时节省资源。
 46. 作为用户，我希望闪念的 17 项设置全量迁移：OLLAMA_URL/EMBEDDING_MODEL/META_PATH/VEC_PATH/TOP_K/CHAT_TOP_K/CHUNK_MIN_LENGTH/ALLOW_PATHS/CONCURRENCY/CONTEXT_LIMIT/DEBOUNCE_DELAY/CURSOR_POLL_INTERVAL/OLLAMA_CHAT_MODEL/DEEPSEEK_MODEL/DEFAULT_USE_DEEPSEEK/MAX_HISTORY/OLLAMA_REMOTE_URL，以便精细调优。
+
+52. 作为用户，我希望桌面端第二大脑 ⚙️ 设置弹窗显示「本机当前局域网 IP」并提供一键填入远程 Ollama URL（确认后覆盖），以便移动端连不上时（DHCP 漂移导致旧 IP 失效）能自查自修。（2026-08-27 用户拍板，ticket 122：`require('os').networkInterfaces()` 枚举桌面端 IP、过滤 internal/link-local、仅桌面端显示、confirm 后覆盖 `secondBrainRemoteOllamaUrl`）
 47. 作为用户，我希望向量索引持久化（meta.json + vectors.vec 二进制文件，存 CONFIG/STORAGE），以便重启后检索不失效。
 48. 作为用户，我希望笔记修改时向量增量重建（vault modify 监听 + 防抖 DEBOUNCE_DELAY），以便索引不过期。
 49. 作为用户，我希望闪念的性能参数（chunk 切分长度、并发、光标轮询间隔、上下文限制、聊天历史上限）按设置生效，以便控制开销。
 50. 作为用户，我希望移动端检测（IS_MOBILE 语义）与降级行为与原脚本一致，以便移动端可用时行为正确。
 51. 作为用户，我希望 TF-IDF 检索保留（「✅ TF-IDF 就绪（N 段）」状态提示，与向量检索协同），以便无 Ollama 时也能基础检索。
 52. 作为用户，我希望连接状态提示（✅ 远程 Ollama 已连接）与聊天界面（发送/··· 菜单、📚 🤖 按钮）与原脚本一致。
+53. 作为用户，我希望本地还没有向量数据时，主面板/参考侧边栏/AI 对话三条命令都打开主面板并看到初始化引导（简短说明 + 开始按钮），以便明确首次向量化需要我手动触发（ticket 107）。
+54. 作为用户，我希望点击开始后能看到向量化进度条，完成后面板自动切换为正常统计；失败时给出原因并可重试（ticket 107）。
+55. 作为用户，我希望每次打开主面板都会做增量索引：有待处理变更时先看到索引进度画面，完成后自动进入统计；无变更直接显示统计（ticket 108）。
+56. 作为用户，我希望统计界面提供更多维度：白名单覆盖率、内容规模（总字数/平均块长/平均每篇块数）、最厚笔记 Top5、索引一致性健康，且存储占用显示合计、日期用相对时间（ticket 108）。
+57. 作为用户，我希望来源分布可逐级展开子树（▸/▾ 下钻子目录），名称左对齐不再有大空白（ticket 108）。
+58. 作为用户，我希望设置弹窗提供「重新索引」：确认后关闭设置、打开主面板并自动全量重建（进度可见）；对话框与概括统一走主设置页 AI 服务商，不再单独配置模型（ticket 108）。
+59. 作为用户，我希望顶部统计卡精简为六张且一行放下：去掉与下方明细重复的「内容规模」、与覆盖笔记语义重叠的「白名单覆盖」，新增「嵌入维度」卡；桌面一行 6 列、移动端 3×2；大数用 K/M 缩写（≥10,000），hover 看千分位精确值（ticket 109）。
+60. 作为用户，我希望灵感参考结果悬停时右侧浮层展示完整内容：浮层更宽、长词/URL 不再折断裁切、不限高度随内容生长并尽量贴屏显示；已拖出的浮卡正文保持全文可读（ticket 109）。
 
 ### 番茄钟（Pomodoro，ticket 26 新域）
 
@@ -301,7 +315,7 @@ otifyMemoAction（方法监听，一次动作一条）+ **每日到期扫描**�
 - **影视数据分析**：已并入 `bz-movie-report`（原 `bz-movie-report` 不再单独注册）
 - **复习计划**（9 个）：`bz-review-open`、`bz-review-start`、`bz-review-add`（添加当前笔记到复习）、`bz-review-remove`（移除当前笔记）、`bz-review-overdue`（跳转逾期）、`bz-review-rate`（评级对话框）、`bz-review-again`（忘了 Again）、`bz-review-hard`、`bz-review-good`、`bz-review-easy`
 - **做题家**：`bz-quiz-update`、`bz-quiz-open`
-- **闪念**：`bz-flash-open`（打开参考窗口）、`bz-flash-chat`（打开聊天窗口）
+- **第二大脑**：`bz-secondbrain-panel`（主面板·统一入口）、`bz-secondbrain-open`（参考侧边栏）、`bz-secondbrain-chat`（AI 对话）——ticket 103 换代，旧 bz-flash-open/chat 无真实外部调用者不留别名
 - **番茄钟**（ticket 26 新域）：`bz-pomodoro-open`（中文名「番茄钟」，icon timer）
 - **日记本**（已迁）：`bz-diary-write`、`bz-diary-open`
 - **B站下载器**：`bz-bili-open`
@@ -355,9 +369,9 @@ otifyMemoAction（方法监听，一次动作一条）+ **每日到期扫描**�
 - **收藏本**：1 项「移动端默认全屏」（仅移动端显示；桌面仍空态，见下跨域条目）
 - **书库**：libraryFolderPath、libraryNotePath、bookTag、showFileSize、showReadingTime、showHighlights、showThinks、showReview（showCategory 字段保留无 UI）
 - **影视**（6 项）：movieFolderPath、moviePageSize（海报抓取仅文字提示）、movieDefaultSort（默认排序 date-desc/…/name-desc）、movieDefaultTypeFilter（默认类型筛选，空=全部）、movieDefaultStatusFilter（默认状态筛选 全部/想看/在看/已看）、movieRatingDisplay（已看卡片评分 stars/number）
-- **复习计划（含做题家，ticket 100 重构后）**：enableAutoNotify（到期提醒，默认开——开启时插件启动即常驻轮询，有逾期笔记弹聚合通知）、reviewAutoAddNotice（新笔记自动加入提醒，默认开，3 秒窗口合并一条）、forceQuizForReview（用做题测难度，**做题家 4 项仅在其开启时显示**：enableMultipleChoice 允许多选题、questionsPerNote 每篇笔记出题数量、shuffleQuestions 打乱出题顺序、difficulty 出题难度）、reviewDailyLimit（每日复习上限，0=不限，逾期队列截断）、reviewIntervalScale（复习间隔缩放，默认 1、范围 0.1-5，FSRS 相位间隔乘系数，ADR-0046）、reviewWatchedFolders（监听文件夹 chip）、reviewTreeBadge（文件树标记，默认开）、reviewExcludedNotes（排除名单）；**autoCheckInterval（检查间隔）已于 ticket 100 删除**（死设置，data.json 残留忽略）。forceQuizForReview（用做题测难度）控制复习流程：开启 → 开始复习（bz-review-start/跳转逾期）自动批量出题做题，正确率自动定级；关闭 → 普通复习（跳转笔记逐篇评级）；开启时做题家未初始化（ai 为 null）先 ensureQuiz 注入，出题失败/无题目 → 降级普通复习并警告
+- **复习计划（含做题家，ticket 100 重构后）**：enableAutoNotify（到期提醒，默认开——开启时插件启动即常驻轮询，有逾期笔记弹聚合通知）、reviewAutoAddNotice（新笔记自动加入提醒，默认开，3 秒窗口合并一条）、forceQuizForReview（用做题测难度，**做题家 4 项仅在其开启时显示**：enableMultipleChoice 允许多选题、questionsPerNote 每篇笔记出题数量、shuffleQuestions 打乱出题顺序、difficulty 出题难度）、reviewDailyLimit（每日复习上限，0=不限，逾期队列截断）、reviewIntervalScale（复习间隔缩放，默认 1、范围 0.1-5，FSRS 相位间隔乘系数，ADR-0046）、reviewWatchedFolders（监听文件夹 chip）、reviewTreeBadge（文件树标记，默认开）、reviewExcludedNotes（排除名单）；**autoCheckInterval（检查间隔）已于 ticket 100 删除**（死设置，data.json 残留忽略）。forceQuizForReview（用做题测难度）控制复习流程：开启 → 开始复习（bz-review-start/跳转逾期）自动批量出题做题，正确率自动定级；关闭 → 普通复习（跳转笔记逐篇评级）；开启时做题家未初始化（ai 为 null）先 ensureQuiz 注入，出题失败/无题目 → 降级普通复习并警告。**到期提醒通知「去复习」按钮（ticket 153）与「开始复习」同路径**——走 `autoJumpOverdue` 完整分流（做题决定难度开启 → 做题；关闭 → 普通复习），不再单篇跳转。**作答节奏（ticket 153 用户拍板）**：答对 → 持久化成功后自动进入下一题（不出现「下一题」按钮）；答错 → 才显示「下一题」按钮（点按/Enter 进入）
 - **番茄钟（12 项）**：pomodoroPreset（12 档：11 预设+自定义）、pomodoroWorkMin/pomodoroShortBreakMin/pomodoroLongBreakMin（自定义时长，预设=自定义时动态显示）、pomodoroLongBreakInterval（N，默认 4）、pomodoroForceFocus（默认关）、pomodoroAutoCycle（默认关）、pomodoroAutoSkipBreak（默认关）、pomodoroSound（默认开）、pomodoroVolume（音量 0-100，默认 100 最大，设置弹窗 slider+试听）、pomodoroRestoreMode（启动恢复方式：background 后台继续 / popup 正在倒计时则自动弹窗；恢复继续弹「番茄钟继续：…还剩 mm:ss」通知）、pomodoroAutoPauseOnHide（后台自动暂停，默认开，ticket 62：窗口 hidden 时主番茄钟暂停、恢复自动继续；blur 不触发）。读书联动与目标选择已移除（ticket 63：pomodoroEpubAuto/pomodoroEpubMode 删除）
-- **闪念（17 项全量，含 AI 项）**：OLLAMA_URL、EMBEDDING_MODEL、META_PATH、VEC_PATH、TOP_K、CHAT_TOP_K、CHUNK_MIN_LENGTH、ALLOW_PATHS、CONCURRENCY、CONTEXT_LIMIT、DEBOUNCE_DELAY、CURSOR_POLL_INTERVAL、OLLAMA_CHAT_MODEL、DEEPSEEK_MODEL、DEFAULT_USE_DEEPSEEK、MAX_HISTORY、OLLAMA_REMOTE_URL
+- **第二大脑（ticket 103 更名迁移）**：secondBrainOllamaUrl、secondBrainEmbeddingModel、secondBrainTopK、secondBrainChatTopK、secondBrainChunkMinLength、secondBrainAllowPaths、secondBrainConcurrency（死配置保留）、secondBrainContextLimit、secondBrainDebounceDelay、secondBrainCursorPollInterval、secondBrainChatModel、secondBrainDeepseekModel、secondBrainDefaultUseDeepseek、secondBrainMaxHistory、secondBrainRemoteOllamaUrl + secondBrainEnabled（原 flashEnabled）+ secondBrainMobileDefaultFullscreen（新增）；旧 16 键 onload 平移，META_PATH/VEC_PATH 废弃清除
 
 **跨域：移动端主窗口默认全屏（ticket 68，ADR-0019）**：11 个有主窗口的域各 1 项布尔开关「移动端默认全屏」（键 `<域前缀>MobileDefaultFullscreen`，落 data.json），**仅移动端（Platform.isMobile）生效、设置项仅移动端显示**，桌面端行为与显示完全不动。语义：≤768px 时 **开=真全屏**（覆盖整个视口 100vw×100vh、去圆角、头部避让安全区、底部 env(safe-area-inset-bottom)，统一类 `.bz-win-mfs`）；**关=常规卡**（95%/90vh 圆角卡，统一 ≤768 规则），并解除既有写死的强制全屏（8 处 JS 内联 + 4 处 CSS 媒体规则，原 480/640/768 乱断点废止）。只决定每次打开的**初始形态**，窗口内无手动切换按钮（用户拍板，Q4-A）；多窗口域（影视主面板+影视分析+影视报告、书库主面板+读书笔记+阅读报告）一并对控制，筛选/批注等小弹窗不纳入。默认值=行为保持（老用户零感知）：**默认开 9 域**——日记本（diaryMobileDefaultFullscreen）、归物本（belongingsMobileDefaultFullscreen）、剪藏本（clippingMobileDefaultFullscreen）、密码本（passwordMobileDefaultFullscreen）、收藏本（favoritesMobileDefaultFullscreen）、书库（libraryMobileDefaultFullscreen）、影视（movieMobileDefaultFullscreen）、复习计划（reviewMobileDefaultFullscreen）、保险箱（encryptMobileDefaultFullscreen）；**默认关 2 域**——备忘录（memoMobileDefaultFullscreen）、番茄钟（pomodoroMobileDefaultFullscreen）。**做题家、入口页明确排除**（用户拍板）。归物本/收藏本 ⚙️ 弹窗由空弹窗变为含此 1 项。**2026-08 用户拍板修订：聚合讯跟随剪藏本键、阅读报告跟随书库键**——两域取消独立开关并移除窗口 ⚙️ 入口与 `newsMobileDefaultFullscreen`/`readingReportMobileDefaultFullscreen` 键（旧 data.json 残留值忽略）；影视报告随影视键。
 
@@ -436,7 +450,7 @@ otifyMemoAction（方法监听，一次动作一条）+ **每日到期扫描**�
 - **影视排序**：键 date（有 watchDate 的在前、无日期的排后）/ rating / name；条目含 watchDate 字段
 - **影视数据分析评分桶**（ratingBucketOf 6 档）：≥5.5 / 5~5.5 / 4~5 / 3~4 / 2~3 / <2；buildAnalysisData 聚合 {total, watched, watching, want, …}
 - **归物本排序弹窗**：自绘弹窗（Promise），手动检测 theme-dark 取色板（bg/text/border/accent），不依赖主题变量
-- **闪念**：命令 `bz-flash-open`（闪念：打开参考窗口）；ALLOW_PATHS 默认 ["卡片盒","主题盒","我的","归档","CODE"]；CHUNK_MIN_LENGTH 默认 50；TFIDF 中文停用词表（'的了是在我有和人这中大为上个国不以到说时要就出会也年对自其他里去子后也得着与把等'）+ 文档频率/平均长度（BM25 式）
+- **第二大脑**（ticket 103）：命令 `bz-secondbrain-panel/open/chat`；ALLOW_PATHS 默认 ["卡片盒","主题盒","我的","归档","CODE"]；CHUNK_MIN_LENGTH 默认 50；TFIDF 中文停用词表（'的了是在我有和人这中大为上个国不以到说时要就出会也年对自其他里去子后也得着与把等'）+ 文档频率/平均长度（BM25 式）；数据文件 secondbrain_meta.json(v8)+secondbrain_vectors.vec
 - **AI 提示词结构（移植基准）**：自动摘要（JSON 模板按缺失字段裁剪，只含 title/summary/tags 定义；标题 15-30 字禁标点/摘要 150-250 字禁"本文"等前缀/3-6 个中文标签≤5 字/正文截断 6000；不含 author）；AIAgent 匹配（→{match, itemId}，ai.json + max_tokens 200 + response_format）；收藏本（→{title, description}，简介≤50 字，ai.json；**GitHub 链接分支**：附 GitHub API 仓库名/简介（8s 超时 + 重试 1 次，失败时 fetched=false），标题=仓库名（用户已填则保留）、简介=仓库简介**忠实翻译成中文**（不扩写/不总结/不凑字数，已中文则原样保留；**获取失败或无简介时简介必须返回空字符串，严禁 AI 编造**，且弹 warning 提示「简介获取失败，简介留空不编造」、成功弹 info「已获取 GitHub 仓库信息」）、标签必须含 GitHub）；做题家（单选四选一/多选不限/难度三档提示词）；备忘录 AI 推荐场景（→{scene, priority}，priority 仅"重要"/"次要"两档，ai.chat）
 
 ### 样式规模与边界行为（第 5 轮，源码提取）
@@ -526,3 +540,327 @@ ai-agent 域（ticket 19）解散（域数 21→20），三类跨域自动化按
 ### 小橘设置页开关与三档关闭方式（ticket 103，grilling 定稿 2026-08-28）
 
 插件设置页新增「🐱 小橘」区块，把既有 `smartcatEnabled` 键补上 UI 并升格为三档关闭语义（原键仅 gate 启动自动挂载且无 UI，命令还会绕过它复活小橘）：「启用小橘」开关（默认 true 不变，兼容冻结）+「关闭方式」下拉 `smartcatOffMode`（新可选键 stop/hide/lazy，默认 stop，仅开关关闭时显示——复用设置页 AI 区块条件显隐模式）；**三档立即生效**——stop=unloadSmartCat 全量停机（容器/监听/定时器/记忆流累积全停，重启不挂载）、hide=装配+收起 DOM（后台感知与 AI 打分照跑；重启=「隐藏启动」装配——装配新增 startHidden 可选旗标，容器不出现问好不闪现）、lazy=当场无动作（Q8 拍板本次会话不打扰）重启不自动挂载；重开=未装配则装配显示/隐藏态走 openSmartCat 幂等重挂，开关循环 smartcat.json 零改动零迁移；**命令守卫收在 smartcat 模块召唤/聊天入口**（模块读插件设置单点判定）：仅 stop 档拒绝 toast「小橘已在设置中关闭」（notice info，ICONS 表无新增），hide/lazy 召唤即显示/启动，hide 命令停机档未初始化天然 no-op，数据面板恒可用（与常驻实例解耦零改动）；stop 档关开关顺带清理开着的小橘 ⚙️ 弹窗残留；文档=CONTEXT.md 新增「关闭方式 (Off Mode)」词条（隐藏≠关闭：隐藏=猫没了后台照跑、停机=全量卸载零感知）+ PROGRESS.md；测试走三既有 seam 零新增（settings-tab 渲染驱动三档行为与条件显隐 / smartcat 模块入口 stop 拒绝+startHidden 装配 / smoke 四态启动门控）；不立 ADR（易逆转无真权衡）；Out of scope=只关 AI 大脑模式（Q4 否决另票）、⚙️ 弹窗加开关（Q5 仅插件设置页）、定时启停、停机补记。issue：`.scratch/memo-suite-plugin/issues/71-smartcat-off-mode.md`。
+
+> 注：本票编号与 hualala 主线 ticket 103（第二大脑正名接管，ADR-0051）冲突——本地分支 ticket 103 为小橘三档关闭，两实现均已合并入主线并共存，以下并存两节。
+
+### 第二大脑正名接管（ticket 103，ADR-0051）
+
+以 QuickAdd《闪念.js》（2311 行）为完整基准完成实现并正名「第二大脑」：src/flash 整体更名 src/secondbrain 完全接管（issue 18 关闭 superseded）；命令换代 bz-secondbrain-panel/open/chat（主面板为统一入口，✕ 仅移动端全屏显示）；17 设置键更名 secondBrain* 并 onload 迁移（META_PATH/VEC_PATH 废弃清除）；meta v7→v8 首载整库重嵌 + 数据文件更名 secondbrain_meta.json / secondbrain_vectors.vec；行为对齐 QA 八处（分块保段落边界、cos=1−d²/2、句界集补中文分号/省略号、TF-IDF chunk 粒度且索引复用、文本检索返回命中段+QA 加权评分、VP 树 mu/minD/maxD 包络剪枝+构建缓存、parallelMap 自适应并发、移动端提示词「【参考】」）；保留 bz 四改进（Ollama 30s 超时、MobileBuffer 写入、真 ⚙️ 域设置弹窗、jumpToChunk offsetToPos）；修 QA/bz 同源缺陷三处（refresh 仅删除不落盘、删除后向量段偏移错位、分块大段路径 buffer 不清致内容重复）；新增主面板统一弹窗（统计卡片+来源分布+近12周趋势自绘迷你图+最近向量化 Top10+AI 一键概括缓存 secondbrain_panel.json，打开即自动增量刷新）；全部 UI 表面 bz-sb-* 类名收敛根 styles.css，废除 sh-* 运行时 style 注入；笔记类型词汇 'flash'（path-classify/smartcat source/credibility）冻结不动。
+
+### 第二大脑首用引导与隐形 bug 清剿（ticket 107，ADR-0051 补记）
+
+本地无向量数据（isIndexReady=false：空库或 meta 残留但 .vec 缺失的损坏态）时三条命令统一打开主面板引导态——说明文案+「开始向量化」按钮；**首次向量化须用户触发**：启动空库不再自动全量嵌入、vault modify 防抖在索引就绪前不生效；点击后进度条实时更新，完成自动切换正常统计面板，失败给出原因可重试（QA 全败仍报「完成」文案，故以 isIndexReady 判定成败）。**样式补齐**：ticket 103 的「bz-sb-* 收敛根 styles.css」实际未落盘——src/secondbrain/styles.css 从未创建，全部 UI 以裸 DOM 发布；本次补齐全套样式（主面板/窄窗/参考卡/悬停预览/AI 对话/移动端抽屉/引导态）并接入 build-css.mjs 聚合清单。**行为修订三处（bz 改进）**：refresh 并发去重（启动/防抖/面板三入口并发会令 srcOffsets 与合并布局错位且不自愈）；损坏态自愈（meta 有条目但向量为空 → refresh 视为全量重建，否则永远「已最新」）；移动端嵌入走远程 Ollama URL（原只会打 localhost 必败）。**移植回归修复**：getEmbeddingsBatch 空结果恢复抛「向量为空」（QA L125）；renderMarkdown 异步失败回退 textContent（原 try/catch 死路径）；makeDraggable 视口钳制（QA L906-908）；jumpToChunk 与后台防抖 refresh 补 .catch；DeepSeek 模型设置生效（chat() 硬编码模型名致 secondBrainDeepseekModel 永不传出，改调 prompt()）；main.ts onunload 补接线 unloadSecondBrain()（原先从未调用：残留窗体 ESC 失效、防抖定时器卸载后仍触发整轮嵌入）。内容态打开改为「refresh 完成后重渲统计」（原先渲染不等 refresh，展示的总是上一轮旧数据）。
+### 第二大脑面板打磨（ticket 108，ADR-0052）
+
+主面板：存储占用卡改合计单值（hover 明细）；「上次索引」卡与「最近向量化」行改用 core 共享 formatRelativeTime（hover 精确时间戳）；近 12 周趋势柱铺满整行；来源分布改树形逐级展开（名称左对齐取消固定列宽，▸/▾ 递归下钻子目录，每级节点聚合其下全部计数）；新增维度四枚——白名单覆盖率（已索引/白名单 md 总数）、内容规模（总字数/平均块长/平均每篇块数）、最厚笔记 Top5（点击跳转）、索引一致性健康灯（向量行数 vs 块总数，偏差告警色）。**打开即增量索引**：hasPendingChanges()（新文件/mtime 变化/已删除）预扫描，有待处理 → 全屏进度视图接管（与首用引导同一视图族、标题不同），完成后自动切统计；无变更直接统计。**重新索引**：设置弹窗动作行 → core confirm 确认（影响+耗时警告）→ closeSettingsModal + 打开主面板自动全量重建（store.rebuildAll：等待在途 refresh 后清空 meta/vec/VP 缓存再整库重嵌）。**AI 通道统一**（ADR-0052）：对话与概括改走主设置页 core AI（aiProvider），不再回退 Ollama 对话模型；设置弹窗删「Ollama 对话模型/DeepSeek 模型/默认使用 DeepSeek」三行（键保留 data.json 不消费，CONCURRENCY 先例），桌面+移动端 DeepSeek 复选框删除，ollamaChat 函数与其测试保留标注预留；新增「前往配置」行直达主设置页。**参考窄窗**：删 🤖 与 ⚙️ 按钮（设置只留主面板入口），按钮换 emoji（🔄 复位 / ◀️▶️ 隐藏 / ❌ 关闭），标题去 📚 图标，收起边条固定 📖；新增密度切换（📃 仅标题 / 📑 标题+内容，会话内有效不持久化）。**对话改居中弹窗**（core createOverlay，9998/9999 层级）：无头部按钮，遮罩+ESC 关闭，宽 min(600px,92vw)×72vh。
+### 小橘记忆流/行为流重构（ticket 123，ADR-0055~0059）
+
+- 单一 `memory.stream` 拆分为 `memoryStream`（情感/认知记忆）+ `behaviorStream`（系统/操作日志），同文件 smartcat.json；行为流滚动窗口清理（保留天数 30/最大条数 1000），记忆流无上限
+- 各域（12+）发事件时自带 StructuredMeta（entityType/action/name/refPath/refHash/snapshot 等）；addObservation 只传 source + structured，importance/emotion/stream 由 ROUTING_RULES 按 `source:action` 静态推导；source（路由）+ entityType（描述生成）并存
+- 描述双轨：创作型（日记/诗歌/信）ContentCompletionDetector（30s 稳定/5min 会话超时/≥20 字符）→ SnapshotGenerator（summary/tags/emotion，snapshot.emotion 写顶层）→ description；非创作型 entityType 模板函数；refHash 变化 ≥30% 才重生成快照+重向量化；旧 *-source.ts 废弃
+- 行为流辅助上下文（时间模式+频率统计查询），不入 prompt 槽位；反思/小结/周报/叙事全部只看记忆流；向量只对 memoryStream，旧 vec 删除重建
+- 遗忘机制不做；设置项 5 个（行为流保留天数/最大条数/显示行为日志/启用关联自动发现/关联发现窗口）；P3 数据面板行为日志 tab + promote 按钮（行为→记忆）+ pin/unpin + 自动关联（同 entityType+name）+ conversationId 聚合
+- **追加拍板（2026-08-27）**：聚合讯「跳过」（点「下一篇」，markAsRead('skipped')）也发观察——`news:skipped` 入行为流（轻量记录，不向量化）；保存链路不变（saved 立即形态 + auto-summary 补全）；「阅读」无独立 UI 动作不发
+
+### 第二大脑统计卡改版与悬停全文（ticket 109）
+
+主面板顶卡 7→6 张：删「内容规模」（与下方内容规模明细区重复）与「白名单覆盖」（与「覆盖笔记」语义重叠）；新增「嵌入维度」卡（取 stats.dim，tip 注明当前嵌入模型与「维度变更需重建索引」）。布局由 auto-fit minmax(96px,1fr)（680px 内容区只摆得下 6 列，第 7 卡孤行换行）改为桌面固定 repeat(6,1fr)、≤768px repeat(3,1fr)。数值缩写：≥10,000 显示 K/M（19.7K / 1.24M，新增 fmtCompact 纯函数），卡片 title hover 恒为千分位精确值。删「最厚笔记 Top5」连根：createUI 容器、渲染函数、SecondBrainStats.topThickets 字段与 computeStats 构造、statistics 测试断言一并移除；孤儿 fmtScale 与无调用方的 clearSummaryCache（ticket 108 删设置入口后遗留）死代码清除。「灵感参考」悬停全文浮层：宽 300→460px（左贴边定位偏移常量同步），正文取消 max-height:150px 硬截断、随内容生长，补 overflow-wrap:anywhere 断词规则（长 URL/英文串/代码块不再横向溢出被裁），top 钳制尽量贴屏内。拖出浮卡自由缩放（makeResizable 八向手柄）与浮卡正文全文（--float 态放开 clamp + 内部滚动）为既有能力，本次核实后维持不动。
+
+### 聚合讯 B 站 UP 主聚合 + 数据源设置（ticket 124，ADR-0060，grill-with-docs 定案）
+
+> 用户需求「聚合讯，聚合我感兴趣的 b 站 up 主」+「剪藏本设置中自动摘要打开后显示更详细的设置项」。剪藏本设置面板新建「数据源」组，聚合讯数据源扩展到 B 站 UP 主视频投稿；news.json 升级为四段对象结构（articles/stats/bilibiliUps/sources），news-stats.json 并入；新增插件侧保留策略清理（未读不处理、已保存 3 天、已跳过 7 天，均设置可调）。
+
+- **检测与引导**：bz 插件以「vault 内 `CONFIG/STORAGE/news.json` 存在」为 news-watcher 库存在的信号（Q1，不依赖跨进程探测，移动端可用）；存在 → 「数据源」组显示全部设置项；不存在 → 显示安装引导块（如何安装/启动 obsidian-news，一行说明 + 复制命令），设置项隐藏（Q2）
+- **数据源组（Q9，剪藏本设置弹窗新增组）**：「知乎」「果壳」「B站」三源独立开关（Q17 用户拍板三源都有开关，落 news.json sources，默认全开；watcher 按开关决定抓不抓）；B 站 UP 主名单（bilibiliUps：仅存 uid，Q13，添加方式=粘贴主页/视频链接自动解析，Q4）；保留天数两项（已保存骨架 3 天 / 已跳过骨架 7 天，Q15，放数据源组，Q16）；只读状态行（最近抓取时间、UP 主数量，Q18）
+- **news.json 四段结构（Q3/Q10）**：`{articles: [...], stats: {...}, bilibiliUps: [uid,...], sources: {zhihu, guokr, bilibili}}`；旧纯数组首次读取自动迁移包裹为 articles 段，news-stats.json 首次读取并入 stats 段（之后不再读写 news-stats.json，旧文件保留不动）；watcher/插件双写者均按四段整读写（保留非本域段），兼容旧数组
+- **保留策略清理（Q11 插件侧 / Q12 未读不处理 / Q15 双档）**：清理时机=打开阅读器时（loadArticles 后触发一次，不新建常驻监听）；未读（read 非 true）永不处理；已保存骨架（read=true 且 state='saved'，正文已清空）按 fetchedAt/date 超过 N 天删除（默认 3，设置可调）；已跳过骨架（state='skipped'）超 M 天删除（默认 7，设置可调）；已读但无 state 的旧数据按「已跳过」档处理（保守，7 天）；超龄直接删（不做降级保留标题）
+- **状态标记**：markAsRead 时在 article 上写 `state: 'saved' | 'skipped'` 字段（区分两档保留策略的依据；旧数据无字段 → 按 skipped 档）
+- **B 站抓取（watcher 侧，ADR-0008 边界不动）**：`tools/news-watcher` 新增 B 站源——每轮先 GET `https://www.bilibili.com/` 拿 Cookie（buvid3），再带 Cookie 请求 `https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space?host_mid=<uid>&timezone_offset=-480`（未登录可读，风控 412 由 Cookie 引导规避）；仅收 `DYNAMIC_TYPE_AV`（视频投稿，Q5 窗口沿用 24h 滚动窗口：pub_ts 过滤 + has_more 分页翻页直到越过 24h 边界）；条目映射：title=archive.title、url=`https://www.bilibili.com/video/<bvid>`、author=module_author.name、date=pub_ts 格式化、body=简介（module_desc.desc 若有）+ 封面 `![](cover)` + 播放链接；platform='B站'（Q7）；双去重（url=bvid 链接 + 标题）沿用；watcher 读 news.json 的 sources/bilibiliUps 决定抓取集合与开关（rc 仍只指定 vaultPath，用户拍板「news-watcher 只指定 obsidian 库的路径」）
+- **阅读流展示（Q6）**：标题 + 简介 + 封面 + 链接；platform-pill 显示「B站」，PLATFORM_DOMAIN 加 'B站': 'bilibili.com' 映射 site 图标；已读/跳过/保存/统计/复制链等既有语义零改动
+- **自动摘要详设（智能组，开关打开后展开，Q8/Q14）**：A) 摘要长度档位（autoSummaryLength：简短/标准/详细，默认标准，映射 summary 字数要求与 max_tokens）；B) 标签生成开关与数量（autoSummaryTagsEnabled + autoSummaryTagCount，默认开 3-6 个；关则不再生成/补全 tags）；C) 摘要时机（autoSummaryTiming：保存后立刻（默认，保持 create+file-open 双监听）/ 懒触发（仅打开文件时补全，去掉 create 即时监听））；AI 配置仍走主设置页 core AI（ADR-0052 不重复）
+- **设置/数据格式开销**：settings.ts 新增 6 键（autoSummaryLength/autoSummaryTagsEnabled/autoSummaryTagCount/autoSummaryTiming/newsRetentionSavedDays/newsRetentionSkippedDays）；news.json 四段结构与 `state` 字段为数据格式变更——铁律 1 兼容性冻结按用户拍板豁免，立 ADR-0060 记录边界（旧 news.json 纯数组/news-stats.json 读取兼容，迁移不破坏已读标记）
+- **验收标准**：a) 剪藏本设置弹窗出现「数据源」组，news.json 存在与否两条路径正确；b) 三源开关切换后 watcher 下轮按 sources 抓取；c) 粘贴 space.bilibili.com/<uid> 或 bilibili.com/video/BVxxx 自动解析出 uid 入名单并可删除；d) 阅读流出现 platform=B站 的条目（标题/简介/封面/链接），保存/跳过标记 state 并按 3/7 天档清理；e) 自动摘要开关打开后展开三组详设并生效；f) 旧 news.json 纯数组与 news-stats.json 迁移无感；g) 全量测试绿 + tsc + 构建
+
+### 设置面板路径选择器统一 + 行为流全量化 + 剪藏本缓存（ticket 128-130，ADR-0061~0063，grill-with-docs 定案）
+
+> 用户需求：「设置面板输入文件或文件夹统一改成文件搜索输入框，支持单个或多个，移动端优化」「移动端输入框行超过两个元素时描述一行、输入框和其他元素一行」「剪藏本每次打开都重新加载数据（要缓存复用）」「最近行为用时间线、行为流全量记录（含记忆流行为，两边都有）」。原型（`.scratch/picker-prototype/`）验收定稿：文件夹选择 = **卡片弹窗**；选择器**不保留手输输入框**（推翻 grill 中 Q8 的保留手输拍板）；行为面板 = 时间线 + 统计块筛选 + 滚动加载。
+
+#### ticket 128（W1）：设置面板统一文件选择器 + 移动端两行式（ADR-0061）
+
+- **范围**：主设置页 + 所有域设置弹窗的路径类输入全部统一。单值目录：storagePath / articleDirectory / diaryDirectory / movieDirectory / letterDirectory / libraryFolderPath / movieFolderPath / encryptRoot；多值目录：secondBrainAllowPaths / linkAgentScopes / reviewWatchedFolders / reviewExcludedNotes；aiAgentWatchedFolders 不暴露 UI 不动
+- **形态**：抽 core 统一选择器（`src/core/path-picker.ts`），单选/多选参数化；**卡片弹窗**（居中卡：标题头 + 搜索框 + 目录列表 + 底部 selinfo/清空(多选)/确定）；已选 = chips（单选 chip 替换式、可 ✕ 清除；多选逐个 ✕ 移除）
+- **数据源**：全部 vault 文件夹（含空目录与点前缀隐藏目录如 `CONFIG/.ENCRYPT`），不能只聚合含笔记目录
+- **不保留手输输入框**：设置行只显示 chips + 「选择…/添加…」按钮，路径一律经选择器录入（限 vault 内）
+- **旧两套迁移**：secondbrain whitelist-modal（多选弹窗）与 attach FolderSelectModal（运行时单选弹窗）合并进 core 组件；z-index 对表 settings-modal.ts 家族注释
+- **移动端**：弹窗近全屏 + 键盘适配；样式简练（原型定稿卡片弹窗）
+- **移动端两行式**：所有设置行（主设置页 + 域设置弹窗）通用规则——控件区（.setting-item-control）含 ≥2 个子元素时，移动端名称+描述独占一行、控件区一行（flex-wrap 折行）；单控件行（开关/下拉）保持原生
+- **兼容**：设置键格式零变化（单值字符串/逗号分隔字符串/数组照旧），仅换 UI（铁律 1 不破）
+
+#### ticket 129（W2）：行为流全量双写 + 时间线面板（ADR-0062，修订 ADR-0055 分流拍板）
+
+- **双写机制**：addObservation 一律**先写行为流**（全量日志）；routing 命中 memory 的再写记忆流条目——两条独立（id/时间戳各自独立，不互相标记来源，用户拍板「看起来是独立添加的，只是方便管理」）；ROUTING_RULES 表本身不动
+- **文案**：行为流条目存结构化数据（metadata = StructuredMeta，description 保持 `source:action 名称` 兜底），面板渲染时按 entityType:action 分派模板生成人类文案（「你保存了《x》（平台·读了 N 分钟）」式）；模板全覆盖（news/movie/memo/favorites/belongings/pomodoro/library/chat/diary 等全部结构化域），无模板兜底旧式；最近行为列表**不显示事件名**
+- **面板**：时间线式（左竖线 + 圆点节点）；来源统计块可点击筛选（点 = 筛选该来源，点「全部」还原）+ 滚动加载
+- **提升按钮**：去掉「提升为记忆」按钮（UI），promoteToMemory 接口保留
+- **容量**：DEFAULT behaviorMaxCount 1000→2000（保留 30 天不变；已有 data.json 值尊重不迁移）
+- **防重维持**：B6 300ms 同事件守卫、news 保存近 20 条防重不变
+- **聚合讯时长**：数据已有（news-source extras.durationMin），本次经渲染文案可见
+
+#### ticket 130（W3）：剪藏本重开缓存复用 + 关闭按钮 ❌ 统一（ADR-0063，修订 B1）
+
+- **缓存复用**：剪藏本面板重开（窗口已存在）→ 仅 setVisible + applyMobileWindowFullscreen，**不再 showLoadingHint + loadAllArticles**（首开仍全量 + 加载提示）
+- **完全信任监听**：modify/delete/rename 三通道常驻（面板隐藏不卸）维护增量，重开零扫描
+- **目录变更**：applyArticleSettings 检测 articleDirectory 变化 → 清空模块列表 + 全量重载一次，此后重开零扫描
+- **B1 修订**：幽灵卡片防护由「重开即重载」改为「常驻监听增量维护」（ticket 125 的「重开先显示加载提示」语义随之作废，首开保留）
+- **关闭按钮**：全局统一 ✕→❌（library 主面板与书库弹窗、movie recommend 等仍用 ✕ 的关闭按钮；chips 的 ✕ 移除符是功能性删除符不动）
+
+#### ticket 131（定稿·待实施）：声明式设置页 + 通用设置组 + 流程框声明（ADR-0064）
+
+- **形态**：全页声明式 schema（对象字面量）；core 渲染器唯一路径，`openSettingsModal` 只收 schema（build 回调退役）；custom 插槽行承载非常规内容
+- **行类型十类**：toggle/text/path/select/slider + custom/button(actionRow)/info/number/textarea；键直绑（keyof BzSettings）+ get/set/save 逃生口 + onChange/onCommit；visibleWhen 声明式联动（core 重求值 + 分组徽标收口）
+- **范围**：13 域设置弹窗 + 主设置页（AI/存储路径）+ UP 名单管理弹窗（renderSettingsInto + 自建 overlay 外壳，z 序零变化）；encrypt 仅 ⚙️（流程展示型不动）；favorites/belongings 统一分组卡片
+- **流程框声明**：{title, message, actions}；core/confirm 退役、23 处调用点（15 文件）全量改写、`__shared_confirm_*` DOM 契约保持（铁律 3）
+- **通用组首批**：移动端默认全屏（11 键收敛）、批次数数字行、排序/默认筛选下拉；warnReload 收敛为 onCommit 内置语义
+- **迁移与门禁**：一次性全量单提交（域逐个替换自验）；ticket 100 文案测试期 lint；设置键格式/DOM 契约/行为文案零变化（铁律 1/3）
+
+### 文献盒 UX 二轮（ticket 139，用户清单拍板 10 项 + 关闭按钮统一）
+
+> ticket 138 交付后的二轮实测反馈清单（11 项提案 → 用户拍板采纳 10 项 + 补充关闭按钮 ❌ 统一）。不改数据格式（literature.json 零字段变化），全部为 UI/交互层。
+
+- **子面板不隐藏主面板**（清单 1，用户改方案）：主面板 📝/🎬 打开术语/视频面板时**不再 hideMain**，子面板 topifyZ 叠开；关闭子面板自然回到主面板，导航闭环。ESC 层级既有顺序（术语→历史→添加→视频→主）不变。
+- **卡片级增量刷新（全域同构域）**（清单 2）：文件事件路径不再 `innerHTML=''` 全列表重建（滚动跳顶根因）。新增 core `list-patch.ts` 键控卡片 diff helper（按 dataset key 增/删/移/换差异卡片，内容变才替换节点，不清容器故 scrollTop 天然保持）。本轮接入 literature + clipping（Explore 确认两域逐行同构，dataset.path 作 key；clipping 已有 findCardByPath）；diary（卡片嵌 date-section + sectionTopCache）与 movie（无 key/无单文件刷新/懒加载全铺）改造量级大，单列后续 ticket。
+- **失败原因白话化**（清单 3）：渲染层 humanizeError 识别常见错误模式（bili-dl 未安装/ffmpeg/ffprobe/python 缺失、AI 未配置与 Key 无效、网络超时/连接失败、转录文件缺失等）→ 一句中文白话；原文保留在卡片 title 悬浮与失败详情弹窗。
+- **添加任务弹窗不复用 openSettingsModal**（清单 8 问题答复）：settings-schema 行绑定是「改即写内存 + 防抖落盘」模型，与表单「整体收集 → 校验 → 保存提交 + 错误定位」相反；`{get,set,save}` 逃生口拼不出校验与错误高亮，settings-modal 单例 toggle 语义亦不符。弹窗保留自建，与术语面板一起视觉重设计（统一表单质感）。
+- **术语面板重设计**（清单 7）：整体质感重做（布局/间距/预览区卡片化/按钮秩序/加载态）；「重新生成」检测到预览被手改（domain/body 与 presentTermPreview 记录值不一致）→ flow-dialog 确认后才覆盖。
+- **整片/剪辑显式开关**（清单 9）：添加任务弹窗加「整片 / 剪辑片段」分段选择，剪辑才展开开始/结束输入；编辑既有任务按 start/end 有无回显；保存校验逻辑不变（剪辑须成对）。
+- **视频录入面板移动端全屏**（清单 11）：showVideoEntry 接 applyMobileWindowFullscreen（主面板/历史弹窗同款）。
+- **打开笔记收起面板**（清单 12）：openNote 统一收起文献盒全部窗口（主面板/视频面板/历史弹窗），用户直接看到笔记。
+- **主面板加载中状态**（清单 13）：showMain 后 refreshPanel 完成前列表显示加载态（骨架/文案），防「白屏一小段」。
+- **移动端视频面板只留 ➕ + ✕**（清单 14 改）：isMobileEnv() 下隐藏 ▶️/⏹/🕘（原只藏 ▶️/⏹）；移动端无处理能力，历史入口一并收起。
+- **padding 对齐 + 失败卡片点击反馈**（清单 16）：筛选行/搜索框 24px → 16px 与列表卡片对齐；失败任务卡片点击 → flow-dialog 展示完整失败原因（白话 + 原文）+ 「编辑任务」入口。
+- **关闭按钮 ✕→❌ 统一**（用户新增）：文献盒三处（主面板/视频面板/历史弹窗）bz-win-close 图符 ✕ → ❌，与全域 11 域对齐（ticket 130 曾统一过一次，文献盒域后建漏网）。
+- **不做**：单条任务处理（14 原案，用户否）、空态引导按钮、搜索增强、领域徽标配色（未表态不擅自做）。
+- **验收**：a) 📝/🎬 打开子面板主面板仍在，关闭子面板回主面板；b) 文献盒/剪藏本文件事件只动对应卡片、滚动位置不跳；c) 失败原因中文白话 + 点击失败卡片出详情；d) 术语面板新视觉 + 手改后重新生成有确认；e) 整片/剪辑开关 + 成对校验；f) 移动端：视频面板全屏、仅 ➕✕；g) 打开笔记面板全收；h) 加载态显示；i) 关闭钮 ❌；j) tsc + 全量测试 + 构建全绿。
+
+### 小橘「对话即操作」助手（ticket 141，计划中）
+
+> 需求（用户原话）：打开小橘对话，说一句话（如「添加关于黑洞的文献笔记」），小橘直接调用对应域的函数生成对应笔记。**通用助手式**：不只单个域，任何域动作只要注册一条技能即可被一句话调用。状态：计划中（记录见 `issues/141-smartcat-agent-assistant-plan.md`，本次仅入计划，未实施）。
+
+- **入口**：小橘聊天 `sendChatMessage` 流程（smartcat 域），不新增加命令。
+- **第 1 层 技能注册表**：每域动作 = 一条技能 `{id, detect(message), execute(params), confirm?, summary(result)}`；新域接入 = 加一条，chat 主流程零改动。
+- **第 2 层 意图识别**：词法快路径（动作词 × 产物词 × 参数提取）→ AI 慢路径兜底（仅命中信号词才 `callChatJson` 一次）→ 兜底照常聊天。不依赖 provider function-calling，插件侧识别 + 调用。
+- **第 3 层 执行与反馈**：复用域既有函数落盘（如 literature `generateTermNote`）→ emit 域事件（`literature:tasks` term-generated，与 UI 手动生成同口径入行为流）→ 结果注入 AI 回复自然确认 + 自动打开产物 + toast；AI 不可用回退固定确认；失败白话化回复。
+- **边界**：数据格式零变化、域事件契约复用、命令单点不动、跨域显式 import（smartcat → literature，参考 smartcat → diary/config 先例）、纯增量。
+- **待拍板**：① 直接执行 vs 预览确认；② 参数缺失行为（多轮追问/开面板/不执行）；③ V1 范围（仅文献盒 / 文献盒+备忘录 / 多域）。
+
+### 术语生成面板简洁版（ticket 142，已交付）
+
+> 术语面板简洁化（用户逐条拍板，原型 `.scratch/term-note-panel/index.html` 方案 A 定稿；.scratch 不入库，决策已落码）。
+> 不改数据格式（frontmatter 五键 title/type/domain/term/date）、不改命令与域事件契约。
+
+- **删**：弹窗标题（bz-win-head 整行）、「术语」label、输入框 placeholder、输入框下方红色提示小字、
+  生成中状态行（并入「生成」按钮文案「生成中…」）——输入行下方无任何提示文字。
+- **预览只读**：领域 input / 简介 textarea 删除；预览 = 上属性卡（术语/领域/日期，无「属性」区标题）
+  ＋ 下内容卡（AI 简介段落，无「内容」区标题）；「类型」行不展示（type 固定 term）。
+- **「重新生成」守卫删除**：预览只读无手改值（ticket 139 引入的手改确认 flow-dialog 一并移除），直接覆盖上一轮预览。
+- **不变**：输入行 + 生成 / 重新生成 / 确认写入（传面板 term + 预览值，所见即所得不重跑 AI）/
+  Enter 生成 / ESC·遮罩关闭 / 命令预填编辑器选中词 / 行为流 term-generated / 预览阶段不落盘（ticket 138 §2.1）。
+- **验收**：a) 面板无标题/label/placeholder/状态行（UI 测试断言）；b) 预览内无任何 input/textarea（只读契约）；
+  c) 重新生成直接覆盖无确认弹窗；d) 确认写入传 AI 预览值落盘一次 + 自动打开 + term-generated + 面板关闭；
+  e) tsc + 全量测试 + 构建全绿。
+
+### 备忘录删除行为流落盘加固（ticket 159，已交付）
+
+> 备忘录条目（scriptName 备忘录）：删除备忘录未入小橘行为流。
+
+- **实证**：源码链路完整（emit → notifyMemoAction → memo:deleted 路由 → 三套注册表齐）+ 测试覆盖；
+  真实行为流 added/completed/edited 均有、deleted 恒 0 ⇒ 症状 = 落盘时序：30s tick 合并写 + 卸载 fire-and-forget，
+  删除后 30s 内退出（移动端关后台快）条目确定丢失。
+- **加固**：`markBehaviorDirty` 追加 5s 短防抖直写（窗口内合并一次写，与 30s tick 并存）；
+  `stopScheduler` 清短防抖定时器；卸载冲刷快照路径不变。低频动作（删除/完成）落盘窗口 30s → 5s。
+- **验收**：a) 5s 触发直写/合并/停止清理（新用例）；b) smartcat 全量绿。
+
+### 小橘反思/日小结/周报饿死修复（ticket 158，已交付）
+
+> 备忘录条目（scriptName 小橘）：日小结，洞察和本周报告好像未生效。
+
+- **根因**：ADR-0069 R2 后记忆流断粮（观察改道行为流，「记忆目录」默认未配置）——反思证据 <2 静默空转、
+  首次日小结被 `!lastReflect` 门槛卡死、周报门槛/原料读记忆流恒 <3；`hour===10` 严格相等还有节拍跳档隐患。
+- **修复**：新增 `behaviorToObservations`（行为条目 → 观察伪条目派生视图，wording 渲染 + 来源档位 credibility）——
+  反思证据池并入（legacy 双写按描述去重）、周报门槛与原料并入；`shouldReflect` 从未反思时行为流攒够 20 条也触发；
+  `shouldDigest` 首次日小结与反思解耦（行为流攒够 3 条即触发，基线回退行为流最早条目）；周报 `hour>=10` + weekKey 去重。
+- **验收**：a) 反思证据含行为条目（wording 渲染、双写去重）；b) 无反思基线可首次日小结；c) smartcat 1137 用例绿。
+
+### 入口页长按同手势拖拽（ticket 157，已交付）
+
+> 备忘录条目（scriptName 入口页，移动端）：长按无法拖拽图标。
+
+- **根因**：长按只进编辑并重建 DOM（拖拽需松手重按）＋ 移动端 touchmove 无阻断/无 touch-action（WebView 滚动抢占 pointercancel 杀手势）＋ 系统长按菜单未拦。
+- **修复**：常态磁贴 pointerdown 挂延续监听——长按触发后同手势移动超阈值 → 直接 startDrag 该磁贴（render 后按 tile.id 重找元素）；长按触发后 document 非被动 touchmove preventDefault（拖拽全程，pointerup/cancel 解除）；`.launcher-tile.editing` 加 touch-action:none；grid contextmenu 拦截 + 磁贴 -webkit-touch-callout:none。常态磁贴不加 touch-action（保网格滚动）。
+- **验收**：a) 长按不松手移动直接拖拽、松手落位写盘（新用例）；b) 长按后松手仅进编辑；c) 既有编辑模式重按拖拽/pointercancel 语义不变（76 用例绿）。
+
+### 做题家作答节奏与出题语义（ticket 156，已交付）
+
+> 备忘录条目（scriptName 做题家）：选对答案等待 0.8 秒自动转跳；去掉右上角对错统计；做错的题下次逾期复习应出新题。
+
+- **答对 0.8s 跳题**（叠加 ticket 153「答对自动进入下一题」）：持久化成功后延时 800ms 再 `showQuestion()`——亮绿反馈窗口。放弃确认 / 强制关闭清除延时 + 会话态守卫，防迟到渲染。
+- **头部统计删除**：`.bz-quiz-stats` 元素/字段/同步方法/样式全删（ticket 141 引入的做题中 ✅/❌ 计数）；结算面板统计不变。
+- **新题语义**：`batchGenerateQuestions` 先 `saveQuestionsForNote(path, [])` 清空存量再 `ensureQuestions` 生成（原「只补缺失」语义退役——错题残留正是旧语义下重考的来源）。待重做队列 `regenerateQuestions` 同范式不变。
+- **验收**：a) 答对亮绿 0.8s 后跳题、延时中放弃无僵尸弹窗；b) 头部无统计；c) 批量出题断言先清空（review/app.test）。
+
+### 术语面板自动生成 + 总结按钮（ticket 155，已交付）
+
+> 备忘录条目（scriptName 文献盒）：选中文字打开术语窗口自动生成；生成完成后生成按钮变重新生成；
+> 底部重新生成按钮改总结按钮，点击对生成原文做一次 AI 总结（精简内容）。
+
+- **自动生成**：`showTermEntry(term)` 预填非空即自动触发 `onTermGenerate`（带词入口=编辑器选中文字；
+  主面板 📝 空词入口不自动生成，仍手点/Enter）。
+- **按钮态机**：生成成功置 `termHasDraft` → 输入行按钮文案「生成」→「重新生成」（生成中仍「生成中…」；
+  失败/重开复位「生成」）。重跑生成职责归输入行按钮，直接覆盖预览（ticket 142 语义不变）。
+- **底部「总结」**：原「重新生成」按钮（`#lit-term-regenerate`，id 保留 DOM 契约）改绑总结——
+  `summarizeTermSummary(body)`（note-gen，ai.chat 精简 prompt）对当前预览正文 AI 精简并回填内容卡；
+  术语/领域不变，总结结果即确认写入正文（所见即所得）。无预览点总结提示「请先生成简介」；
+  总结中按钮全禁用防并发（`termSummarizing`）。
+- **验收**：a) 带词入口自动生成且按钮变「重新生成」；b) 总结回填内容卡 + 确认写入落精简正文；
+  c) 空术语不生成、无预览总结提示、AI 未配置提示；d) tsc + literature 测试全绿。
+
+### 文献盒桌面窗口简洁版（ticket 143，每窗 4 套布局走查后全部拍板 A，worktree 交付）
+
+> 原型 `.scratch/literature-minimal/index.html` 四个窗口各出 A/B/C/D 四套布局走查，用户逐窗拍板选 A 后落地。
+> 不改数据格式（literature.json / 笔记 frontmatter）、不改命令与域事件契约。
+
+- **主面板**：**保留原标题**（用户拍板，bz-win-head「文献盒」+ 动作钮不变，领域筛选行独立在标题下方）；
+  仅搜索框简洁化（去 placeholder，盒内 🔍 图标自明，`#literature-search-input` id 不变）。
+- **视频录入**：**保留原标题**（用户拍板「视频录入也要加标题」）、标题后灰色状态计数小字去掉（「去掉后面的
+  灰色小字」）；bz-win-head「视频录入」+ ➕▶️⏹🕘❌；任务卡结构不变。
+- **添加任务 A**：h4 标题删除（编辑态右上角 `#lit-add-mode` 小标签「编辑任务」）；链接输入上方 label 且与
+  整片/剪辑开关同行；**新任务默认剪辑片段**（编辑按 start/end 回显）；分P label 去括号；全部输入去 placeholder；
+  失败提示条红色 → 中性化（文案与原文 title 保留）。
+- **历史 A**：标题删除，工具栏 = 「🕘 历史 · 共 N 条」+ ❌；分组卡结构不变，组头去「UP主」前缀与
+  「N 条笔记」计数；笔记行路径 `shortNoteName`（去目录/兼容反斜杠/去 .md）、时间 `formatRelativeTime` 相对显示。
+- **移动端**：表单行 / 链接行折单列，每行一个输入框，URL 与开关分行。
+- **验收**：a) 主面板/视频录入保留 h3 标题（文献盒/视频录入），历史无 `bz-lit-title`；b) 搜索输入 placeholder 为空；c) 添加弹窗默认剪辑、
+  编辑态 mode 标签、分P 无括号、URL 无 placeholder；d) 历史组头无「UP主」/条数、行去目录去 .md、
+  时间等于 formatRelativeTime 结果；e) tsc + 全量测试 + 构建全绿（worktree 流程）。
+
+### 文献盒交互第三轮（ticket 146，用户三条拍板，worktree 交付）
+
+> ① 主面板列表加大行距 + 日期改相对时间；② 视频录入批量按钮单钮态机；③（承接）均不改数据格式与域事件契约。
+
+- **主面板卡片间距**：标题 → 简介 → 时间分档加大（`.bz-lit-card-summary` margin-top 6→10px、
+  `.bz-lit-card-date` margin-top 6→12px）。
+- **主面板日期**：`formatRelativeTime(n.date)` 相对显示（与历史同口径）；无效日期回退原文、空日期不显示。
+- **视频录入单钮态机**（去独立 ⏹ 终止钮）：
+  - 空闲 = 「▶️ 批量处理」（无待处理/失败任务时禁用；处理完成仍有失败 → 自动可再点续跑）；
+  - 运行中 = 该按钮即终止控制：整批（含待处理项）「⏹ 终止」；**仅失败项续跑**「⏹ 终止整批」；点击走原中止确认；
+  - 移动端整钮隐藏（`.bz-lit-run-btn` 文本钮，覆盖头行图标钮 22px 固定宽）。
+- **验收**：a) 主列表日期 = formatRelativeTime 结果、间距 CSS 加大；b) 视频头部无 `#lit-btn-video-abort`，
+  空闲/运行中/失败续跑三态按钮文案与禁用态正确；c) 移动端按钮隐藏；d) tsc + 全量测试 + 构建全绿（worktree 流程）。
+
+### 压缩回退（ticket 145，tools/bili-downloader，用户拍板）
+
+> 全局工具 @jwbz/bili-downloader（源码在 `tools/bili-downloader`，镜像发布）补回网页版旧有「压缩回退」：
+> 压缩件体积严格大于压缩输入（原件/剪辑件）→ 压缩无收益，丢弃压缩件沿用输入交付。不改插件侧（processor 仅透传 compress/crf）。
+
+- **core.js ③.5 压缩段**：`needsCompressFallback(inPath, outPath)`（stat 严格 >，异常保守 false）→ 回退：
+  删压缩件、不写 resume-compress 缓存、`srcForDeliver` 沿用输入；采纳才写缓存。
+- **交付文件名**：`compressed` 标记改传实际采纳 `compressedAdopted`——回退时文件名不带 `_crf<值>`；
+  断点续跑命中压缩缓存恒为采纳。
+- **验收**：tools `node --test` 全绿（新增 needsCompressFallback 单测：更大回退/更小·相等·stat 异常不回退）；
+  bz 侧 tsc + 全量测试 + 构建不回归；全局安装副本同步 core.js。
+
+### 视频录入批量按钮纯 emoji（ticket 148，用户拍板）+ --batch base64 传输（ticket 147）
+
+> 文献盒第四轮小改：① 批量按钮去文字只留 emoji（▶️/⏹），区分语义移 title hover；② 修复批量处理
+> 整批失败——`--batch` JSON 经 shell（.cmd shim 需 shell:true）启动时引号/空格被 cmd 对消，
+> argv 损坏报「Expected property name at position 1」，改 base64 传输。
+
+- **按钮纯 emoji（148，src/literature/ui.ts）**：空闲 `▶️`（title「批量处理（桌面端）」，无工作禁用）/
+  运行中 `⏹`（title「中止批量处理」）；仅失败项续跑 `⏹`（title「中止整批（处理失败任务中）」）；
+  移动端整钮隐藏不变；`batchAbortLabel` 逻辑与 `#lit-btn-video-run` 契约不动。
+- **base64 传参（147，tools/bili-downloader + processor.ts）**：core.js `decodeBatchArg(raw)`——
+  `b64:` 前缀 base64 解码后再 JSON.parse，无前缀直解析（手动命令行兼容）；cli.js 改用它；
+  插件 `resolveBatchSpawn` 把 taskJson 经 `Buffer` 转 base64 以 `b64:` 下发（无引号无空格，shell 安全）。
+- **验收**：tools `node --test` 全绿（decodeBatchArg 单测：b64 解码/直传解析/双形态坏 JSON 抛错）；
+  bz 侧 processor.test.ts spawn 参数断言改 b64 解码、ui.test.ts 按钮断言改纯 emoji + title；
+  tsc + 全量测试 + 构建全绿；全局安装副本同步 core.js/cli.js。
+
+### 文献盒留空键不下发回退 rc（ticket 149，用户实测转写失败）
+
+> 用户批量处理在语音转写环节整批失败，提示「检查设置里的 Python 路径与 Whisper 模型」，但设置里
+> 两项留空（desc 承诺「留空跟随工具配置」）——空串覆盖 rc/DEFAULTS 兜底的代码 bug。
+
+- **processor.ts**：`nonEmpty()` helper——pythonPath/outputDir/ffmpegPath/ffprobePath/whisperModel/cacheDir
+  留空时返回 undefined（JSON.stringify 省略不下发），core.js `{...deps.conf, ...options}` 合并保留 rc
+  兜底（本机 rc pythonPath 存在）；显式填写仍下发覆盖。vaultPath/quality/keepVideo/compress/crf/cacheRetentionDays 不变。
+- **ui.ts humanizeError** whisper 分支细分：未配置 pythonPath（rc 也无）→「语音转写未配置…」；
+  faster-whisper 未安装（pip install 提示）→「语音转写失败：faster-whisper 未安装，请在目标 Python 中
+  运行 pip install faster-whisper」；其它 whisper 类 → 原提示。
+- **验收**：processor 空设置用例断言留空键不在下发 JSON（toEqual 忽略 undefined）；ui.test.ts 新增
+  humanizeError 三断言；tsc + 全量测试 + 构建全绿。
+
+### Python 路径填写体验（ticket 150，用户诉求「填一个 python 就能生效」）
+
+> 填 `python` 命令名即可生效（spawn 走 PATH）——但默认值曾硬编码开发机专属绝对路径（其他用户没有）、
+> 各提示都没教怎么找/填，ENOENT 还被误报成「faster-whisper 未安装」。
+
+- **config.js**：`DEFAULTS.pythonPath` → `'python'`（通用命令名）；注释教 Windows `where python` 查绝对路径。
+- **core.js**：777 未配置文案教填写方式；转写 catch 对 `/无法启动 Python|ENOENT/` 专报「找不到 Python…where python 可查」。
+- **ui.ts**：humanizeError 四分支独立匹配（找不到 Python / 未配置 pythonPath / pip install faster-whisper / 通用 whisper，
+  ENOENT 消息不含 whisper 词不能挂 whisper 主块）；设置 desc 更新「装了 Python 一般填 python 即可…」。
+- **实测本机**：Python312（rc 指向）faster-whisper 1.2.1 已装；PATH python（miniconda）未装——填 `python` 应先在对应环境 pip install faster-whisper。
+- **验收**：tools 52 全绿（+ENOENT/未配置引导两用例）；ui/processor 测试绿 + tsc 0；全量测试 + 构建不回归。
+
+### 文献笔记补视频双链（ticket 151，用户实测「生成的文献笔记没有视频」）
+
+> ADR-0066/0073 定义视频文献「正文 = 润色 + 视频双链」，但 ticket 136 AI 回迁时实现漏掉——
+> generateVideoNote 从不接收 videoPath，交付的 mp4 从未进笔记。
+
+- **note-gen.ts**：`generateVideoNote` opts 增 `videoPath?: string | null`；非空 → 正文尾部
+  `## 视频\n\n![[<vault相对路径>]]`（反斜杠归一正斜杠，Obsidian mp4 双链内嵌播放器）；
+  空/未交付 → 无视频段。frontmatter 九键不动。
+- **processor.ts `_aiStep`**：generateVideoNote 传 `videoPath`（[bz-result] 解析出的交付路径，此前被丢弃）。
+- **验收**：note-gen +1 用例（视频段 + 反斜杠归一）+ 既有用例补「未传 → 无视频段」；
+  processor 成功链路断言补 videoPath 键；tsc + 全量测试 + 构建不回归。
+
+### 三层记忆流水线 + 巩固参数面板（ticket 160，用户拍板推翻 158 合并池）
+
+> 「日小结接行为流，反思和周报接记忆流，反思和周报的记忆有引用内容要贴上原文；巩固参数尽量上设置面板，旧设置有废则删。」
+
+- **流水线（ADR-0075）**：行为流（append-only 原始日志）→ 日小结（每天，产出 observation 写入记忆流，source=digest，evidenceIds 溯源行为条目）→ 记忆流观察 → 反思（只吃观察，产出 insight）→ 周报（只吃本周新增 insight，产出报告 insight）。每层只吃下一层，单向；日小结产出从 insight 改 observation 是管道接通的关键（insight 被反思防自指闸挡在证据池外）。
+- **memory.ts**：
+  - 新增 `getConsolidationConfig()`：MEMORY_CONFIG 为缺省，BzSettings `smartcat*` 同义键覆盖（未注入/非法值回退缺省；refExcerptLimit 允许 0=不附原文）。
+  - `shouldReflect` 重写：距上次 ≥reflectIntervalHours **且**「新素材 ≥reflectMinNew」（首次只看素材量）；新素材 = max(pendingSinceReflect 计数, created 扫描)，计数覆盖回填日期的记忆目录入库，扫描覆盖重启恢复。删 158 的行为流兜底触发。
+  - `reflect` 证据池 = 记忆流最近 evidenceWindow 条观察（不再并行为流派生/不再按描述去重）；带 ref 条目经 refResolver 当场读正文，编号行附「原文摘录」截 refExcerptLimit 字（读失败回退路径不崩，失效自愈仍归记忆目录同步）。
+  - `digest` 产出 `makeDigestObservation`（type=observation/source=digest/importance 0.7/credibility 走档位/evidenceIds 保留；【今日小结】前缀取消）；upsertNoteMemory 新建分支补 pendingSinceReflect++。
+  - 删 `behaviorToObservations`（158 派生视图，158 补丁整体退役）；`behaviorEarliestBase` 保留（digest 基线）；SOURCE_LABELS 补 digest/weekly-report 中文标签。
+- **report.ts**：WeeklyReportData 收敛为 `{window,total,themeDist,insights,padAvg}`——吃本周新增 insight（isSupersededInsight 剔除；只吃本周窗，周周有增量）；formatWeeklyReport/generateWeeklyReport 重写为主题分组洞察清单叙述；旧统计字段（observationCount/sourceDist/emotionDist/topMemories）随观察原料一并移除。
+- **index.ts** maybeWeeklyReport：门槛 = 本周 insight ≥weeklyMinInsights（经 buildWeeklyReportData.total），删 behaviorWeek 并池与记忆流观察过滤。
+- **设置**：BzSettings 新增 11 键（smartcatReflectIntervalHours 24 / ReflectMinNew 3 / ReflectEvidenceWindow 100 / ReflectEvidenceTop 50 / InsightCount 3 / DigestIntervalHours 18 / DigestMinNew 3 / DigestMaxEvidence 24 / DigestCount 2 / WeeklyMinInsights 3 / RefExcerptLimit 400），⚙️ 弹窗新增「记忆巩固」组 11 滑杆（文案过 ticket 100 规范）；旧设置清点：无既有键与本重构重叠，废弃的是内部常量语义（reflectionMinNew=20 快车道、pending 单义计数）与死代码，非用户可见设置。
+- **验收**：memory.test 158 语义用例改写（行为流不再直进反思证据/digest 产出 observation/ref 原文/配置覆盖）+ report.test 全量改写洞察语义 + index-cov 周报链路喂洞察；tsc + 全量测试 + 构建全绿。
+
+### 巩固参数滑杆改输入框（ticket 161）
+
+> 「小橘设置面板中的数字滑动都改成输入框，因为在下滑的时候偶尔会误触。」
+
+- 小橘 ⚙️ 弹窗全部 17 处 `slider` 行改 `number` 行（core/settings-schema 既有行类型）：min/max 钳制、step、绑定与文案均不变；schema 渲染器无改动。
+- 值语义沿用 number 行口径：空串/非数字不写入，防抖 800ms + 失焦/回车落盘。
+
+### 巩固语义重定义：行为小结并入反思 + 阈值精简 + 周报锚定首洞察（ticket 162）
+
+> 「反思就是指定 20 条，从上一次攒过 20 条就反思；反思前先把上次反思之间的所有行为流合并总结成一条写入记忆流（首次拿 24 小时），行为小结不占反思额度；那 20 条是原始记忆，过滤掉洞察和每周报告；周报从第一条洞察的日期开始算，往后推一周；设置面板精简，移动端默认全屏放最下面。」
+
+- **反思**：只看素材阈值（smartcatReflectMinNew，默认 20）——自上次反思记忆流新增观察攒够即反思，时间间隔闸退役。证据池 = 自上次反思以来全部新增观察（原始记忆；insight/周报天然排除），按重要度降序全量进 prompt（evidenceWindow/evidenceTop 截断退役），洞察条数由 LLM 自定（smartcatInsightCount 退役）。
+- **行为小结（原「日小结」，source=digest 不变）**：独立调度退役，改为反思前置步骤——上次反思以来（首次最近 24h）全部行为流经 behavior-wording 渲染合并总结成 1 条 observation 写入记忆流（evidenceIds 溯源、lastDigestAt/digestCount 保留），保证每次反思恰有一条覆盖两窗行为的小结；小结不占反思素材额度（pendingSinceReflect 不推、created 扫描排除 source=digest）。前置证据闸：现有新观察 + 将产生的小结 <2 条则连小结也不做（防重复总结同一窗口）；小结失败（AI 未配置/调用失败/落盘失败）整轮反思退避中止。
+- **周报**：窗口锚定第一条洞察（排除 weekly-report 自身产物）日期，首窗 [首洞察, +7d)，此后每窗起点 = 上窗末端（weeklyReport.at 存窗口末端），7 天一周链式推进；空窗不出报告、窗口静默推进；洞察门槛（smartcatWeeklyMinInsights）退役；满 7 天且整点后由小时心跳分派。
+- **设置**：「记忆巩固」组 11 → 2 行（反思观察阈值、引用摘录字数）；退役键 smartcatReflectIntervalHours/ReflectEvidenceWindow/ReflectEvidenceTop/InsightCount、smartcatDigestIntervalHours/DigestMinNew/DigestMaxEvidence/DigestCount、smartcatWeeklyMinInsights（data.json 残留值忽略）；「移动端默认全屏」组挪面板末尾。
+- **测试**：memory.test「行为小结」describe 重写 + routedFetch 路由 mock（按「行为记录（编号」分流 digests/insights）；相关 7 个测试文件同步；全量绿。
+
+### 洞察上限 + 来源分布按追查目录 + 称呼替换（ticket 163）
+
+> 「AI 决定生成洞察的数量，一次给我生成 10 条，太多了！默认不超过 3 条，设置放面板里让用户自己选。记忆来源分布：日记下面怎么是记忆目录？应该根据设置页里记忆目录的追踪目录走。还有洞察和行为消息。设置页可以指定小橘对我的称呼，默认叫包仔；AI 调用记忆流和行为流时把「你/用户」这类指代用户的词都替换成称呼。」
+
+- **洞察条数上限**：新增设置 `smartcatReflectMaxInsights`（默认 3，⚙️ 小橘设置「记忆巩固」组「反思洞察条数上限」number 行 1-10）；`getConsolidationConfig` 增 `maxInsights`（负数回退 3、0 钳制到 1）；反思 prompt 改为「最多 N 条（宁缺毋滥，超出只取最重要的）」，LLM 返回按序 `.slice(0, N)` 硬截断兜底。
+- **记忆来源分布（dashboard 记忆页）**：`buildSourceDistribution(stream, dirs?)` 口径升级——① 洞察（type=insight，含周报洞察）按「洞察」单列一行计入（此前完全不计）；② source=note 的引用条目按「记忆目录」配置的追查目录分行（`resolveTrackedDirLabel`：ref 路径/description 路径段前缀匹配首个配置目录 → 标签为该目录字符串；未传目录/未命中回退「记忆目录」旧标签）；③ 行为小结（source=digest）行保留。最近记忆列表 note 行标签同口径（`我的/信` 而非统称「记忆目录」）。
+- **称呼替换**：新增设置 `smartcatUserName`（默认「包仔」，⚙️ 小橘设置「互动」组「小橘对我的称呼」text 行）；`replaceUserReference(text)` 把记忆流/行为流内容里的「你/你们/用户」替换为称呼（单趟正则 `你们|你|用户`，替代回调保证「你们」先匹配；存储格式冻结不写盘，只作用于喂 AI 的 prompt 文本）。应用点：formatMemoriesForPrompt / formatMemoriesForPromptWithRefs（聊天/主动关心/懂你上下文）、反思证据编号行 + 原文摘录、行为小结行为文案行、情绪追标编号行、周报洞察清单行、特质归因洞察行、懂你上下文块生成行（「你通常在…」「你和小橘的关系」）。模板/人物设定句（「你是小橘」、候选块头「你既有的相关洞察」——此处「你」指小橘）不做替换。
+- **测试**：memory.test（getConsolidationConfig maxInsights/getUserNickname/replaceUserReference/证据行替换/5→3 截断+prompt 声明+设置可调）；dashboard.test（洞察单列、note 按追查目录分行、未命中回退、UI 卡与列表标签）；report.test（洞察清单称呼替换）；companion-context.test（作息行包仔）；settings.test（互动 4 项/记忆巩固 3 项徽标）；trait-attribution/adr0069-core 断言同步为称呼文案。全量绿 + tsc 0 错 + 构建部署。

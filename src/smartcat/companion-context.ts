@@ -7,10 +7,12 @@
  */
 import { describeRhythm, buildRhythmProfile, periodText } from './rhythm';
 import { analyzeEmotionTrend, buildEmotionSnapshots, describeEmotionTrend } from './cognitive';
+// ticket 163：生成的背景行涉及用户（「你通常…」「你和小橘的关系」）——喂 AI 前替换为称呼
+import { replaceUserReference } from './memory';
 
 export interface CompanionContextInput {
   /** 记忆流条目（作息/趋势分析的数据源） */
-  stream?: { created?: string; emotion?: string; importance?: number }[];
+  memoryStream?: { created?: string; emotion?: string; importance?: number }[];
   /** 关系张量（PersonalityGrowth.relationship） */
   relationship?: { trust?: number; attachment?: number } | null;
   /** 当前瞬时情绪（可选，作为趋势补充上下文） */
@@ -25,24 +27,24 @@ export interface CompanionContextInput {
 /** 组装「懂你上下文块」：无任何可用信号时返回空串（调用方自行省略） */
 export function buildCompanionContext(i: CompanionContextInput): string {
   const now = i.now ?? Date.now();
-  const stream = i.stream || [];
+  const stream = i.memoryStream || [];
   const hour = i.hour ?? new Date(now).getHours();
   const parts: string[] = [];
 
   const profile = buildRhythmProfile(stream as any, 30, now);
   const rhythmLine = profile.total >= 3
-    ? `你通常在${describeRhythm(profile)}最活跃（现在是${periodText(hour)}）`
+    ? replaceUserReference(`你通常在${describeRhythm(profile)}最活跃（现在是${periodText(hour)}）`)
     : '';
   if (rhythmLine) parts.push(rhythmLine);
 
   const snaps = buildEmotionSnapshots(stream);
   const trend = analyzeEmotionTrend(snaps);
-  if (trend.count >= 1) parts.push(describeEmotionTrend(trend));
+  if (trend.count >= 1) parts.push(replaceUserReference(describeEmotionTrend(trend)));
 
   const rel = i.relationship;
   if (rel && typeof rel.trust === 'number') {
     const attach = typeof rel.attachment === 'number' ? ` / 依恋 ${rel.attachment.toFixed(2)}` : '';
-    parts.push(`你和小橘的关系：信任 ${rel.trust.toFixed(2)}${attach}`);
+    parts.push(replaceUserReference(`你和小橘的关系：信任 ${rel.trust.toFixed(2)}${attach}`));
   }
 
   const lines: string[] = [];

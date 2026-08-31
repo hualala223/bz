@@ -12,6 +12,7 @@ import { createAI, type AIService } from '../core/ai';
 import { notify } from '../core/notice';
 import { tryGetSettings } from '../core/settings-provider';
 import { onDomainEvent } from '../core/domain-bus';
+import { jsonFileStore, storageFile } from '../core/storage';
 import { DataManager } from './data';
 import { showClipConfirmDialog } from './clip-archive-dialog';
 
@@ -35,8 +36,7 @@ function getWatchedFolders(): string[] {
 /** 备忘录数据文件路径（照抄旧 ai-agent/index.ts：ADR-0009 storagePath 优先，旧 todoFilePath 兼容兜底） */
 function getMemoPath(): string {
   const s = tryGetSettings() as any;
-  const folder = ((s && (s.storagePath || s.todoFilePath)) || 'CONFIG/STORAGE').trim().replace(/\/+$/, '');
-  return folder + '/memo.json';
+  return storageFile('memo.json', (s && (s.storagePath || s.todoFilePath)) || 'CONFIG/STORAGE');
 }
 
 /** AI 剪藏匹配开关（设置可配，默认开启） */
@@ -50,16 +50,10 @@ function inFolders(path: string, folders: string[]): boolean {
   return folders.some((f) => path.startsWith(f + '/') || path === f);
 }
 
-// ---------- JSON 读写（读候选走旧 loadJSON 私有副本，写归档走同域 DataManager） ----------
+// ---------- JSON 读写（读候选走统一数据读写层，写归档走同域 DataManager） ----------
 
 async function loadJSON(app: App, filePath: string): Promise<any[]> {
-  const file = app.vault.getAbstractFileByPath(filePath);
-  if (!file) return [];
-  try {
-    return JSON.parse(await app.vault.read(file as any));
-  } catch {
-    return [];
-  }
+  return jsonFileStore<any[]>(filePath).read();
 }
 
 // ---------- 队列（ai-agent/index.ts 逐行等价移植） ----------
@@ -85,6 +79,34 @@ function enqueue(task: () => Promise<any> | void) {
     });
 }
 
+// ---------- 归档成功通知合并（n2：批量剪藏归档不逐条弹屏，参照 review/watch.ts ticket 100 先例） ----------
+
+/** 归档成功通知合并窗口（3 秒；测试可注入短值） */
+export let CLIP_ARCHIVE_NOTIFY_MERGE_MS = 3000;
+export function __setClipArchiveNotifyMergeMsForTests(ms: number): void {
+  CLIP_ARCHIVE_NOTIFY_MERGE_MS = ms;
+}
+
+/** 归档成功通知合并缓冲：窗口内多条剪藏收进一份名单，到点合并成一条通知 */
+let archiveNotifyQueue: string[] = [];
+let archiveNotifyTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 到点刷出合并通知（单条/多条文案与 review 先例一致；不带 dedupeKey——
+ *  notice 的 30s 同键抑制窗口会把间隔 3.2s~30s 的归档成功反馈静默吞掉） */
+function flushArchiveNotify(): void {
+  archiveNotifyTimer = null;
+  const batch = archiveNotifyQueue;
+  archiveNotifyQueue = [];
+  // 建议 C：卸载后到点的在途定时器不再弹（与 enqueue 首行 _cancelled 短路同语义）
+  if (_cancelled || !batch.length) return;
+  const shown = batch.slice(0, 3).join('、');
+  const tail = batch.length > 3 ? ` 等 ${batch.length - 3} 条` : '';
+  notify(
+    batch.length > 1 ? `已归档到备忘录：${shown}${tail}` : `已归档到备忘录：${shown}`,
+    { type: 'success' }
+  );
+}
+
 // ---------- 剪藏归档（仅备忘录数据源） ----------
 
 let _ai: AIService | null = null;
@@ -101,7 +123,11 @@ async function archiveItem(item: any, file: any) {
   try {
     await DataManager.updateItem(item.id, { title: file.basename, linkedNote: file.path, url: item.url ?? null } as any);
     await DataManager.completeItem(item.id);
-    notify('已归档到备忘录', { type: 'success' });
+    // 建议 C：await 期间插件卸载 → 不再排队/弹通知（unload 竞态守卫，防续体复活定时器）
+    if (_cancelled) return;
+    // n2：归档成功通知合并窗口——窗口内多条剪藏收进一份名单，到点统一弹一条（不再逐条弹屏）
+    archiveNotifyQueue.push(file.basename);
+    if (!archiveNotifyTimer) archiveNotifyTimer = setTimeout(flushArchiveNotify, CLIP_ARCHIVE_NOTIFY_MERGE_MS);
   } catch (e) {
     console.error('[memo-clip-archive] 归档失败', e);
     notify('归档失败：' + ((e && (e as any).message) || e), { type: 'error' });
@@ -155,15 +181,15 @@ ${candidatesDesc}
 /** 剪藏入口：URL 精确匹配直接归档；不中 → AI 判断 + 弹窗批准 */
 async function handleClip(app: App, file: any) {
   const cache = app.metadataCache.getFileCache(file);
-  const link = (cache as any)?.frontmatter?.link;
-  if (!link) return;
+  const url = (cache as any)?.frontmatter?.url;
+  if (!url) return;
 
   const items = await loadJSON(app, getMemoPath());
   const candidates = items.filter((i) => i.scene === '剪藏' && i.url && !i.linkedNote);
   if (candidates.length === 0) return;
 
   // ① URL 精确匹配 → 直接归档（非 AI，静默执行）
-  const exact = candidates.find((i) => i.url === link);
+  const exact = candidates.find((i) => i.url === url);
   if (exact) {
     await archiveItem(exact!, file);
     return;
@@ -176,7 +202,7 @@ async function handleClip(app: App, file: any) {
     getAI(),
     {
       title: file.basename,
-      url: link,
+      url,
       frontmatter: (cache as any).frontmatter,
     },
     candidates
@@ -201,7 +227,7 @@ function createClipArchiveAgent(app: App): void {
     // 语义通道只保证落在剪藏目录（articleDirectory 分类命中），但用户可能已把该目录移出
     // aiAgentWatchedFolders 监听范围——保留旧 watchedFolders 门，范围外不触发匹配归档。
     if (!inFolders(evt.path, getWatchedFolders())) return;
-    // 伪载荷只有 path：取真 TFile 后读 metadataCache frontmatter link（文件已被删则静默跳过）
+    // 伪载荷只有 path：取真 TFile 后读 metadataCache frontmatter url（文件已被删则静默跳过）
     const file = app.vault.getAbstractFileByPath(evt.path);
     if (!file) return;
     enqueue(() => handleClip(app, file));
@@ -229,4 +255,10 @@ export function unloadClipArchive(): void {
   initialized = false;
   _ai = null;
   queue = Promise.resolve();
+  // 卸载时取消待刷出的归档成功通知（残余定时器与名单一并清空）
+  if (archiveNotifyTimer !== null) {
+    clearTimeout(archiveNotifyTimer);
+    archiveNotifyTimer = null;
+  }
+  archiveNotifyQueue = [];
 }

@@ -16,7 +16,7 @@ import { eventSystem, setSmartcatApp, setupVisibilityCheck, __resetVisibilityFor
 import { mountCatContainer, unmountCatContainer, applyAppearance, createChatPanel, showChatPanel, hideChatPanel, openSmartcatSettings } from './ui';
 import { BubbleManager } from './bubble';
 import { MoodSystem, PersonalityGrowth } from './mood';
-import { MemorySystem, USER_CONTENT_BOUNDARY, PROMPT_SLOTS } from './memory';
+import { MemorySystem, USER_CONTENT_BOUNDARY, PROMPT_SLOTS, migrateSmartcatSidecars, slimSmartCatData } from './memory';
 import { SmartCatAnimation } from './animation';
 import { InteractionManager, MobileInputAdapter } from './interaction';
 import { getSmartCatMessage } from './messages';
@@ -24,23 +24,27 @@ import { generatePrompt } from './prompts';
 import { callChat, isAIConfigured } from './api';
 import { generateBookDescription, hasBookTag } from './content';
 import { classifyPath } from './context-source';
+import { NoteMemorySync, type NoteMemoryBackend } from './note-memory';
+import { normalizeMemoryDirectories } from './config';
 import { onDomainEvent } from '../core/domain-bus';
-import { buildMovieActionText, type MovieActionEvent } from './movie-source';
-import { buildMemoActionText, memoDueObservation, type MemoActionEvent, type MemoDueLike } from './memo-source';
-import { parseDiaryFile, decideDiarySettle, diaryDeleteText, diaryDeleteFileText, DIARY_SETTLE_MS, type DiaryEntryLike } from './diary-source';
+import type { MovieActionEvent } from './movie-source';
+import { buildMemoStructured, buildMemoDueScanStructured, type MemoActionEvent, type MemoDueLike } from './memo-source';
+import { generateDescription } from './description-generators';
+import { parseDiaryFile, decideDiarySettle, diaryDeleteText, diaryDeleteFileText, DIARY_SETTLE_MS, buildDiaryTagsStructured, type DiaryEntryLike, type DiaryTagsEvent } from './diary-source';
 import { noteFirstText, noteDeleteText, noteFileName, noteBodyText, parseNoteDate, letterReadonly, decideNoteSettle, NOTE_SETTLE_MS, type NoteKind } from './note-source';
 import { DIARY_DIRECTORY } from '../diary/config';
 
-import { buildBelongingsActionText, type BelongingsActionEvent } from './belongings-source';
+import { buildBelongingsStructured, type BelongingsActionEvent } from './belongings-source';
+import { buildLiteratureStructured, type LiteratureActionEvent } from './literature-source';
 
-import { buildNewsReadText, buildNewsSavedFullText, type NewsReadEvent } from './news-source';
-import { buildFavoritesActionText, type FavoritesActionEvent } from './favorites-source';
+import { buildNewsReadStructured, buildNewsSavedStructured, type NewsReadEvent } from './news-source';
+import { buildFavoritesStructured, type FavoritesActionEvent } from './favorites-source';
 
-import { buildPomodoroActionText, type PomodoroActionEvent } from './pomodoro-source';
+import { buildPomodoroStructured, type PomodoroActionEvent } from './pomodoro-source';
 import { DOMAIN_FILES, snapshotDomains } from './domain-source';
 import { buildLibraryNoteText, type LibraryWeaveDiff } from './library-source';
 import { buildRhythmProfile, isActiveNow, describeRhythm, periodText, isoWeekKey } from './rhythm';
-import { buildWeeklyReportData, generateWeeklyReport, weekWindow } from './report';
+import { buildWeeklyReportData, generateWeeklyReport } from './report';
 import { appendDossierEvent, getDossierEvents, shouldScanDossierNarrative, buildNarrativeInput, generateDossierNarrative, advanceDossierScanKey } from './dossier';
 import { buildCompanionContext } from './companion-context';
 import { analyzeEmotionTrend, buildEmotionSnapshots, describeEmotionTrend, checkContradiction, extractStoredFacts, initBanditArm, sampleThompson, updateBandit } from './cognitive';
@@ -50,7 +54,7 @@ import {
   QuietGateSystem, gentleGreeting, gentleGreetingAvailable, gentlePhraseFor, gentleStyleFor,
   localDayKey, proactiveMinGapMs,
 } from './quiet-gate';
-import type { SmartCatData, SmartCatConfig, ProactiveCareState } from './types';
+import type { SmartCatData, SmartCatConfig, ProactiveCareState, StructuredMeta } from './types';
 import type { BanditArmParams } from './cognitive';
 import type { SmartcatPanels } from './ui';
 
@@ -70,6 +74,8 @@ let animation: SmartCatAnimation | null = null;
 let interaction: InteractionManager | null = null;
 let mobileAdapter: MobileInputAdapter | null = null;
 let panels: SmartcatPanels | null = null;
+/** 记忆目录增量同步器（ADR-0069：配置了 memoryDirectories 才装配；unload 置空） */
+let noteMemorySync: NoteMemorySync | null = null;
 let fileOpenRef: any = null;
 /** 域事件总线订阅退订函数收集（vault md 事件换线 + 六域方法监听换线；unload 逐一退订） */
 const busUnsubs: (() => void)[] = [];
@@ -83,18 +89,18 @@ interface NewsChannelEvent {
 }
 /** 聚合讯保存待补全登记（ticket 076，方案 a）：剪藏路径 → 登记（内存态不落盘）；
  *  auto-summary 写回 frontmatter 的剪藏 modify 命中 → 补全完整保存观察并移除；2 分钟降级定时器兜底。
- *  ticket 084b：登记追加 baseName/link（rename 反查锚点）——剪藏 frontmatter 无 title →
+ *  ticket 084b：登记追加 baseName/url（rename 反查锚点）——剪藏 frontmatter 无 title →
  *  auto-summary renameToTitle 必改文件路径，登记键（原路径）将永久失效；
- *  补全/降级按 link（URL 唯一）或 baseName 反查改名后新路径，AI 摘要/标签才能进记忆流。 */
+ *  补全/降级按 url（URL 唯一）或 baseName 反查改名后新路径，AI 摘要/标签才能进记忆流。 */
 interface NewsPendingSave {
   title: string;
   platform: string;
   durationMin: number;
   /** 剪藏原文件名去 .md（saveToClip 写入路径的 cleanTitle；rename 后 basename 反查兜底） */
   baseName: string;
-  /** 剪藏 frontmatter link（URL 唯一标识原文：renameToTitle 只改文件名不碰 link，改名后反查主锚点；
+  /** 剪藏 frontmatter url（URL 唯一标识原文：renameToTitle 只改文件名不碰 frontmatter，改名后反查主锚点；
    *  登记时异步读取，读失败为空串 → 走 baseName 兜底） */
-  link: string;
+  url: string;
   timer: ReturnType<typeof setTimeout>;
 }
 const newsPendingSaves = new Map<string, NewsPendingSave>();
@@ -152,10 +158,6 @@ const libraryPendingNotes = new Map<string, LibraryPendingNote>();
 let libraryDebounceMs = 5 * 60 * 1000;
 let visibilityCleanup: (() => void) | null = null;
 let greetTimer: ReturnType<typeof setTimeout> | null = null;
-/** 主动关心调度（2026-08-23：作息模型判定时机，每周 ≤ proactiveWeeklyCap 次温和搭话） */
-let proactiveTimer: ReturnType<typeof setInterval> | null = null;
-/** 每周报告调度（每小时检查，10:00 触发生成） */
-let weeklyReportTimer: ReturnType<typeof setInterval> | null = null;
 /** 每周报告状态（editingData.weeklyReport） */
 interface WeeklyReportState { weekKey: string; at: number; }
 function getWeeklyReportState(): WeeklyReportState {
@@ -170,7 +172,10 @@ const dataProvider = (): SmartCatData => {
 };
 const dataSaver = async (d: SmartCatData): Promise<void> => {
   data = d;
-  if (appRef) await saveSmartCatData(appRef, d);
+  if (!appRef) return;
+  // ADR-0069：smartcat.json 只留 meta/config——memory 双流以 sidecar（smartcat-memory/behavior.json）为准，
+  // sidecar 落盘由 MemorySystem 30s tick 防抖合并写（关键路径另有即时 flush），此处写瘦身视图
+  await saveSmartCatData(appRef, slimSmartCatData(d));
 };
 
 /** 域配置读取（供 interaction） */
@@ -194,6 +199,20 @@ export async function ensureSmartCat(app: App, opts?: { startHidden?: boolean })
   setSmartcatApp(app);
 
   data = await loadSmartCatData(app);
+  // ADR-0069：存储 sidecar 化升级迁移（一次性幂等）——记忆/行为双流自 smartcat.json 迁出，
+  // 事件类记忆清空（R2）、孤儿向量清理、smartcat.json 瘦身重写（关键路径即时落盘）。
+  // 审查 P1：sidecar 损坏时迁移抛错中止（已备份 .bak）——不瘦身 smartcat.json，保留现场等人工介入
+  try {
+    await migrateSmartcatSidecars(app, data);
+  } catch (e) {
+    // bug 修复：原实现 catch 后继续装配——smartcat.json 已瘦身、双流恒空，运行时以空流启动，
+    // 面板记忆总数从 0 重建 + 每条重调 AI。现中止装配保留现场（sidecar 已备份 .bak），等人工介入
+    console.error('[bz] smartcat sidecar 迁移中止，小橘本轮不启动', e);
+    initialized = false;
+    data = null;
+    notice(`小橘记忆文件损坏，已自动备份（.bak）并暂停启动，避免覆盖记忆。请查看控制台日志处理。`, 'error', 0);
+    return;
+  }
   // 竞态守卫：等待期间若被 unload（main 的 void ensureSmartCat 是 fire-and-forget），停止装配
   if (!initialized) {
     data = null;
@@ -225,6 +244,12 @@ export async function ensureSmartCat(app: App, opts?: { startHidden?: boolean })
   moodSystem.onDecayTick = () => { void quietGateSystem?.onDecayTick(); };
   personalityGrowth = new PersonalityGrowth(dataProvider, dataSaver);
   memorySystem = new MemorySystem(app, dataProvider, dataSaver);
+  // ADR-0069：注入「引用 → 正文」读取器（记忆目录引用型条目 prompt 拼装时当场读 vault；null=文件失效）
+  memorySystem.setRefResolver(async (ref: string) => {
+    const f = app.vault.getAbstractFileByPath(ref);
+    if (!f) return null;
+    return await app.vault.read(f as any);
+  });
   // ADR-0021：init = 探测 Ollama + 加载向量 + 反思调度（取代原 24h 固化调度）
   await memorySystem.init();
   if (!initialized) return; // 竞态守卫 2：init 期间被 unload 则丢弃装配
@@ -232,9 +257,18 @@ export async function ensureSmartCat(app: App, opts?: { startHidden?: boolean })
   // ticket 093：缺席状态机挂同一调度心跳（复用既有 30s tick，不自建定时器）——
   // 检查 lastPresenceAt 距今 → normal→missing 迁移；重逢由在场信号钩子触发
   absenceSystem = new AbsenceSystem(dataProvider, dataSaver, moodSystem);
-  memorySystem.onSchedulerTick = () => { void maybeMemoDueScan(); void absenceSystem?.onSchedulerTick(); };
+  memorySystem.onSchedulerTick = () => {
+    void maybeMemoDueScan();
+    void absenceSystem?.onSchedulerTick();
+    // p2 收敛：常驻长周期轮询随同一 30s tick 按节拍分派
+    dispatchResidentTick();
+    // ADR-0069 R4：节流期合并的笔记变更到期重入库（随既有 30s tick 分派，不自建定时器）
+    void noteMemorySync?.flushDue();
+  };
   // ticket 093：重逢判定 = 在场信号（观察路径统一经 addObservation→touchPresence 后到此）+ phase ≠ normal
   memorySystem.onPresence = () => { void absenceSystem?.onPresenceSignal(); };
+  // p2 收敛：常驻调度心跳挂同一 30s tick（主动/趋势/周报/叙事 四路长周期轮询并入分派，
+  // 见 startResidentHeartbeat / dispatchResidentTick —— 不自建 setInterval）
   // 反思驱动人格（ADR-0023：洞察 → 特质归因成长 + 行为周统计深更新；ticket 091 origin 透传给归因来源约束）
   memorySystem.onReflect = async (insights, meta) => {
     if (personalityGrowth) {
@@ -266,6 +300,7 @@ export async function ensureSmartCat(app: App, opts?: { startHidden?: boolean })
       const d = dataProvider();
       if (!applyInsightPatch(d, id, patch)) return false;
       await dataSaver(d);
+      memorySystem?.markMemoryDirty(); // ADR-0069：记忆条目字段已改 → 记忆 sidecar 标脏（30s tick 落盘）
       return true;
     },
   });
@@ -296,7 +331,15 @@ export async function ensureSmartCat(app: App, opts?: { startHidden?: boolean })
       if (!memorySystem) return '';
       try {
         const memories = await memorySystem.retrieve(query, undefined, { lexicalQuery });
-        return memories.length ? memorySystem.formatMemoriesForPrompt(memories, PROMPT_SLOTS.maxEntries) : '';
+        if (!memories.length) return '';
+        // ADR-0069：引用型条目经读取器当场取正文；失效引用返回并安排清理（不阻塞检索）
+        const { text, staleRefs } = await memorySystem.formatMemoriesForPromptWithRefs(memories, PROMPT_SLOTS.maxEntries);
+        for (const stale of staleRefs) {
+          // 审查 P0：传完整 ref 键（路径#定位符）——只删失效段，防误杀同文件存活日记段
+          const r = stale.ref!;
+          try { await memorySystem.removeMemoryByRef(r.locator ? `${r.path}#${r.locator}` : r.path); } catch { /* 清理失败静默（下次检索再试） */ }
+        }
+        return text;
       } catch (e) {
         return '';
       }
@@ -355,6 +398,14 @@ export async function ensureSmartCat(app: App, opts?: { startHidden?: boolean })
   // 通用通道恒发 {oldPath, newPath}，onVaultRename 内部按新旧路径分类自行三分支判定（迁移 / 删除+清理）
   busUnsubs.push(onDomainEvent('vault:md-renamed', (e: any) => void onVaultRename({ path: e?.newPath }, e?.oldPath)));
 
+  // ADR-0069 记忆目录（笔记记忆库）：vault 原生 md 增删改通用兜底通道订阅 + 懒初始化
+  //（未配置 memoryDirectories 时同步器不装配，订阅静默空转）
+  busUnsubs.push(onDomainEvent('vault:md-created', (e: any) => void noteMemorySync?.onModified(e?.path)));
+  busUnsubs.push(onDomainEvent('vault:md-modified', (e: any) => void noteMemorySync?.onModified(e?.path)));
+  busUnsubs.push(onDomainEvent('vault:md-deleted', (e: any) => void noteMemorySync?.onDeleted(e?.path)));
+  busUnsubs.push(onDomainEvent('vault:md-renamed', (e: any) => void noteMemorySync?.onRenamed(e?.oldPath, e?.newPath)));
+  ensureNoteMemorySync();
+
   // 日记重启基线（ticket 077）：监听挂载前先对日记目录当日文件建快照（不产出观察，
   // 防重启后旧条目被当首次——已有正文条目记「已见」，后续改动走更新分支）
   await buildDiaryBaseline();
@@ -372,6 +423,11 @@ export async function ensureSmartCat(app: App, opts?: { startHidden?: boolean })
   busUnsubs.push(onDomainEvent<FavoritesActionEvent>('favorites', (evt) => notifyFavoritesAction(evt)));
   busUnsubs.push(onDomainEvent<BelongingsActionEvent>('belongings', (evt) => notifyBelongingsAction(evt)));
   busUnsubs.push(onDomainEvent<PomodoroActionEvent>('pomodoro', (evt) => notifyPomodoroAction(evt)));
+  // 文献盒（ADR-0066/0072）：literature 域经 'literature:tasks' 通道派发 → 行为流（ticket 136：视频 converted + 术语 term-generated）
+  busUnsubs.push(onDomainEvent<LiteratureActionEvent>('literature:tasks', (evt) => notifyLiteratureAction(evt)));
+  // ADR-0069 行为流全量盘点补齐：日记分类调整（diary 域 dialogs 域事件）。
+  // 剪藏删除观察已按用户拍板断开（2026-08-29）：vault delete 不再入行为流。
+  busUnsubs.push(onDomainEvent<DiaryTagsEvent>('diary:tags-changed', (evt) => notifyDiaryTagsChanged(evt)));
 
   // 域 JSON 感知（2026-08-23 用户拍板：CONFIG/STORAGE 域数据 modify → 观察；懒启动探测）
   void onDomainActivity();
@@ -393,9 +449,9 @@ export async function ensureSmartCat(app: App, opts?: { startHidden?: boolean })
         msg = getSmartCatMessage('WELCOME_BACK_MESSAGES');
       }
       // ADR-0025 B 面：欢迎回来也「懂你」——作息有数据时掺入作息感知话
-      if (data && data.memory.stream.length >= 3 && Math.random() > 0.6) {
+      if (data && data.memory.memoryStream.length >= 3 && Math.random() > 0.6) {
         try {
-          const profile = buildRhythmProfile(data.memory.stream, 30, Date.now());
+          const profile = buildRhythmProfile(data.memory.memoryStream, 30, Date.now());
           if (profile.total >= 3) {
             msg = `我注意到你通常在${describeRhythm(profile)}最活跃。欢迎回来，我一直在哦~`;
           }
@@ -405,16 +461,12 @@ export async function ensureSmartCat(app: App, opts?: { startHidden?: boolean })
     },
   });
 
-  // 主动关心（2026-08-23：作息模型 + 每周 ≤2 次温和搭话；每 10 分钟检查一次）
-  startProactiveCare();
-  // 每周懂你报告（2026-08-23：每周一检查，有观察则生成写回流 + 气泡展示）
-  startWeeklyReport();
+  // 常驻调度（2026-08-23：作息模型主动关心 + 每周报告 + 关系史叙事 + 情绪趋势回写；
+  // p2 收敛：四路长周期 setInterval 合并为分层心跳——复用 memory 30s 反射调度 tick 按节拍分派，
+  // 10min/30min/1h 检查口径与节流逻辑全部保持；ensure 末尾照旧保留周报/叙事的一次性入口）
+  startResidentHeartbeat();
   void maybeWeeklyReport();
-  // 关系史叙事扫描（ticket 094：独立周键退避，成功才推进 dossierScanKey）
-  startDossierScan();
   void maybeDossierNarrative();
-  // 情绪趋势回写心情（ADR-0025 A 面：30 分钟节流，declining/improving/高波动温和漂移 PAD）
-  startTrendDrift();
 
   // 隐藏启动：装配完成即卸容器（等效 hideSmartCat 终结态；强引用在重挂/卸载时统一处理）
   if (startHidden) unmountCatContainer();
@@ -422,6 +474,86 @@ export async function ensureSmartCat(app: App, opts?: { startHidden?: boolean })
   eventSystem.emit('appInitialized');
 }
 
+// ---------------- 记忆目录同步（ADR-0069：笔记记忆库增量接线） ----------------
+
+/** 记忆目录同步器懒初始化（幂等）：noteSource 开 + 配置了 memoryDirectories 才装配；
+ *  已装配时仅同步目录集合（设置变更后的移除清理/新增补扫由 syncDirectories 承担）。
+ *  backend 即 memorySystem（ADR-0069 契约 API upsertNoteMemory/removeMemoryByRef/setRefResolver
+ *  由记忆流侧实现；本流先按签名对接，method 缺位属另一条流合并点）。 */
+function ensureNoteMemorySync(): void {
+  if (!appRef || !memorySystem) return;
+  const dirs = normalizeMemoryDirectories((getSettings() as any).memoryDirectories);
+  if (!data?.config?.noteSource || !dirs.length) {
+    noteMemorySync = null;
+    return;
+  }
+  if (noteMemorySync) {
+    void noteMemorySync.syncDirectories(dirs);
+    return;
+  }
+  const app = appRef;
+  noteMemorySync = new NoteMemorySync({
+    adapter: {
+      listFiles: () => {
+        try { return ((app.vault.getFiles?.() || []) as any[]).map((f) => String(f.path)); } catch { return []; }
+      },
+      readFile: async (p) => {
+        try {
+          const f = app.vault.getAbstractFileByPath(p);
+          return f ? await app.vault.read(f as any) : null;
+        } catch { return null; }
+      },
+      fileMtime: (p) => {
+        try {
+          const f: any = app.vault.getAbstractFileByPath(p);
+          return f?.stat?.mtime ?? null;
+        } catch { return null; }
+      },
+      now: () => Date.now(),
+      diaryDirectory: () => DIARY_DIRECTORY || '我的/日记',
+    },
+    backend: memorySystem as unknown as NoteMemoryBackend,
+    getDirectories: () => normalizeMemoryDirectories((getSettings() as any).memoryDirectories),
+  });
+  void noteMemorySync.init();
+}
+
+
+// ---------------- 常驻调度心跳（p2 收敛：长周期轮询合并，节流语义不变） ----------------
+
+/** 常驻调度节拍计数（每 30s memory 反射调度 tick 递增一次；unload 归零，重装后从 0 重算相位） */
+let residentTickCount = 0;
+
+/**
+ * 启动常驻调度心跳（p2 收敛）：把主动关心（10min）/ 情绪趋势回写（30min）/ 每周报告（1h）/
+ * 关系史叙事扫描（1h）四个独立 setInterval 合并进 memory 30s 反射调度 tick 按节拍分派
+ * （对齐 ticket 075/093「复用既有 30s tick，不自建定时器」先例）；节流逻辑本身不动
+ * （主动关心隔天/每周上限、趋势 48h 样本门槛、周报 10 点 + 周键、叙事周键与失败退避全部保持）。
+ * memory 30s / mood 60s / 陪伴 speakInterval / 动画 5-8s 循环频率不落在 30s 网格上或属
+ * 模块内既有测试契约（mood/animation/interaction 直接构造驱动），保持各自定时器不动——
+ * 本心跳只减少长周期轮询的 setInterval 数量。
+ */
+function startResidentHeartbeat(): void {
+  residentTickCount = 0;
+}
+
+/** 心跳分派（由 ensure 挂到 memorySystem.onSchedulerTick；每次 30s tick 递增并按节拍分派） */
+function dispatchResidentTick(): void {
+  residentTickCount++;
+  const n = residentTickCount;
+  // 10 分钟（20 节拍）→ 主动关心（温和问候豁免/作息闸门等在 maybeProactiveCare 内部，语义不动）
+  if (n % 20 === 0) void maybeProactiveCare();
+  // 30 分钟（60 节拍）→ 情绪趋势回写 + 心情门控心跳（maybeTrendDrift 内部喂 onHeartbeat）
+  if (n % 60 === 0) void maybeTrendDrift();
+  // 1 小时（120 节拍）→ 每周报告（沿用原 startWeeklyReport 的 10 点检查）+ 关系史叙事扫描
+  // ticket 158：hour===10 严格相等在节拍相位漂移时可能整点跳档 → ≥10 点后当周首个 tick 生成
+  // （maybeWeeklyReport 内部有 weekKey 去重，重复调用无副作用）
+  if (n % 120 === 0) {
+    const hour = new Date().getHours();
+    if (hour >= 10) void maybeWeeklyReport();
+    void maybeDossierNarrative();
+  }
+}
 
 // ---------------- 主动关心（作息模型判定时机，2026-08-23 用户拍板） ----------------
 
@@ -491,28 +623,20 @@ async function rewardProactiveArm(): Promise<void> {
   await dataSaver(d);
 }
 
-/** 主动关心调度：每 10 分钟检查；时机 = 距上次 ≥2 天 + 本周未超上限 + 当前在用户活跃时段 */
-function startProactiveCare(): void {
-  if (proactiveTimer) clearInterval(proactiveTimer);
-  proactiveTimer = setInterval(() => {
-    void maybeProactiveCare();
-  }, 10 * 60 * 1000);
-}
-
 /** 温和主动搭话（LLM 生成一句关心；AI 未配置/失败 → 模板兜底；Bandit 选臂决定话术风格）。
- *  导出供测试驱动（对齐 maybeMemoDueScan 先例；生产仅 startProactiveCare 定时调用）。 */
+ *  导出供测试驱动（对齐 maybeMemoDueScan 先例；生产由常驻心跳 10 分钟节拍分派，见 dispatchResidentTick）。 */
 export async function maybeProactiveCare(): Promise<void> {
   if (!data || !bubbleManager || !moodSystem || !memorySystem || !personalityGrowth) return;
   const cfg = data.config;
   if (!cfg.proactiveCare) return;
-  if (!memorySystem || data.memory.stream.length < 3) return; // 记忆太少还不知道你
+  if (!memorySystem || data.memory.memoryStream.length < 3) return; // 记忆太少还不知道你
   const st = getProactiveState();
   const since = Date.now() - st.lastAt;
   // ticket 095 设计 1：平静期主动间隔 2 天 → 3~4 天（默认 3.5，晨起可调）；非平静维持既有 2 天
   const quiet = quietGateSystem?.isQuiet() ?? false;
   if (since < proactiveMinGapMs(quiet)) return;
   // 作息模型：当前是否用户活跃时段（无数据 → 保守不打扰）——温和问候豁免与 Bandit 主动共享本闸门
-  const profile = buildRhythmProfile(data.memory.stream, 30, Date.now());
+  const profile = buildRhythmProfile(data.memory.memoryStream, 30, Date.now());
   if (!profile.total || !isActiveNow(profile)) return;
   // ticket 095 设计 2+7：每日 1 次温和问候豁免——安静陪伴期优先占用本次调度槽位：
   // 与 Bandit 主动共享间隔/作息闸门，发出即刷新 lastAt 顺延下一次 Bandit 主动（打扰总量守恒，
@@ -543,7 +667,7 @@ export async function maybeProactiveCare(): Promise<void> {
       } else {
         const templates: Record<string, string[]> = {
           empathy: [
-            `我看记录你最近情绪有些波动，${describeEmotionTrend(analyzeEmotionTrend(buildEmotionSnapshots(data.memory.stream)))}。想说的时候我都在。`,
+            `我看记录你最近情绪有些波动，${describeEmotionTrend(analyzeEmotionTrend(buildEmotionSnapshots(data.memory.memoryStream)))}。想说的时候我都在。`,
             `喵~ 感觉你这阵子心情起伏不小，要不要和我说说？`,
           ],
           life: [
@@ -560,7 +684,7 @@ export async function maybeProactiveCare(): Promise<void> {
       }
     } else {
       // 近 3 条记忆做引子 + 懂你上下文块（作息/趋势/关系/检索记忆）→ LLM 温和关心（按臂给风格指令）
-      const recent = data.memory.stream.slice(-3).map((m) => m.description).join('；');
+      const recent = data.memory.memoryStream.slice(-3).map((m) => m.description).join('；');
       // ticket 095 设计 1：平静期臂 → 温和风格指令子集（只换表达维度，不改选臂与 reward 口径）
       const styleHint = quiet
         ? gentleStyleFor(armId)
@@ -570,10 +694,19 @@ export async function maybeProactiveCare(): Promise<void> {
       let memoriesText = '';
       try {
         const mems = await memorySystem.retrieve('', undefined);
-        memoriesText = mems.length ? memorySystem.formatMemoriesForPrompt(mems, PROMPT_SLOTS.maxEntries) : '';
+        if (mems.length) {
+          // ADR-0069：引用型条目当场取正文（失效引用顺手清理，不阻塞主动关心）
+          const { text, staleRefs } = await memorySystem.formatMemoriesForPromptWithRefs(mems, PROMPT_SLOTS.maxEntries);
+          for (const stale of staleRefs) {
+            // 审查 P0：完整 ref 键（路径#定位符），只删失效段
+            const r = stale.ref!;
+            try { await memorySystem.removeMemoryByRef(r.locator ? `${r.path}#${r.locator}` : r.path); } catch { /* 清理失败静默 */ }
+          }
+          memoriesText = text;
+        }
       } catch { /* 检索失败用空 */ }
       const companionContext = buildCompanionContext({
-        stream: data.memory.stream,
+        memoryStream: data.memory.memoryStream,
         relationship: data.personalityGrowth?.relationship ?? null,
         emotion: moodSystem.getCurrentEmotion(),
         memoriesText,
@@ -608,22 +741,13 @@ export async function maybeProactiveCare(): Promise<void> {
 }
 
 // ---------------- 情绪趋势回写心情（ADR-0025 A 面：近 48h 趋势 → PAD 温和漂移） ----------------
-
-let trendDriftTimer: ReturnType<typeof setInterval> | null = null;
-
-/** 趋势回写调度（每 30 分钟检查；观察情绪样本 ≥3 才动） */
-function startTrendDrift(): void {
-  if (trendDriftTimer) clearInterval(trendDriftTimer);
-  trendDriftTimer = setInterval(() => {
-    void maybeTrendDrift();
-  }, 30 * 60 * 1000);
-}
+// 趋势回写按 30 分钟节拍调度，由常驻心跳分派（startResidentHeartbeat / dispatchResidentTick，p2 收敛）
 
 /** 近 48h 观察情绪序列 → 趋势/波动 → applyTrendDrift（温和回写；样本太少不动） */
 async function maybeTrendDrift(): Promise<void> {
   if (!data || !moodSystem) return;
   const since = Date.now() - 48 * 60 * 60 * 1000;
-  const recent = data.memory.stream.filter((m) => m.type === 'observation' && m.emotion && new Date(m.created).getTime() >= since);
+  const recent = data.memory.memoryStream.filter((m) => m.type === 'observation' && m.emotion && new Date(m.created).getTime() >= since);
   if (recent.length < 3) return;
   try {
     const trend = analyzeEmotionTrend(buildEmotionSnapshots(recent));
@@ -635,60 +759,66 @@ async function maybeTrendDrift(): Promise<void> {
 }
 
 // ---------------- 每周懂你报告（2026-08-23「懂你」增强：⑦） ----------------
+// 周报按 1 小时节拍调度 + 10 点检查，由常驻心跳分派（startResidentHeartbeat / dispatchResidentTick，p2 收敛）
 
-/** 周报调度：每天 10:00 检查一次（新一周且本周有观察 → 生成） */
-function startWeeklyReport(): void {
-  if (weeklyReportTimer) clearInterval(weeklyReportTimer);
-  weeklyReportTimer = setInterval(() => {
-    const h = new Date().getHours();
-    if (h === 10) void maybeWeeklyReport();
-  }, 60 * 60 * 1000);
+/** 第一条洞察的时间戳（周报首窗锚点；排除周报自身产物；无洞察返回 0） */
+function firstInsightAt(stream: { type?: string; source?: string; created?: string }[]): number {
+  let min = NaN;
+  for (const m of stream || []) {
+    if (m?.type !== 'insight' || m?.source === 'weekly-report') continue;
+    const t = m.created ? new Date(m.created).getTime() : NaN;
+    if (Number.isFinite(t) && (Number.isNaN(min) || t < min)) min = t;
+  }
+  return Number.isFinite(min) ? min : 0;
 }
 
-/** 生成本周报告（仅当新周 + 本周有观察；LLM/兜底 → 写回流 source weekly-report + 气泡展示 + 状态推进） */
+/** 生成懂你报告（ticket 162：窗口锚定第一条洞察的日期，按 7 天一周往后推链式生成——
+ *  首窗 = [第一条洞察, +7d)，此后每窗起点 = 上窗末端（st.at 存窗口末端）；整点后由小时心跳分派；
+ *  空窗不出报告、窗口静默推进（防卡死）。LLM/兜底 → 写回流 source weekly-report + 气泡 + 状态推进） */
 async function maybeWeeklyReport(): Promise<void> {
   if (!data || !bubbleManager || !moodSystem || !memorySystem) return;
   const st = getWeeklyReportState();
-  const weekKey = isoWeekKey();
-  if (st.weekKey === weekKey) return; // 本周已生成
-  const win = weekWindow(Date.now());
-  const [start] = win;
-  // 周一起算：只在本周窗口已至少过去 1 天且本周有观察时生成（周二起才可能）
-  if (Date.now() - start < 24 * 60 * 60 * 1000) return;
-  const weekEntries = data.memory.stream.filter((m) => {
-    const t = m.created ? new Date(m.created).getTime() : NaN;
-    return Number.isFinite(t) && t >= win[0] && t <= win[1] && m.type === 'observation';
-  });
-  if (weekEntries.length < 3) return; // 观察太少，本周报告无意义（下周再试）
+  const now = Date.now();
+  const WEEK = 7 * 24 * 60 * 60 * 1000;
+  // 基线 = 上窗末端；首次（无 at）= 第一条洞察的日期（无洞察不出报告）
+  let baseline = st.at || 0;
+  if (!baseline) {
+    baseline = firstInsightAt(data.memory.memoryStream);
+    if (!baseline) return;
+  }
+  if (now - baseline < WEEK) return; // 本窗未满 7 天
+  const windowEnd = baseline + WEEK;
+  // 周报只吃窗口内洞察（反思/叙事产出的高阶结论，buildWeeklyReportData 内剔除 superseded）
+  const report = buildWeeklyReportData(data.memory.memoryStream, moodSystem.pad, windowEnd, baseline);
+  const advance = async () => {
+    const d = dataProvider();
+    d.editingData = { ...(d.editingData || {}), weeklyReport: { weekKey: isoWeekKey(), at: windowEnd } as WeeklyReportState };
+    await dataSaver(d);
+  };
+  if (report.total === 0) {
+    await advance(); // 空窗：不出报告，窗口推进（下轮检查下一窗）
+    return;
+  }
   try {
-    const report = buildWeeklyReportData(data.memory.stream, moodSystem.pad, Date.now());
     const text = await generateWeeklyReport(report);
     if (!text) return;
     // 写回流（insight，source weekly-report，importance 高——记忆流可见但 insight 不作反思 evidence）
     await memorySystem.addInsight(`【本周懂你报告】${text}`, [], 0.8, undefined, 'weekly-report');
     // 气泡展示（隐藏超长：先给一句导语，全文在设置弹窗「查看报告」）
     bubbleManager.showBubble(`喵~ 我读完这周关于你的记录了。${text.length > 60 ? text.substring(0, 60) + '……' : text}`);
-    const d = dataProvider();
-    d.editingData = { ...(d.editingData || {}), weeklyReport: { weekKey, at: Date.now() } as WeeklyReportState };
-    await dataSaver(d);
+    await advance();
   } catch (e) {
-    /* 周报失败静默（下周再试；不推进状态） */
+    /* 周报失败静默（下轮小时检查再试；不推进状态） */
   }
 }
 
 // ---------------- 关系史叙事扫描（ticket 094 方向八：独立周键退避，不共享 reflectBackoffUntil） ----------------
+// 叙事扫描按 1 小时节拍调度，由常驻心跳分派（startResidentHeartbeat / dispatchResidentTick，p2 收敛）
 
-/** 叙事扫描调度（每小时检查；本周未生成且本周有正性事件才尝试，AI 未配置静默跳过） */
-let dossierTimer: ReturnType<typeof setInterval> | null = null;
 /** 叙事失败内存退避（30 分钟；不落盘——重启即重置，周键才是持久化去重位） */
 let dossierRetryAt = 0;
 /** 叙事生成进行中锁（防 ensure 即扫与小时 tick 并发双发） */
 let dossierScanning = false;
-
-function startDossierScan(): void {
-  if (dossierTimer) clearInterval(dossierTimer);
-  dossierTimer = setInterval(() => { void maybeDossierNarrative(); }, 60 * 60 * 1000);
-}
 
 /** 生成本周关系史叙事（成功 → 洞察写回流 source=dossier + 推进 editingData.dossierScanKey；
  *  LLM 未配置/失败/空回包静默不推进周键（下轮小时检查再试，对齐周报先例）；
@@ -729,7 +859,7 @@ async function generateBookReview(): Promise<void> {
     if (!bookDescription) return;
     // ADR-0025 B 面：书评也带「懂你上下文」（作息/趋势/关系；不额外检索记忆省一次调用）
     const companionContext = buildCompanionContext({
-      stream: data.memory.stream,
+      memoryStream: data.memory.memoryStream,
       relationship: data.personalityGrowth?.relationship ?? null,
       emotion: moodSystem.getCurrentEmotion(),
     });
@@ -889,17 +1019,21 @@ function openSettings(): void {
       (getSettings() as any).smartcatMobileDefaultFullscreen = v;
       await saveSettings();
     },
-    // ADR-0023：人格成长可视化 + 重置
-    getPersonalityGrowth: () => {
-      return data ? data.personalityGrowth : null;
+    // ADR-0069：记忆目录变更 → 同步增量同步器（移除目录清理条目/新增目录补扫）。
+    // 审查 P0：全清也必须先走 syncDirectories([]) 回删名下条目（UI 承诺「移除目录会清掉对应记忆」），
+    // 直接丢引用会永久残留——先同步再卸载
+    onMemoryDirectoriesChanged: (dirs: string[]) => {
+      if (!dirs.length) {
+        const sync = noteMemorySync;
+        noteMemorySync = null;
+        if (sync) void sync.syncDirectories([]).catch(() => { /* 清理失败静默 */ }).finally(() => sync.dispose());
+      } else ensureNoteMemorySync();
     },
-    resetPersonalityGrowth: async () => {
-      if (!data || !appRef) return;
-      const fresh = defaultPersonalityGrowth();
-      // 保留已有 30 特质成长历史？重置 = 回新种子（MATE：重置出生）
-      data.personalityGrowth = fresh;
-      await saveSmartCatData(appRef, data);
+    // ticket 103 本地移植：电源组对账回调——启用/关闭方式变更后立即把运行态对齐（stop 全量卸载 / hide 隐藏启动 / lazy 不动）
+    onPowerStateChange: async (enabled, offMode) => {
+      if (appRef) await applySmartcatPowerState(appRef, enabled, normalizeSmartcatOffMode(offMode));
     },
+    // ADR-0023：人格成长数据在内部演化（personalityGrowth 字段），设置弹窗不再展示
     // 「打开数据面板」（2026-08-23：原「每周懂你报告」行替换；周报全文在面板「报告」页签）
     onOpenDashboard: () => {
       if (appRef) void openSmartcatDashboard(appRef);
@@ -965,14 +1099,14 @@ async function sendChatMessage(message: string): Promise<void> {
     // 元认知矛盾检测（ticket 035）：当前消息 vs 记忆流用户事实 → 命中则给回复加提醒
     let contradictionHint = '';
     try {
-      const facts = extractStoredFacts(data.memory.stream);
+      const facts = extractStoredFacts(data.memory.memoryStream);
       const cr = checkContradiction(message, facts);
       if (cr.detected && cr.detail.length) contradictionHint = '\n\n（小橘注意到：' + cr.detail[0] + '——你是不是改变主意了？）';
     } catch { /* 矛盾检测失败不阻断 */ }
     // 情绪趋势注入（ticket 035）：格式化后拼进 user 上下文尾
     let emotionContext = '';
     try {
-      const trend = analyzeEmotionTrend(buildEmotionSnapshots(data.memory.stream));
+      const trend = analyzeEmotionTrend(buildEmotionSnapshots(data.memory.memoryStream));
       if (trend.count > 0) emotionContext = '\n用户近期情绪趋势：' + describeEmotionTrend(trend);
     } catch { /* 无情绪数据跳过 */ }
     const messages = await interaction.prepareChatMessages(message + emotionContext + contradictionHint);
@@ -993,7 +1127,14 @@ async function sendChatMessage(message: string): Promise<void> {
     // ADR-0021/0025：对话写入 observation（dedupe=聊天去重限流：近 20 条内重复跳过；
     //  非 calm 情绪或 importance≥0.55 才落库，低价值「用户说：X」不稀释记忆流）；
     //  情绪共振/瞬时情绪由 memorySystem.onObservation 钩子统一处理（不再此处手动 registerEmotion）
-    await memorySystem!.addObservation(`用户说：${message}`, { source: 'chat', dedupe: true });
+    //  P2a：结构化聊天消息——走新签名，dedupe 保留
+    await memorySystem!.addObservation('chat', {
+      structured: {
+        entityType: 'chat_message', action: 'said',
+        extras: { content: message },
+      },
+      dedupe: true,
+    });
     // ADR-0023：聊天 → 性格微移 + 行为统计（tickBehaviorStats；情绪强度近似取消息长度）
     // ticket 072：强度上限 0.8→0.5（长度≠情绪浓度，粘贴长文不应拿满格人格微移）
     personalityGrowth!.developBasedOnInteraction('talk', 1, Math.min(0.5, message.length / 200)).catch(() => {});
@@ -1009,22 +1150,37 @@ async function sendChatMessage(message: string): Promise<void> {
   }
 }
 
-/** 打字机效果（原 typewriterEffect 逐字） */
+/** 打字机效果（原 typewriterEffect 逐字；UX 47：长回复期间点击目标气泡可直接完成渲染——
+ * 点击任意时刻补全全文并清 interval，不必等打字节拍走完） */
 function typewriterEffect(element: HTMLElement, text: string, speed = 30): Promise<void> {
   return new Promise((resolve) => {
     let index = 0;
+    let timer: ReturnType<typeof setInterval> | null = null;
     element.textContent = '';
-    const timer = setInterval(() => {
+    const finish = () => {
+      if (timer) clearInterval(timer);
+      timer = null;
+      element.removeEventListener('click', onClick);
+      element.textContent = text;
+      resolve();
+    };
+    const onClick = (): void => finish();
+    element.addEventListener('click', onClick);
+    timer = setInterval(() => {
       if (index < text.length) {
         element.textContent += text[index];
         index++;
         if (panels) panels.chatMessages.scrollTop = panels.chatMessages.scrollHeight;
       } else {
-        clearInterval(timer);
-        resolve();
+        finish();
       }
     }, speed);
   });
+}
+
+/** 测试辅助：UX 47 打字机点击跳过单测直取（生产仅 sendChatMessage 内部使用） */
+export function __typewriterEffectForTests(element: HTMLElement, text: string, speed = 30): Promise<void> {
+  return typewriterEffect(element, text, speed);
 }
 
 /** 卸载清理 */
@@ -1073,29 +1229,18 @@ export function unloadSmartCat(): void {
     visibilityCleanup();
     visibilityCleanup = null;
   }
-  if (proactiveTimer) {
-    clearInterval(proactiveTimer);
-    proactiveTimer = null;
-  }
-  if (weeklyReportTimer) {
-    clearInterval(weeklyReportTimer);
-    weeklyReportTimer = null;
-  }
-  // 关系史叙事扫描调度（ticket 094）
-  if (dossierTimer) {
-    clearInterval(dossierTimer);
-    dossierTimer = null;
-  }
+  // 常驻调度心跳（p2 收敛）：随下方 memory stopScheduler 停跳；节拍计数归零，重装后从 0 重算相位
+  residentTickCount = 0;
   dossierRetryAt = 0;
-  if (trendDriftTimer) {
-    clearInterval(trendDriftTimer);
-    trendDriftTimer = null;
-  }
   if (greetTimer) {
     clearTimeout(greetTimer);
     greetTimer = null;
   }
   animation?.dispose();
+  // ADR-0069：卸载前尽力冲刷脏 sidecar（防抖窗口内的记忆/行为条目不丢）。
+  // 审查 P1：传卸载前的 data 快照——冲刷内部不再经 dataProvider()（函数尾部 data 会被置 null，
+  // 原实现记忆分支必然抛错且 fire-and-forget 被吞，未落盘条目确定丢失）
+  try { void memorySystem?.flushSidecars(data ?? undefined); } catch { /* 忽略 */ }
   memorySystem?.stopScheduler(); // 反思调度（含 ticket 075 memo 到期扫描 tick）一并停止
   moodSystem?.dispose();
   interaction?.dispose();
@@ -1104,6 +1249,9 @@ export function unloadSmartCat(): void {
   domainPrev.clear();
   domainObserved.clear();
   mobileAdapter?.destroy();
+  // 记忆目录增量同步器（ADR-0069）：内存表清空（无定时器）
+  noteMemorySync?.dispose();
+  noteMemorySync = null;
   if (panels) {
     panels.dispose();
     panels = null;
@@ -1173,27 +1321,105 @@ function memoActionKey(evt: MemoActionEvent): string {
 }
 
 /** 影视动作观察处理（movie 域 UI 经 emitDomainEvent('movie', evt) 派发 → 总线订阅进入）。
- *  未初始化 / 未启用（noteSource 关）→ 静默；文案构造见 movie-source.buildMovieActionText。 */
+ *  未初始化 / 未启用（noteSource 关）→ 静默；文案构造见 movie-source.buildMovieActionText。
+ *  P2a：结构化观察——产出 StructuredMeta 走新签名 addObservation，由路由规则分派流。 */
 function notifyMovieAction(evt: MovieActionEvent): void {
   if (!initialized || !memorySystem || !data?.config?.noteSource) return;
-  const text = buildMovieActionText(evt);
-  if (!text) return;
   // B6（ticket 084a）：同事件同 key 近 300ms 防重（双击确认等重复触发）
   if (notifyDeduped(evt.kind, movieActionKey(evt))) return;
-  void memorySystem.addObservation(text, { source: 'movie' });
+  // P2a：将 MovieActionEvent 映射为 StructuredMeta
+  const structured = movieEventToStructured(evt);
+  const desc = generateDescription(structured);
+  structured.snapshot = { summary: desc, tags: [], length: 0 };
+  void memorySystem.addObservation('movie', { structured });
+}
+
+/** MovieActionEvent → StructuredMeta 映射（P2a） */
+function movieEventToStructured(evt: MovieActionEvent): StructuredMeta {
+  switch (evt.kind) {
+    case 'created':
+      return {
+        entityType: 'movie', action: evt.status,
+        name: evt.name,
+        rating: evt.rating ?? undefined,
+        extras: { review: evt.review },
+      };
+    case 'status':
+      return {
+        entityType: 'movie', action: evt.to,
+        name: evt.name,
+        extras: { from: evt.from },
+      };
+    case 'rated':
+      return {
+        entityType: 'movie', action: 'rated',
+        name: evt.name,
+        rating: evt.toRating,
+        extras: { fromRating: evt.fromRating },
+      };
+    case 'review':
+      return {
+        entityType: 'movie', action: 'reviewed',
+        name: evt.name,
+        extras: { fromReview: evt.fromReview, review: evt.toReview },
+      };
+    case 'deleted':
+      return {
+        entityType: 'movie', action: 'deleted',
+        name: evt.name,
+      };
+    default:
+      // P1-2：意外 evt.kind 兜底——不抛错，走 system:fallback 路由
+      return {
+        entityType: 'movie', action: 'unknown',
+        name: (evt as any).name ?? '未知',
+      };
+  }
 }
 
 // ------------- 备忘录动作观察（ticket 075：方法监听 + 每日到期扫描） -------------
 
 /** 备忘录动作观察处理（memo 域 UI 经 emitDomainEvent('memo', evt) 派发 → 总线订阅进入）。
- *  未初始化 / 未启用（noteSource 关）→ 静默；文案构造见 memo-source.buildMemoActionText。 */
+ *  未初始化 / 未启用（noteSource 关）→ 静默；P2b：构造 StructuredMeta 走行为流。 */
 function notifyMemoAction(evt: MemoActionEvent): void {
   if (!initialized || !memorySystem || !data?.config?.noteSource) return;
-  const text = buildMemoActionText(evt);
-  if (!text) return;
+  const structured = buildMemoStructured(evt);
+  if (!structured) return;
   // B6（ticket 084a）：同事件同 key 近 300ms 防重（勾选完成与抽屉「标记完成」双入口/双击等）
   if (notifyDeduped(evt.kind, memoActionKey(evt))) return;
-  void memorySystem.addObservation(text, { source: 'memo' });
+  void memorySystem.addObservation('memo', { structured });
+}
+
+// ------------- 文献盒动作观察（ADR-0066/0072：literature:tasks 域事件接入小橘行为流；ticket 136 收敛为两节点） -------------
+
+/** 文献盒动作观察处理（literature 域经 emitDomainEvent('literature:tasks', evt) 派发 → 总线订阅进入）。
+ *  未初始化 / 未启用（noteSource 关）→ 静默。
+ *  视频转文献成功（converted）/ 术语生成成功（term-generated）→ 行为流新建条目
+ *  （ticket 136 用户拍板只收这两类；添加任务/解析/编辑/失败跳过）。 */
+function notifyLiteratureAction(evt: LiteratureActionEvent): void {
+  if (!initialized || !memorySystem || !data?.config?.noteSource) return;
+  const structured = buildLiteratureStructured(evt);
+  if (!structured) return;
+  // 同事件同 key 近 300ms 防重（双击保存等双入口场景）
+  if (notifyDeduped(structured.action, literatureActionKey(evt))) return;
+  void memorySystem.addObservation('literature', { structured });
+}
+
+/** 文献盒事件防重键：converted=url+notePath（重试/重复转换不重复计）；term-generated=term（同词连点一次算一次） */
+function literatureActionKey(evt: LiteratureActionEvent): string {
+  return evt.kind === 'converted' ? `${evt.url}|${evt.notePath ?? ''}` : String(evt.term || '');
+}
+
+// ------------- ADR-0069 行为流全量盘点补齐（日记分类调整 / 剪藏删除） -------------
+
+/** 日记分类调整观察（ADR-0069 盘点补齐）：diary 域 dialogs 经 emitDomainEvent('diary:tags-changed')
+ *  派发 → 总线订阅进入。构造 diary:tagged 结构化条目入行为流（此前该动作无任何观察）。
+ *  未初始化 / noteSource 关 / 载荷异常 → 静默。 */
+function notifyDiaryTagsChanged(evt: DiaryTagsEvent): void {
+  if (!initialized || !memorySystem || !data?.config?.noteSource) return;
+  const structured = buildDiaryTagsStructured(evt);
+  if (!structured) return;
+  void memorySystem.addObservation('diary', { structured });
 }
 
 /** memo.json 路径（跟随共享 storagePath，同 smartcatStorageDir 目录规则） */
@@ -1239,12 +1465,12 @@ export async function maybeMemoDueScan(now: Date = new Date()): Promise<void> {
     if (!file) return; // memo 域未启用（无 memo.json）：静默，不推进扫描日期（等 memo 数据出现再扫）
     const raw = JSON.parse(await appRef.vault.read(file as any));
     const items: MemoDueLike[] = Array.isArray(raw) ? (raw as any[]) : [];
-    const text = memoDueObservation(items, now);
     // B8 防重复：先推进扫描日期（落盘）再观察——如上注释，任何后续失败也跳过当天重扫
     const d = dataProvider();
     d.editingData = { ...(d.editingData || {}), dueScan: { date: today } };
     await dataSaver(d);
-    if (text) await memorySystem.addObservation(text, { source: 'memo' });
+    const structured = buildMemoDueScanStructured(items, now);
+    if (structured) await memorySystem.addObservation('memo', { structured });
     memoDueScanFail = { date: today, count: 0 };
   } catch (e) {
     /* 读取/解析/日期落盘失败：不推进日期，记连续失败计数——达到上限当日放弃（下次 tick 不再重试） */
@@ -1255,21 +1481,22 @@ export async function maybeMemoDueScan(now: Date = new Date()): Promise<void> {
 // ------------- 聚合讯观察（ticket 076：2026-08-25 修订——仅保存 + 累计可视时长，ADR-0029） -------------
 
 /** 聚合讯观察处理（read 入口）：news 域 reader 经 emitDomainEvent('news', {kind:'read', evt}) 派发。
- *  2026-08-25 用户拍板：跳过/阅读不再产生观察，仅保存发（立即形态，auto-summary 补全走
- *  saved 入口登记）；文案构造见 news-source.buildNewsReadText；未初始化/未启用（noteSource 关）→ 静默。 */
+ *  2026-08-25 拍板：仅保存发观察（立即形态，auto-summary 补全走 saved 入口登记）；
+ *  2026-08-27 追加拍板（ticket 123）：跳过也发——news:skipped 入行为流（轻量记录，不向量化）；
+ *  阅读无独立动作不发。P2b：构造 StructuredMeta 走行为流；未初始化/未启用（noteSource 关）→ 静默。 */
 function notifyNewsRead(evt: NewsReadEvent): void {
   if (!initialized || !memorySystem || !data?.config?.noteSource) return;
-  const text = buildNewsReadText(evt.state, evt.title, evt.platform, evt.durationMin);
-  if (text) void memorySystem.addObservation(text, { source: 'news' });
+  const structured = buildNewsReadStructured(evt);
+  void memorySystem.addObservation('news', { structured });
 }
 
 /** 保存登记待补全（方案 a，saved 入口）：news 域 reader saveToClip 经
  *  emitDomainEvent('news', {kind:'saved', evt, clipPath}) 派发 → 总线订阅进入。
- *  登记 {标题, 平台, 时长分, 剪藏 baseName, link} 进内存表并启动 2 分钟降级定时器：
+ *  登记 {标题, 平台, 时长分, 剪藏 baseName, url} 进内存表并启动 2 分钟降级定时器：
  *  命中 auto-summary 写回的剪藏 modify → 补全完整保存观察并移除登记（clearTimeout）；
  *  定时器兜底（到时无提交）→ 降级产出保存观察并移除登记。未初始化 / noteSource 关 → 静默。
  *  ticket 084b：剪藏 frontmatter 无 title → auto-summary renameToTitle 必改名，登记键（原路径）
- *  会失效；补全/降级靠登记 baseName/link 反查新路径（见 complete/degradePendingNewsSave）。 */
+ *  会失效；补全/降级靠登记 baseName/url 反查新路径（见 complete/degradePendingNewsSave）。 */
 function notifyNewsSaved(evt: NewsReadEvent, clipPath: string): void {
   if (!initialized || !memorySystem || !data?.config?.noteSource) return;
   const prev = newsPendingSaves.get(clipPath);
@@ -1278,12 +1505,12 @@ function notifyNewsSaved(evt: NewsReadEvent, clipPath: string): void {
     void degradePendingNewsSave(clipPath);
   }, newsSaveTimeoutMs);
   const baseName = clipPath.split('/').pop()?.replace(/\.md$/i, '') || evt.title;
-  newsPendingSaves.set(clipPath, { title: evt.title, platform: evt.platform, durationMin: evt.durationMin, baseName, link: '', timer });
-  // ticket 084b：异步登记 frontmatter link（rename 后反查主锚点；saveToClip 已创建文件读必成功，
+  newsPendingSaves.set(clipPath, { title: evt.title, platform: evt.platform, durationMin: evt.durationMin, baseName, url: '', timer });
+  // ticket 084b：异步登记 frontmatter url（rename 后反查主锚点；saveToClip 已创建文件读必成功，
   // 读失败留空走 baseName 兜底；unload 清表后该 then 自然空转）
   void readClipFrontmatterOrEmpty(clipPath).then((fm) => {
     const reg = newsPendingSaves.get(clipPath);
-    if (reg && fm.link) reg.link = fm.link;
+    if (reg && fm.url) reg.url = fm.url;
   });
 }
 
@@ -1307,7 +1534,7 @@ function removePendingNewsSave(clipPath: string): void {
 
 /** 剪藏 modify 补全（'clipping:file-modified' 总线订阅）：命中登记 → 读 frontmatter summary/tags → 完整保存观察 → 移除登记。
  *  ticket 084b 二次匹配：事件路径 ≠ 登记键（auto-summary renameToTitle 改名后 modify 带新路径）时，
- *  按事件文件 frontmatter link / 文件名反查登记表，改名场景同样补全命中。 */
+ *  按事件文件 frontmatter url / 文件名反查登记表，改名场景同样补全命中。 */
 async function completePendingNewsSave(file: any): Promise<void> {
   const path = file?.path;
   let reg = newsPendingSaves.get(path);
@@ -1321,21 +1548,21 @@ async function completePendingNewsSave(file: any): Promise<void> {
     regPath = hit.clipPath;
   }
   removePendingNewsSave(regPath);
-  const text = buildNewsSavedFullText(reg.title, reg.platform, reg.durationMin, fm.summary || null, fm.tags.length ? fm.tags : null);
-  await addNewsSaveObservation(text);
+  const structured = buildNewsSavedStructured(reg.title, reg.platform, reg.durationMin, fm.summary || null, fm.tags.length ? fm.tags : null);
+  await addNewsSaveObservation(structured);
 }
 
-/** 二次匹配（ticket 084b）：事件文件与登记键不一致时反查登记表——frontmatter link 一致（URL 唯一，
- *  renameToTitle 只改文件名不碰 link）优先；其次文件名 baseName 一致（AI 标题与原 cleanTitle 相同的
+/** 二次匹配（ticket 084b）：事件文件与登记键不一致时反查登记表——frontmatter url 一致（URL 唯一，
+ *  renameToTitle 只改文件名不碰 frontmatter）优先；其次文件名 baseName 一致（AI 标题与原 cleanTitle 相同的
  *  未改名场景，或目录级移动）。返回命中登记的键（原剪藏路径）与登记本身。 */
-function reverseLookupPendingNewsSave(file: any, fm: { summary: string; tags: string[]; link: string }): { reg: NewsPendingSave; clipPath: string } | null {
+function reverseLookupPendingNewsSave(file: any, fm: { summary: string; tags: string[]; url: string }): { reg: NewsPendingSave; clipPath: string } | null {
   const path = file?.path;
   if (!path || newsPendingSaves.size === 0) return null;
   const base = path.split('/').pop()?.replace(/\.md$/i, '') || '';
   let baseHit: { reg: NewsPendingSave; clipPath: string } | null = null;
   for (const [clipPath, reg] of newsPendingSaves) {
     if (clipPath === path) continue; // 键已在上层命中
-    if (fm.link && reg.link === fm.link) return { reg, clipPath };
+    if (fm.url && reg.url === fm.url) return { reg, clipPath };
     if (!baseHit && base && reg.baseName === base) baseHit = { reg, clipPath };
   }
   return baseHit;
@@ -1343,7 +1570,7 @@ function reverseLookupPendingNewsSave(file: any, fm: { summary: string; tags: st
 
 /** 降级：登记后 2 分钟未等到 auto-summary → 读剪藏 frontmatter（错过 modify 事件兜底）→ 产出保存观察并移除登记。
  *  ticket 084b：原路径读无摘要（auto-summary renameToTitle 已改名，原路径不存在）→
- *  按登记 baseName/link 全剪藏目录反查改名后新路径再读，AI 摘要/标签不再被改名吞掉。 */
+ *  按登记 baseName/url 全剪藏目录反查改名后新路径再读，AI 摘要/标签不再被改名吞掉。 */
 async function degradePendingNewsSave(clipPath: string): Promise<void> {
   const reg = newsPendingSaves.get(clipPath);
   if (!reg) return; // 已被补全移除
@@ -1353,12 +1580,12 @@ async function degradePendingNewsSave(clipPath: string): Promise<void> {
     const moved = await locateRenamedClip(reg, clipPath);
     if (moved) fm = await readClipFrontmatterOrEmpty(moved);
   }
-  const text = buildNewsSavedFullText(reg.title, reg.platform, reg.durationMin, fm.summary || null, fm.tags.length ? fm.tags : null);
-  await addNewsSaveObservation(text);
+  const structured = buildNewsSavedStructured(reg.title, reg.platform, reg.durationMin, fm.summary || null, fm.tags.length ? fm.tags : null);
+  await addNewsSaveObservation(structured);
 }
 
 /** 剪藏目录内反查改名后新文件（ticket 084b）：枚举 `归档/网页剪藏/` 下 .md，
- *  优先 frontmatter link 与登记一致（renameToTitle 改名场景），其次文件名 baseName 与登记一致；
+ *  优先 frontmatter url 与登记一致（renameToTitle 改名场景），其次文件名 baseName 与登记一致；
  *  逐一读 frontmatter 判定，防误配其他剪藏。返回新路径，找不到返回 null（维持原降级语义：空摘要）。 */
 async function locateRenamedClip(reg: NewsPendingSave, clipPath: string): Promise<string | null> {
   if (!appRef || !reg.baseName) return null;
@@ -1373,11 +1600,11 @@ async function locateRenamedClip(reg: NewsPendingSave, clipPath: string): Promis
   } catch {
     return null; // 枚举失败按无候选（维持原降级语义）
   }
-  // 1) frontmatter link 完全匹配（URL 唯一标识原文；renameToTitle 保留 link 字段）
-  if (reg.link) {
+  // 1) frontmatter url 完全匹配（URL 唯一标识原文；renameToTitle 保留 frontmatter）
+  if (reg.url) {
     for (const c of candidates) {
       try {
-        if ((await readClipFrontmatterOrEmpty(c)).link === reg.link) return String(c.path);
+        if ((await readClipFrontmatterOrEmpty(c)).url === reg.url) return String(c.path);
       } catch { /* 单个候选读取失败跳过 */ }
     }
   }
@@ -1390,18 +1617,20 @@ async function locateRenamedClip(reg: NewsPendingSave, clipPath: string): Promis
   return null;
 }
 
-/** 保存联动产出防重复：与近 20 条同文案（保存瞬间 notifyNewsRead 已产的立即形态）→ 跳过，防双条入流 */
-async function addNewsSaveObservation(text: string): Promise<void> {
+/** 保存联动产出防重复：与近 20 条同文案（保存瞬间 notifyNewsRead 已产的立即形态）→ 跳过，防双条入流。
+ *  P2b：改用 StructuredMeta 走行为流；防重检查同步切换到行为流。 */
+async function addNewsSaveObservation(structured: StructuredMeta): Promise<void> {
   const mem = memorySystem;
   if (!mem) return;
-  const norm = text.trim();
-  if (mem.stream.slice(-20).some((m) => (m.description || '').trim() === norm)) return;
-  await mem.addObservation(text, { source: 'news' });
+  const name = structured.name ?? '';
+  // 防重：行为流近 20 条内有同 source+name → 跳过（防止 notifyNewsRead 立即形态已入流后的重复）
+  if (mem.behaviorStream.slice(-20).some((b) => b.source === 'news' && (b.metadata as StructuredMeta | undefined)?.name === name)) return;
+  await mem.addObservation('news', { structured });
 }
 
-/** 读剪藏 frontmatter 的 link/summary/tags（auto-summary 产物原样处理；正则轻量解析，兼容 list 与 inline 数组两式） */
-async function readClipFrontmatterOrEmpty(fileOrPath: any): Promise<{ summary: string; tags: string[]; link: string }> {
-  const empty = { summary: '', tags: [] as string[], link: '' };
+/** 读剪藏 frontmatter 的 url/summary/tags（auto-summary 产物原样处理；正则轻量解析，兼容 list 与 inline 数组两式） */
+async function readClipFrontmatterOrEmpty(fileOrPath: any): Promise<{ summary: string; tags: string[]; url: string }> {
+  const empty = { summary: '', tags: [] as string[], url: '' };
   if (!appRef) return empty;
   let content = '';
   try {
@@ -1414,10 +1643,10 @@ async function readClipFrontmatterOrEmpty(fileOrPath: any): Promise<{ summary: s
   return parseClipFrontmatter(content);
 }
 
-/** frontmatter link/summary/tags 轻量解析（正则；兼容 `  - ` list 与 `["a","b"]` inline 两式）。
- *  link 为 rename 反查主锚点（ticket 084b）：剪藏模板 `link: "URL"`，renameToTitle 只改文件名不碰 link。 */
-export function parseClipFrontmatter(content: string): { summary: string; tags: string[]; link: string } {
-  const out: { summary: string; tags: string[]; link: string } = { summary: '', tags: [], link: '' };
+/** frontmatter url/summary/tags 轻量解析（正则；兼容 `  - ` list 与 `["a","b"]` inline 两式）。
+ *  url 为 rename 反查主锚点（ticket 084b）：剪藏模板 `url: "URL"`，renameToTitle 只改文件名不碰 frontmatter。 */
+export function parseClipFrontmatter(content: string): { summary: string; tags: string[]; url: string } {
+  const out: { summary: string; tags: string[]; url: string } = { summary: '', tags: [], url: '' };
   const fm = content.match(/^\s*---\s*\n([\s\S]*?)\n\s*---\s*\n/);
   if (!fm) return out;
   const tags: string[] = [];
@@ -1447,8 +1676,8 @@ export function parseClipFrontmatter(content: string): { summary: string; tags: 
     if (trimmed.startsWith('summary:') || trimmed.startsWith('summary：')) {
       out.summary = trimmed.slice(trimmed.indexOf(':') + 1).trim().replace(/^["']|["']$/g, '');
     }
-    if (trimmed.startsWith('link:')) {
-      out.link = trimmed.slice(trimmed.indexOf(':') + 1).trim().replace(/^["']|["']$/g, '');
+    if (trimmed.startsWith('url:')) {
+      out.url = trimmed.slice(trimmed.indexOf(':') + 1).trim().replace(/^["']|["']$/g, '');
     }
   }
   out.tags = tags;
@@ -1575,7 +1804,19 @@ async function settleDiaryEntry(filePath: string, date: string, time: string): P
   if (settled.text) {
     // fire-and-forget：addObservation 的 appendVector（探测 Ollama）尾段在无向量环境可能不 resolve，
     // 结算状态须立即推进（对齐 notifyMovieAction 等既有 fire-and-forget 模式）
-    void mem.addObservation(settled.text, { source: 'diary' });
+    // P2a：结构化观察——settled.text 作为 snapshot.summary；generateDescription 生成更丰富的描述
+    const diaryAction = settled.kind === 'first' ? 'created' : 'updated';
+    const tags = entry.tags || [];
+    const structured: StructuredMeta = {
+      entityType: 'diary_entry', action: diaryAction,
+      name: `${date} ${time}`,
+      tags, refPath: filePath,
+      snapshot: { summary: settled.text, tags, length: entry.body.length },
+    };
+    const desc = generateDescription(structured);
+    // 过渡设计：生成的描述写入 snapshot.summary，memory.ts buildDescription 拾取
+    structured.snapshot!.summary = desc;
+    void mem.addObservation('diary', { structured });
     st.lastGeneratedAt = Date.now();
   }
   // 结算状态推进会话内生效（首落已见 / 基线更新 / 累计推进——本次补写 ≤50 也计入下次结算）
@@ -1585,11 +1826,17 @@ async function settleDiaryEntry(filePath: string, date: string, time: string): P
   st.accum = settled.next.accum;
 }
 
-/** 追加一条删除观察（原观察全部保留，删除观察只是追加；fire-and-forget 防阻塞事件链） */
+/** 追加一条删除观察（原观察全部保留，删除观察只是追加；fire-and-forget 防阻塞事件链）
+ *  P2a：走 behavior 流（diary:deleted 路由已定义）+ structured 语义 */
 function appendDiaryDeleteObservation(date: string, time: string): void {
   const mem = memorySystem;
   if (!mem || !data?.config?.noteSource) return;
-  void mem.addObservation(diaryDeleteText(date, time), { source: 'diary' });
+  void mem.addObservation('diary', {
+    structured: {
+      entityType: 'diary_entry', action: 'deleted',
+      name: `${date} ${time}`,
+    },
+  });
 }
 
 /** 日记 create/modify 新链路（ticket 077）：diff 出变化的条目重置其独立计时；
@@ -1640,19 +1887,29 @@ function handleDiaryTrackedDelete(filePath: string): void {
     const date = diaryFileDate(filePath);
     if (!date) return;
     // 文件级兜底（fire-and-forget，防阻塞 vault 事件链）
-    void mem.addObservation(diaryDeleteFileText(date), { source: 'diary' });
+    // P2a：走 behavior 流 + structured 语义
+    void mem.addObservation('diary', {
+      structured: {
+        entityType: 'diary_entry', action: 'deleted',
+        name: date,
+      },
+    });
   }
   diaryTracked.delete(filePath);
 }
 
 /** 卡片盒/现代诗/信 文件删除处理（delete 事件与 rename 移出目录共用）：有跟踪快照 → 追加删除观察
- * （原观察全部保留；fire-and-forget 防阻塞事件链）+ 清计时；未跟踪（无法知道内容）→ 跳过。 */
+ * （原观察全部保留；fire-and-forget 防阻塞事件链）+ 清计时；未跟踪（无法知道内容）→ 跳过。
+ *  P2a：走 behavior 流 + structured 语义 */
 function handleNoteTrackedDelete(filePath: string): void {
   const mem = memorySystem;
   if (!mem) return;
   const tracked = noteTracked.get(filePath);
   if (tracked) {
-    void mem.addObservation(noteDeleteText(tracked.kind, noteFileName(filePath)), { source: tracked.kind });
+    const entityType = tracked.kind === 'letter' ? 'letter' : tracked.kind === 'poem' ? 'poem' : 'flash';
+    void mem.addObservation(tracked.kind, {
+      structured: { entityType, action: 'deleted', name: noteFileName(filePath) },
+    });
     dropNoteTimer(filePath);
   }
   noteTracked.delete(filePath);
@@ -1801,7 +2058,11 @@ async function settleNoteFile(filePath: string): Promise<void> {
   let file: any = null;
   try { file = appRef.vault.getAbstractFileByPath(filePath); } catch { return; }
   if (!file) {
-    void mem.addObservation(noteDeleteText(st.kind, noteFileName(filePath)), { source: st.kind });
+    // P2a：走 behavior 流（note:deleted 路由）+ structured 语义
+    const entityType = st.kind === 'letter' ? 'letter' : st.kind === 'poem' ? 'poem' : 'flash';
+    void mem.addObservation(st.kind, {
+      structured: { entityType, action: 'deleted', name: noteFileName(filePath) },
+    });
     dropNoteTimer(filePath);
     noteTracked.delete(filePath);
     return;
@@ -1823,7 +2084,16 @@ async function settleNoteFile(filePath: string): Promise<void> {
   if (st.generated && !st.observed && (st.kind === 'letter' || st.kind === 'poem') && date && body) {
     const first = noteFirstText(st.kind, name, body, date);
     if (first) {
-      void mem.addObservation(first, { source: st.kind }); // fire-and-forget，对齐 diary 链路
+      // P2a：结构化首落观察
+      const entityType = st.kind === 'letter' ? 'letter' : 'poem';
+      const structured: StructuredMeta = {
+        entityType, action: 'created', name,
+        extras: { date, body },
+        snapshot: { summary: first, tags: [], length: body.length },
+      };
+      const desc = generateDescription(structured);
+      structured.snapshot!.summary = desc;
+      void mem.addObservation(st.kind, { structured }); // fire-and-forget，对齐 diary 链路
       st.observed = true;
     }
   }
@@ -1833,7 +2103,17 @@ async function settleNoteFile(filePath: string): Promise<void> {
   if (settled.text) {
     // fire-and-forget：addObservation 的 appendVector（探测 Ollama）尾段在无向量环境可能不 resolve，
     // 结算状态须立即推进（对齐日记链路）
-    void mem.addObservation(settled.text, { source: st.kind });
+    // P2a：结构化 diff 观察
+    const entityType = st.kind === 'letter' ? 'letter' : st.kind === 'poem' ? 'poem' : 'flash';
+    const action = settled.kind === 'first' ? 'created' : 'updated';
+    const structured: StructuredMeta = {
+      entityType, action, name,
+      extras: { date, body },
+      snapshot: { summary: settled.text, tags: [], length: body.length },
+    };
+    const desc = generateDescription(structured);
+    structured.snapshot!.summary = desc;
+    void mem.addObservation(st.kind, { structured });
   }
   // 结算状态推进会话内生效：基线恒推进到当前正文全文（v2：无累计）；observed——首落已产出或确定不产（无日期）置 true
   st.generated = settled.next.generated;
@@ -1870,32 +2150,34 @@ export function __getNoteTrackedForTests(): ReadonlyMap<string, { kind: NoteKind
 // ------------- 收藏本动作观察（ticket 078：方法监听，ADR-0031） -------------
 
 /** 收藏本动作观察处理（favorites 域 UI 经 emitDomainEvent('favorites', evt) 派发 → 总线订阅进入）。
- *  未初始化 / 未启用（noteSource 关）→ 静默；文案构造见 favorites-source.buildFavoritesActionText。 */
+ *  未初始化 / 未启用（noteSource 关）→ 静默；P2b：构造 StructuredMeta 走行为流。 */
 function notifyFavoritesAction(evt: FavoritesActionEvent): void {
   if (!initialized || !memorySystem || !data?.config?.noteSource) return;
-  const text = buildFavoritesActionText(evt);
-  if (text) void memorySystem.addObservation(text, { source: 'favorites' });
+  const structured = buildFavoritesStructured(evt);
+  if (!structured) return;
+  void memorySystem.addObservation('favorites', { structured });
 }
 
 // ------------- 归物本动作观察（ticket 079：方法监听，ADR-0032） -------------
 
 /** 归物本动作观察处理（belongings 域 UI 经 emitDomainEvent('belongings', evt) 派发 → 总线订阅进入）。
- *  未初始化 / 未启用（noteSource 关）→ 静默；文案构造见 belongings-source.buildBelongingsActionText。
+ *  未初始化 / 未启用（noteSource 关）→ 静默；P2b：构造 StructuredMeta 走行为流。
  *  即时同步观察：无 timer/map 需清理。 */
 function notifyBelongingsAction(evt: BelongingsActionEvent): void {
   if (!initialized || !memorySystem || !data?.config?.noteSource) return;
-  const text = buildBelongingsActionText(evt);
-  if (text) void memorySystem.addObservation(text, { source: 'belongings' });
+  const structured = buildBelongingsStructured(evt);
+  if (!structured) return;
+  void memorySystem.addObservation('belongings', { structured });
 }
 
 // ------------- 番茄钟动作观察（ticket 080：方法监听） -------------
 
 /** 番茄钟动作观察处理（pomodoro 域 applyAction 经 emitDomainEvent('pomodoro', evt) 派发 → 总线订阅进入）。
- *  未初始化 / 未启用（noteSource 关）→ 静默；文案构造见 pomodoro-source.buildPomodoroActionText。 */
+ *  未初始化 / 未启用（noteSource 关）→ 静默；P2b：构造 StructuredMeta 走路由（focus-done 进 memory 流）。 */
 function notifyPomodoroAction(evt: PomodoroActionEvent): void {
   if (!initialized || !memorySystem || !data?.config?.noteSource) return;
-  const text = buildPomodoroActionText(evt);
-  if (text) void memorySystem.addObservation(text, { source: 'pomodoro' });
+  const structured = buildPomodoroStructured(evt);
+  void memorySystem.addObservation('pomodoro', { structured });
 }
 
 /** 域 JSON 感知状态（domain-source.ts 提供 extract 纯函数；此处管理监听生命周期） */
@@ -1928,19 +2210,53 @@ async function settleLibraryPending(id: string): Promise<void> {
   libraryPendingNotes.delete(id);
   if (!watchEnabled() || !memorySystem) return;
   const text = buildLibraryNoteText(p.title, p.highlights, p.excerpts);
-  if (text) await memorySystem.addObservation(text, { source: 'domain:library' });
+  if (!text) return;
+  // P2a：划线/想法结算 → StructuredMeta，路由走 library:highlight/library:thought（按首个有内容的类型判定）
+  const hasHighlights = p.highlights.some((h) => h.trim());
+  const hasExcerpts = p.excerpts.some((e) => e.trim());
+  const action = hasHighlights ? 'highlight' : 'thought';
+  const structured: StructuredMeta = {
+    entityType: 'book', action,
+    name: p.title,
+    extras: { highlights: p.highlights, excerpts: p.excerpts, texts: hasHighlights ? p.highlights : p.excerpts },
+  };
+  const desc = generateDescription(structured);
+  structured.snapshot = { summary: desc, tags: [], length: 0 };
+  await memorySystem.addObservation('library', { structured });
 }
 
 /** library 结构化 diff 消费（ticket 081 v2）：书架增删/读完/时长即时入流；划线/想法走 5 分钟防抖。
- *  noteSource 关（A3）→ 即时事件与防抖档案均不产。 */
+ *  noteSource 关（A3）→ 即时事件与防抖档案均不产。
+ *  P2a：每个事件产出 StructuredMeta 走新签名 addObservation。 */
 async function consumeLibraryDiff(diff: LibraryWeaveDiff, mem: any): Promise<void> {
   if (!watchEnabled()) return;
-  for (const e of diff.added) await mem.addObservation('你把《' + e.title + '》加入了书架', { source: 'domain:library' });
-  for (const e of diff.started) await mem.addObservation('你开始读《' + e.title + '》', { source: 'domain:library' });
-  for (const e of diff.done) await mem.addObservation('你读完了《' + e.title + '》', { source: 'domain:library' });
-  for (const e of diff.removed) await mem.addObservation('你把《' + e.title + '》移出了书架', { source: 'domain:library' });
+  for (const e of diff.added) {
+    const structured: StructuredMeta = { entityType: 'book', action: 'added', name: e.title };
+    structured.snapshot = { summary: generateDescription(structured), tags: [], length: 0 };
+    await mem.addObservation('library', { structured });
+  }
+  for (const e of diff.started) {
+    const structured: StructuredMeta = { entityType: 'book', action: 'started', name: e.title };
+    structured.snapshot = { summary: generateDescription(structured), tags: [], length: 0 };
+    await mem.addObservation('library', { structured });
+  }
+  for (const e of diff.done) {
+    const structured: StructuredMeta = { entityType: 'book', action: 'completed', name: e.title };
+    structured.snapshot = { summary: generateDescription(structured), tags: [], length: 0 };
+    await mem.addObservation('library', { structured });
+  }
+  for (const e of diff.removed) {
+    const structured: StructuredMeta = { entityType: 'book', action: 'removed', name: e.title };
+    structured.snapshot = { summary: generateDescription(structured), tags: [], length: 0 };
+    await mem.addObservation('library', { structured });
+  }
   for (const e of diff.sessions) {
-    await mem.addObservation('你读了《' + e.title + '》约 ' + e.minutes + ' 分钟（读到 ' + e.percent + '%）', { source: 'domain:library' });
+    const structured: StructuredMeta = {
+      entityType: 'book', action: 'progressed',
+      name: e.title, duration: e.minutes, progress: e.percent,
+    };
+    structured.snapshot = { summary: generateDescription(structured), tags: [], length: 0 };
+    await mem.addObservation('library', { structured });
   }
   for (const e of diff.highlightEvents) pushLibraryPending(e.id, e.title, { highlights: e.texts });
   for (const e of diff.excerptEvents) pushLibraryPending(e.id, e.title, { excerpts: e.texts });

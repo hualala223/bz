@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 复习计划核心逻辑测试（ticket 16 修正版）：markReview 阶梯/FSRS/未到期/autoJumpOverdue
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -238,10 +238,12 @@ describe('autoJumpOverdue：做题决定难度开关', () => {
     const getQSpy = vi.fn(async (_app: any, notePath: string) =>
       notePath === 'A.md' ? [{ question: 'Q', options: ['a', 'b', 'c', 'd'], correctIndices: [0] }] : null
     );
+    // ticket 156：批量出题先清空存量题（上次答错残留）再生成新题
+    const saveQSpy = vi.fn(async () => {});
     (reviewApp as any)._quizOverride = {
       ai: {},
       ensureQuestions: async () => {},
-      manager: { getQuestionsForNote: getQSpy },
+      manager: { getQuestionsForNote: getQSpy, saveQuestionsForNote: saveQSpy },
     };
     const spyQL = vi.spyOn(reviewApp, 'quizReviewLoop').mockResolvedValue(undefined);
     const spyRL = vi.spyOn(reviewApp, 'reviewLoop').mockResolvedValue(undefined);
@@ -251,6 +253,8 @@ describe('autoJumpOverdue：做题决定难度开关', () => {
     // 参数错位 bug 回归：必须以 (app, notePath) 双参调用，否则读不到题目
     expect(getQSpy.mock.calls[0][0]).toBeTruthy(); // app
     expect(getQSpy.mock.calls[0][1]).toBe('A.md'); // notePath
+    // ticket 156：出题前先清空该笔记存量题（下次逾期复习出新题）
+    expect(saveQSpy).toHaveBeenCalledWith(expect.anything(), 'A.md', []);
   });
 
   it('关闭 → reviewLoop（普通复习，不弹做题）', async () => {
@@ -292,7 +296,7 @@ describe('autoJumpOverdue：做题决定难度开关', () => {
     (reviewApp as any)._quizOverride = {
       ai: {},
       ensureQuestions: async () => {},
-      manager: { getQuestionsForNote: async () => [] },
+      manager: { getQuestionsForNote: async () => [], saveQuestionsForNote: async () => {} },
     };
     const spyQL = vi.spyOn(reviewApp, 'quizReviewLoop').mockResolvedValue(undefined);
     const spyRL = vi.spyOn(reviewApp, 'reviewLoop').mockResolvedValue(undefined);
@@ -332,6 +336,7 @@ describe('applyReviewStyles', () => {
     document.body.innerHTML = '';
     setSettingsProvider(() => ({}) as any);
     (reviewApp as any).dataManager = null;
+    (reviewApp as any)._styledPaths = new Set(); // ticket 48：曾染色集合逐用例隔离
   });
 
   it('data-path 选择器 + 时间徽标（d/h/m）', async () => {
@@ -399,6 +404,69 @@ describe('applyReviewStyles', () => {
     expect(inner.style.color).toBe('');
     expect(inner.querySelector('.review-stage-badge')).toBeNull();
   });
+
+  it('ticket 48：changedFile 单文件路径——非条目节点不被触碰（他方颜色保持）', async () => {
+    const vault = new MockVault();
+    vault.files.set('A.md', '正文'); // 非复习条目
+    vault.files.set(REVIEW_FILE_PATH, JSON.stringify([]));
+    const treeItem = document.createElement('div');
+    treeItem.setAttribute('data-path', 'A.md');
+    const inner = document.createElement('div');
+    inner.className = 'tree-item-inner';
+    treeItem.appendChild(inner);
+    document.body.appendChild(treeItem);
+    inner.style.color = '#1890ff'; // 模拟他方设置的颜色
+    const app = makeApp(vault);
+    setApp(app);
+    await reviewApp.applyReviewStyles(app, vault.file('A.md') as any);
+    expect(inner.style.color).toBe('rgb(24, 144, 255)'); // 未被重置
+    expect(inner.querySelector('.review-stage-badge')).toBeNull();
+  });
+
+  it('ticket s1：结果卡文件名 XSS 转义（buildFailCard / buildPassCard）', () => {
+    const evil = { filePath: 'X.md', name: '<img src=x onerror=alert(1)>' } as any;
+    const results = { correct: 1, wrong: 0, total: 1 };
+    const failHtml = reviewApp.buildFailCard(evil, results, 'good');
+    expect(failHtml).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    expect(failHtml).not.toContain('<img src=x onerror=alert(1)>');
+    // innerHTML 解析后不产生 img 元素
+    const div = document.createElement('div');
+    div.innerHTML = failHtml;
+    expect(div.querySelector('img')).toBeNull();
+    const passHtml = reviewApp.buildPassCard(evil, results, 'good', {});
+    expect(passHtml).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    expect(passHtml).not.toContain('<img src=x onerror=alert(1)>');
+    const div2 = document.createElement('div');
+    div2.innerHTML = passHtml;
+    expect(div2.querySelector('img')).toBeNull();
+  });
+
+  it('用户拍板 2026-08-29：二次复习结果卡不显示自动标记（showAutoMark: false）', () => {
+    const item = { filePath: 'A.md', name: 'A' } as any;
+    const results = { correct: 2, wrong: 0, total: 2, accuracy: 100 };
+    // 重做队列路径：失败/通过卡都不显示「自动标记」徽标
+    expect(reviewApp.buildFailCard(item, results, 'good', { showAutoMark: false })).not.toContain('自动标记');
+    expect(
+      reviewApp.buildPassCard(item, results, 'good', { nextLabel: '下一篇（2/2）', showAutoMark: false })
+    ).not.toContain('自动标记');
+    // 首次做题路径（缺省）：仍显示自动标记（评级照常写排期）
+    expect(reviewApp.buildFailCard(item, results, 'good')).toContain('自动标记');
+    expect(reviewApp.buildPassCard(item, results, 'good', {})).toContain('自动标记');
+  });
+
+  it('用户拍板 2026-08-29：终局结算面板（nextLabel 空）只保留「完成复习」按钮', () => {
+    const item = { filePath: 'A.md', name: 'A' } as any;
+    const results = { correct: 2, wrong: 0, total: 2 };
+    const last = reviewApp.buildPassCard(item, results, 'good', { nextLabel: '' });
+    expect(last).toContain('完成复习');
+    expect(last).not.toContain('quiz-end-review'); // 无「结束这次复习」
+    expect(last).not.toContain('结束这次复习');
+    // 非最后一篇：双按钮保留
+    const mid = reviewApp.buildPassCard(item, results, 'good', { nextLabel: '下一篇（2/3）' });
+    expect(mid).toContain('下一篇（2/3）');
+    expect(mid).toContain('quiz-end-review');
+    expect(mid).toContain('结束这次复习');
+  });
 });
 
 describe('ticket 100：到期提醒 / 每日上限 / 间隔缩放', () => {
@@ -407,10 +475,12 @@ describe('ticket 100：到期提醒 / 每日上限 / 间隔缩放', () => {
     document.body.innerHTML = '';
     (reviewApp as any).dataManager = null;
     (reviewApp as any)._notifiedOverdue = new Set();
+    (reviewApp as any)._overdueNotice = null;
   });
   afterEach(() => {
     vi.restoreAllMocks();
     (reviewApp as any)._notifiedOverdue = new Set();
+    (reviewApp as any)._overdueNotice = null;
   });
 
   function seedOverdueWith(vault: MockVault, paths: string[]) {
@@ -423,7 +493,7 @@ describe('ticket 100：到期提醒 / 每日上限 / 间隔缩放', () => {
     vault.files.set(REVIEW_FILE_PATH, JSON.stringify(rows));
   }
 
-  it('到期提醒：新增逾期弹聚合通知（晨报）；再次检查不重复弹；移出逾期后再逾期重现', async () => {
+  it('到期提醒：新增逾期弹篇数常驻通知；再次检查不重复弹；移出逾期后再逾期重现', async () => {
     const noticeSpy = vi.spyOn(await import('../../src/core/notice'), 'notify');
     const vault = new MockVault();
     for (const p of ['A.md', 'B.md']) vault.files.set(p, '正文');
@@ -431,11 +501,11 @@ describe('ticket 100：到期提醒 / 每日上限 / 间隔缩放', () => {
     const app = makeApp(vault);
     setApp(app);
     setSettingsProvider(() => ({ enableAutoNotify: true } as any));
-    // 首次：两篇全新逾期 → 一条聚合通知
+    // 首次：两篇全新逾期 → 一条篇数通知（不列题目，duration 0 常驻）
     await reviewApp.checkOverdueAndNotify();
     expect(noticeSpy).toHaveBeenCalledTimes(1);
-    const [msg] = noticeSpy.mock.calls[0];
-    expect(String(msg)).toContain('2 篇笔记到期待复习');
+    expect(String(noticeSpy.mock.calls[0][0])).toBe('有 2 篇笔记逾期');
+    expect((noticeSpy.mock.calls[0][1] as any).duration).toBe(0);
     // 再次检查：无新逾期 → 不再弹
     noticeSpy.mockClear();
     await reviewApp.checkOverdueAndNotify();
@@ -447,10 +517,72 @@ describe('ticket 100：到期提醒 / 每日上限 / 间隔缩放', () => {
     seedOverdueWith(vault, ['A.md', 'B.md']);
     await reviewApp.checkOverdueAndNotify();
     expect(noticeSpy).toHaveBeenCalledTimes(1);
-    expect(String(noticeSpy.mock.calls[0][0])).toContain('A');
+    expect(String(noticeSpy.mock.calls[0][0])).toBe('有 2 篇笔记逾期');
   });
 
-  it('超 3 篇截断「，等 M 篇」；单篇「X 到期待复习」', async () => {
+  it('ticket 153：到期提醒挂「去复习」action → 走 autoJumpOverdue（做题分流，非单篇打开）', async () => {
+    const noticeSpy = vi.spyOn(await import('../../src/core/notice'), 'notify');
+    const vault = new MockVault();
+    vault.files.set('A.md', '正文');
+    vault.files.set('B.md', '正文');
+    const now = new Date();
+    // A 最早到期（最紧迫），B 次之；本轮都属 newly
+    vault.files.set(REVIEW_FILE_PATH, JSON.stringify([
+      { id: '1', filePath: 'A.md', reviewStart: now.toISOString(), stage: 0, phase: 'ladder', stability: 1, difficulty: 0.3, reviewHistory: [], totalReviews: 0, averageConfidence: 0, nextReviewDate: new Date(now.getTime() - 2 * 86400000).toISOString(), lastReviewed: null, lastDifficulty: null, completed: false },
+      { id: '2', filePath: 'B.md', reviewStart: now.toISOString(), stage: 0, phase: 'ladder', stability: 1, difficulty: 0.3, reviewHistory: [], totalReviews: 0, averageConfidence: 0, nextReviewDate: new Date(now.getTime() - 1 * 86400000).toISOString(), lastReviewed: null, lastDifficulty: null, completed: false },
+    ]));
+    const app = makeApp(vault);
+    const openFile = vi.fn().mockResolvedValue(undefined);
+    (app.workspace as any).getLeaf = () => ({ openFile });
+    setApp(app);
+    setSettingsProvider(() => ({ enableAutoNotify: true } as any));
+    // 拦截 autoJumpOverdue：验证「去复习」触发统一复习流程（而非直接 openFile）
+    const jumpSpy = vi.spyOn(reviewApp, 'autoJumpOverdue').mockResolvedValue(undefined);
+    await reviewApp.checkOverdueAndNotify();
+    const opts = noticeSpy.mock.calls[0][1] as any;
+    expect(opts.action).toBeTruthy();
+    expect(opts.action.label).toBe('去复习'); // 无 emoji
+    expect(String(noticeSpy.mock.calls[0][0])).toBe('有 2 篇笔记逾期');
+    opts.action.onClick();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(jumpSpy).toHaveBeenCalledTimes(1); // 走统一流程
+    expect(openFile).not.toHaveBeenCalled(); // 不再裸开单篇
+  });
+
+  it('ticket 153：已通知的旧逾期不重复弹——「去复习」仍只对 newly 弹通知', async () => {
+    const noticeSpy = vi.spyOn(await import('../../src/core/notice'), 'notify');
+    const vault = new MockVault();
+    vault.files.set('A.md', '正文');
+    vault.files.set('B.md', '正文');
+    const now = new Date();
+    const seed = (rows: any[]) => vault.files.set(REVIEW_FILE_PATH, JSON.stringify(rows));
+    const aRow = { id: '1', filePath: 'A.md', reviewStart: now.toISOString(), stage: 0, phase: 'ladder', stability: 1, difficulty: 0.3, reviewHistory: [], totalReviews: 0, averageConfidence: 0, lastReviewed: null, lastDifficulty: null, completed: false };
+    // 首轮：仅 A 逾期（最紧迫）；B 未逾期 → 通知 A
+    seed([{ ...aRow, nextReviewDate: new Date(now.getTime() - 2 * 86400000).toISOString() }]);
+    const app = makeApp(vault);
+    const openFile = vi.fn().mockResolvedValue(undefined);
+    (app.workspace as any).getLeaf = () => ({ openFile });
+    setApp(app);
+    setSettingsProvider(() => ({ enableAutoNotify: true } as any));
+    await reviewApp.checkOverdueAndNotify();
+    expect(String(noticeSpy.mock.calls[0][0])).toBe('有 1 篇笔记逾期');
+    // 第二轮：A 仍逾期（已在已通知集合），B 变逾期且晚于 A → 通知内容不变（不重复弹 A）
+    noticeSpy.mockClear();
+    const jumpSpy = vi.spyOn(reviewApp, 'autoJumpOverdue').mockResolvedValue(undefined);
+    seed([
+      { ...aRow, nextReviewDate: new Date(now.getTime() - 2 * 86400000).toISOString() },
+      { id: '2', filePath: 'B.md', reviewStart: now.toISOString(), stage: 0, phase: 'ladder', stability: 1, difficulty: 0.3, reviewHistory: [], totalReviews: 0, averageConfidence: 0, nextReviewDate: new Date(now.getTime() - 1 * 86400000).toISOString(), lastReviewed: null, lastDifficulty: null, completed: false },
+    ]);
+    await reviewApp.checkOverdueAndNotify();
+    expect(String(noticeSpy.mock.calls[0][0])).toBe('有 2 篇笔记逾期');
+    const opts = noticeSpy.mock.calls[0][1] as any;
+    opts.action.onClick();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(jumpSpy).toHaveBeenCalledTimes(1); // 点「去复习」走统一流程
+    expect(openFile).not.toHaveBeenCalled();
+  });
+
+  it('逾期通知只报篇数（多/单篇一致，不列题目；duration 0 常驻）', async () => {
     const noticeSpy = vi.spyOn(await import('../../src/core/notice'), 'notify');
     const vault = new MockVault();
     for (const p of ['A.md', 'B.md', 'C.md', 'D.md', 'E.md']) vault.files.set(p, '正文');
@@ -460,16 +592,35 @@ describe('ticket 100：到期提醒 / 每日上限 / 间隔缩放', () => {
     setSettingsProvider(() => ({ enableAutoNotify: true } as any));
     await reviewApp.checkOverdueAndNotify();
     const msg = String(noticeSpy.mock.calls[0][0]);
-    expect(msg).toContain('5 篇笔记到期待复习');
-    expect(msg).toContain('等 2 篇');
-    // 单篇
+    expect(msg).toBe('有 5 篇笔记逾期'); // 不含任何题目名
+    expect((noticeSpy.mock.calls[0][1] as any).duration).toBe(0); // 常驻
+    // 单篇同口径
     noticeSpy.mockClear();
     (reviewApp as any)._notifiedOverdue = new Set();
+    (reviewApp as any)._overdueNotice = null;
     seedOverdueWith(vault, ['F.md']);
     vault.files.set('F.md', '正文');
     await reviewApp.checkOverdueAndNotify();
-    const single = String(noticeSpy.mock.calls[0][0]);
-    expect(single).toBe('F 到期待复习');
+    expect(String(noticeSpy.mock.calls[0][0])).toBe('有 1 篇笔记逾期');
+  });
+
+  it('逾期清零 → 常驻通知主动收起', async () => {
+    const noticeModule = await import('../../src/core/notice');
+    noticeModule.__resetNoticeForTests(); // 清 30s 去重窗口，保证本测真实建框
+    const vault = new MockVault();
+    vault.files.set('A.md', '正文');
+    seedOverdueWith(vault, ['A.md']);
+    const app = makeApp(vault);
+    setApp(app);
+    setSettingsProvider(() => ({ enableAutoNotify: true } as any));
+    await reviewApp.checkOverdueAndNotify();
+    expect(document.querySelector('.bz-notice')).not.toBeNull();
+    // 全部逾期清除 → 常驻通知失去时效被收起
+    seedOverdueWith(vault, []);
+    await reviewApp.checkOverdueAndNotify();
+    expect((reviewApp as any)._overdueNotice).toBeNull();
+    await new Promise((r) => setTimeout(r, 280)); // 退出动画 200ms
+    expect(document.querySelector('.bz-notice')).toBeNull();
   });
 
   it('到期提醒开关关 → 完全静默', async () => {

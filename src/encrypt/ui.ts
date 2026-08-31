@@ -4,13 +4,13 @@
  * 解锁弹窗（复用密码本 showPasswordDialog 范式）；预览窗（独立只读弹窗，Markdown 渲染 + 图片/视频压缩预览）。
  * 协调层：加锁当前笔记（含预览生成 + 动态进度；完成自动打开面板）、还原取出（完成跳转笔记并关闭面板）。
  */
-import { Setting, MarkdownRenderer, Component } from 'obsidian';
+import { MarkdownRenderer, Component } from 'obsidian';
 import { notice, notify } from '../core/notice';
 import type { NoticeHandle } from '../core/notice';
 import { getApp } from '../core/app';
 import { escManager } from '../core/esc-manager';
-import { confirm } from '../core/confirm';
-import { createIconBtn, createOverlay } from '../core/dom';
+import { openFlowDialog } from '../core/flow-dialog';
+import { createIconBtn, createOverlay, topifyZ } from '../core/dom';
 import {
   attachItemActions,
   registerSheetCompanion,
@@ -18,9 +18,10 @@ import {
   type ItemAction,
 } from '../core/item-actions';
 import { escapeHtml, formatRelativeTime } from '../core/utils';
-import { getSettings, tryGetSettings, saveSettings } from '../core/settings-provider';
-import { openSettingsModal, createSettingsGroup } from '../core/settings-modal';
+import { tryGetSettings } from '../core/settings-provider';
+import { openSettingsModal } from '../core/settings-modal';
 import { isMobileEnv, applyMobileWindowFullscreen } from '../core/mobile';
+import type { SettingsSchema } from '../core/settings-schema';
 import { SafeManager, base64ToBytes, bytesToBase64, type SafeNote, type SafeAttachment, type HealthReport, type HealthItem, type LockAttachmentInput } from './data';
 import { compressImage, videoFrame } from './preview';
 
@@ -232,6 +233,73 @@ function finishProgress(h: NoticeHandle | null, done: number, msg: string) {
 
 
 
+/** 保险箱设置 schema（ticket 131；ADR-0064）：存储/预览/安全/移动端四组 7 键。全部配置项为启动快照
+ *  （控制器构造时读取），改动需重载插件后生效——warnReload 一次性提示收敛为渲染器 onCommit（text/path
+ *  行值变更才提示）/ onChange 一次性闭包（toggle），文案逐字保留。置于模块顶层供文案 lint 直接引用。
+ *  移动端组手写（非 mobileFullscreenGroup 预设）：原 toggle 同带 warnReload 启动快照提示，预设无回调
+ *  通道，手写行保行为（desc 为多数派文案，逐字对齐现状）。 */
+export function encryptSettingsSchema(): SettingsSchema {
+  let reloadWarned = false;
+  const warnReload = () => {
+    if (!reloadWarned) {
+      reloadWarned = true;
+      notice('保险箱设置已保存，重载插件后生效', 'info');
+    }
+  };
+  return {
+    groups: [
+      {
+        icon: 'folder-open',
+        name: '存储',
+        rows: [
+          // ticket 128：保险箱根目录（统一路径选择器录入，无手输文本框；点前缀目录可选自 CONFIG/.ENCRYPT）
+          {
+            type: 'path',
+            mode: 'single',
+            name: '保险箱根目录',
+            desc: '加密清单与密文镜像的存放位置，点前缀目录在侧栏隐藏，防止误删',
+            binding: { key: 'encryptRoot' },
+            onCommit: warnReload,
+          },
+        ],
+      },
+      {
+        icon: 'image',
+        name: '预览',
+        rows: [
+          { type: 'toggle', name: '生成压缩预览', desc: '加密时生成图片和视频的压缩预览，体积小但足够清晰', binding: { key: 'encryptPreviewEnabled' }, onChange: warnReload },
+          { type: 'text', name: '预览长边', desc: '压缩预览的目标长边像素，默认 384，数值越小打开越快', binding: { key: 'encryptPreviewSize' }, onCommit: warnReload },
+          { type: 'text', name: '预览质量', desc: '压缩图的 JPEG 质量，默认百分之五十，调低更省空间，画质会变模糊', binding: { key: 'encryptPreviewQuality' }, onCommit: warnReload },
+          { type: 'toggle', name: '预览自动加载原图', desc: '打开预览自动解密原图替换省略图，默认关闭，省流量和内存', binding: { key: 'encryptAutoLoadOriginal' }, onChange: warnReload },
+        ],
+      },
+      {
+        icon: 'shield',
+        name: '安全',
+        rows: [
+          { type: 'toggle', name: '安全模式', desc: '关闭保险箱面板立即自动上锁', binding: { key: 'encryptSecurityMode' }, onChange: warnReload },
+        ],
+      },
+      {
+        icon: 'smartphone',
+        name: '移动端',
+        // 组级门控（ticket 131 域迁移补正）：桌面端整组隐藏但结构保留，可重求值
+        visibleWhen: () => isMobileEnv(),
+        rows: [
+          {
+            type: 'toggle',
+            name: '移动端默认全屏',
+            desc: '移动端打开主窗口时默认全屏，关闭则显示常规卡片',
+            binding: { key: 'encryptMobileDefaultFullscreen' },
+            onChange: warnReload,
+            visibleWhen: () => isMobileEnv(),
+          },
+        ],
+      },
+    ],
+  };
+}
+
 export class UIManager {
   dataManager: SafeManager;
   config: EncryptUIConfig;
@@ -288,7 +356,7 @@ export class UIManager {
     document.body.appendChild(this.mask);
     document.body.appendChild(this.popup);
     // 预览窗
-    const ov = createOverlay({ maskId: 'bz-encrypt-preview-mask', popupId: 'bz-encrypt-preview-popup', zIndex: 10060, maxWidth: 640, onMaskClick: () => this.closePreview() });
+    const ov = createOverlay({ maskId: 'bz-encrypt-preview-mask', popupId: 'bz-encrypt-preview-popup', maxWidth: 640, onMaskClick: () => this.closePreview() });
     this.previewMask = ov.mask;
     this.previewPopup = ov.popup;
     document.body.appendChild(this.previewMask);
@@ -301,7 +369,6 @@ export class UIManager {
     const mask = document.createElement('div');
     mask.id = id;
     mask.className = 'bz-overlay-mask';
-    mask.style.zIndex = '9998';
     mask.style.display = 'none';
     mask.onclick = () => this.hide();
     return mask;
@@ -311,8 +378,7 @@ export class UIManager {
     const popup = document.createElement('div');
     popup.id = id;
     popup.className = 'bz-overlay-popup';
-    popup.style.zIndex = '9999';
-    // 视觉尺寸已收敛至 styles.css（#bz-encrypt-popup），此处只保留功能性 zIndex/显隐
+    // 视觉尺寸已收敛至 styles.css（#bz-encrypt-popup），此处只保留功能性显隐（display）
     popup.style.display = 'none';
     return popup;
   }
@@ -341,6 +407,7 @@ export class UIManager {
   show() {
     if (!this._initialized) this.ensureElements();
     applyMobileWindowFullscreen(this.popup, tryGetSettings().encryptMobileDefaultFullscreen === true);
+    topifyZ(this.mask!, this.popup!); // ADR-0067：显示即发号，谁后显示谁在上
     this.mask!.style.display = 'block';
     this.popup!.style.display = 'flex';
     void this.renderList();
@@ -359,7 +426,7 @@ export class UIManager {
   /**
    * 体检（用户拍板：右上角 🩺 按钮替换原清理扫把，先报告后勾选清理）。
    * 体检需解锁（对账依赖清单明文，完整性检测需解密）——未解锁先弹主密码，取消则不进入。
-   * 可清理类（失效条目/孤儿密文）默认勾选、可取消；损坏/缺失类只展示不清理（删了就是真丢数据）。
+   * 可清理类（失效条目/孤儿密文）默认不全选、勾选后二次确认才删（ticket 18）；损坏/缺失类只展示不清理（删了就是真丢数据）。
    * 清理后自动重新体检，报告收敛。
    */
   async openHealthDialog() {
@@ -368,6 +435,7 @@ export class UIManager {
       if (!ok) return;
     }
     if (!this.healthMask) this.ensureHealthElements();
+    topifyZ(this.healthMask!, this.healthPopup!); // ADR-0067：显示即发号
     this.healthMask!.style.display = 'flex';
     this.healthPopup!.style.display = 'flex';
     void this.runHealthScan();
@@ -377,12 +445,10 @@ export class UIManager {
     const mask = document.createElement('div');
     mask.id = 'bz-encrypt-health-mask';
     mask.className = 'bz-encrypt-health-mask';
-    mask.style.zIndex = '10080';
     mask.style.display = 'none';
     const popup = document.createElement('div');
     popup.id = 'bz-encrypt-health-popup';
     popup.className = 'bz-encrypt-health-box';
-    popup.style.zIndex = '10081';
     popup.style.display = 'none';
     const head = document.createElement('div');
     head.className = 'bz-encrypt-health-head';
@@ -484,7 +550,7 @@ export class UIManager {
     }
   }
 
-  /** 渲染体检报告（UI 保证解锁后调用，integrityChecked 恒 true）：可清理类默认勾选；损坏/缺失只展示 */
+  /** 渲染体检报告（UI 保证解锁后调用，integrityChecked 恒 true）：可清理类默认不全选；损坏/缺失只展示 */
   private renderHealthReport(report: HealthReport, body: HTMLElement) {
     body.innerHTML = '';
     const cleanable = report.items.filter((i) => i.cat === 'dead-entry' || i.cat === 'orphan-file');
@@ -535,7 +601,7 @@ export class UIManager {
     this.updateHealthCleanCount();
   }
 
-  /** 可清理区块：失效条目 + 孤儿密文（checkbox 默认勾选，可取消） */
+  /** 可清理区块：失效条目 + 孤儿密文（checkbox 默认不全选，勾选才计入清理） */
   private appendCleanableSection(body: HTMLElement, items: HealthItem[]) {
     const sec = document.createElement('div');
     sec.className = 'bz-encrypt-health-section bz-encrypt-health-section--clean';
@@ -554,7 +620,7 @@ export class UIManager {
       box.type = 'checkbox';
       box.className = 'bz-encrypt-health-check';
       box.value = item.key;
-      box.checked = true; // 可清理项默认全选（对齐原扫把全清语义，可取消）
+      box.checked = false; // 用户拍板（ticket 18）：可清理项默认不全选，勾选即明确同意删除
       box.addEventListener('change', () => this.updateHealthCleanCount());
       row.appendChild(box);
       row.appendChild(document.createTextNode(item.label));
@@ -575,13 +641,37 @@ export class UIManager {
     return [...popup.querySelectorAll<HTMLInputElement>('input.bz-encrypt-health-check:checked')].map((i) => i.value);
   }
 
-  /** 清理勾选项：只执行可清理类（resolveHealth 对损坏/缺失类防御性忽略），完成后自动重新体检 */
+  /**
+   * 清理勾选项（ticket 18）：执行前二次确认——写明将永久删除的数量（失效条目含残余附件镜像、
+   * 孤儿密文），确认后才执行；只处理可清理类（resolveHealth 对损坏/缺失类防御性忽略），
+   * 完成后自动重新体检。
+   */
   private async confirmHealthCleanup() {
     const keys = this.collectCheckedKeys();
     if (!keys.length) {
       notice('未勾选任何可清理项');
       return;
     }
+    // 勾选 key 按类别计数（契约见 data.ts HealthItem：dead-entry=`entry:<id>`、orphan-file=`file:<文件名>`）
+    const dead = keys.filter((k) => k.startsWith('entry:')).length;
+    const orphan = keys.filter((k) => k.startsWith('file:')).length;
+    const parts: string[] = [];
+    if (dead > 0) parts.push(dead + ' 条失效条目（含残余附件镜像）');
+    if (orphan > 0) parts.push(orphan + ' 个孤儿密文');
+    void openFlowDialog({
+      title: '清理确认',
+      message: parts.join('、') + '将永久删除，不可恢复',
+      actions: [
+        { label: '取消', value: 'cancel' },
+        { label: '永久删除', value: 'ok', cta: true },
+      ],
+    }).then((v) => {
+      if (v === 'ok') void this.executeHealthCleanup(keys);
+    });
+  }
+
+  /** 执行清理（二次确认通过后）：resolveHealth 只处理可清理类，完成后自动重新体检 */
+  private async executeHealthCleanup(keys: string[]) {
     try {
       const { notes, files } = await this.dataManager.resolveHealth(keys);
       const parts: string[] = [];
@@ -605,7 +695,7 @@ export class UIManager {
     return new Promise((resolve) => {
       const mask = document.createElement('div');
       mask.className = 'bz-encrypt-dialog-mask';
-      mask.style.zIndex = '10070';
+      topifyZ(mask); // ADR-0067：一次性弹窗，创建即显示即发号
       mask.style.display = 'flex';
       const box = document.createElement('div');
       box.className = 'bz-encrypt-dialog-box';
@@ -699,19 +789,25 @@ export class UIManager {
             this.resetUnlockThrottle();
             document.body.removeChild(mask);
             resolve(true);
-            notice('解锁成功', 'success');
+            // 自愈回滚提示（ticket 6）：上次未完成的加密已被自动回滚，原文全程未被删过（原文未动）
+            const healMsg =
+              this.dataManager.selfHealRolledBack > 0 ? '；上次未完成的加密已自动回滚，原文未动' : '';
+            notice('解锁成功' + healMsg, 'success');
           } else {
             // 区分「清单损坏」与「密码错误」：损坏必须显式确认后才能重设，绝不静默
             const issue = this.dataManager.manifestIssue;
             if (issue === 'empty' || issue === 'corrupt') {
-              confirm({
+              void openFlowDialog({
                 title: '清单疑似损坏',
                 message:
                   '保险箱清单文件为空或无法解析（可能因写入中断/同步冲突损坏）。' +
                   '重设主密码将生成全新空清单，旧加密数据将永久无法恢复。确定重设吗？',
-                confirmText: '仍要重设',
-                cancelText: '暂不重设',
-                onConfirm: () => {
+                actions: [
+                  { label: '暂不重设', value: 'cancel' },
+                  { label: '仍要重设', value: 'ok', cta: true },
+                ],
+              }).then((v) => {
+                if (v === 'ok') {
                   void this.dataManager.unlock(pw, true).then((ok) => {
                     if (ok) {
                       this.resetUnlockThrottle();
@@ -722,10 +818,9 @@ export class UIManager {
                       notice('重设失败：无法写入清单', 'error');
                     }
                   });
-                },
-                onCancel: () => {
+                } else {
                   notice('未重设：请先检查或备份数据文件', 'warning');
-                },
+                }
               });
             } else {
               notice('密码错误，请重试', 'error');
@@ -877,40 +972,47 @@ export class UIManager {
   }
 
   confirmRestore(note: SafeNote) {
-    confirm({
+    void openFlowDialog({
       title: '还原',
       message: `将「${note.title}」的原文${note.attachments.length ? '与 ' + note.attachments.length + ' 个原质量附件' : ''}还原到原路径？`,
-      confirmText: '还原',
-      onConfirm: () => {
-        const h = progressNotify('还原 ' + note.title);
-        void this.dataManager
-          .restoreNote(note.id, (p) => updateProgress(h, p.done, p.total, p.current))
-          .then(({ conflicts, removed, manifestSaveFailed }) => {
-            const total = note.attachments.length + 1;
-            if (removed) {
-              // 取出即删：进度通知内直接显示完成；随后跳转笔记并关闭面板
-              finishProgress(h, total, '还原完成');
-              this.hide();
-              this.openRestoredNote(note);
-            } else if (manifestSaveFailed) {
-              // 文件已还原、仅清单落盘失败（磁盘异常）：如实告知，重试可幂等收敛
-              finishProgress(h, total, '文件已还原（清单保存失败）');
-              notice(
-                '笔记与附件已还原到原位置，但保险箱清单保存失败（磁盘异常）；下次解锁后重试还原将自动完成清理',
-                'warning'
-              );
-            } else {
-              // 原子还原（优化五）：任一冲突/失败 → 整体未写回，条目保留在保险箱
-              finishProgress(h, total, '还原未完成（' + conflicts.length + ' 个目标有冲突）');
-              notice(
-                '还原中止：' + conflicts.length + ' 个目标被占用或不可用，未写入任何文件，条目保留在保险箱',
-                'warning'
-              );
-            }
-            void this.renderList();
-          })
-          .catch((e: any) => notice('还原失败：' + e.message, 'error'));
-      },
+      actions: [
+        { label: '取消', value: 'cancel' },
+        { label: '还原', value: 'ok', cta: true },
+      ],
+    }).then((v) => {
+      if (v !== 'ok') return;
+      const h = progressNotify('还原 ' + note.title);
+      void this.dataManager
+        .restoreNote(note.id, (p) => updateProgress(h, p.done, p.total, p.current))
+        .then(({ conflicts, removed, manifestSaveFailed }) => {
+          const total = note.attachments.length + 1;
+          if (removed) {
+            // 取出即删：进度通知内直接显示完成；随后跳转笔记并关闭面板
+            finishProgress(h, total, '还原完成');
+            this.hide();
+            this.openRestoredNote(note);
+          } else if (manifestSaveFailed) {
+            // 文件已还原、仅清单落盘失败（磁盘异常）：如实告知，重试可幂等收敛
+            finishProgress(h, total, '文件已还原（清单保存失败）');
+            notice(
+              '笔记与附件已还原到原位置，但保险箱清单保存失败（磁盘异常）；下次解锁后重试还原将自动完成清理',
+              'warning'
+            );
+          } else {
+            // 原子还原（优化五）：任一冲突/失败 → 整体未写回，条目保留在保险箱
+            finishProgress(h, total, '还原未完成（' + conflicts.length + ' 个目标有冲突）');
+            notice(
+              '还原中止：' + conflicts.length + ' 个目标被占用或不可用，未写入任何文件，条目保留在保险箱',
+              'warning'
+            );
+          }
+          void this.renderList();
+        })
+        .catch((e: any) => {
+          // 失败分支收尾进度通知（ticket 5）：收起常驻转圈，不残留幽灵进度条
+          if (h) h.hide();
+          notice('还原失败：' + e.message, 'error');
+        });
     });
   }
 
@@ -946,7 +1048,7 @@ export class UIManager {
     const title = document.createElement('h4');
     title.textContent = note.title;
     const closeBtn = document.createElement('button');
-    closeBtn.textContent = '✕';
+    closeBtn.textContent = '❌';
     closeBtn.className = 'bz-encrypt-btn bz-win-close';
     closeBtn.onclick = () => this.closePreview();
     header.appendChild(title);
@@ -960,6 +1062,7 @@ export class UIManager {
     body.appendChild(loadHint);
     popup.appendChild(body);
     // 先显示弹窗（同步），内容异步填充，保证单击必然弹出
+    topifyZ(this.previewMask, this.previewPopup); // ADR-0067：复用面板显示即发号
     mask.style.display = 'block';
     popup.style.display = 'flex';
     void this.fillPreviewBody(note, body);
@@ -1153,101 +1256,9 @@ export class UIManager {
 
   // ---------- 设置弹窗 ----------
   openSettings() {
-    // 以下配置项均为启动快照（控制器构造时读取），改动需重载插件后生效——首次改动即提示一次
-    let reloadWarned = false;
-    const warnReload = () => {
-      if (!reloadWarned) {
-        reloadWarned = true;
-        notice('保险箱设置已保存，重载插件后生效', 'info');
-      }
-    };
-    openSettingsModal({
-      title: '保险箱设置',
-      maxWidth: 560,
-      build: (el) => {
-        const s = getSettings() as any;
-        // ===== 存储组 =====
-        const storeGroup = createSettingsGroup(el, { icon: 'folder-open', name: '存储' });
-        new Setting(storeGroup)
-          .setName('保险箱根目录')
-          .setDesc('加密清单与密文镜像的存放位置，点前缀目录在侧栏隐藏，防止误删')
-          .addText((text) =>
-            text.setValue(s.encryptRoot || 'CONFIG/.ENCRYPT').onChange(async (v) => {
-              s.encryptRoot = v;
-              await saveSettings();
-              warnReload();
-            })
-          );
-        // ===== 预览组 =====
-        const previewGroup = createSettingsGroup(el, { icon: 'image', name: '预览' });
-        new Setting(previewGroup)
-          .setName('生成压缩预览')
-          .setDesc('加密时生成图片和视频的压缩预览，体积小但足够清晰')
-          .addToggle((toggle) =>
-            toggle.setValue(!!s.encryptPreviewEnabled).onChange(async (v) => {
-              s.encryptPreviewEnabled = v;
-              await saveSettings();
-              warnReload();
-            })
-          );
-        new Setting(previewGroup)
-          .setName('预览长边')
-          .setDesc('压缩预览的目标长边像素，默认 384，数值越小打开越快')
-          .addText((text) =>
-            text.setValue(String(s.encryptPreviewSize || '384')).onChange(async (v) => {
-              s.encryptPreviewSize = v;
-              await saveSettings();
-              warnReload();
-            })
-          );
-        new Setting(previewGroup)
-          .setName('预览质量')
-          .setDesc('压缩图的 JPEG 质量，默认 0.5，调低更省空间，画质会变模糊')
-          .addText((text) =>
-            text.setValue(String(s.encryptPreviewQuality || '0.5')).onChange(async (v) => {
-              s.encryptPreviewQuality = v;
-              await saveSettings();
-              warnReload();
-            })
-          );
-        new Setting(previewGroup)
-          .setName('预览自动加载原图')
-          .setDesc('打开预览自动解密原图替换省略图，默认关闭，省流量和内存')
-          .addToggle((toggle) =>
-            toggle.setValue(!!s.encryptAutoLoadOriginal).onChange(async (v) => {
-              s.encryptAutoLoadOriginal = v;
-              await saveSettings();
-              warnReload();
-            })
-          );
-        // ===== 安全组 =====
-        const securityGroup = createSettingsGroup(el, { icon: 'shield', name: '安全' });
-        new Setting(securityGroup)
-          .setName('安全模式')
-          .setDesc('关闭保险箱面板立即自动上锁')
-          .addToggle((toggle) =>
-            toggle.setValue(!!s.encryptSecurityMode).onChange(async (v) => {
-              s.encryptSecurityMode = v;
-              await saveSettings();
-              warnReload();
-            })
-          );
-        // ===== 移动端组（仅移动端显示） =====
-        if (isMobileEnv()) {
-          const mobileGroup = createSettingsGroup(el, { icon: 'smartphone', name: '移动端' });
-          new Setting(mobileGroup)
-            .setName('移动端默认全屏')
-            .setDesc('移动端打开主窗口时默认全屏，关闭则显示常规卡片')
-            .addToggle((toggle) =>
-              toggle.setValue(!!s.encryptMobileDefaultFullscreen).onChange(async (v) => {
-                s.encryptMobileDefaultFullscreen = v;
-                await saveSettings();
-                warnReload();
-              })
-            );
-        }
-      },
-    });
+    // 以下配置项均为启动快照（控制器构造时读取），改动需重载插件后生效——warnReload 一次性提示
+    // 收敛为渲染器 onCommit（text/path 行）/ onChange 一次性闭包（toggle），文案逐字保留（ticket 131）
+    openSettingsModal({ title: '保险箱设置', maxWidth: 560, schema: encryptSettingsSchema() });
   }
 
   registerEscape() {
@@ -1319,16 +1330,17 @@ export class EncryptAppController {
   }
 
   /** 二次确认：正文与附件将移入保险箱（原路径消失），点确认才开始 */
-  private confirmLockProceed(file: { basename: string }, attCount: number): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
-      confirm({
+  private async confirmLockProceed(file: { basename: string }, attCount: number): Promise<boolean> {
+    return (
+      (await openFlowDialog({
         title: '加密到保险箱',
         message: `把「${file.basename}」的正文${attCount ? '与 ' + attCount + ' 个附件' : ''}加密移入保险箱？加密后原笔记与附件将从原路径移出（保险箱内为密文）。`,
-        confirmText: '加密',
-        onConfirm: () => resolve(true),
-        onCancel: () => resolve(false),
-      });
-    });
+        actions: [
+          { label: '取消', value: 'cancel' },
+          { label: '加密', value: 'ok', cta: true },
+        ],
+      })) === 'ok'
+    );
   }
 
   /**
@@ -1413,6 +1425,8 @@ export class EncryptAppController {
         finishProgress(h, attachments.length + 1, '加密完成');
         this.uiManager.show();
       } catch (e: any) {
+        // 失败分支收尾进度通知（ticket 5）：收起常驻转圈，不残留幽灵进度条；错误另由 error toast 明示
+        if (h) h.hide();
         notice('加密失败：' + e.message, 'error');
       }
     } finally {

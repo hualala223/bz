@@ -7,18 +7,29 @@ import { TFile } from 'obsidian';
 import { notice } from '../core/notice';
 import { getApp } from '../core/app';
 import { escManager } from '../core/esc-manager';
-import { createSiteIcon } from '../core/dom';
+import { createSiteIcon, topifyZ } from '../core/dom';
 import { applyMobileWindowFullscreen } from '../core/mobile';
 import { tryGetSettings } from '../core/settings-provider';
+import { pad2 } from '../core/utils';
 // 聚合讯观察（ticket 076，ADR-0029）：域事件派发挂点（域内 import 之后，对齐影视 movie/ui）
+// ticket 123 追加（2026-08-27 用户拍板）：跳过也发观察（news:skipped → 行为流）——见 markAsRead
+// ticket 134 修订（ADR-0068）：B站视频条目保存改道文献盒（saveToLiterature）、跳过不发——普通文章保留
 import { emitDomainEvent } from '../core/domain-bus';
+// 域内函数级 import（无环，对齐 movie/ui → movie-report 先例）：B站条目保存入口
+import { openLiteratureAddTask } from '../literature';
 import type { NewsReadEvent } from '../smartcat/news-source';
 
 // ---------- 常量 ----------
-const NEWS_JSON_PATH = 'CONFIG/STORAGE/news.json';
-const STATS_JSON_PATH = 'CONFIG/STORAGE/news-stats.json';
+// ticket 124（ADR-0060）：news.json 四段结构 + 保留策略；路径/读写/迁移收 src/news/data.ts
+import {
+  readNewsData, writeNewsData, migrateLegacyStats, applyRetention, normalizeRetentionDays, statsHasData,
+} from './data';
+
 const CLIP_DIR = '归档/网页剪藏';
-const PLATFORM_DOMAIN: Record<string, string> = { '果壳': 'guokr.com', '知乎日报': 'zhihu.com' };
+const PLATFORM_DOMAIN: Record<string, string> = { '果壳': 'guokr.com', '知乎日报': 'zhihu.com', 'B站': 'bilibili.com' };
+
+/** ticket 134（ADR-0068）：B站视频条目——保存改道文献盒、跳过不进行为流；url 异常缺失回退剪藏按钮 */
+const isBiliVideo = (a: any): boolean => a?.platform === 'B站' && !!String(a?.url || '').trim();
 
 /** HTML 转义（源码内联 esc） */
 const esc = (s: any) =>
@@ -43,6 +54,18 @@ let stats: any = { totalRead: 0, totalSaved: 0, totalSkipped: 0, byPlatform: {},
 let openedAt = 0;
 let accumMs = 0;
 let renderedKey = '';
+/** l5 三态：news.json 缺失（首用引导）与解析失败（错误态，不渲染「读完」态） */
+let dataFileMissing = false;
+let loadFailed = false;
+/** show() 重入串行化：加载链在跑时重入（hide 后立即重开 / 双 show 并发）复用同一链，
+ *  防双链竞态——晚完成链用旧快照覆盖面板、晚到 render() 重设 openedAt 截断已读时长。 */
+let pendingLoad: Promise<void> | null = null;
+/** ticket 124（ADR-0060）：news.json 写回串行队列——saveArticles（articles 段）与 saveStats
+ *  （stats 段）同文件异步写回必须串行执行（先读盘→改段→整写），否则两写回并发互相覆盖对方段。 */
+let writeChain: Promise<void> = Promise.resolve();
+function enqueueWrite(fn: () => Promise<void>): void {
+  writeChain = writeChain.then(fn).catch(() => { /* 写回失败静默（原语义） */ });
+}
 
 // ---------- 创建弹窗 ----------
 function createMaskAndPopup() {
@@ -59,7 +82,7 @@ function createMaskAndPopup() {
   // 关闭按钮（移动端显示）
   const closeBtn = document.createElement('button');
   closeBtn.className = 'news-close-btn';
-  closeBtn.innerHTML = '✕';
+  closeBtn.innerHTML = '❌';
   closeBtn.onclick = (e) => { e.stopPropagation(); hide(); };
   popup.appendChild(closeBtn);
 
@@ -71,26 +94,34 @@ function createMaskAndPopup() {
   document.body.appendChild(popup);
 }
 
-// ---------- 统计 ----------
+// ---------- 统计（ticket 124：并入 news.json stats 段，兼容旧 news-stats.json 迁移）----------
 export async function loadStats() {
-  const app = getApp();
-  const af = app.vault.getAbstractFileByPath(STATS_JSON_PATH);
-  if (!af) return;
-  try {
-    stats = JSON.parse(await app.vault.read(af as TFile));
-  } catch (e) { /* 保留默认 */ }
+  const res = await readNewsData();
+  if (!res.ok || res.missing) return;
+  let data = res.data;
+  // 首次迁移：stats 段无真实数据且旧 news-stats.json 存在 → 并入并落盘一次
+  if (!statsHasData(data.stats)) {
+    const migrated = await migrateLegacyStats(data);
+    if (statsHasData(migrated.stats) && migrated !== data) {
+      data = migrated;
+      await writeNewsData(data);
+    }
+  }
+  stats = data.stats || stats;
 }
 
 export async function saveStats() {
-  const app = getApp();
-  try {
-    const dir = STATS_JSON_PATH.substring(0, STATS_JSON_PATH.lastIndexOf('/'));
-    const dirAf = app.vault.getAbstractFileByPath(dir);
-    if (!dirAf) await app.vault.createFolder(dir);
-    const af = app.vault.getAbstractFileByPath(STATS_JSON_PATH);
-    if (af) await app.vault.modify(af as TFile, JSON.stringify(stats, null, 2));
-    else await app.vault.create(STATS_JSON_PATH, JSON.stringify(stats, null, 2));
-  } catch (e) { /* 静默 */ }
+  // 四段整读写：读盘保留 articles/bilibiliUps/sources，仅替换 stats 段；
+  // 写回串行队列（与 saveArticles 同文件，防并发覆盖）。
+  // 统一读写语义：缺失时 readNewsData 已建空数据文件（data=emptyData），
+  // 不再因 missing 跳过——首用统计落盘（loadArticles 的 missing 引导态仍由 UI 层区分）。
+  enqueueWrite(async () => {
+    try {
+      const res = await readNewsData();
+      if (!res.ok) return;
+      await writeNewsData({ ...res.data, stats });
+    } catch (e) { /* 静默 */ }
+  });
 }
 
 export function recordStat(action: string, article: any) {
@@ -101,7 +132,8 @@ export function recordStat(action: string, article: any) {
   const platform = article.platform || '未知';
   stats.byPlatform[platform] = (stats.byPlatform[platform] || 0) + 1;
 
-  const today = new Date().toISOString().substring(0, 10);
+  // x2b：byDate 键用本地日（对齐 src/pomodoro/stats.ts dayKey 口径，UTC+8 凌晨 0-8 点不落昨日）
+  const today = localDayKey();
   stats.byDate[today] = (stats.byDate[today] || 0) + 1;
 
   void saveStats();
@@ -130,17 +162,44 @@ export function mergeWithDisk(memory: any[], disk: any[]): any[] {
 
 export async function loadArticles() {
   const app = getApp();
-  const af = app.vault.getAbstractFileByPath(NEWS_JSON_PATH);
-  if (!af) { allArticles = []; articles = []; batchTotal = 0; return; }
+  loadFailed = false; // 每次加载重置状态（修复文件后重开即可恢复）
+  const res = await readNewsData();
+  if (res.missing) {
+    // l5：无数据文件（首次使用）→ 首用引导态；allArticles 清空（后续 saveArticles 不覆写）
+    dataFileMissing = true;
+    allArticles = []; articles = []; batchTotal = 0;
+    return;
+  }
+  if (!res.ok) {
+    // l5：崩溃半截/损坏 JSON → 错误态（不渲染「读完」态），error toast 人话提示；
+    // 保留磁盘旧文件不动（后续 saveArticles 不覆写），技术详情进 console
+    loadFailed = true;
+    allArticles = []; articles = []; batchTotal = 0;
+    console.warn('[聚合讯] news.json 解析失败，进入错误态（不渲染完成态）');
+    notice('新闻数据读取失败，请检查数据文件后重试', 'error');
+    return;
+  }
+  dataFileMissing = false;
   const prevCurrent = articles[currentIndex]; // 重载前当前篇，用于游标锚定
   try {
-    allArticles = JSON.parse(await app.vault.read(af as TFile));
+    let data = res.data;
+    // ticket 124（ADR-0060）保留策略：打开阅读器清理一次（插件侧；未读不处理）
+    const s = tryGetSettings() as any;
+    const savedDays = normalizeRetentionDays(s?.newsRetentionSavedDays) ?? 3;
+    const skippedDays = normalizeRetentionDays(s?.newsRetentionSkippedDays) ?? 7;
+    const cleaned = applyRetention(data.articles, savedDays, skippedDays);
+    if (cleaned.length !== data.articles.length) {
+      data = { ...data, articles: cleaned };
+      await writeNewsData(data);
+    }
+    allArticles = data.articles;
     articles = allArticles.filter((a: any) => !a.read);
     batchTotal = articles.length;
   } catch (e) {
-    // 崩溃半截 JSON：保留磁盘旧文件不动、按空列表返回并告警（后续 saveArticles 不覆写）
-    console.warn('[聚合讯] news.json 解析失败，按空列表处理', e);
+    loadFailed = true;
     allArticles = []; articles = []; batchTotal = 0;
+    console.warn('[聚合讯] news.json 处理失败，进入错误态', e);
+    notice('新闻数据读取失败，请检查数据文件后重试', 'error');
   }
   // 游标锚定：优先按上一当前篇的稳定标识定位新索引，找不到再夹取边界
   const anchored = anchorCursor(prevCurrent, articles);
@@ -160,9 +219,14 @@ export function render() {
   if (!container) return;
   container.innerHTML = '';
 
-  // 所有文章读完 → 完成状态
+  // l5 三态：解析失败 → 错误态（不渲染「读完」）；无数据文件 → 首用引导；真读空 → 完成态
+  if (loadFailed) {
+    renderErrorState();
+    return;
+  }
   if (articles.length === 0) {
-    renderDoneState();
+    if (dataFileMissing) renderFirstUseState();
+    else renderDoneState();
     return;
   }
 
@@ -230,18 +294,21 @@ export function render() {
   const bottombar = document.createElement('div');
   bottombar.className = 'news-bottombar';
   const nextLabel = articles.length === 1 ? '✅ 完成阅读' : '⏭️ 下一篇';
+  // ticket 134（ADR-0068）：B站视频条目保存改道文献盒，普通文章仍是剪藏（data-action 契约不变）
+  const saveLabel = isBiliVideo(articles[currentIndex]) ? '📥 保存至文献' : '📥 保存至剪藏';
   bottombar.innerHTML = `
-        <button class="news-btn news-btn-primary" data-action="save">📥 保存至剪藏</button>
+        <button class="news-btn news-btn-primary" data-action="save">${saveLabel}</button>
         <button class="news-btn" data-action="next">${nextLabel}</button>
         <span class="news-counter">${batchTotal - articles.length + 1} / ${batchTotal}</span>
     `;
   container.appendChild(bottombar);
-  bottombar.querySelector<HTMLElement>('[data-action="save"]')!.onclick = () => saveToClip();
+  bottombar.querySelector<HTMLElement>('[data-action="save"]')!.onclick = () => saveCurrent();
   bottombar.querySelector<HTMLElement>('[data-action="next"]')!.onclick = () => skipArticle();
 }
 
 export function renderDoneState() {
-  const today = new Date().toISOString().substring(0, 10);
+  // x2b：今日统计键用本地日（与 recordStat 的 byDate 同口径）
+  const today = localDayKey();
   const todayRead = stats.byDate[today] || 0;
 
   const cardArea = document.createElement('div');
@@ -272,6 +339,70 @@ export function renderDoneState() {
 }
 
 // ---------- 工具 ----------
+/** 本地日期键 YYYY-MM-DD（对齐 src/pomodoro/stats.ts dayKey 本地日口径：UTC+8 凌晨 0-8 点不落昨日） */
+export function localDayKey(ts: number = Date.now()): string {
+  const d = new Date(ts);
+  const m = pad2(d.getMonth() + 1);
+  const day = pad2(d.getDate());
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+/** 本地时间戳 YYYY-MM-DD HH:mm:ss（剪藏 created 字段，避免 UTC+8 凌晨写入昨日） */
+export function localDatetime(ts: number = Date.now()): string {
+  const d = new Date(ts);
+  const hms = `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  return `${localDayKey(ts)} ${hms}`;
+}
+
+/**
+ * l5 错误态：news.json 解析失败——错误 toast 已提示（loadArticles），面板不渲染「读完」态，
+ * 只说明文件可能正在被写入或已损坏，重开即重试。
+ */
+function renderErrorState() {
+  const card = document.createElement('div');
+  card.className = 'news-done';
+  card.innerHTML = `
+        <div class="news-done-stats">
+            <div class="news-done-stats-title">新闻数据读取失败</div>
+            <div class="news-done-body">数据文件（CONFIG/STORAGE/news.json）可能正在被写入或已损坏。请检查文件内容后重新打开阅读器。</div>
+        </div>
+    `;
+  container!.appendChild(card);
+}
+
+/**
+ * l5 首用引导态：无数据文件（首次使用）——说明数据从哪来：
+ * 由外部「数据源守护」进程（obsidian-news）抓取写入，插件本身只读渲染。
+ */
+function renderFirstUseState() {
+  const card = document.createElement('div');
+  card.className = 'news-done';
+  card.innerHTML = `
+        <div class="news-done-stats">
+            <div class="news-done-stats-title">数据从哪里来？</div>
+            <div class="news-done-body">聚合讯的数据由外部「数据源守护」进程（obsidian-news）自动抓取写入 CONFIG/STORAGE/news.json，插件本身不抓取新闻，只负责渲染阅读流。</div>
+            <div class="news-done-body">首次使用请先配置并运行数据源守护（obsidian-news watch），守护进程每 30 分钟抓取最新文章入库，之后回到这里即可阅读。</div>
+            <div class="news-done-body">B 站 UP 主聚合在剪藏本设置 →「数据源」组配置（添加关注的 UP 主即可自动抓取其新视频）。</div>
+        </div>
+    `;
+  container!.appendChild(card);
+}
+
+/** l5 加载态占位：show() 异步加载期间的反馈（.news-loading 样式已收敛在 src/news/styles.css） */
+function renderLoading() {
+  if (!container) return;
+  container.innerHTML = '';
+  const loading = document.createElement('div');
+  loading.className = 'news-loading';
+  const spinner = document.createElement('div');
+  spinner.className = 'news-loading-spinner';
+  const text = document.createElement('div');
+  text.textContent = '正在加载…';
+  loading.appendChild(spinner);
+  loading.appendChild(text);
+  container.appendChild(loading);
+}
+
 export function toDatetime(dateStr: string): string {
   try {
     const d = new Date(dateStr);
@@ -328,7 +459,7 @@ export async function saveToClip() {
         background: 'var(--background-primary)',
         borderRadius: '10px', padding: '20px',
         boxShadow: '0 8px 30px rgba(0,0,0,0.3)',
-        zIndex: 10001, minWidth: '260px', textAlign: 'center',
+        minWidth: '260px', textAlign: 'center',
         fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, system-ui, sans-serif',
       });
       el.innerHTML = `
@@ -339,7 +470,8 @@ export async function saveToClip() {
                 </div>
             `;
       const ov = document.createElement('div');
-      Object.assign(ov.style, { position: 'fixed', inset: '0', background: 'var(--background-modifier-cover)', zIndex: 10000 });
+      Object.assign(ov.style, { position: 'fixed', inset: '0', background: 'var(--background-modifier-cover)' });
+      topifyZ(ov, el); // ADR-0067：一次性弹窗，创建即显示即发号
       document.body.appendChild(ov);
       document.body.appendChild(el);
       // 点遮罩 = 取消（与「取消」按钮同语义，用户拍板：小弹窗靠遮罩关闭）
@@ -355,12 +487,13 @@ export async function saveToClip() {
   }
 
   const tagsYaml = (a.tags || []).map((t: string) => `  - "${yamlEscape(t)}"`).join('\n');
-  const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  // x2b：created 用本地时间戳（与 byDate 本地日同口径，避免 UTC+8 凌晨写入昨日）
+  const now = localDatetime();
   const pubDate = a.date ? toDatetime(a.date) : '';
   const body = (a.body || '').replace(/^\s*---[\s\S]*?---\s*/m, '').replace(/^\s*```dataviewjs[\s\S]*?```\s*/m, '').trim();
 
   const md = `---
-link: "${yamlEscape(a.url || '')}"
+url: "${yamlEscape(a.url || '')}"
 author: "${yamlEscape(a.author || '')}"
 site: "${yamlEscape(a.platform || '')}"
 summary: "${yamlEscape(a.summary || '')}"
@@ -388,8 +521,27 @@ ${body}`;
     // ticket 076：保存联动 auto-summary——登记待补全（smartcat 订阅该剪藏 modify 补全 / 2 分钟降级）
     if (evt) emitDomainEvent('news', { kind: 'saved', evt, clipPath: filePath });
   } catch (e: any) {
-    notice(`保存失败：${e.message}`, 'error');
+    // m1b-news：技术详情进 console，toast 只给可操作的人话（正文不带 emoji）
+    console.error('[聚合讯] 保存剪藏失败', e);
+    notice('保存失败，请稍后重试', 'error');
   }
+}
+
+// ---------- 保存分流 + 保存至文献（ticket 134，ADR-0068）----------
+/** 底栏保存按钮分流：B站视频条目 → 文献盒，其余 → 剪藏 */
+function saveCurrent(): void {
+  if (isBiliVideo(articles[currentIndex])) saveToLiterature();
+  else void saveToClip();
+}
+
+/**
+ * B站条目「保存至文献」：打开文献盒主面板 + 添加转文献任务弹窗（预填链接/标题/UP主）。
+ * 不写剪藏、不标已读（阅读器留在本篇未读）、不发 'news' 域事件；标题/UP主仅任务元数据。
+ */
+export function saveToLiterature() {
+  const a = articles[currentIndex];
+  if (!a) return;
+  openLiteratureAddTask(getApp(), { url: a.url, title: a.title || null, uploader: a.author || null });
 }
 
 // ---------- 下一篇 / 标记已读 ----------
@@ -399,18 +551,26 @@ export function markAsRead(action: string): NewsReadEvent | null {
   const a = articles[currentIndex];
   let evt: NewsReadEvent | null = null;
   if (a) {
-    // ticket 076 修订（2026-08-25 用户拍板）：只保留「保存」观察——跳过/阅读不再产观察（域统计照记）；
+    // ticket 076 修订（2026-08-25 用户拍板：只发保存）→ ticket 123 追加（2026-08-27 用户拍板）：跳过也产观察
+    // ——保存走 saved 立即形态 + auto-summary 补全；跳过走 news:skipped 入行为流（轻量记录，不向量化）；
+    // 阅读无独立动作不发（域统计照记）；
+    // ticket 134（ADR-0068）对 B站条目的跳过静音，被 ADR-0069「行为流全量盘点补齐」反转：
+    // B站条目「下一篇/完成阅读」（skipped）也发 'news' 域事件进行为流；saved 对 B站不会走到此
+    // （保存改道文献盒 saveToLiterature，不标已读语义不变）；普通文章语义不变；
     // 时长 = 累计可视时间（hide 已暂停并入 accumMs，此处补挂起会话），毫秒/60000 取整分钟 ≥1
     // （原实现 ms/60 致时长虚增 60 倍——「读了 N 分钟」离谱根因之一）
-    if (action === 'saved') {
+    if (action === 'saved' || action === 'skipped') {
       const now = Date.now();
       const durationSec = (openedAt ? now - openedAt : 0) + accumMs;
       const durationMin = Math.max(1, Math.round(durationSec / 60000));
-      evt = { title: a.title, platform: a.platform, state: 'saved', durationMin };
-      // 保存立即形态在此发（saveToClip 再经 'news' saved 入口登记 auto-summary 补全）；smartcat 未初始化 / noteSource 关时静默
+      evt = { title: a.title, platform: a.platform, state: action as 'saved' | 'skipped', durationMin };
+      // 保存立即形态在此发（saveToClip 再经 'news' saved 入口登记 auto-summary 补全）；
+      // 跳过：news:skipped → 行为流；smartcat 未初始化 / noteSource 关时静默
       emitDomainEvent('news', { kind: 'read', evt });
     }
     a.read = true;
+    // ticket 124（ADR-0060）保留策略档位依据：保存/跳过写 state（旧数据无 state → 按跳过档）
+    a.state = action === 'saved' ? 'saved' : 'skipped';
     delete a.body;
     recordStat(action, a);
   }
@@ -428,49 +588,88 @@ export function markAsRead(action: string): NewsReadEvent | null {
 }
 
 export async function checkNewArticles(prevTotal: number) {
-  const app = getApp();
   try {
-    const af = app.vault.getAbstractFileByPath(NEWS_JSON_PATH);
-    if (!af) return;
-    const fresh = JSON.parse(await app.vault.read(af as TFile));
-    if (fresh.length > prevTotal) {
-      notice(`新增 ${fresh.length - prevTotal} 篇文章`, 'info');
+    const res = await readNewsData();
+    if (!res.ok || res.missing) return;
+    if (res.data.articles.length > prevTotal) {
+      notice(`新增 ${res.data.articles.length - prevTotal} 篇文章`, 'info');
     }
   } catch (e) { /* 忽略 */ }
 }
 
 export async function saveArticles() {
-  const app = getApp();
-  try {
-    const af = app.vault.getAbstractFileByPath(NEWS_JSON_PATH);
-    if (!af) return;
-    // 双写者防丢：写前重读磁盘，合并外部追加项（P0-5）；磁盘解析失败不覆写防清盘
-    let disk: any;
+  // 双写者防丢：写前重读磁盘（四段），仅替换 articles 段（保留 stats/bilibiliUps/sources）；
+  // 写回串行队列（与 saveStats 同文件，防并发覆盖）；磁盘解析失败/缺失不覆写防清盘
+  enqueueWrite(async () => {
     try {
-      disk = JSON.parse(await app.vault.read(af as TFile));
-    } catch (e) {
-      console.warn('[聚合讯] news.json 解析失败，跳过本次写回以防覆盖', e);
-      return;
-    }
-    if (!Array.isArray(disk)) {
-      console.warn('[聚合讯] news.json 内容异常（非数组），跳过本次写回以防覆盖');
-      return;
-    }
-    await app.vault.modify(af as TFile, JSON.stringify(mergeWithDisk(allArticles, disk), null, 2));
-  } catch (e) { /* 忽略 */ }
+      const res = await readNewsData();
+      if (!res.ok || res.missing) return;
+      const merged = mergeWithDisk(allArticles, res.data.articles);
+      await writeNewsData({ ...res.data, articles: merged });
+    } catch (e) { /* 忽略 */ }
+  });
 }
 
 // ---------- 显示 / 隐藏 ----------
+/** 一次读盘加载（stats 迁移 + articles + 保留清理；show 链专用，避免 loadStats+loadArticles 双读盘） */
+export async function loadAll(): Promise<void> {
+  const res = await readNewsData();
+  loadFailed = false;
+  if (res.missing) {
+    dataFileMissing = true;
+    allArticles = []; articles = []; batchTotal = 0;
+    stats = { totalRead: 0, totalSaved: 0, totalSkipped: 0, byPlatform: {}, byDate: {} };
+    return;
+  }
+  if (!res.ok) {
+    dataFileMissing = false;
+    loadFailed = true;
+    allArticles = []; articles = []; batchTotal = 0;
+    console.warn('[聚合讯] news.json 解析失败，进入错误态（不渲染完成态）');
+    notice('新闻数据读取失败，请检查数据文件后重试', 'error');
+    return;
+  }
+  dataFileMissing = false;
+  let data = res.data;
+  // 保留策略清理（插件侧；未读不处理）
+  const s = tryGetSettings() as any;
+  const savedDays = normalizeRetentionDays(s?.newsRetentionSavedDays) ?? 3;
+  const skippedDays = normalizeRetentionDays(s?.newsRetentionSkippedDays) ?? 7;
+  const cleaned = applyRetention(data.articles, savedDays, skippedDays);
+  // 旧 news-stats.json 迁移（stats 段无真实数据时）
+  let changed = cleaned.length !== data.articles.length;
+  if (!statsHasData(data.stats)) {
+    const migrated = await migrateLegacyStats(data);
+    if (statsHasData(migrated.stats)) { data = migrated; changed = true; }
+  }
+  if (changed) {
+    data = { ...data, articles: cleaned };
+    await writeNewsData(data);
+  }
+  stats = data.stats || stats;
+  allArticles = data.articles;
+  articles = allArticles.filter((a: any) => !a.read);
+  batchTotal = articles.length;
+}
+
 export function show() {
   if (!popup) createMaskAndPopup();
   // 移动端默认全屏跟随剪藏本（用户拍板：聚合讯不设独立开关，与剪藏本同键 clippingMobileDefaultFullscreen）
   applyMobileWindowFullscreen(popup, tryGetSettings().clippingMobileDefaultFullscreen === true);
-  loadStats()
-    .then(() => loadArticles())
+  // l5：加载期先展示占位（此前整个加载过程全程 hidden 无反馈），加载完成后 render() 替换为正文；
+  // 不可见即展示：加载中途 hide() 关闭 → 加载完成只渲染内容不再强制弹出
+  renderLoading();
+  topifyZ(mask!, popup!); // ADR-0067：显示即发号，谁后显示谁在上
+  mask!.style.visibility = 'visible';
+  popup!.style.visibility = 'visible';
+  // 重入串行化：已有加载链在跑 → 占位/显窗已重建，复用同一链（其完成时 render 替换占位），不另起第二条链
+  if (pendingLoad) return;
+  pendingLoad = loadAll()
     .then(() => {
       render();
-      mask!.style.visibility = 'visible';
-      popup!.style.visibility = 'visible';
+    })
+    .finally(() => {
+      pendingLoad = null;
     });
 }
 

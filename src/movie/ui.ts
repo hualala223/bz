@@ -2,18 +2,20 @@
  * 影视 UI（ticket 14 修正版：对齐源码逐字——卡片/overlay/添加/编辑/设置弹窗）
  */
 import type { App, TFile } from 'obsidian';
-import { Setting } from 'obsidian';
 import { notice, notify } from '../core/notice';
 import { escManager } from '../core/esc-manager';
+import { allocZ, topifyZ } from '../core/z-order';
 import { formatRelativeTime, pad2 } from '../core/utils';
-import { getSettings, saveSettings, tryGetSettings } from '../core/settings-provider';
-import { openSettingsModal, createSettingsGroup } from '../core/settings-modal';
-import { isMobileEnv, applyMobileWindowFullscreen } from '../core/mobile';
+import { tryGetSettings } from '../core/settings-provider';
+import { openSettingsModal } from '../core/settings-modal';
+import { applyMobileWindowFullscreen } from '../core/mobile';
+import { mobileFullscreenGroup } from '../core/settings-common';
+import type { SettingsSchema } from '../core/settings-schema';
 import { STATUS_WANT, STATUS_WATCHING, STATUS_WATCHED, getTypeColor, getStarRating, ALL_TAGS, getGroupForTag } from './constants';
 import { M, takeHomeFilmStatus, type MovieItem } from './state';
 import { getDisplayItems, refreshDataAndView, rebuildItems } from './data';
 import { attachItemActions, refreshItemSheet, registerSheetCompanion, unregisterSheetCompanion, type ItemAction } from '../core/item-actions';
-import { confirm } from '../core/confirm';
+import { openFlowDialog } from '../core/flow-dialog';
 import { runAIRecommend, runSimilarRecommend } from './recommend';
 import { watchPosterFetch } from './poster-watch';
 import { openAnalysisModal } from '../movie-report/analysis'; // ADR-0048：报告独立域，📊 按钮跨域显式引用（纯数据回引 constants 无环）
@@ -23,7 +25,11 @@ import { emitDomainEvent } from '../core/domain-bus';
 export function renderAll(displayItems: any[], container: HTMLElement, app: App): void {
   const total = displayItems.length;
   if (total === 0) {
-    container.innerHTML = '<p style="text-align:center; color:var(--text-muted);">暂无符合条件的影视记录</p>';
+    // 空态区分（l6-movie）：有筛选条件 → 筛选无结果；无筛选 → 空库引导
+    const filtering = M.typeFilter !== '全部' || M.statusFilter !== '全部' || !!M.searchKeyword;
+    container.innerHTML = filtering
+      ? '<p style="text-align:center; color:var(--text-muted);">暂无符合条件的影视记录</p>'
+      : '<p style="text-align:center; color:var(--text-muted);">影视库还是空的——点右上角 ✏️ 添加第一部影视</p>';
     return;
   }
 
@@ -361,9 +367,11 @@ export function openAddModal(app: App, prefill?: { name?: string; tag?: string; 
   }
 
   const addOverlayDiv = document.createElement('div');
+  addOverlayDiv.className = 'bz-movie-overlay--1200'; // 标识钩子（层级已动态发号 ADR-0067）
+  addOverlayDiv.style.zIndex = String(allocZ()); // ADR-0067：新建即显示即发号
   addOverlayDiv.style.cssText = `
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.4); z-index: 1200;
+    background: rgba(0,0,0,0.4);
     display: flex; align-items: center; justify-content: center;
   `;
   const addModal = document.createElement('div');
@@ -589,9 +597,11 @@ export function openEditModal(item: any, app: App): void {
   }
 
   const editOverlayDiv = document.createElement('div');
+  editOverlayDiv.className = 'bz-movie-overlay--1200'; // 标识钩子（层级已动态发号 ADR-0067）
+  editOverlayDiv.style.zIndex = String(allocZ()); // ADR-0067：新建即显示即发号
   editOverlayDiv.style.cssText = `
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.4); z-index: 1200;
+    background: rgba(0,0,0,0.4);
     display: flex; align-items: center; justify-content: center;
   `;
   const editModal = document.createElement('div');
@@ -929,9 +939,11 @@ export function openFilterModal(): void {
   }
 
   const settingsOverlayDiv = document.createElement('div');
+  settingsOverlayDiv.className = 'bz-movie-overlay--1100'; // 标识钩子（层级已动态发号 ADR-0067）
+  settingsOverlayDiv.style.zIndex = String(allocZ()); // ADR-0067：新建即显示即发号
   settingsOverlayDiv.style.cssText = `
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.3); z-index: 1100;
+    background: rgba(0,0,0,0.3);
     display: flex; align-items: center; justify-content: center;
   `;
   const settingsModal = document.createElement('div');
@@ -950,7 +962,7 @@ export function openFilterModal(): void {
   `;
   settingsHeader.innerHTML = '<h3 style="margin:0;">筛选与排序</h3>';
   const closeSettingsBtn = document.createElement('button');
-  closeSettingsBtn.textContent = '✕';
+  closeSettingsBtn.textContent = '❌';
   closeSettingsBtn.className = 'bz-win-close';
   closeSettingsBtn.style.cssText = `
     background: none; border: none; font-size: 1.3rem; cursor: pointer; color: var(--text-muted);
@@ -975,6 +987,88 @@ export function openFilterModal(): void {
 
 // ---------- 主 overlay（源码 L1219-1402 逐字） ----------
 
+/** 影视设置 schema（ticket 131 声明式；ADR-0064）：目录/默认视图为启动快照设置（ensureMovie
+ *  一次性读取），改动需重载插件后生效——warnReload 一次性提示收敛为渲染器 onCommit 内置语义
+ *  （text/path 行值变更才提示、同会话至多一次；dropdown 行用 onChange + 域内一次性闭包）。
+ *  置于模块顶层供文案 lint 直接引用。 */
+export function movieSettingsSchema(): SettingsSchema {
+  let reloadWarned = false;
+  const warnReload = () => {
+    if (!reloadWarned) {
+      reloadWarned = true;
+      notice('影视设置已保存，重载插件后生效', 'info');
+    }
+  };
+  // 海报抓取指引（ADR-0007：外部工具承担；描述去包名细节，详见 README/ADR）
+  return {
+    groups: [
+      {
+        icon: 'folder-open',
+        name: '目录',
+        rows: [
+          // ticket 128：影视文件夹（统一路径选择器录入，无手输文本框）
+          { type: 'path', mode: 'single', name: '影视文件夹', desc: '存放影视笔记的文件夹路径', binding: { key: 'movieFolderPath' }, onCommit: warnReload },
+          { type: 'text', name: '每页加载数量', desc: '列表首次加载和滚动加载时显示的条数', binding: { key: 'moviePageSize' }, onCommit: warnReload },
+        ],
+      },
+      {
+        icon: 'monitor',
+        name: '默认视图',
+        rows: [
+          {
+            type: 'select',
+            name: '默认排序',
+            desc: '打开影视列表时默认的排序方式',
+            binding: { key: 'movieDefaultSort' },
+            options: [
+              { value: 'date-desc', label: '日期↓' },
+              { value: 'date-asc', label: '日期↑' },
+              { value: 'rating-desc', label: '评分↓' },
+              { value: 'rating-asc', label: '评分↑' },
+              { value: 'name-asc', label: '名称A-Z' },
+              { value: 'name-desc', label: '名称Z-A' },
+            ],
+            onChange: warnReload,
+          },
+          {
+            type: 'select',
+            name: '默认类型筛选',
+            desc: '打开影视列表时默认选中的类型',
+            binding: { key: 'movieDefaultTypeFilter' },
+            options: [{ value: '', label: '全部' }, ...ALL_TAGS.map((tag) => ({ value: tag, label: tag }))],
+            onChange: warnReload,
+          },
+          {
+            type: 'select',
+            name: '默认状态筛选',
+            desc: '打开影视列表时默认选中的状态',
+            binding: { key: 'movieDefaultStatusFilter' },
+            options: [
+              { value: '全部', label: '全部' },
+              { value: '想看', label: '想看' },
+              { value: '在看', label: '在看' },
+              { value: '已看', label: '已看' },
+            ],
+            onChange: warnReload,
+          },
+          {
+            type: 'select',
+            name: '已看卡片评分显示',
+            desc: '已看条目评分以星星串或数字显示',
+            binding: { key: 'movieRatingDisplay' },
+            options: [
+              { value: 'stars', label: '星星串' },
+              { value: 'number', label: '⭐数字' },
+            ],
+          },
+          { type: 'info', name: '海报抓取', desc: '海报与豆瓣信息由独立的外部工具提供，需另行安装运行' },
+        ],
+      },
+      mobileFullscreenGroup('movieMobileDefaultFullscreen'),
+    ],
+  };
+}
+
 export function createOverlay(app: App, statusType?: string): void {
   registerEscapeHandler(); // 确保监听已注册
   // 主页点击"在看/想看"传入初始筛选；无参数时恢复默认"全部"
@@ -993,6 +1087,7 @@ export function createOverlay(app: App, statusType?: string): void {
   // 移动端默认全屏：复用打开（已存在 → visibility visible）也重挂，设置变更后重开生效
   applyMobileWindowFullscreen(M.currentOverlay?.firstElementChild as HTMLElement | null, tryGetSettings().movieMobileDefaultFullscreen === true);
   if (M.currentOverlay) {
+    topifyZ(M.currentOverlay); // ADR-0067：显示即发号，谁后显示谁在上
     M.currentOverlay.style.visibility = 'visible';
     renderList();
     return;
@@ -1000,9 +1095,11 @@ export function createOverlay(app: App, statusType?: string): void {
 
   const overlay = document.createElement('div');
   overlay.id = '__yin_ying__';
+  overlay.className = 'bz-movie-overlay--1000'; // 标识钩子（层级已动态发号 ADR-0067）
+  overlay.style.zIndex = String(allocZ()); // ADR-0067：首建即显示即发号（modal 为子节点随动）
   overlay.style.cssText = `
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.5); z-index: 1000;
+    background: rgba(0,0,0,0.5);
     display: flex; align-items: center; justify-content: center;
   `;
 
@@ -1060,111 +1157,10 @@ export function createOverlay(app: App, statusType?: string): void {
     openFilterModal();
   });
 
-  // 影视设置弹窗（ADR-0009 域设置弹窗；分组卡片重设计 + ticket 100 文案规范）
+  // 影视设置弹窗（ADR-0009 域设置弹窗；分组卡片重设计 + ticket 100 文案规范；ticket 131 声明式 schema）
   const settingsBtn = mkBtn('⚙️', '影视设置', 'var(--text-normal)', (e) => {
     e.stopPropagation();
-    openSettingsModal({
-      title: '影视设置',
-      maxWidth: 560,
-      build: (el) => {
-        const s = getSettings();
-        // ===== 目录组 =====
-        const dirGroup = createSettingsGroup(el, { icon: 'folder-open', name: '目录' });
-        new Setting(dirGroup)
-          .setName('影视文件夹')
-          .setDesc('存放影视笔记的文件夹路径')
-          .addText((text) =>
-            text.setValue(s.movieFolderPath || '').onChange(async (v) => {
-              s.movieFolderPath = v;
-              await saveSettings();
-            })
-          );
-        new Setting(dirGroup)
-          .setName('每页加载数量')
-          .setDesc('列表首次加载和滚动加载时显示的条数')
-          .addText((text) =>
-            text.setValue(s.moviePageSize || '').onChange(async (v) => {
-              s.moviePageSize = v;
-              await saveSettings();
-            })
-          );
-        // ===== 默认视图组 =====
-        const viewGroup = createSettingsGroup(el, { icon: 'monitor', name: '默认视图' });
-        new Setting(viewGroup)
-          .setName('默认排序')
-          .setDesc('打开影视列表时默认的排序方式')
-          .addDropdown((dd) =>
-            dd
-              .addOption('date-desc', '日期↓')
-              .addOption('date-asc', '日期↑')
-              .addOption('rating-desc', '评分↓')
-              .addOption('rating-asc', '评分↑')
-              .addOption('name-asc', '名称A-Z')
-              .addOption('name-desc', '名称Z-A')
-              .setValue(s.movieDefaultSort || 'date-desc')
-              .onChange(async (v) => {
-                s.movieDefaultSort = v;
-                await saveSettings();
-              })
-          );
-        new Setting(viewGroup)
-          .setName('默认类型筛选')
-          .setDesc('打开影视列表时默认选中的类型')
-          .addDropdown((dd) => {
-            dd.addOption('', '全部');
-            for (const tag of ALL_TAGS) dd.addOption(tag, tag);
-            dd.setValue(s.movieDefaultTypeFilter || '').onChange(async (v) => {
-              s.movieDefaultTypeFilter = v;
-              await saveSettings();
-            });
-          });
-        new Setting(viewGroup)
-          .setName('默认状态筛选')
-          .setDesc('打开影视列表时默认选中的状态')
-          .addDropdown((dd) =>
-            dd
-              .addOption('全部', '全部')
-              .addOption('想看', '想看')
-              .addOption('在看', '在看')
-              .addOption('已看', '已看')
-              .setValue(s.movieDefaultStatusFilter || '全部')
-              .onChange(async (v) => {
-                s.movieDefaultStatusFilter = v;
-                await saveSettings();
-              })
-          );
-        new Setting(viewGroup)
-          .setName('已看卡片评分显示')
-          .setDesc('已看条目评分以星星串或数字显示')
-          .addDropdown((dd) =>
-            dd
-              .addOption('stars', '星星串')
-              .addOption('number', '⭐数字')
-              .setValue(s.movieRatingDisplay || 'stars')
-              .onChange(async (v) => {
-                s.movieRatingDisplay = v;
-                await saveSettings();
-              })
-          );
-        // 海报抓取指引（ADR-0007：外部工具承担；描述去包名细节，详见 README/ADR）
-        new Setting(viewGroup)
-          .setName('海报抓取')
-          .setDesc('海报与豆瓣信息由独立的外部工具提供，需另行安装运行');
-        // ===== 移动端组（仅移动端显示） =====
-        if (isMobileEnv()) {
-          const mobileGroup = createSettingsGroup(el, { icon: 'smartphone', name: '移动端' });
-          new Setting(mobileGroup)
-            .setName('移动端默认全屏')
-            .setDesc('移动端打开主窗口时默认全屏，关闭则显示常规卡片')
-            .addToggle((toggle) =>
-              toggle.setValue(!!s.movieMobileDefaultFullscreen).onChange(async (v) => {
-                s.movieMobileDefaultFullscreen = v;
-                await saveSettings();
-              })
-            );
-        }
-      },
-    });
+    openSettingsModal({ title: '影视设置', maxWidth: 560, schema: movieSettingsSchema() });
   });
 
   const closeBtn = mkBtn('❌', '关闭', 'var(--text-muted)', () => closeOverlay());
@@ -1340,10 +1336,10 @@ function openMovieNote(item: MovieItem, app: App): void {
 const DEFAULT_RATING = 3.5;
 
 /**
- * 快捷状态流转（想看 → 在看 / 在看 → 已看 / 想看 → 已看 直改标记，不弹窗）。
+ * 快捷状态流转（想看 → 在看 直改标记，不弹窗）。
  * 状态由评分推断（无独立状态字段）：想看=-1 / 在看=0 / 已看=>0。
- * 标记在看 → 评分 0；标记已看 → 默认评分 3.5（抽屉保持，可随即「改分」）。
- * 标记在看与标记已看都写观影日期 = 当前日期（用户需求，2026-08-23）。
+ * 标记在看 → 评分 0，并写观影日期 = 当前日期（用户需求，2026-08-23）。
+ * 标记已看不再走本函数：点「标记已看」直接弹评分小窗（评分 → 确认），写评分 + 观影日期=今天（拍板 ux-14）。
  */
 async function setMovieStatus(item: MovieItem, status: number, app: App): Promise<void> {
   const ratingValue = status === STATUS_WATCHING ? 0 : status === STATUS_WATCHED ? DEFAULT_RATING : -1;
@@ -1372,13 +1368,15 @@ function closeMovieTinyModal(mask: HTMLElement, modalEsc: { unregister: () => vo
 }
 
 /**
- * 评分窗（评分 / 改分 共用）：滑块拖动 + 实时数值；遮罩点击/ESC 关闭，无取消按钮。
- * 无日期输入：默认当年日期（已有观影日期则保留，改分不覆盖）。
+ * 评分窗（评分 / 改分 / 标记已看 共用）：滑块拖动 + 实时数值；遮罩点击/ESC 关闭，无取消按钮。
+ * 无日期输入：默认当年日期（已有观影日期则保留，改分不覆盖）；
+ * forceTodayDate（标记已看路径）= 观影日期强制今天，覆盖旧日期。
  * 确认：评分、观影日期 写入 frontmatter（已看状态由评分 >0 表达，不写状态字段）。
  */
-export function openRateModal(item: MovieItem, app: App, title: string, onDone?: () => void): void {
+export function openRateModal(item: MovieItem, app: App, title: string, onDone?: () => void, forceTodayDate?: boolean): void {
   const mask = document.createElement('div');
   mask.className = 'bz-movie-tiny-mask';
+  mask.style.zIndex = String(allocZ()); // ADR-0067：新建即显示即发号（modal 为子节点随动）
   const modal = document.createElement('div');
   modal.className = 'bz-movie-tiny-modal';
 
@@ -1415,8 +1413,8 @@ export function openRateModal(item: MovieItem, app: App, title: string, onDone?:
 
   confirmBtn.addEventListener('click', async () => {
     const ratingVal = parseFloat(slider.value);
-    // 无日期输入：新评分默认当年日期；已有观影日期保留（改分不覆盖旧日期）
-    const watchDate = item.watchDate || localNowFormat().replace('T', ' ');
+    // 无日期输入：新评分默认当年日期；改分保留旧日期；标记已看（forceTodayDate）强制今天
+    const watchDate = item.watchDate && !forceTodayDate ? item.watchDate : localNowFormat().replace('T', ' ');
     await app.fileManager.processFrontMatter(item.file, (fm: Record<string, any>) => {
       fm['评分'] = ratingVal;
       fm['观影日期'] = watchDate;
@@ -1448,6 +1446,7 @@ export function openRateModal(item: MovieItem, app: App, title: string, onDone?:
 export function openReviewModal(item: MovieItem, app: App, title: string, onDone?: () => void): void {
   const mask = document.createElement('div');
   mask.className = 'bz-movie-tiny-mask';
+  mask.style.zIndex = String(allocZ()); // ADR-0067：新建即显示即发号（modal 为子节点随动）
   const modal = document.createElement('div');
   modal.className = 'bz-movie-tiny-modal';
 
@@ -1500,17 +1499,20 @@ export function openReviewModal(item: MovieItem, app: App, title: string, onDone
 
 /** 删除影视笔记（二次确认，不可撤销） */
 function confirmDeleteMovie(item: MovieItem, app: App): void {
-  confirm({
+  void openFlowDialog({
     title: '删除影视',
     message: `确定删除《${item.name}》吗？\n\n此操作不可撤销，影视笔记将从笔记库永久删除。`,
-    confirmText: '删除',
-    onConfirm: async () => {
-      await app.vault.delete(item.file);
-      // ticket 074（域事件派发）：删除影视观察
-      emitDomainEvent('movie', { kind: 'deleted', name: item.name });
-      notice('影视已删除', 'success');
-      refreshDataAndView(app);
-    },
+    actions: [
+      { label: '取消', value: 'cancel' },
+      { label: '删除', value: 'ok', cta: true },
+    ],
+  }).then(async (v) => {
+    if (v !== 'ok') return;
+    await app.vault.delete(item.file);
+    // ticket 074（域事件派发）：删除影视观察
+    emitDomainEvent('movie', { kind: 'deleted', name: item.name });
+    notice('影视已删除', 'success');
+    refreshDataAndView(app);
   });
 }
 
@@ -1581,6 +1583,7 @@ function openDetailModal(item: MovieItem, app: App): void {
 
   const mask = document.createElement('div');
   mask.className = 'bz-movie-tiny-mask';
+  mask.style.zIndex = String(allocZ()); // ADR-0067：新建即显示即发号（modal 为子节点随动）
   const modal = document.createElement('div');
   modal.className = 'bz-movie-tiny-modal bz-movie-detail-modal';
 
@@ -1674,13 +1677,22 @@ async function copyMovieLink(item: MovieItem): Promise<void> {
 /**
  * 挂统一操作（桌面右键 + 移动端抽屉）：
  * 打开 > 状态流转 >（已看）评分/影评 > 删除。
- * 动作随状态动态：想看=标记在看 + 标记已看（并列，可跳过在看直跳已看）；在看=标记已看
- * （直改标记，抽屉保持并刷新为已看动作）；已看=评分/改分（滑块窗）+ 写/改影评（影评窗），
- * 评分与影评按有无内容切换文案。标记在看/已看均把观影日期更新为当前日期。
+ * 动作随状态动态：想看=标记在看 + 标记已看（并列，可跳过在看直跳已看）；在看=标记已看。
+ * 标记在看直改标记（评分 0 + 观影日期=今天，抽屉保持并刷新动作）；
+ * 标记已看直接弹评分小窗（评分 → 确认，写评分 + 观影日期=今天，不写默认分；抽屉保持并刷新为已看动作）。
+ * 已看=评分/改分（滑块窗）+ 写/改影评（影评窗），评分与影评按有无内容切换文案。
  */
 function attachMovieActions(card: HTMLElement, item: MovieItem, app: App): void {
   // 状态/评分/影评变化后：动作列表 + 头部信息一并刷新（抽屉保持）
   const rebuild = () => refreshItemSheet(buildActions(), buildMovieSheetHead(item, app));
+  /** 标记已看：直接弹评分窗（评分 → 确认）；确认回调把状态流转观察 + 本地状态刷新 */
+  const markWatched = (from: 'want' | 'watching') => () =>
+    openRateModal(item, app, '标记已看', () => {
+      // ticket 074（域事件派发）：看完「状态流转」观察（from = 改前状态；评分观察由评分窗确认已发）
+      emitDomainEvent('movie', { kind: 'status', name: item.name, from, to: 'watched' });
+      item.status = STATUS_WATCHED;
+      rebuild();
+    }, true);
   const buildActions = (): ItemAction[] => {
     const acts: ItemAction[] = [];
     acts.push({ icon: 'external-link', label: '打开', title: '打开影视笔记', onClick: () => openMovieNote(item, app) });
@@ -1698,18 +1710,13 @@ function attachMovieActions(card: HTMLElement, item: MovieItem, app: App): void 
             rebuild();
           }),
       });
-      // 想看 → 已看 直跳（放「标记在看」下面，用户需求 2026-08-23）
+      // 想看 → 已看 直跳（放「标记在看」下面，用户需求 2026-08-23）：直接弹评分小窗
       acts.push({
         icon: 'check-circle',
         label: '标记已看',
         title: '标记已看',
         keepOpen: true,
-        onClick: () =>
-          void setMovieStatus(item, STATUS_WATCHED, app).then(() => {
-            item.status = STATUS_WATCHED;
-            item.rating = DEFAULT_RATING; // 与落盘一致：已看 = 有评分，抽屉刷新显示「改分」
-            rebuild();
-          }),
+        onClick: markWatched('want'),
       });
     } else if (item.status === STATUS_WATCHING) {
       acts.push({
@@ -1717,12 +1724,7 @@ function attachMovieActions(card: HTMLElement, item: MovieItem, app: App): void 
         label: '标记已看',
         title: '标记已看',
         keepOpen: true,
-        onClick: () =>
-          void setMovieStatus(item, STATUS_WATCHED, app).then(() => {
-            item.status = STATUS_WATCHED;
-            item.rating = DEFAULT_RATING; // 与落盘一致：已看 = 有评分，抽屉刷新显示「改分」
-            rebuild();
-          }),
+        onClick: markWatched('watching'),
       });
     } else {
       // 已看态：评分/影评按有无内容切换文案（评分 → 改分；写影评 → 改影评）；改分小字 = 当前分数

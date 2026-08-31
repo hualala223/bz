@@ -299,7 +299,13 @@ const waitFor = (pred: () => boolean, timeout = 10000, step = 30) =>
     };
     tick();
   });
-const readStream = (): any[] => __getSmartcatInternals().data.memory.stream;
+// ADR-0069：library 事件类全走 behavior 流，富描述在 metadata.snapshot.summary——
+// 这里映射出与旧记忆流条目同形的 { description, source } 视图，既有断言口径不变
+const readStream = (): any[] =>
+  __getSmartcatInternals().data.memory.behaviorStream.map((m: any) => ({
+    ...m,
+    description: m.metadata?.snapshot?.summary ?? m.description,
+  }));
 const WEAVE_PATH = 'CONFIG/STORAGE/weave-data.json';
 
 /** weave 文件先写入 vault → ensureSmartCat（首快照基线）→ 返回 */
@@ -335,7 +341,7 @@ describe('书库 md 通道短路（ticket 081：onVaultActivity reading 短路�
   });
 });
 
-describe('weave-data modify 链路（domain:library；书架/时长即时 + 划线想法防抖）', () => {
+describe('weave-data modify 链路（library；书架/时长即时 + 划线想法防抖）', () => {
   it('首快照不产出；已有书无变化 modify → 也不产', async () => {
     const { vault } = await bootWithWeave({ b1: book({ reading: { position: { percent: 50 }, stats: {}, sessions: [{ durationSeconds: 300 }] } }) });
     await settle();
@@ -368,7 +374,7 @@ describe('weave-data modify 链路（domain:library；书架/时长即时 + 划�
       const tail = readStream();
       return tail.length > before && tail[tail.length - 1].description === '你在《血与蜜之地》划了 2 条重点：「巴尔干是一片破碎之地」、「边界是虚构的」';
     });
-    expect(readStream()[readStream().length - 1].source).toBe('domain:library');
+    expect(readStream()[readStream().length - 1].source).toBe('library');
     expect(__getLibraryPendingForTests().size).toBe(0);
   });
 
@@ -398,7 +404,7 @@ describe('weave-data modify 链路（domain:library；书架/时长即时 + 划�
       const tail = readStream();
       return tail.length > before && tail[tail.length - 1].description === '你在《测试书》划了 2 条重点：「c1」、「c2」；写了条想法：「e1」';
     }, 3000);
-    expect(readStream()[readStream().length - 1].source).toBe('domain:library');
+    expect(readStream()[readStream().length - 1].source).toBe('library');
     expect(__getLibraryPendingForTests().size).toBe(0);
   });
 

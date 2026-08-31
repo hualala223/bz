@@ -77,7 +77,7 @@ function makeUI(dm: SafeManager, config = BASE_CONFIG) {
 
 function findDialog(): HTMLElement | null {
   return [...document.querySelectorAll('div')].find(
-    (d) => d.style.zIndex === '10070' && d.style.display === 'flex'
+    (d) => d.classList.contains('bz-encrypt-dialog-mask') && d.style.display === 'flex'
   ) as HTMLElement | null;
 }
 
@@ -223,13 +223,13 @@ describe('体检弹窗覆盖补测', () => {
     expect(body.textContent).toContain('可清理（2）：1 个失效条目、1 个孤儿密文');
     expect(body.textContent).toContain('损坏镜像（2）——不可清理，请从备份恢复后重试还原');
     expect(body.textContent).toContain('附件镜像缺失（1）——还原时该附件将不可用');
-    // 可清理项默认全选，计数联动
+    // 可清理项默认不全选（ticket 18 用户拍板），勾选才计入清理
     const boxes = [...body.querySelectorAll<HTMLInputElement>('input.bz-encrypt-health-check')];
     expect(boxes.length).toBe(2);
-    expect(boxes.every((b) => b.checked)).toBe(true);
+    expect(boxes.every((b) => b.checked)).toBe(false);
     const cleanBtn = document.getElementById('bz-encrypt-health-clean') as HTMLButtonElement;
-    expect(cleanBtn.textContent).toBe('清理勾选项 (2)');
-    boxes[0].checked = false;
+    expect(cleanBtn.textContent).toBe('清理勾选项 (0)');
+    boxes[0].checked = true;
     boxes[0].dispatchEvent(new Event('change'));
     expect(cleanBtn.textContent).toBe('清理勾选项 (1)');
     // 重新体检按钮触发再次扫描（foot 仅有 class 无 id）
@@ -263,7 +263,7 @@ describe('体检弹窗覆盖补测', () => {
     expect(document.getElementById('bz-encrypt-health-popup')!.style.display).toBe('none');
   });
 
-  it('清理：未勾选提示；成功按类目汇总并自动复扫；失败如实报错', async () => {
+  it('清理：未勾选提示；勾选后二次确认写明永久删除数量，确认后按类目汇总并自动复扫；失败如实报错', async () => {
     const dm = fakeDM({
       overrides: {
         resolveHealth: vi.fn(async () => ({ notes: 2, files: 1 })),
@@ -277,23 +277,44 @@ describe('体检弹窗覆盖补测', () => {
     await ui.openHealthDialog();
     await waitFor(() => !!document.querySelector('.bz-encrypt-health-check'));
 
-    // 全部取消勾选 → 提示未勾选
+    // 默认未勾选（ticket 18）→ 点清理只提示未勾选，不弹确认
     const box = document.querySelector<HTMLInputElement>('input.bz-encrypt-health-check')!;
-    box.checked = false;
-    box.dispatchEvent(new Event('change'));
+    expect(box.checked).toBe(false);
     (document.getElementById('bz-encrypt-health-clean') as HTMLElement).click();
     await waitFor(() => hasNotice('未勾选任何可清理项'));
+    expect(document.getElementById('__shared_confirm_mask__')).toBeNull();
 
-    // 勾选后清理 → 汇总通知 + 自动重新体检
+    // 勾选后清理 → 二次确认写明永久删除数量 → 确认后汇总通知 + 自动重新体检
     box.checked = true;
     box.dispatchEvent(new Event('change'));
     (document.getElementById('bz-encrypt-health-clean') as HTMLElement).click();
+    await waitFor(() => !!document.getElementById('__shared_confirm_mask__'));
+    expect(document.getElementById('__shared_confirm_mask__')!.textContent).toContain('清理确认');
+    expect(document.getElementById('__shared_confirm_mask__')!.textContent).toContain('1 条失效条目（含残余附件镜像）');
+    expect(document.getElementById('__shared_confirm_mask__')!.textContent).toContain('将永久删除，不可恢复');
+    (document.getElementById('__shared_confirm_ok__') as HTMLElement).click();
     await waitFor(() => hasNotice('已清理：2 个失效条目、1 个孤儿密文'));
     expect((dm as any).scanHealth.mock.calls.length).toBeGreaterThanOrEqual(2);
 
-    // 失败路径
+    // 取消二次确认 → 不执行清理（清理后自动复扫渲染新报告，重新查询勾选框，默认仍不全选）
+    await waitFor(() => !!document.querySelector('input.bz-encrypt-health-check'));
+    const box2 = document.querySelector<HTMLInputElement>('input.bz-encrypt-health-check')!;
+    expect(box2.checked).toBe(false);
+    const resolvedBefore = (dm as any).resolveHealth.mock.calls.length;
+    box2.checked = true;
+    box2.dispatchEvent(new Event('change'));
+    (document.getElementById('bz-encrypt-health-clean') as HTMLElement).click();
+    await waitFor(() => !!document.getElementById('__shared_confirm_mask__'));
+    expect(document.getElementById('__shared_confirm_mask__')!.textContent).toContain('将永久删除，不可恢复');
+    (document.getElementById('__shared_confirm_cancel__') as HTMLElement).click();
+    await new Promise((r) => setTimeout(r, 30));
+    expect((dm as any).resolveHealth).toHaveBeenCalledTimes(resolvedBefore); // 取消未多执行清理
+
+    // 失败路径（同样先过二次确认 → 确认后如实报错）
     (dm as any).resolveHealth.mockRejectedValueOnce(new Error('磁盘只读'));
     (document.getElementById('bz-encrypt-health-clean') as HTMLElement).click();
+    await waitFor(() => !!document.getElementById('__shared_confirm_mask__'));
+    (document.getElementById('__shared_confirm_ok__') as HTMLElement).click();
     await waitFor(() => hasNotice('清理失败：磁盘只读'));
   });
 });
@@ -840,6 +861,11 @@ describe('EncryptAppController 覆盖补测', () => {
       encryptSecurityMode: false,
     };
     setSettingsProvider(() => s);
+    // ticket 128：保险箱根目录走统一路径选择器——种库内目录（默认 CONFIG/.ENCRYPT + 新/路径）
+    const vault = new MockVault();
+    vault.create('CONFIG/.ENCRYPT/.safe.enc', 'x');
+    vault.create('新/路径/a.md', 'x');
+    setApp(mockAppWithVault(vault) as any);
     const saveSpy = vi.fn(async () => {});
     setSettingsSaver(saveSpy);
     const c = new EncryptAppController(makeConfig());
@@ -847,15 +873,36 @@ describe('EncryptAppController 覆盖补测', () => {
     const settingsBtn = [...document.querySelectorAll('button')].find((b) => b.title === '保险箱设置')!;
     settingsBtn.click();
     let popup = document.getElementById('bz-settings-modal-popup')!;
-    let names = [...popup.querySelectorAll('.setting-item')].map((el) => (el as any).__setting.name);
+    // ticket 131：移动端组行仍留 DOM（bz-setting-hidden 整组隐藏），桌面端按组可见性过滤后与原行为一致
+    const visibleRows = () =>
+      [...popup.querySelectorAll('.setting-item')].filter(
+        (el) => !(el as HTMLElement).closest('.bz-settings-group')!.classList.contains('bz-setting-hidden')
+      );
+    let names = visibleRows().map((el) => (el as any).__setting.name);
     expect(names).toEqual(['保险箱根目录', '生成压缩预览', '预览长边', '预览质量', '预览自动加载原图', '安全模式']);
-    const controls = [...popup.querySelectorAll('.setting-item')].map((el) => (el as any).__setting.controls);
-    await (controls[0][0] as any).trigger('新/路径'); // 根目录
+    const controls = visibleRows().map((el) => (el as any).__setting.controls);
+    // 保险箱根目录行：点「选择…」→ 选择器选「新/路径」→ 确定（点前缀隐藏目录 CONFIG/.ENCRYPT 亦在列表）
+    expect(controls[0][0].text).toBe('选择…');
+    controls[0][0].trigger();
+    const picker = document.getElementById('bz-path-picker-popup')!;
+    // 等「adapter 补齐完成」标记（快速首渲染下 rows 立即出现，但空目录 新/路径 与点前缀目录要等补齐合并）
+    await waitFor(() => picker.dataset.ready === '1');
+    const paths = [...picker.querySelectorAll('.bz-path-picker-row')].map((r) => (r as HTMLElement).dataset.path);
+    expect(paths).toContain('CONFIG/.ENCRYPT'); // 点前缀目录经 adapter 补齐
+    expect(paths).toContain('新/路径');
+    const target = [...picker.querySelectorAll('.bz-path-picker-row')].find(
+      (r) => (r as HTMLElement).dataset.path === '新/路径'
+    ) as HTMLElement;
+    target.click();
+    (picker.querySelector('.bz-path-picker-btn--primary') as HTMLButtonElement).click();
     expect(s.encryptRoot).toBe('新/路径');
     await (controls[1][0] as any).trigger(false); // 预览开关
     expect(s.encryptPreviewEnabled).toBe(false);
+    // text 行（ticket 131 渲染器语义：800ms 防抖落盘 + 失焦立即 commit）——失焦立即落盘替代 waitFor 竞速
     await (controls[2][0] as any).trigger('512'); // 预览长边
+    (controls[2][0] as any).inputEl.dispatchEvent(new Event('blur'));
     await (controls[3][0] as any).trigger('0.8'); // 质量
+    (controls[3][0] as any).inputEl.dispatchEvent(new Event('blur'));
     await (controls[4][0] as any).trigger(true); // 自动加载原图
     await (controls[5][0] as any).trigger(true); // 安全模式
     expect(s.encryptSecurityMode).toBe(true);

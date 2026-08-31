@@ -76,13 +76,25 @@ export default interface BzSettings {
   /** 📁 存储文件夹路径（belongings.json）——ADR-0009 废弃，统一走 storagePath，仅兼容保留 */
   belongingsDataFolder: string;
 
-  // ===== 📰 剪藏本（2 项 + 自动摘要开关）=====
+  // ===== 📰 剪藏本（2 项 + 自动摘要开关 + ticket 124 详设/数据源）=====
   /** 📂 剪藏目录 */
   articleDirectory: string;
   /** 📄 每批加载数量（滚动加载每批显示的条目数） */
   articleBatchSize: string;
   /** 📄 自动摘要：监听剪藏目录新文件（路径与剪藏目录一致） */
   autoSummaryEnabled: boolean;
+  /** 📏 自动摘要长度档位：simple（简短）/ standard（标准）/ detailed（详细）——ticket 124 详设 */
+  autoSummaryLength: string;
+  /** 🏷️ 自动摘要标签生成开关（关 = 不生成/不补全 tags）——ticket 124 详设 */
+  autoSummaryTagsEnabled: boolean;
+  /** 🔢 自动摘要标签数量（"3-6" 区间文本）——ticket 124 详设 */
+  autoSummaryTagCount: string;
+  /** ⏱️ 自动摘要时机：immediate（保存后立刻，create+file-open 双监听）/ lazy（仅打开文件时补全）——ticket 124 详设 */
+  autoSummaryTiming: string;
+  /** 🗑️ 聚合讯保留策略：已保存骨架（state=saved，正文已清空）保留天数——ticket 124 数据源组 */
+  newsRetentionSavedDays: string;
+  /** 🗑️ 聚合讯保留策略：已跳过骨架（state=skipped）保留天数——ticket 124 数据源组 */
+  newsRetentionSkippedDays: string;
 
   // ===== 🔐 密码本（4 项）=====
   /** 📂 数据存储路径——ADR-0009 废弃，统一走 storagePath，仅兼容保留 */
@@ -132,7 +144,7 @@ export default interface BzSettings {
   // ===== 🧠 做题家（4 项，含 shuffleQuestions；设置并入复习计划 tab）=====
   /** 允许多选题 */
   enableMultipleChoice: boolean;
-  /** 每笔记题目数量（0 为自动） */
+  /** 每篇笔记出题数量（f8：留空/0=自动） */
   questionsPerNote: string;
   /** 打乱题目顺序 */
   shuffleQuestions: boolean;
@@ -181,41 +193,53 @@ export default interface BzSettings {
   /** 移动端独立：打开入口页手势（未设置 → 继承桌面端） */
   launcherGestureMobile?: string;
 
-  // ===== 💭 闪念（17 项，全量迁移）=====
+  // ===== 🧠 第二大脑（secondbrain 域；原闪念 17 键 ticket 103 全量更名，onload 迁移旧值）=====
   /** Ollama URL（本地） */
-  OLLAMA_URL: string;
+  secondBrainOllamaUrl: string;
   /** Embedding 模型 */
-  EMBEDDING_MODEL: string;
-  /** 元数据路径（meta.json）——ADR-0009 废弃，统一走 storagePath，仅兼容保留 */
-  META_PATH: string;
-  /** 向量文件路径（vectors.vec）——ADR-0009 废弃，统一走 storagePath，仅兼容保留 */
-  VEC_PATH: string;
+  secondBrainEmbeddingModel: string;
   /** 参考结果数 */
-  TOP_K: string;
+  secondBrainTopK: string;
   /** AI 检索结果数 */
-  CHAT_TOP_K: string;
+  secondBrainChatTopK: string;
   /** 段落最小长度 */
-  CHUNK_MIN_LENGTH: string;
-  /** 允许的文件夹（逗号分隔） */
-  ALLOW_PATHS: string;
-  /** Embedding 请求并发数 */
-  CONCURRENCY: string;
+  secondBrainChunkMinLength: string;
+  /** 允许的文件夹（逗号分隔；f8：留空/空=不索引任何目录，不是「全库」） */
+  secondBrainAllowPaths: string;
+  /** Embedding 请求并发数（QA 遗留死配置：定义后从未接线，忠实保留不删） */
+  secondBrainConcurrency: string;
   /** 上下文限制 */
-  CONTEXT_LIMIT: string;
+  secondBrainContextLimit: string;
   /** 防抖延迟（ms） */
-  DEBOUNCE_DELAY: string;
+  secondBrainDebounceDelay: string;
   /** 光标轮询间隔（ms） */
-  CURSOR_POLL_INTERVAL: string;
+  secondBrainCursorPollInterval: string;
   /** Ollama 对话模型 */
-  OLLAMA_CHAT_MODEL: string;
+  secondBrainChatModel: string;
   /** DeepSeek 模型 */
-  DEEPSEEK_MODEL: string;
+  secondBrainDeepseekModel: string;
   /** 默认使用 DeepSeek（true/false） */
-  DEFAULT_USE_DEEPSEEK: string;
+  secondBrainDefaultUseDeepseek: string;
   /** 最大历史记录 */
-  MAX_HISTORY: string;
-  /** 远程 Ollama URL */
-  OLLAMA_REMOTE_URL: string;
+  secondBrainMaxHistory: string;
+  /** 远程 Ollama URL（移动端探活/降级链） */
+  secondBrainRemoteOllamaUrl: string;
+
+  // ===== 🔗 第二大脑·自动双链管线（ticket 111，⚙️ 弹窗「自动双链」组）=====
+  /** 自动双链总开关：关联范围新笔记落盘时自动建立 related 双链（false 时无任何监听与写入） */
+  linkAgentEnabled: boolean;
+  /** 关联范围：英文逗号分隔的 vault 内目录清单（风格同 aiAgentWatchedFolders），同时决定落盘监听与候选过滤；f8：留空/空=不自动关联（ticket 116 起不再回退「文献盒」） */
+  linkAgentScopes: string;
+  /** 单篇候选数量（关联范围内向量近邻 Top-K） */
+  linkAgentTopK: number;
+  /** 每篇 related 写入上限；0 = 不限，由 AI 裁判自行决定（沿用复习域「0=不限制」惯例） */
+  linkAgentMaxLinks: number;
+  /** 处理完成后通知提醒（关闭则全程静默） */
+  linkAgentNotify: boolean;
+  /** 失效关联自动清理（metadataCache 删除事件 + 低频巡检） */
+  linkAgentAutoClean: boolean;
+  /** 已有关联不再建链（v1.7/ticket 167）：自动路径（创建/修改/队列消费）对 related 非空笔记跳过；手动重跑豁免 */
+  linkAgentRespectRelated: boolean;
 
   // ===== 常驻监听开关（懒加载架构，ADR-0003）=====
   // AI Agent 4 项（ADR-0009）：设置不暴露 UI，运行时读字段（默认值兜底，尊重旧 data.json 值）
@@ -227,8 +251,8 @@ export default interface BzSettings {
   aiAgentWatchedFolders: string;
   /** 🧠 AI Agent 剪藏匹配模型 */
   aiAgentModel: string;
-  /** 闪念：常驻监听光标/文件 */
-  flashEnabled: boolean;
+  /** 第二大脑启用开关（l7A）：仅控制启动时自动加载（常驻监听/面板初始化），关闭后仍可从命令面板手动打开；原 flashEnabled，ticket 103 更名迁移 */
+  secondBrainEnabled: boolean;
 
   // ===== 🍅 番茄钟（9 项，ticket 31）=====
   /** 预设方案 id（PRESETS 12 档：11 科学预设 + custom 自定义） */
@@ -286,6 +310,11 @@ export default interface BzSettings {
   passwordMobileDefaultFullscreen: boolean;
   /** 收藏本：移动端默认全屏（默认开——原 JS 内联强制全屏） */
   favoritesMobileDefaultFullscreen: boolean;
+  /** 收藏本：列表排序键（created=创建时间最新优先 / title=标题 / domain=域名，ticket 141。
+   *  排序选择持久化于 data.json 而非 favorites.json——favorites.json 顶层是纯条目数组，
+   *  顶层加字段需改根结构，会破坏仍在用的外部统计脚本 主页.js（读 favorites.length），
+   *  且违背「既有结构不改」铁律；排序键落设置与 memoSortMode/movieDefaultSort 同惯例） */
+  favoritesSortKey: string;
   /** 书库：移动端默认全屏（默认开——原 CSS ≤768 全屏主面板与读书笔记；阅读报告跟随此键） */
   libraryMobileDefaultFullscreen: boolean;
   /** 影视：移动端默认全屏（默认开——主面板/影视分析/影视报告同控，原 JS 内联强制全屏） */
@@ -296,9 +325,41 @@ export default interface BzSettings {
   pomodoroMobileDefaultFullscreen: boolean;
   /** 保险箱：移动端默认全屏（默认开——原 JS 内联强制全屏） */
   encryptMobileDefaultFullscreen: boolean;
+  /** 文献盒：移动端默认全屏（默认关——95% 居中卡，ADR-0065） */
+  literatureMobileDefaultFullscreen: boolean;
+  /** 文献盒：步骤进度详细度（默认开——当前步骤+耗时+百分比+步骤时间线；关=仅步骤徽章，ADR-0066） */
+  literatureProgressDetail: boolean;
+  /** 文献盒：处理完是否保留视频原件（默认保留；关=只出文献笔记不落视频，ADR-0066） */
+  literatureKeepVideo: boolean;
+  /** 文献盒：下载清晰度（'highest'/'1080'/'720'，默认最高；透传工具 options.quality，ADR-0066） */
+  literatureQuality: string;
+  /** 文献盒：遇错即停（默认关=失败后继续；开=单条失败后剩余保持待处理，ADR-0066） */
+  literatureStopOnFailure: boolean;
+  /** 文献盒：输出目录覆盖（默认空=跟随工具配置 ~/.bilibili-dl.json 的 outputDir，ADR-0066） */
+  literatureOutputDir: string;
+  /** 文献盒：压缩开关（默认开——用户拍板 ticket 136；透传工具 options.compress） */
+  literatureCompress: boolean;
+  /** 文献盒：压缩质量 CRF（默认 23，范围 18-28；透传工具 options.crf，ticket 136） */
+  literatureCrf: number;
+  /** 文献盒：文献目录（文献笔记落盘位置，默认 vault 根下「文献盒」；ticket 136/ADR-0072） */
+  literatureDirectory: string;
+  /** 文献盒：领域词表（逗号分隔；空 = AI 自由写，ticket 136/ADR-0073） */
+  literatureDomainList: string;
+  /** 文献盒：ffmpeg 路径（原工具 rc ffmpegPath，ticket 136 全并进设置） */
+  literatureFfmpegPath: string;
+  /** 文献盒：ffprobe 路径（原工具 rc ffprobePath） */
+  literatureFfprobePath: string;
+  /** 文献盒：Python 路径（faster-whisper，原工具 rc pythonPath） */
+  literaturePythonPath: string;
+  /** 文献盒：Whisper 模型（原工具 rc whisperModel） */
+  literatureWhisperModel: string;
+  /** 文献盒：缓存目录（原工具 rc cacheDir；留空=系统临时目录/bili-dl-cache） */
+  literatureCacheDir: string;
+  /** 文献盒：缓存保留天数（原工具 rc cacheRetentionDays） */
+  literatureCacheRetentionDays: number;
 
   // ===== 🐱 小橘陪伴猫（smartcat 域：桌面宠物 + AI 陪伴）=====
-  /** 常驻域开关：开启后 onLayoutReady 启动小橘（猫容器 + 自言自语/心情/动画等常驻行为） */
+  /** 小橘启用开关（l7A）：仅控制启动时自动加载（猫容器挂载/常驻行为），关闭后仍可从命令面板手动打开 */
   smartcatEnabled: boolean;
   /** 关闭方式（ticket 103）：小橘关闭后的处理——stop 彻底停机 / hide 仅隐藏（后台仍感知）/ lazy 仅不自动启动；默认 stop。立即生效 */
   smartcatOffMode: string;
@@ -308,6 +369,40 @@ export default interface BzSettings {
    * 原独立键 smartcatDashboardMobileDefaultFullscreen（ticket 071）删除，旧值残留忽略。
    */
   smartcatMobileDefaultFullscreen: boolean;
+  /** 小橘记忆库向量化模型（'' = 跟随第二大脑嵌入模型；改动需重建记忆向量索引） */
+  smartcatEmbeddingModel: string;
+  /** 小橘记忆库分块字符上限（200–6000；默认 800——中文语义检索粒度优先，改动后新入库条目生效） */
+  smartcatChunkLimitChars: number;
+
+  // ===== 🐱 小橘记忆巩固（ticket 160 三层流水线；ticket 162 精简——反思只看素材阈值（证据池全量进
+  // prompt，仅按重要度排序）；行为小结为反思前置步骤（1 条，不占素材额度）；周报窗口=上次周报以来（首次 7 天），
+  // 洞察/小结条数由 AI 定）=====
+  /** 反思新观察阈值（自上次反思记忆流新增达到该条数即反思；无时间间隔闸） */
+  smartcatReflectMinNew: number;
+  /** 反思引用原文摘录字数（0 表示不附原文） */
+  smartcatRefExcerptLimit: number;
+  /** 每次反思最多归纳洞察条数（ticket 163：默认 3——LLM 输出超限按序截断，防一次性产出过多） */
+  smartcatReflectMaxInsights: number;
+  /** 小橘对我的称呼（ticket 163：默认「包仔」；把记忆流/行为流喂给 AI 时「你/用户」替换为称呼） */
+  smartcatUserName: string;
+
+  // ===== 🐱 小橘行为流设置（P1 数据基座，ticket 123）=====
+  /** 行为流最大保留天数（超出部分删除最旧条目） */
+  behaviorMaxDays: number;
+  /** 行为流最大保留条数（超出部分删除最旧） */
+  behaviorMaxCount: number;
+  /** 显示行为日志面板（控制 UI 入口是否可见） */
+  showBehaviorLog: boolean;
+  /** 启用自动双链（关联范围新笔记落盘时自动建立 related 双链） */
+  enableAutoLinking: boolean;
+  /** 自动双链窗口天数（关联范围内的笔记时间窗口） */
+  linkWindowDays: number;
+  /** 记忆目录（ADR-0069 记忆目录流）：进入小橘笔记记忆库的多个 vault 文件夹（⚙️ 小橘设置弹窗配置） */
+  memoryDirectories: string[];
+
+  // ===== 🧠 第二大脑 =====
+  /** 第二大脑主面板：移动端默认全屏（默认开——总览信息密度高；ticket 103） */
+  secondBrainMobileDefaultFullscreen: boolean;
 }
 
 export const DEFAULT_SETTINGS: BzSettings = {
@@ -356,6 +451,12 @@ export const DEFAULT_SETTINGS: BzSettings = {
   articleDirectory: '归档/网页剪藏',
   articleBatchSize: '20',
   autoSummaryEnabled: true,
+  autoSummaryLength: 'standard',
+  autoSummaryTagsEnabled: true,
+  autoSummaryTagCount: '3-6',
+  autoSummaryTiming: 'immediate',
+  newsRetentionSavedDays: '3',
+  newsRetentionSkippedDays: '7',
 
   // 密码本
   pwStoragePath: 'CONFIG/STORAGE',
@@ -412,31 +513,38 @@ export const DEFAULT_SETTINGS: BzSettings = {
   // 手势触发（默认关闭；单选一个手势打开命令入口页）
   launcherGesture: 'off',
 
-  // 闪念
-  OLLAMA_URL: 'http://localhost:11434',
-  EMBEDDING_MODEL: 'bge-m3',
-  META_PATH: 'CONFIG/STORAGE/ai_completion_meta.json',
-  VEC_PATH: 'CONFIG/STORAGE/ai_completion_vectors.vec',
-  TOP_K: '20',
-  CHAT_TOP_K: '20',
-  CHUNK_MIN_LENGTH: '50',
-  ALLOW_PATHS: '卡片盒,主题盒,我的,归档,CODE',
-  CONCURRENCY: '15',
-  CONTEXT_LIMIT: '600',
-  DEBOUNCE_DELAY: '300',
-  CURSOR_POLL_INTERVAL: '500',
-  OLLAMA_CHAT_MODEL: 'qwen2.5:14b-instruct',
-  DEEPSEEK_MODEL: 'deepseek-v4-flash',
-  DEFAULT_USE_DEEPSEEK: 'false',
-  MAX_HISTORY: '10',
-  OLLAMA_REMOTE_URL: 'http://192.168.1.8:11434',
+  // 第二大脑（ticket 103：原闪念键更名，值语义与存储类型不变；META_PATH/VEC_PATH 废弃清除）
+  secondBrainOllamaUrl: 'http://localhost:11434',
+  secondBrainEmbeddingModel: 'bge-m3',
+  secondBrainTopK: '20',
+  secondBrainChatTopK: '20',
+  secondBrainChunkMinLength: '50',
+  secondBrainAllowPaths: '', // ticket 116：默认空 = 什么也不录（不索引任何目录），由用户自行填写
+  secondBrainConcurrency: '15',
+  secondBrainContextLimit: '600',
+  secondBrainDebounceDelay: '300',
+  secondBrainCursorPollInterval: '500',
+  secondBrainChatModel: 'qwen2.5:14b-instruct',
+  secondBrainDeepseekModel: 'deepseek-v4-flash',
+  secondBrainDefaultUseDeepseek: 'false',
+  secondBrainMaxHistory: '10',
+  secondBrainRemoteOllamaUrl: 'http://192.168.1.8:11434',
+
+  // 自动双链管线（ticket 111；ticket 116 起默认空 = 什么也不录，由用户自行填写范围）
+  linkAgentEnabled: true,
+  linkAgentScopes: '',
+  linkAgentTopK: 8,
+  linkAgentMaxLinks: 0,
+  linkAgentNotify: true,
+  linkAgentAutoClean: true,
+  linkAgentRespectRelated: true, // v1.7/ticket 167：默认尊重「已有 related 不再自动建链」
 
   // 常驻监听
   aiAgentEnabled: true,
   enableAIClipMatch: true,
   aiAgentWatchedFolders: '卡片盒,归档/网页剪藏',
   aiAgentModel: 'deepseek-v4-flash',
-  flashEnabled: true,
+  secondBrainEnabled: true,
 
   // 番茄钟（9 项，ticket 31）
   pomodoroPreset: 'classic',
@@ -468,15 +576,100 @@ export const DEFAULT_SETTINGS: BzSettings = {
   clippingMobileDefaultFullscreen: true,
   passwordMobileDefaultFullscreen: true,
   favoritesMobileDefaultFullscreen: true,
+  favoritesSortKey: 'created',
   libraryMobileDefaultFullscreen: true,
   movieMobileDefaultFullscreen: true,
   reviewMobileDefaultFullscreen: true,
   pomodoroMobileDefaultFullscreen: false,
   encryptMobileDefaultFullscreen: true,
+  literatureMobileDefaultFullscreen: false,
+  // 文献盒处理设置（键名随域更名 literature*；ticket 136 默认值=既存行为不动，零迁移）
+  literatureProgressDetail: true,
+  literatureKeepVideo: true,
+  literatureQuality: 'highest',
+  literatureStopOnFailure: false,
+  literatureOutputDir: '',
+  literatureCompress: true,
+  literatureCrf: 23,
+  literatureDirectory: '文献盒',
+  literatureDomainList: '',
+  literatureFfmpegPath: 'ffmpeg',
+  literatureFfprobePath: 'ffprobe',
+  literaturePythonPath: '',
+  literatureWhisperModel: 'small',
+  literatureCacheDir: '',
+  literatureCacheRetentionDays: 7,
+  secondBrainMobileDefaultFullscreen: true,
 
   // 小橘陪伴猫（smartcat 域；移动端默认全屏键聊天/设置/数据面板共用，2026-08-23 合并一套）
   smartcatEnabled: true,
   // 小橘关闭方式（ticket 103）：stop/hide/lazy，默认彻底停机
   smartcatOffMode: 'stop',
   smartcatMobileDefaultFullscreen: false,
+  smartcatEmbeddingModel: '',
+  smartcatChunkLimitChars: 800,
+  // 小橘对我的称呼（ticket 163）：默认包仔——把记忆流/行为流喂给 AI 时「你/用户」替换为此称呼
+  smartcatUserName: '包仔',
+
+  // 小橘记忆巩固（ticket 160 引入；ticket 162 精简——窗口化语义，见接口注释。旧键（间隔/条数阈值/
+  // 证据窗口/洞察条数/周报门槛）从默认值退役，data.json 残留值被忽略）
+  smartcatReflectMinNew: 20,
+  smartcatRefExcerptLimit: 400,
+  // ticket 163：洞察条数上限（默认 3——反思 prompt 最高 N 条 + LLM 返回按序截断）
+  smartcatReflectMaxInsights: 3,
+
+  // 小橘行为流设置（P1 数据基座，ticket 123；ADR-0069：全量补齐后扩容 30→60 天 / 2000→10000 条）
+  behaviorMaxDays: 60,
+  /** 行为流最大保留条数（ticket 129：1000→2000；ADR-0069：2000→10000——全域事件补齐后条目增速再升，已有 data.json 值尊重、零迁移） */
+  behaviorMaxCount: 10000,
+  showBehaviorLog: true,
+  enableAutoLinking: true,
+  linkWindowDays: 7,
+
+  // 记忆目录（ADR-0069 记忆目录流）：默认空=不启用笔记记忆库
+  memoryDirectories: [],
 };
+
+/** 闪念旧键 → 第二大脑新键映射（ticket 103；META_PATH/VEC_PATH 废弃清除无继任者） */
+export const SECOND_BRAIN_RENAMED_KEYS: ReadonlyArray<readonly [string, string]> = [
+  ['OLLAMA_URL', 'secondBrainOllamaUrl'],
+  ['EMBEDDING_MODEL', 'secondBrainEmbeddingModel'],
+  ['TOP_K', 'secondBrainTopK'],
+  ['CHAT_TOP_K', 'secondBrainChatTopK'],
+  ['CHUNK_MIN_LENGTH', 'secondBrainChunkMinLength'],
+  ['ALLOW_PATHS', 'secondBrainAllowPaths'],
+  ['CONCURRENCY', 'secondBrainConcurrency'],
+  ['CONTEXT_LIMIT', 'secondBrainContextLimit'],
+  ['DEBOUNCE_DELAY', 'secondBrainDebounceDelay'],
+  ['CURSOR_POLL_INTERVAL', 'secondBrainCursorPollInterval'],
+  ['OLLAMA_CHAT_MODEL', 'secondBrainChatModel'],
+  ['DEEPSEEK_MODEL', 'secondBrainDeepseekModel'],
+  ['DEFAULT_USE_DEEPSEEK', 'secondBrainDefaultUseDeepseek'],
+  ['MAX_HISTORY', 'secondBrainMaxHistory'],
+  ['OLLAMA_REMOTE_URL', 'secondBrainRemoteOllamaUrl'],
+  ['flashEnabled', 'secondBrainEnabled'],
+];
+
+/**
+ * ticket 103 设置迁移：闪念 16 键更名平移（旧有值且新缺 → 复制；一律删旧键），
+ * 废弃 META_PATH/VEC_PATH 直接清除（ADR-0009 起 storagePath 接管，不再兼容保留）。
+ * 纯函数可测；main.onload 调用，返回是否发生迁移以决定落盘。
+ */
+export function migrateSecondBrainSettings(s: BzSettings): boolean {
+  const anyS = s as unknown as Record<string, unknown>;
+  let migrated = false;
+  for (const [from, to] of SECOND_BRAIN_RENAMED_KEYS) {
+    if (anyS[from] !== undefined) {
+      if (anyS[to] === undefined) anyS[to] = anyS[from];
+      delete anyS[from];
+      migrated = true;
+    }
+  }
+  for (const dead of ['META_PATH', 'VEC_PATH']) {
+    if (anyS[dead] !== undefined) {
+      delete anyS[dead];
+      migrated = true;
+    }
+  }
+  return migrated;
+}

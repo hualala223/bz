@@ -53,7 +53,7 @@ describe('supersede 检索剔除（拍板路径：排序前前置 filter）', ()
   it('已废弃洞察 retrieve 不返回，且不挤占 topN 名额（重要度再高也进不了前 10）', async () => {
     const m = make();
     for (let i = 0; i < 12; i++) await m.addObservation(`用户说：项目进展记录 ${i}`, { importance: 0.5 });
-    data.memory.stream.push(insight('dead1', '用户说：旧结论已被推翻的洞察', { importance: 0.99, supersededBy: 'newer1' }));
+    data.memory.memoryStream.push(insight('dead1', '用户说：旧结论已被推翻的洞察', { importance: 0.99, supersededBy: 'newer1' }));
     const results = await m.retrieve('项目');
     expect(results.length).toBe(10); // topN=10 契约不变
     expect(results.some((r) => r.id === 'dead1')).toBe(false); // 废弃者被剔除
@@ -65,7 +65,7 @@ describe('supersede 检索剔除（拍板路径：排序前前置 filter）', ()
     const m = make();
     await m.addObservation('用户说：填充观察一', { importance: 0.3 });
     await m.addObservation('用户说：填充观察二', { importance: 0.3 });
-    data.memory.stream.push(insight('alive1', '用户对 TypeScript 有持续投入', {}));
+    data.memory.memoryStream.push(insight('alive1', '用户对 TypeScript 有持续投入', {}));
     const results = await m.retrieve('TypeScript');
     expect(results.some((r) => r.id === 'alive1')).toBe(true);
   });
@@ -84,10 +84,10 @@ describe('supersede 检索剔除（拍板路径：排序前前置 filter）', ()
 
   it('观察条目带脏 supersededBy 字段不受剔除影响（剔除只认 type=insight；旧数据容忍）', async () => {
     const m = make();
-    data.memory.stream.push({ id: 'o-dirty', created: new Date().toISOString(), lastAccessed: new Date().toISOString(), description: '用户说：带脏字段的观察', importance: 0.9, type: 'observation', supersededBy: 'x' } as any);
+    data.memory.memoryStream.push({ id: 'o-dirty', created: new Date().toISOString(), lastAccessed: new Date().toISOString(), description: '用户说：带脏字段的观察', importance: 0.9, type: 'observation', supersededBy: 'x' } as any);
     const results = await m.retrieve('脏字段');
     expect(results.length).toBe(1);
-    expect(isSupersededInsight(data.memory.stream[0])).toBe(false);
+    expect(isSupersededInsight(data.memory.memoryStream[0])).toBe(false);
   });
 
   it('isSupersededInsight 口径：空串/缺失/非 insight 一律 false', () => {
@@ -129,6 +129,17 @@ describe('主题键：受限枚举校验 + 词法回退', () => {
   });
 });
 
+/** ticket 162：行为小结提问路由 digests 负载，其余调用返回 payload（并记录最后一条 user prompt） */
+function digestAware(payload: any) {
+  const f = vi.fn(async (_url: string, init?: any) => {
+    const user = (JSON.parse((init as any).body)?.messages?.[1]?.content as string) ?? '';
+    (f as any).lastPrompt = user;
+    const content = user.includes('行为记录（编号') ? { digests: [{ text: '行为小结', evidence: [1] }] } : payload;
+    return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(content) } }] }) };
+  });
+  return f;
+}
+
 describe('reflect 集成：主题打标 + supersede 写点 + 候选通道', () => {
   async function seedTwoObservations(m: MemorySystem): Promise<void> {
     await m.addObservation('用户说：这周要考六级', { importance: 0.9 });
@@ -138,18 +149,12 @@ describe('reflect 集成：主题打标 + supersede 写点 + 候选通道', () =
   it('LLM 返回 theme 合法枚举 → 洞察落库带 theme；非法 → 词法兜底', async () => {
     const m = make({ ai: true });
     await seedTwoObservations(m);
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        choices: [{ message: { content: JSON.stringify({ insights: [
-          { text: '用户最近项目冲刺很忙，天天加班到深夜', evidence: [1], theme: '学习' }, // 非法枚举 → 词法兜底
-          { text: '用户备考进入冲刺期', evidence: [2], theme: '工作' }, // 合法枚举（词义牵强但按契约放行）
-        ] }) } }],
-      }),
-    }));
-    (globalThis as any).fetch = fetchMock;
+    (globalThis as any).fetch = digestAware({ insights: [
+      { text: '用户最近项目冲刺很忙，天天加班到深夜', evidence: [1], theme: '学习' }, // 非法枚举 → 词法兜底
+      { text: '用户备考进入冲刺期', evidence: [2], theme: '工作' }, // 合法枚举（词义牵强但按契约放行）
+    ] });
     await m.reflect();
-    const insights = data.memory.stream.filter((x) => x.type === 'insight');
+    const insights = data.memory.memoryStream.filter((x) => x.type === 'insight');
     expect(insights.length).toBe(2);
     expect(insights[0].theme).toBe('工作'); // 非法「学习」被拒 → 词法兜底（项目/加班命中）
     expect(insights[1].theme).toBe('工作'); // 合法枚举直通
@@ -158,55 +163,46 @@ describe('reflect 集成：主题打标 + supersede 写点 + 候选通道', () =
   it('supersede 候选编号写点：目标洞察被写 supersededBy=新洞察 id；候选块进 prompt', async () => {
     const m = make({ ai: true });
     await seedTwoObservations(m);
-    data.memory.stream.push(insight('old-i1', '用户在准备英语考试'));
-    let userPrompt = '';
-    const fetchMock = vi.fn(async (url: string, init?: any) => {
-      userPrompt = JSON.parse((init as any).body).messages[1].content as string;
-      return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({
-        insights: [{ text: '用户的英语备考进入冲刺阶段', evidence: [1, 2] }],
-        supersede: 1,
-      }) } }] }) };
+    data.memory.memoryStream.push(insight('old-i1', '用户在准备英语考试'));
+    const fetchMock = digestAware({
+      insights: [{ text: '用户的英语备考进入冲刺阶段', evidence: [1, 2] }],
+      supersede: 1,
     });
     (globalThis as any).fetch = fetchMock;
     await m.reflect();
+    const userPrompt = (fetchMock as any).lastPrompt as string;
     expect(userPrompt).toContain('你既有的相关洞察'); // 候选块注入
     expect(userPrompt).toContain('C1[');
     expect(userPrompt).toContain('用户在准备英语考试'.slice(0, 10)); // 只注入描述片段
-    const target = data.memory.stream.find((x) => x.id === 'old-i1')!;
-    const newer = data.memory.stream.filter((x) => x.type === 'insight' && x.id !== 'old-i1')[0];
+    const target = data.memory.memoryStream.find((x) => x.id === 'old-i1')!;
+    const newer = data.memory.memoryStream.filter((x) => x.type === 'insight' && x.id !== 'old-i1')[0];
     expect(target.supersededBy).toBe(newer.id); // 被本批第一条新洞察取代
   });
 
   it('supersede 字符串 id 写点同样生效；最多 1 个/批次（顶层单值）', async () => {
     const m = make({ ai: true });
     await seedTwoObservations(m);
-    data.memory.stream.push(insight('old-s1', '用户偏好夜间学习'));
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ choices: [{ message: { content: JSON.stringify({
-        insights: [{ text: '用户的学习习惯集中在深夜', evidence: [1] }],
-        supersede: 'old-s1',
-      }) } }] }) }),
-    ) as any;
+    data.memory.memoryStream.push(insight('old-s1', '用户偏好夜间学习'));
+    const fetchMock = digestAware({
+      insights: [{ text: '用户的学习习惯集中在深夜', evidence: [1] }],
+      supersede: 'old-s1',
+    }) as any;
     (globalThis as any).fetch = fetchMock;
     await m.reflect();
-    expect(data.memory.stream.find((x) => x.id === 'old-s1')!.supersededBy).toBeTruthy();
+    expect(data.memory.memoryStream.find((x) => x.id === 'old-s1')!.supersededBy).toBeTruthy();
   });
 
   it('pinned 保护：目标洞察人工固定后 LLM supersede 拒绝生效', async () => {
     const m = make({ ai: true });
     await seedTwoObservations(m);
-    data.memory.stream.push(insight('pin1', '用户长期坚持英语学习', { pinned: true }));
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ choices: [{ message: { content: JSON.stringify({
-        insights: [{ text: '用户仍在坚持学英语', evidence: [1] }],
-        supersede: 1,
-      }) } }] }) }),
-    ) as any;
+    data.memory.memoryStream.push(insight('pin1', '用户长期坚持英语学习', { pinned: true }));
+    const fetchMock = digestAware({
+      insights: [{ text: '用户仍在坚持学英语', evidence: [1] }],
+      supersede: 1,
+    }) as any;
     (globalThis as any).fetch = fetchMock;
     await m.reflect();
-    const target = data.memory.stream.find((x) => x.id === 'pin1')!;
+    const target = data.memory.memoryStream.find((x) => x.id === 'pin1')!;
     expect(target.pinned).toBe(true);
     expect(target.supersededBy).toBeUndefined(); // 固定不被自动取代
     expect(data.memory.reflection.count).toBe(1); // 反思本体不受影响
@@ -215,14 +211,11 @@ describe('reflect 集成：主题打标 + supersede 写点 + 候选通道', () =
   it('候选通道异常裁剪：畸形 stream（description 缺失）不抛错、反思照常产出', async () => {
     const m = make({ ai: true });
     await seedTwoObservations(m);
-    data.memory.stream.push({ id: 'bad-i', created: new Date().toISOString(), lastAccessed: new Date().toISOString(), description: null as any, importance: 0.7, type: 'insight' });
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ choices: [{ message: { content: JSON.stringify({ insights: [{ text: '正常结论', evidence: [1] }] }) } }] }),
-    }));
+    data.memory.memoryStream.push({ id: 'bad-i', created: new Date().toISOString(), lastAccessed: new Date().toISOString(), description: null as any, importance: 0.7, type: 'insight' });
+    const fetchMock = digestAware({ insights: [{ text: '正常结论', evidence: [1] }] });
     (globalThis as any).fetch = fetchMock;
     await expect(m.reflect()).resolves.not.toThrow();
-    expect(data.memory.stream.some((x) => x.description === '正常结论')).toBe(true);
+    expect(data.memory.memoryStream.some((x) => x.description === '正常结论')).toBe(true);
   });
 });
 
@@ -365,7 +358,7 @@ describe('DDID 展示层短索引', () => {
 function uiFixture(): SmartCatData {
   const d = defaultSmartCatData();
   const iso = new Date().toISOString();
-  d.memory.stream = [
+  d.memory.memoryStream = [
     { id: 'u-o1', created: iso, lastAccessed: iso, description: '用户说：普通观察', importance: 0.6, type: 'observation', source: 'chat' },
     insight('u-i1', '洞察一（可修正）'),
     insight('u-i2', '洞察二（已固定）', { pinned: true }),
@@ -428,16 +421,16 @@ describe('dashboard：DDID 短索引 + 固定/废弃按钮', () => {
     const row1 = [...document.querySelectorAll('.bz-sc-dash-memory')].find((r) => r.textContent!.includes('#1')) as HTMLElement;
     (row1.querySelector('.bz-sc-dash-mini-btn') as HTMLElement).click(); // 「固定」
     await flush();
-    expect(storedData(vault).memory.stream.find((m) => m.id === 'u-i1')!.pinned).toBe(true);
+    expect(storedData(vault).memory.memoryStream.find((m) => m.id === 'u-i1')!.pinned).toBe(true);
     // P1-29 回归：常驻侧任意保存后 pinned 不被回滚
     resident.mood.pad.pleasure = 61;
     await saveSmartCatData(app as any, resident);
-    expect(storedData(vault).memory.stream.find((m) => m.id === 'u-i1')!.pinned).toBe(true);
+    expect(storedData(vault).memory.memoryStream.find((m) => m.id === 'u-i1')!.pinned).toBe(true);
     const rowAfter = [...document.querySelectorAll('.bz-sc-dash-memory')].find((r) => r.textContent!.includes('#1')) as HTMLElement;
     expect(rowAfter.textContent).toContain('取消固定');
     ((rowAfter.querySelector('.bz-sc-dash-mini-btn') as HTMLElement)).click(); // 「取消固定」
     await flush();
-    expect(storedData(vault).memory.stream.find((m) => m.id === 'u-i1')!.pinned).toBe(false);
+    expect(storedData(vault).memory.memoryStream.find((m) => m.id === 'u-i1')!.pinned).toBe(false);
   }, 15000);
 
   it('点击「废弃」落盘 supersededBy=manual；已废弃行不再提供「废弃」按钮', async () => {
@@ -449,7 +442,7 @@ describe('dashboard：DDID 短索引 + 固定/废弃按钮', () => {
     const depBtn = [...row1.querySelectorAll('.bz-sc-dash-mini-btn')].find((b) => b.textContent === '废弃') as HTMLElement;
     depBtn.click();
     await flush();
-    const stored = storedData(vault).memory.stream.find((m) => m.id === 'u-i1')!;
+    const stored = storedData(vault).memory.memoryStream.find((m) => m.id === 'u-i1')!;
     expect(stored.supersededBy).toBe(MANUAL_SUPERSEDED_BY);
     // 重渲染后 #1 行显示「已被推翻」（097 B2 文案）且不再有「废弃」按钮
     const rowAfter = [...document.querySelectorAll('.bz-sc-dash-memory')].find((r) => r.textContent!.includes('#1')) as HTMLElement;

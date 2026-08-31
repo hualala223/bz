@@ -19,7 +19,7 @@ import { characterTransition, trustUpdate, characterFromExperience, characterSee
 import { buildRhythmProfile } from './rhythm';
 import { emotionToVAD } from './cognitive';
 import { callChatJson, isAIConfigured } from './api';
-import { USER_CONTENT_BOUNDARY } from './memory';
+import { USER_CONTENT_BOUNDARY, replaceUserReference } from './memory';
 
 /** 周深更新的互动样本门槛（ticket 072）：此前 applyWeeklyExperience 挂在反思/日小结节奏上
  *  （≥20 条观察即触发），每次都把 warmth 等顶格 +0.01——「周」更新实际按天甚至按小时跑。
@@ -511,7 +511,8 @@ export class PersonalityGrowth {
       try {
         if (await isAIConfigured()) {
           llmAttempted = true;
-          const numbered = insights.map((ins, i) => `${i + 1}. ${ins.text}`).join('\n');
+          // ticket 163：洞察文本同为记忆产物——喂 AI 前「你/用户」替换为小橘对用户的称呼
+          const numbered = insights.map((ins, i) => `${i + 1}. ${replaceUserReference(ins.text)}`).join('\n');
           const candidates = (TRAIT_ATTRIBUTION_CANDIDATES as readonly string[])
             .filter((t) => allowExistential || !(EXISTENTIAL_TRAITS as readonly string[]).includes(t))
             .map((t) => `${t}(${TRAIT_LABELS[t]})`)
@@ -527,7 +528,7 @@ export class PersonalityGrowth {
                 `\n\n请为每条洞察选出最能说明「用户哪方面值得加深了解」的一个特质，候选仅限：${candidates}。\n` +
                 '- 必须从该条洞察原文中摘录一小段原话作为 quote 依据；\n' +
                 '- 拿不准或没有合适特质就返回 none，禁止硬挑；\n' +
-                (allowExistential ? '' : '- 本批洞察来自日小结，exist_depth/familiarity/concern 三个特质不可选；\n') +
+                (allowExistential ? '' : '- 本批洞察来自行为小结，exist_depth/familiarity/concern 三个特质不可选；\n') +
                 '只返回 JSON：{"attributions":[{"index":1,"trait":"exist_depth","quote":"原文片段"},{"index":2,"trait":"none"}]}',
             },
           ]);
@@ -597,7 +598,7 @@ export class PersonalityGrowth {
     const hour = new Date().getHours();
     // ADR-0025 修「假众数」：preferredHour 由近 30 天记忆创建小时直方图峰值（复用作息画像）给出；
     // 无记忆数据（还没观察过）时兜底当前小时（旧行为，mood 测试保持）
-    const profile = buildRhythmProfile(this.dataProvider().memory.stream || [], 30, Date.now());
+    const profile = buildRhythmProfile(this.dataProvider().memory.memoryStream || [], 30, Date.now());
     s.preferredHour = profile.total > 0 ? profile.peakHour : hour;
     const tone = interactionType === 'learn' ? 0.02
       : interactionType === 'diary' || interactionType === 'flash' ? 0.01

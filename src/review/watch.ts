@@ -8,7 +8,7 @@
  */
 import type { App, TFile } from 'obsidian';
 import { notice } from '../core/notice';
-import { confirm } from '../core/confirm';
+import { openFlowDialog } from '../core/flow-dialog';
 import { tryGetSettings, saveSettings } from '../core/settings-provider';
 import { ReviewDataManager } from './data';
 
@@ -25,6 +25,12 @@ export function __setAutoAddMergeMsForTests(ms: number): void {
   REVIEW_AUTO_ADD_MERGE_MS = ms;
 }
 
+/** ticket n2：改名通知合并窗口（3 秒；批量重命名只弹一条；测试可注入短值） */
+export let RENAME_MERGE_MS = 3000;
+export function __setRenameMergeMsForTests(ms: number): void {
+  RENAME_MERGE_MS = ms;
+}
+
 export class ReviewWatcher {
   app: App;
   dataManager: ReviewDataManager;
@@ -35,6 +41,9 @@ export class ReviewWatcher {
   /** ticket 100：新笔记自动加入提醒合并缓冲（3 秒窗口收集，多条合并一条通知） */
   private autoAddQueue: string[] = [];
   private autoAddTimer: ReturnType<typeof setTimeout> | null = null;
+  /** ticket n2：改名通知合并缓冲（3 秒窗口收集；列表/文件树更新仍即时） */
+  private renameQueue: string[] = [];
+  private renameTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(app: App, dataManager: ReviewDataManager) {
     this.app = app;
@@ -77,6 +86,17 @@ export class ReviewWatcher {
     await saveSettings();
   }
 
+  /** ticket 57：单条解除排除记录（数据 reviewExcludedNotes 既有；仅补 UI 管理入口） */
+  async removeExcludedNote(path: string): Promise<void> {
+    const s = tryGetSettings() as any;
+    if (!s) return;
+    const cur = Array.isArray(s.reviewExcludedNotes) ? [...(s.reviewExcludedNotes as string[])] : [];
+    const kept = cur.filter((p) => p !== path);
+    if (kept.length === cur.length) return;
+    s.reviewExcludedNotes = kept;
+    await saveSettings();
+  }
+
   /** vault create：监听目录内新建 md → 自动加入（未排除、未在计划）；ticket 100：3 秒窗口合并提醒 + 开关 */
   async onVaultCreate(file: TFile): Promise<void> {
     if (file.extension !== 'md') return;
@@ -115,30 +135,33 @@ export class ReviewWatcher {
         if (!batch.length) return;
         const n = batch.length;
         const firstName = (batch[0] || '').split('/').pop();
-        confirm({
+        void openFlowDialog({
           title: n > 1 ? `删除 ${n} 篇笔记` : '笔记已删除',
           message:
             n > 1
               ? `有 ${n} 篇笔记已从 vault 删除，是否同步移除复习计划里的记录？不移除则保留（文件恢复后继续复习，列表现删除线）。`
               : `「${firstName}」已从 vault 删除，是否同步移除复习计划里的记录？不移除则保留（文件恢复后继续复习，列表现删除线）。`,
-          confirmText: '移除',
-          cancelText: '保留',
-          onConfirm: async () => {
+          actions: [
+            { label: '保留', value: 'cancel' },
+            { label: '移除', value: 'ok', cta: true },
+          ],
+        }).then(async (v) => {
+          if (v === 'ok') {
             for (const path of batch) await this.dataManager.removeItem(path);
             // 仅监听目录内的删除写排除名单（防自动加回；目录外的删除无监听风险）
             await this.excludePaths(batch.filter((p) => this.isWatched(p)));
             notice(`已移除 ${n} 条复习记录`, 'success');
             await this.refresh();
-          },
-          onCancel: () => {
+          } else {
             void this.refresh();
-          },
+          }
         });
       }, 300);
     })();
   }
 
-  /** vault rename：计划内文件改名/移动 → 自动更新路径（ticket 099：不再弹确认） */
+  /** vault rename：计划内文件改名/移动 → 自动更新路径（ticket 099：不再弹确认）；
+   *   ticket n2：通知改合并窗口（窗口内多条合并一条；列表/文件树刷新仍即时） */
   onVaultRename(file: TFile, oldPath: string): void {
     void (async () => {
       if (file.extension !== 'md') return;
@@ -146,10 +169,22 @@ export class ReviewWatcher {
       const items = await this.dataManager.loadItems();
       if (!items.some((i) => i.filePath === oldPath)) return;
       const updated = await this.dataManager.updateFilePath(oldPath, file.path, file.basename);
-      if (updated) {
-        notice('已更新复习计划路径', 'success');
-        await this.refresh();
-      }
+      if (!updated) return;
+      await this.refresh(); // 列表自动更新（即时）
+      this.renameQueue.push(file.basename);
+      if (this.renameTimer) return;
+      this.renameTimer = setTimeout(() => {
+        this.renameTimer = null;
+        const batch = this.renameQueue;
+        this.renameQueue = [];
+        if (!batch.length) return;
+        const shown = batch.slice(0, 3).join('、');
+        const tail = batch.length > 3 ? `，等 ${batch.length - 3} 篇` : '';
+        notice(
+          batch.length > 1 ? `已更新 ${batch.length} 篇笔记的复习路径：${shown}${tail}` : '已更新复习计划路径',
+          'success'
+        );
+      }, RENAME_MERGE_MS);
     })();
   }
 
@@ -168,29 +203,27 @@ export class ReviewWatcher {
     const items = await this.dataManager.loadItems();
     const candidates = this.collectAutoaddCandidates(folder, items);
     if (!candidates.length) return true; // 无存量候选：直接接受
-    return new Promise<boolean>((resolve) => {
-      confirm({
-        title: '批量加入复习计划',
-        message: `监听文件夹「${folder}」下有 ${candidates.length} 篇笔记未加入复习计划，是否一并加入？`,
-        confirmText: '加入',
-        cancelText: '取消',
-        onConfirm: async () => {
-          let ok = 0;
-          for (const p of candidates) {
-            try {
-              await this.dataManager.addItem(p, p.split('/').pop()!.replace(/\.md$/, ''));
-              ok++;
-            } catch {
-              /* 并发已加入 → 跳过 */
-            }
-          }
-          notice(`已加入 ${ok} 篇笔记到复习计划`, 'success');
-          await this.refresh();
-          resolve(true);
-        },
-        onCancel: () => resolve(false),
-      });
+    const v = await openFlowDialog({
+      title: '批量加入复习计划',
+      message: `监听文件夹「${folder}」下有 ${candidates.length} 篇笔记未加入复习计划，是否一并加入？`,
+      actions: [
+        { label: '取消', value: 'cancel' },
+        { label: '加入', value: 'ok', cta: true },
+      ],
     });
+    if (v !== 'ok') return false;
+    let ok = 0;
+    for (const p of candidates) {
+      try {
+        await this.dataManager.addItem(p, p.split('/').pop()!.replace(/\.md$/, ''));
+        ok++;
+      } catch {
+        /* 并发已加入 → 跳过 */
+      }
+    }
+    notice(`已加入 ${ok} 篇笔记到复习计划`, 'success');
+    await this.refresh();
+    return true;
   }
 
   /** 移除监听文件夹（ticket 099 追加）：同时清空该目录下全部排除记录——否则二次添加时存量被旧黑名单挡住。
@@ -228,5 +261,10 @@ export class ReviewWatcher {
       this.autoAddTimer = null;
     }
     this.autoAddQueue = [];
+    if (this.renameTimer) {
+      clearTimeout(this.renameTimer);
+      this.renameTimer = null;
+    }
+    this.renameQueue = [];
   }
 }

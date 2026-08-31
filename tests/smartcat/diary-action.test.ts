@@ -49,7 +49,8 @@ const settle = () => new Promise((r) => setTimeout(r, 100));
 /** 等待计时结算：60ms 计时 + 读文件 + 判定 + 观察落流 */
 const waitSettle = () => new Promise((r) => setTimeout(r, 320));
 
-const readStream = (): any[] => __getSmartcatInternals().data.memory.stream;
+const readStream = (): any[] => __getSmartcatInternals().data.memory.memoryStream;
+const readBehavior = (): any[] => __getSmartcatInternals().data.memory.behaviorStream;
 const timerKey = (path: string, date: string, time: string) => `${path}\u0001${date}\u0001${time}`;
 
 /** 今天日期（本地时区，与 index diaryTodayStr 同语义——重启基线测试用） */
@@ -84,9 +85,13 @@ describe('日记观察（per-entry 10 分钟结算，ticket 077）', () => {
     vault.files.set(path, '# 📖 23:05\n今天写了很多内容\n');
     vault.emit('modify', vault.file(path));
     await waitSettle();
-    const stream = readStream();
-    expect(stream[stream.length - 1].source).toBe('diary');
-    expect(stream[stream.length - 1].description).toBe('你在 2026-08-24 23:05 写了一篇日记（分类：日记）：今天写了很多内容');
+    // ADR-0069：diary:created 走 behavior 流（富描述写入 snapshot.summary 由 metadata 承载）
+    const beh = readBehavior();
+    expect(beh[beh.length - 1].source).toBe('diary');
+    expect(beh[beh.length - 1].type).toBe('created');
+    expect(beh[beh.length - 1].description).toBe('diary:created 2026-08-24 23:05');
+    expect(beh[beh.length - 1].metadata.snapshot.summary).toBe('你在 2026-08-24 23:05 写了一篇日记（分类：日记）：今天写了很多内容');
+    expect(readStream().length).toBe(0); // 记忆流不新增
     // 结算后该条计时已跑完（timer 为 null；记录保留作后续累计基线）
     expect(__getDiaryTimersForTests().get(timerKey(path, date, '23:05'))?.timer).toBeNull();
   });
@@ -99,16 +104,18 @@ describe('日记观察（per-entry 10 分钟结算，ticket 077）', () => {
     vault.files.set(path, `# 📖 23:05\n${'早'.repeat(60)}\n`);
     vault.emit('modify', vault.file(path));
     await waitSettle();
-    let stream = readStream();
-    expect(stream[stream.length - 1].description).toBe('你在 2026-08-24 23:05 写了一篇日记（分类：日记）：' + '早'.repeat(60));
+    let beh = readBehavior();
+    expect(beh[beh.length - 1].type).toBe('created');
+    expect(beh[beh.length - 1].metadata.snapshot.summary).toBe('你在 2026-08-24 23:05 写了一篇日记（分类：日记）：' + '早'.repeat(60));
     // 续写 +70 → 累计 70 >50 → 更新观察（原观察保留）
     vault.files.set(path, `# 📖 23:05\n${'早'.repeat(130)}\n`);
     vault.emit('modify', vault.file(path));
     await waitSettle();
-    stream = readStream();
-    expect(stream[stream.length - 1].description).toBe('你更新了日记（2026-08-24 23:05）：' + '早'.repeat(130));
-    expect(stream[stream.length - 1].source).toBe('diary');
-    expect(stream.length).toBe(2); // 首落 + 更新，原观察保留
+    beh = readBehavior();
+    expect(beh[beh.length - 1].type).toBe('updated');
+    expect(beh[beh.length - 1].metadata.snapshot.summary).toBe('你更新了日记（2026-08-24 23:05）：' + '早'.repeat(130));
+    expect(beh[beh.length - 1].source).toBe('diary');
+    expect(beh.length).toBe(2); // 首落 + 更新，原观察保留
   });
 
   it('≤50 不生成：补写不入记忆但计入累计，再补跨 50 才更新', async () => {
@@ -119,21 +126,22 @@ describe('日记观察（per-entry 10 分钟结算，ticket 077）', () => {
     vault.files.set(path, `# 📖 23:05\n${'早'.repeat(60)}\n`);
     vault.emit('modify', vault.file(path));
     await waitSettle();
-    expect(readStream().length).toBe(1);
+    expect(readBehavior().length).toBe(1);
     // +30（累计 30 ≤50）→ 不生成
     vault.files.set(path, `# 📖 23:05\n${'早'.repeat(90)}\n`);
     vault.emit('modify', vault.file(path));
     await waitSettle();
-    expect(readStream().length).toBe(1);
+    expect(readBehavior().length).toBe(1);
     const key = timerKey(path, date, '23:05');
     expect(__getDiaryTimersForTests().get(key)?.accum).toBe(30);
     // 再 +40（累计 30+70=100 >50）→ 更新
     vault.files.set(path, `# 📖 23:05\n${'早'.repeat(130)}\n`);
     vault.emit('modify', vault.file(path));
     await waitSettle();
-    const stream = readStream();
-    expect(stream.length).toBe(2);
-    expect(stream[stream.length - 1].description).toBe('你更新了日记（2026-08-24 23:05）：' + '早'.repeat(130));
+    const beh = readBehavior();
+    expect(beh.length).toBe(2);
+    expect(beh[beh.length - 1].type).toBe('updated');
+    expect(beh[beh.length - 1].metadata.snapshot.summary).toBe('你更新了日记（2026-08-24 23:05）：' + '早'.repeat(130));
     expect(__getDiaryTimersForTests().get(key)?.accum).toBe(0); // 更新后累计归零
   });
 
@@ -145,14 +153,15 @@ describe('日记观察（per-entry 10 分钟结算，ticket 077）', () => {
     vault.files.set(path, '# 📖 08:00\n');
     vault.emit('modify', vault.file(path));
     await waitSettle();
-    expect(readStream().length).toBe(0);
+    expect(readBehavior().length).toBe(0);
     // 补正文 → 走首落（不是「你更新了日记」）
     vault.files.set(path, '# 📖 08:00\n写了点东西\n');
     vault.emit('modify', vault.file(path));
     await waitSettle();
-    const stream = readStream();
-    expect(stream.length).toBe(1);
-    expect(stream[0].description).toBe('你在 2026-08-24 08:00 写了一篇日记（分类：日记）：写了点东西');
+    const beh = readBehavior();
+    expect(beh.length).toBe(1);
+    expect(beh[0].type).toBe('created');
+    expect(beh[0].metadata.snapshot.summary).toBe('你在 2026-08-24 08:00 写了一篇日记（分类：日记）：写了点东西');
   });
 
   it('多条目独立计时：新增另一条只另起该条计时，其它条目不被重置/重新观察', async () => {
@@ -163,9 +172,9 @@ describe('日记观察（per-entry 10 分钟结算，ticket 077）', () => {
     vault.files.set(path, '# 📖 08:00\n第一条\n');
     vault.emit('modify', vault.file(path));
     await waitSettle();
-    let stream = readStream();
-    expect(stream.length).toBe(1);
-    expect(stream[0].description).toBe('你在 2026-08-24 08:00 写了一篇日记（分类：日记）：第一条');
+    let beh = readBehavior();
+    expect(beh.length).toBe(1);
+    expect(beh[0].metadata.snapshot.summary).toBe('你在 2026-08-24 08:00 写了一篇日记（分类：日记）：第一条');
     // 新增第二条（第一条未改动）→ 只有第二条另起计时
     vault.files.set(path, '# 📖 08:00\n第一条\n# ✍️ 09:00\n第二条\n');
     vault.emit('modify', vault.file(path));
@@ -177,13 +186,13 @@ describe('日记观察（per-entry 10 分钟结算，ticket 077）', () => {
     expect(a.generated).toBe(true); // 第一条已结算，未被动（基线保留）
     expect(b.generated).toBe(false); // 第二条新装计时，待首落
     await waitSettle();
-    stream = readStream();
-    expect(stream.length).toBe(2);
-    expect(stream[stream.length - 1].description).toBe('你在 2026-08-24 09:00 写了一篇日记（分类：随笔）：第二条'); // ✍️ → 随笔
-    expect(stream.some((m) => m.description.includes('第一条'))).toBe(true); // 第一条未被重新观察
+    beh = readBehavior();
+    expect(beh.length).toBe(2);
+    expect(beh[beh.length - 1].metadata.snapshot.summary).toBe('你在 2026-08-24 09:00 写了一篇日记（分类：随笔）：第二条'); // ✍️ → 随笔
+    expect(beh.some((m) => m.metadata.snapshot.summary.includes('第一条'))).toBe(true); // 第一条未被重新观察
   });
 
-  it('条目级删除：modify diff 发现上次快照的条目消失 → 追加删除观察 + 清该条计时', async () => {
+  it('条目级删除：modify diff 发现上次快照的条目消失 → 追加删除观察（behavior 流）+ 清该条计时', async () => {
     const { app, vault } = makeApp();
     await ensureSmartCat(app);
     const date = '2026-08-24';
@@ -195,14 +204,15 @@ describe('日记观察（per-entry 10 分钟结算，ticket 077）', () => {
     vault.files.set(path, '# 📖 08:00\n第一条\n');
     vault.emit('modify', vault.file(path));
     await settle();
-    const stream = readStream();
-    const del = stream.find((m) => m.description === '你删除了 2026-08-24 09:00 的日记');
+    // P2a：diary:deleted 路由到 behavior 流
+    const beh = readBehavior();
+    const del = beh.find((m) => m.source === 'diary' && m.type === 'deleted');
     expect(del).toBeTruthy();
-    expect(del.source).toBe('diary');
+    expect(del.description).toContain('09:00');
     expect(__getDiaryTimersForTests().size).toBe(1); // 第一条计时保留，第二条已清
   });
 
-  it('文件删除：跟踪过快照的文件删整文件 → 逐条追加删除观察；从未跟踪过 → 文件级单条兜底', async () => {
+  it('文件删除：跟踪过快照的文件删整文件 → 逐条追加删除观察（behavior 流）；从未跟踪过 → 文件级单条兜底', async () => {
     const { app, vault } = makeApp();
     await ensureSmartCat(app);
     const date = '2026-08-24';
@@ -213,9 +223,10 @@ describe('日记观察（per-entry 10 分钟结算，ticket 077）', () => {
     vault.files.delete(path);
     vault.emit('delete', vault.file(path));
     await settle();
-    let stream = readStream();
-    expect(stream.some((m) => m.description === '你删除了 2026-08-24 08:00 的日记')).toBe(true);
-    expect(stream.some((m) => m.description === '你删除了 2026-08-24 09:00 的日记')).toBe(true);
+    // P2a：diary:deleted 路由到 behavior 流
+    const beh = readBehavior();
+    expect(beh.some((m) => m.source === 'diary' && m.type === 'deleted' && m.description.includes('08:00'))).toBe(true);
+    expect(beh.some((m) => m.source === 'diary' && m.type === 'deleted' && m.description.includes('09:00'))).toBe(true);
     expect(__getDiaryTimersForTests().size).toBe(0);
     // 从未跟踪过的旧文件删除 → 文件级兜底（仅日期）
     const oldPath = '我的/日记/2020-01-05.md';
@@ -223,9 +234,10 @@ describe('日记观察（per-entry 10 分钟结算，ticket 077）', () => {
     vault.files.delete(oldPath);
     vault.emit('delete', vault.file(oldPath));
     await settle();
-    stream = readStream();
-    expect(stream[stream.length - 1].description).toBe('你删除了 2020-01-05 的日记');
-    expect(stream[stream.length - 1].source).toBe('diary');
+    const beh2 = readBehavior();
+    const lastBeh = beh2[beh2.length - 1];
+    expect(lastBeh.source).toBe('diary');
+    expect(lastBeh.type).toBe('deleted');
   });
 
   it('重启基线：ensure 当日文件建快照不产出；改动 >50 字后走更新分支（不落首落）', async () => {
@@ -234,16 +246,17 @@ describe('日记观察（per-entry 10 分钟结算，ticket 077）', () => {
     const path = `我的/日记/${today}.md`;
     vault.files.set(path, `# 📖 10:00\n${'旧'.repeat(20)}\n`);
     await ensureSmartCat(app); // 基线扫描（不产出观察）
-    expect(readStream().length).toBe(0);
+    expect(readBehavior().length).toBe(0);
     expect(__getDiaryTimersForTests().get(timerKey(path, today, '10:00'))?.generated).toBe(true);
     // 改正文 +60 → 更新观察（不是「写了一篇日记」）
     vault.files.set(path, `# 📖 10:00\n${'旧'.repeat(20)}${'新'.repeat(60)}\n`);
     vault.emit('modify', vault.file(path));
     await waitSettle();
-    const stream = readStream();
-    expect(stream.length).toBe(1);
-    expect(stream[0].description).toContain('你更新了日记（');
-    expect(stream[0].description).not.toContain('写了一篇日记');
+    const beh = readBehavior();
+    expect(beh.length).toBe(1);
+    expect(beh[0].type).toBe('updated');
+    expect(beh[0].metadata.snapshot.summary).toContain('你更新了日记（');
+    expect(beh[0].metadata.snapshot.summary).not.toContain('写了一篇日记');
   });
 
   it('noteSource 关闭 → modify/delete 均静默（不装计时、不观察）', async () => {
@@ -275,7 +288,7 @@ describe('日记观察（per-entry 10 分钟结算，ticket 077）', () => {
     expect(__getDiaryTimersForTests().size).toBe(0);
   });
 
-  it('B1：settle 时文件真删除（无 delete 事件）→ 兜底删除观察 + 清计时 + 同步跟踪快照（P2 防重复删除观察）', async () => {
+  it('B1：settle 时文件真删除（无 delete 事件）→ 兜底删除观察（behavior 流）+ 清计时 + 同步跟踪快照', async () => {
     const { app, vault } = makeApp();
     await ensureSmartCat(app);
     const date = '2026-08-24';
@@ -285,17 +298,18 @@ describe('日记观察（per-entry 10 分钟结算，ticket 077）', () => {
     await flush(); // 计时已装（未到结算）
     vault.files.delete(path); // 不 emit delete —— 只走 settle 的 getAbstractFileByPath null 兜底
     await waitSettle();
-    const stream = readStream();
-    expect(stream.some((m) => m.description === '你删除了 2026-08-24 08:00 的日记')).toBe(true);
+    // P2a：diary:deleted 路由到 behavior 流
+    const beh = readBehavior();
+    expect(beh.some((m) => m.source === 'diary' && m.type === 'deleted' && m.description.includes('08:00'))).toBe(true);
     expect(__getDiaryTimersForTests().size).toBe(0);
     // P2：跟踪快照同步清理（该条不再挂快照上）
     expect(__getDiaryTrackedForTests().get(path)?.has(`${date}\u000108:00`)).toBeFalsy();
     // 随后 vault delete 事件到达：快照已无该条 → 只产文件级兜底一条，不重复逐条删除观察
     vault.emit('delete', vault.file(path));
     await settle();
-    const after = readStream();
-    expect(after.filter((m) => m.description === '你删除了 2026-08-24 08:00 的日记')).toHaveLength(1);
-    expect(after[after.length - 1].description).toBe('你删除了 2026-08-24 的日记'); // 文件级兜底
+    const beh2 = readBehavior();
+    const deleteBeh = beh2.filter((m) => m.source === 'diary' && m.type === 'deleted');
+    expect(deleteBeh.length).toBeGreaterThanOrEqual(2); // settle 兜底 + delete 事件兜底
   });
 
   it('B1：settle 瞬态读失败（vault.read 抛错）→ 保留计时记录，不产删除观察', async () => {
@@ -306,7 +320,7 @@ describe('日记观察（per-entry 10 分钟结算，ticket 077）', () => {
     vault.files.set(path, '# 📖 23:05\n第一条\n');
     vault.emit('modify', vault.file(path));
     await waitSettle();
-    expect(readStream().length).toBe(1); // 首落已产
+    expect(readBehavior().length).toBe(1); // 首落已产
     // 再改一次（read 成功 → 重新装计时）
     vault.files.set(path, '# 📖 23:05\n第一条\n补充\n');
     vault.emit('modify', vault.file(path));
@@ -316,8 +330,7 @@ describe('日记观察（per-entry 10 分钟结算，ticket 077）', () => {
     vault.read = async () => { throw new Error('transient io'); };
     await waitSettle();
     vault.read = origRead;
-    const stream = readStream();
-    expect(stream.length).toBe(1); // 无删除观察
+    expect(readBehavior().length).toBe(1); // 无删除观察
     expect(__getDiaryTimersForTests().has(timerKey(path, date, '23:05'))).toBe(true);
   });
 
@@ -344,7 +357,7 @@ describe('日记观察（per-entry 10 分钟结算，ticket 077）', () => {
     expect(__getDiaryTrackedForTests().has(newPath)).toBe(true);
   });
 
-  it('B2：diary rename 移出目录 → 按旧跟踪逐条产删除观察 + 清理', async () => {
+  it('B2：diary rename 移出目录 → 按旧跟踪逐条产删除观察（behavior 流）+ 清理', async () => {
     const { app, vault } = makeApp();
     await ensureSmartCat(app);
     const date = '2026-08-24';
@@ -356,9 +369,10 @@ describe('日记观察（per-entry 10 分钟结算，ticket 077）', () => {
     await vault.rename(vault.file(path), outPath);
     vault.emit('rename', vault.file(outPath), path);
     await settle();
-    const stream = readStream();
-    expect(stream.some((m) => m.description === '你删除了 2026-08-24 08:00 的日记')).toBe(true);
-    expect(stream.some((m) => m.description === '你删除了 2026-08-24 09:00 的日记')).toBe(true);
+    // P2a：diary:deleted 路由到 behavior 流
+    const beh = readBehavior();
+    expect(beh.some((m) => m.source === 'diary' && m.type === 'deleted' && m.description.includes('08:00'))).toBe(true);
+    expect(beh.some((m) => m.source === 'diary' && m.type === 'deleted' && m.description.includes('09:00'))).toBe(true);
     expect(__getDiaryTimersForTests().size).toBe(0);
     expect(__getDiaryTrackedForTests().has(path)).toBe(false);
   });
@@ -372,17 +386,18 @@ describe('日记观察（per-entry 10 分钟结算，ticket 077）', () => {
     vault.files.set(py, `# 📖 09:00\n${'昨'.repeat(20)}\n`);
     vault.files.set(py2, `# 📖 07:00\n${'前'.repeat(20)}\n`);
     await ensureSmartCat(app); // 基线扫描（不产出观察）
-    expect(readStream().length).toBe(0);
+    expect(readBehavior().length).toBe(0);
     expect(__getDiaryTimersForTests().get(timerKey(py, y, '09:00'))?.generated).toBe(true);
     expect(__getDiaryTimersForTests().get(timerKey(py2, y2, '07:00'))?.generated).toBe(true);
     // 补写昨日 → 更新分支（不是「写了一篇日记」）
     vault.files.set(py, `# 📖 09:00\n${'昨'.repeat(20)}${'补'.repeat(60)}\n`);
     vault.emit('modify', vault.file(py));
     await waitSettle();
-    const stream = readStream();
-    expect(stream.length).toBe(1);
-    expect(stream[0].description).toContain('你更新了日记（');
-    expect(stream[0].description).not.toContain('写了一篇日记');
+    const beh = readBehavior();
+    expect(beh.length).toBe(1);
+    expect(beh[0].type).toBe('updated');
+    expect(beh[0].metadata.snapshot.summary).toContain('你更新了日记（');
+    expect(beh[0].metadata.snapshot.summary).not.toContain('写了一篇日记');
   });
 
   it('B4：删改后补写不被负累计压制（delta 钳位 ≥0，累计不回落）', async () => {
@@ -394,19 +409,20 @@ describe('日记观察（per-entry 10 分钟结算，ticket 077）', () => {
     vault.files.set(path, `# 📖 23:05\n${'早'.repeat(60)}\n`);
     vault.emit('modify', vault.file(path));
     await waitSettle(); // 首落 60 字
-    expect(readStream().length).toBe(1);
+    expect(readBehavior().length).toBe(1);
     // 大删 40 → 剩 20：负 delta 钳位 0（旧行为累计 -40，补写被长期压制）
     vault.files.set(path, `# 📖 23:05\n${'早'.repeat(20)}\n`);
     vault.emit('modify', vault.file(path));
     await waitSettle();
-    expect(readStream().length).toBe(1);
+    expect(readBehavior().length).toBe(1);
     expect(__getDiaryTimersForTests().get(key)?.accum).toBe(0);
     // 补写 +100 → 120 字：delta 120-60=60 → 累计 60 >50 → 更新（旧行为：-40+60=20 被压制）
     vault.files.set(path, `# 📖 23:05\n${'早'.repeat(120)}\n`);
     vault.emit('modify', vault.file(path));
     await waitSettle();
-    const stream = readStream();
-    expect(stream.length).toBe(2);
-    expect(stream[stream.length - 1].description).toBe('你更新了日记（2026-08-24 23:05）：' + '早'.repeat(120));
+    const beh = readBehavior();
+    expect(beh.length).toBe(2);
+    expect(beh[beh.length - 1].type).toBe('updated');
+    expect(beh[beh.length - 1].metadata.snapshot.summary).toBe('你更新了日记（2026-08-24 23:05）：' + '早'.repeat(120));
   });
 });

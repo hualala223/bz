@@ -1,4 +1,6 @@
 /* ==================== 影视域样式（src/movie/styles.css） ==================== */
+/* 影视域遮罩层级已动态发号（ADR-0067，本域不再定义档位类规则，
+   避免与本文件另处已合并的裁定值双规则并存/回退层级体系；JS 侧仅挂 class，由根/域样式接管） */
 /* ---- 影视抽屉头部（与影视卡片一字不差：海报 + 名称 + 徽章 + 影评） ---- */
 .bz-item-sheet-movie-name {
   font-size: 16px; font-weight: 600; color: var(--text-normal);
@@ -23,7 +25,7 @@
 /* ---- 影视小弹窗（评分窗 / 影评窗：遮罩点击 + ESC 关闭，无取消按钮） ---- */
 .bz-movie-tiny-mask {
   position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
-  z-index: 12000; display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: center; justify-content: center; /* z 动态发号（ADR-0067） */
 }
 .bz-movie-tiny-modal {
   width: 280px; max-width: 86vw;
@@ -91,6 +93,8 @@
   margin: 4px 0 0; font-size: 13px; line-height: 1.7;
   color: var(--text-normal); white-space: pre-wrap;
 }
+/* ---- e3 低 z 族抬档（冻结面授权）：影视遮罩档 ----
+   层级已动态发号（ADR-0067）：主面板显示时 topifyZ、弹窗创建时 allocZ；--1000/--1100/--1200/--1300 修饰名仅作标识钩子；压暗由各遮罩内联 CSS 负责 */
 .bz-item-sheet-title {
   font-size: 14px; font-weight: 600; color: var(--text-normal);
   line-height: 1.4; word-break: break-word;

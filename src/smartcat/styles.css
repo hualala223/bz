@@ -359,22 +359,9 @@
 #smart-companion-cat .bz-sc-anim-tail-base { animation: tailFlick 7s ease-in-out infinite; }
 #smart-companion-cat .bz-sc-anim-eye-base { animation: blinkSlow 5s ease-in-out infinite; }
 
-/* 心情组合动画（原 applyMoodAnimations 各 mood 组合；类加在 .cat-body 上） */
-#smart-companion-cat .bz-sc-mood-happy { animation: happyBounce 4s ease-in-out infinite, gentleSway 6s ease-in-out infinite; }
-#smart-companion-cat .bz-sc-mood-happy .cat-tail { animation: tailWagHappy 3s ease-in-out infinite; }
-#smart-companion-cat .bz-sc-mood-happy .cat-eye { animation: blinkQuick 3s ease-in-out infinite, eyesSparkle 5s ease-in-out infinite; }
-#smart-companion-cat .bz-sc-mood-curious { animation: curiousTilt 5s ease-in-out infinite; }
-#smart-companion-cat .bz-sc-mood-curious .cat-eye { animation: blinkSlow 4s ease-in-out infinite, eyesWiden 6s ease-in-out infinite; }
-#smart-companion-cat .bz-sc-mood-sleepy { animation: sleepySway 8s ease-in-out infinite; }
-#smart-companion-cat .bz-sc-mood-sleepy .cat-ear,
-#smart-companion-cat .bz-sc-mood-sleepy .cat-tail { animation: none; }
-#smart-companion-cat .bz-sc-mood-sleepy .cat-eye { animation: blinkSlow 8s ease-in-out infinite; }
-#smart-companion-cat .bz-sc-mood-excited { animation: excitedVibrate 2s ease-in-out infinite, breathing 2s ease-in-out infinite; }
-#smart-companion-cat .bz-sc-mood-excited .cat-tail { animation: tailSwish 1.5s ease-in-out infinite; }
-#smart-companion-cat .bz-sc-mood-excited .cat-eye { animation: blinkQuick 2s ease-in-out infinite; }
-#smart-companion-cat .bz-sc-mood-playful { animation: playfulHop 3s ease-in-out infinite; }
-#smart-companion-cat .bz-sc-mood-playful .cat-tail { animation: tailFlick 2s ease-in-out infinite; }
-#smart-companion-cat .bz-sc-mood-playful .cat-eye { animation: blinkQuick 3s ease-in-out infinite; }
+/* 心情组合动画（原 applyMoodAnimations 的 .bz-sc-mood-* 类）已删除——动画心情状态机移除，
+   对应 keyframes（happyBounce/curiousLook/sleepySway/excitedVibrate/playfulHop）保留，
+   作为随机池普通动作由 JS 一次性触发 */
 
 /* 聊天面板（bz 主窗口：chat-panel 由 createOverlay 生成；样式走 bz-overlay + 头行） */
 #chat-panel {
@@ -798,6 +785,168 @@
 @keyframes scalePulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.2); } }
 @keyframes spinEffect { 0%,100% { transform: rotate(0deg); } 50% { transform: rotate(90deg); } }
 
+/* 组合动作 keyframes（playMultiPartAnimation 多部件同时驱动；2026-08-31 新增） */
+@keyframes comboJump {
+  0%, 100% { transform: translateY(0); }
+  35% { transform: translateY(-14px) scale(1.05, 0.95); }
+  60% { transform: translateY(0) scale(1, 1); }
+  80% { transform: translateY(-5px); }
+}
+@keyframes comboJumpTail {
+  0%, 100% { transform: rotate(0deg); }
+  35% { transform: rotate(30deg); }
+  60% { transform: rotate(-15deg); }
+}
+@keyframes comboJumpEars {
+  0%, 100% { transform: rotate(0deg); }
+  35% { transform: rotate(10deg) translateY(-2px); }
+}
+@keyframes comboHappySpin {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(180deg) translateY(-4px); }
+}
+@keyframes comboHappySpinTail {
+  0%, 100% { transform: rotate(0deg); }
+  25%, 75% { transform: rotate(40deg); }
+  50% { transform: rotate(-40deg); }
+}
+@keyframes comboHappySpinEyes {
+  0%, 100% { transform: scaleY(1); }
+  40%, 60% { transform: scaleY(0.3); }
+}
+@keyframes comboYawn {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  40% { transform: translateY(6px) scaleY(0.88); }
+  70% { transform: translateY(-4px) scaleY(1.05); }
+}
+@keyframes comboYawnEyes {
+  0%, 100% { transform: scaleY(1); }
+  40% { transform: scaleY(0.2); }
+  60% { transform: scaleY(0.4); }
+}
+@keyframes comboYawnTail {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-25deg); }
+}
+@keyframes comboLookAround {
+  0%, 100% { transform: rotate(0deg); }
+  20% { transform: rotate(12deg); }
+  45% { transform: rotate(-10deg); }
+  70% { transform: rotate(8deg); }
+}
+@keyframes comboLookAroundEars {
+  0%, 100% { transform: rotate(0deg); }
+  25%, 60% { transform: rotate(14deg); }
+}
+@keyframes comboLookAroundEyes {
+  0%, 100% { transform: scaleY(1); }
+  20%, 45%, 70% { transform: scaleY(0.9); }
+}
+@keyframes comboPurr {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2px) scale(1.02, 0.98); }
+  50% { transform: translateX(1px); }
+  75% { transform: translateX(-1px) scale(1.02, 0.98); }
+}
+@keyframes comboPurrTail {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(35deg); }
+}
+@keyframes comboPurrEyes {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.5); }
+}
+@keyframes comboStartle {
+  0%, 100% { transform: translateY(0) scale(1); }
+  30% { transform: translateY(-10px) scale(1.15, 0.9); }
+  55% { transform: translateY(0) scale(0.95, 1.05); }
+}
+@keyframes comboStartleEars {
+  0%, 100% { transform: rotate(0deg); }
+  30% { transform: rotate(-25deg); }
+  60% { transform: rotate(5deg); }
+}
+@keyframes comboStartleEyes {
+  0%, 100% { transform: scaleY(1); }
+  30%, 55% { transform: scaleY(1.5) scaleX(1.2); }
+}
+@keyframes comboStretchArms {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  45% { transform: translateY(8px) scaleY(0.8); }
+  70% { transform: translateY(-6px) scaleY(1.15); }
+}
+@keyframes comboStretchArmsTail {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-40deg); }
+}
+@keyframes comboPlayfulPounce {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  35% { transform: translateY(-12px) rotate(-6deg); }
+  65% { transform: translateY(4px) rotate(4deg); }
+}
+@keyframes comboPlayfulPounceTail {
+  0%, 100% { transform: rotate(0deg); }
+  30% { transform: rotate(50deg); }
+  65% { transform: rotate(-30deg); }
+}
+@keyframes comboPlayfulPounceEars {
+  0%, 100% { transform: rotate(0deg); }
+  35%, 65% { transform: rotate(12deg); }
+}
+@keyframes comboSleepyDozing {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(5px) scale(0.95, 0.9); }
+}
+@keyframes comboSleepyDozingEyes {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.15); }
+}
+@keyframes comboSleepyDozingTail {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-15deg); }
+}
+@keyframes comboCuriousPeek {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  40% { transform: translateY(-6px) rotate(10deg); }
+  70% { transform: translateY(-2px) rotate(-6deg); }
+}
+@keyframes comboCuriousPeekHead {
+  0%, 100% { transform: rotate(0deg); }
+  40% { transform: rotate(18deg); }
+}
+@keyframes comboCuriousPeekEars {
+  0%, 100% { transform: rotate(0deg); }
+  40%, 70% { transform: rotate(15deg); }
+}
+@keyframes comboRollOver {
+  0%, 100% { transform: rotate(0deg) translateY(0); }
+  50% { transform: rotate(360deg) translateY(-5px); }
+}
+@keyframes comboRollOverTail {
+  0%, 100% { transform: rotate(0deg); }
+  25%, 75% { transform: rotate(60deg); }
+}
+@keyframes comboRollOverEyes {
+  0%, 100% { transform: scaleY(1); }
+  40%, 60% { transform: scaleY(0.3); }
+}
+@keyframes comboCelebrate {
+  0%, 100% { transform: translateY(0); }
+  20% { transform: translateY(-12px); }
+  40% { transform: translateY(0); }
+  60% { transform: translateY(-8px) rotate(-4deg); }
+  80% { transform: translateY(0) rotate(0deg); }
+}
+@keyframes comboCelebrateTail {
+  0%, 100% { transform: rotate(0deg); }
+  15%, 45%, 75% { transform: rotate(45deg); }
+  30%, 60%, 90% { transform: rotate(-45deg); }
+}
+@keyframes comboCelebrateEars {
+  0%, 100% { transform: rotate(0deg); }
+  20%, 60% { transform: rotate(12deg) translateY(-2px); }
+}
+
 /* 快速动画引用（原 playAnimation 用不定时长的一次性动画：此处补齐动画应用） */
 #smart-companion-cat .bz-sc-anim[style*="--bz-sc-anim-name"] {
   animation: var(--bz-sc-anim-name) var(--bz-sc-anim-dur, 1000ms) cubic-bezier(0.4, 0, 0.2, 1);
@@ -1062,6 +1211,9 @@
   line-height: 1.5;
   color: var(--text-normal);
   word-break: break-word;
+  white-space: pre-wrap;
+  max-height: 260px;
+  overflow-y: auto;
 }
 .bz-sc-dash-trail-row {
   display: flex;
@@ -1191,3 +1343,116 @@
 }
 .bz-sc-dash-memory--superseded { opacity: 0.55; }
 .bz-sc-dash-memory--superseded .bz-sc-dash-memory-text { text-decoration: line-through; }
+
+/* ===== P3 用户体验层：行为页签 + structured 摘要（ticket 123） ===== */
+
+/* 行为条目元信息行 */
+.bz-sc-dash-behavior-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.bz-sc-dash-behavior-type {
+  background: rgba(var(--color-orange-rgb), 0.12);
+  color: var(--color-orange);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.bz-sc-dash-behavior-source { color: var(--text-muted); }
+.bz-sc-dash-behavior-time { color: var(--text-faint); }
+
+/* 行为页签升级（ticket 129：时间线式列表 + 来源筛选 + 滚动加载） */
+/* 时间线容器：左侧竖线 + 每条圆点节点（条目左 padding 让位节点，竖线居中对齐圆点） */
+.bz-sc-dash-behavior-tl {
+  position: relative;
+  padding-left: 14px;
+}
+.bz-sc-dash-behavior-tl::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--background-modifier-border);
+}
+.bz-sc-dash-behavior-item {
+  position: relative;
+  padding: 7px 0;
+}
+.bz-sc-dash-behavior-item::before {
+  content: '';
+  position: absolute;
+  left: -14px;
+  top: 11px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  background: var(--background-primary);
+  border: 2px solid var(--interactive-accent);
+}
+.bz-sc-dash-behavior-tl > .bz-sc-dash-behavior-item:last-child::before {
+  background: var(--interactive-accent);
+}
+/* 来源统计块可点击（筛选/还原）：hover 反馈 + active 高亮 */
+.bz-sc-dash-stat-click {
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, background 0.15s ease;
+}
+.bz-sc-dash-stat-click:hover {
+  background: var(--background-modifier-hover);
+}
+.bz-sc-dash-stat-click.active {
+  box-shadow: inset 0 0 0 1.5px var(--interactive-accent);
+  background: rgba(var(--interactive-accent-rgb), 0.06);
+}
+/* 加载更多按钮（批次追加；剩余条数显示） */
+.bz-sc-dash-load-more {
+  display: block;
+  margin: 8px auto 2px;
+  font-size: 12px;
+  padding: 4px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--background-modifier-border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.bz-sc-dash-load-more:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* 记忆流 structured 摘要 */
+.bz-sc-dash-structured-summary {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 2px;
+  font-style: italic;
+}
+.bz-sc-dash-structured-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+.bz-sc-dash-structured-tags .bz-sc-dash-badge {
+  font-size: 10px;
+  padding: 0 4px;
+  background: rgba(var(--color-purple-rgb), 0.1);
+  color: var(--color-purple);
+}
+.bz-sc-dash-snapshot-summary {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 2px;
+  padding-left: 8px;
+  border-left: 2px solid var(--background-modifier-border);
+}

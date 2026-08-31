@@ -1,18 +1,19 @@
 /**
  * 归物本 UI（归物本.js 逐字移植）
- * 主面板：__gui_wu_ben__（visibility 控制，不销毁）；弹窗 z-index（P0-7 统一抬档，压过抽屉遮罩 10999/抽屉 11000）：add=11100/edit=11100/delete=11101/sort=11100；
+ * 主面板：__gui_wu_ben__（visibility 控制，不销毁，显示即 topifyZ 发号）；弹窗 z-index 动态发号（ADR-0067）：谁后打开谁在上；
  * 统一抽屉（桌面右键/移动长按）：状态流转 + 编辑 + 删除（用户拍板，替换原手写 pointerdown 长按删除/单击编辑）；
  * 刷新：右上角 ⏳ 按钮已移除 → 打开期间监听 belongings.json 变更自动刷新（用户拍板）；
  * MutationObserver 主题变化重渲染。
  */
-import { Setting } from 'obsidian';
 import { notice } from '../core/notice';
 import { getApp } from '../core/app';
 import { escManager } from '../core/esc-manager';
+import { allocZ, topifyZ } from '../core/z-order';
 import { escapeHtml, formatRelativeTime } from '../core/utils';
-import { getSettings, saveSettings, tryGetSettings } from '../core/settings-provider';
-import { applyMobileWindowFullscreen, isMobileEnv } from '../core/mobile';
+import { tryGetSettings } from '../core/settings-provider';
+import { applyMobileWindowFullscreen } from '../core/mobile';
 import { openSettingsModal } from '../core/settings-modal';
+import { mobileFullscreenGroup } from '../core/settings-common';
 import {
   attachItemActions,
   refreshItemSheet,
@@ -25,6 +26,12 @@ import { loadDatabase, saveDatabase, calculateDailyCost, calculateDaysUsed, getD
 import type { BelongingsDatabase, BelongingsItem } from './types';
 import { emitDomainEvent } from '../core/domain-bus';
 import { belongingsEditChanges } from '../smartcat/belongings-source';
+import type { SettingsSchema } from '../core/settings-schema';
+
+/** 归物本设置 schema（ticket 131 声明式；空态域唯一内容为通用「移动端」组） */
+export function belongingSettingsSchema(): SettingsSchema {
+  return { groups: [mobileFullscreenGroup('belongingsMobileDefaultFullscreen')] };
+}
 
 // ----- 类型 -----
 /** 弹窗色板（createModalShell 返回值） */
@@ -50,10 +57,6 @@ interface FormField {
 
 
 // ----- 模块状态（原脚本全局变量） -----
-/** 域内模态层级档（P0-7）：必须压过抽屉遮罩 10999 / 抽屉本体 11000 */
-const MODAL_Z = 11100;
-/** 模态内 search-select 下拉层级（模态 +1 档） */
-const DROPDOWN_Z = 11101;
 
 let database: BelongingsDatabase | null = null;
 let listContainer: HTMLDivElement | null = null;
@@ -61,6 +64,10 @@ let listContainer: HTMLDivElement | null = null;
 let sheetEditPending = false;
 /** 数据文件变更监听（打开期间注册，关闭注销——用户拍板"自动刷新"） */
 let autoRefreshOff: (() => void) | null = null;
+/** 主题变化监听（模块级持有，cleanupBelongings 时断开——防卸载残留） */
+let bodyThemeObserver: MutationObserver | null = null;
+/** 主题淡化渲染只关心 body 上的主题类（P44 去全量重渲染） */
+const THEME_CLASSES = new Set(['theme-dark', 'theme-light']);
 let sortField = 'purchase_date'; // 默认按购买日期
 let sortOrder = 'desc'; // 降序
 
@@ -85,7 +92,7 @@ function render() {
   const html = `
   <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 15px; background: ${palette.bg}; min-height: 100vh; color: ${palette.textColor};">
     ${buildStatsHtml(palette, totalValue, totalDailyCost, statusMap)}
-    ${buildItemGroupsHtml(palette, statusMap)}
+    ${items.length === 0 ? buildEmptyGuideHtml(palette) : buildItemGroupsHtml(palette, statusMap)}
     <div style="text-align: center; color: ${palette.muted}; font-size: 11px; margin-top: 15px; padding-top: 15px; border-top: 1px solid ${palette.border};">
       最后更新: ${new Date().toLocaleString('zh-CN')}
     </div>
@@ -219,6 +226,16 @@ function buildItemGroupsHtml(
     }).join('')}`;
 }
 
+/** 空态首步引导（l6-belongings）：零物品时提示点 ✏️ 添加第一个物品 */
+function buildEmptyGuideHtml(palette: { textColor: string; muted: string; border: string }): string {
+  const { textColor, muted, border } = palette;
+  return `
+    <div style="text-align:center;padding:32px 16px;border:1px dashed ${border};border-radius:12px;color:${muted};font-size:13px;">
+      <div style="font-size:15px;color:${textColor};font-weight:600;margin-bottom:8px;">归物本还没有物品</div>
+      点右上角 ✏️ 添加第一个物品
+    </div>`;
+}
+
 /** 为物品卡片挂统一抽屉（桌面右键菜单 / 移动长按抽屉）：状态流转 + 编辑 + 删除 */
 function bindCardDrawers(): void {
   if (!listContainer) return;
@@ -252,10 +269,10 @@ function buildActions(item: BelongingsItem, rebuild: () => void): ItemAction[] {
         void (async () => {
           item.current_status = s;
           item.last_updated = new Date().toISOString();
-          await saveDatabase(database!);
+          await saveAndRender();
           // ticket 079：状态流转通知 smartcat（4 态动词化，不防抖）
           emitDomainEvent('belongings', { kind: 'status', title: item.name, status: s });
-          render();
+          notice(`「${item.name}」已标记为${s}`, 'success');
           rebuild();
         })();
       },
@@ -324,8 +341,7 @@ function buildSheetHead(item: BelongingsItem): HTMLElement {
 /** 创建搜索下拉分类（与添加/编辑一致，可复用 helper） */
 function createSearchSelect(
   field: FormField,
-  palette: ModalPalette,
-  zIndex: number = DROPDOWN_Z
+  palette: ModalPalette
 ): HTMLDivElement {
   const { bg, text, border, inputBg, isDark } = palette;
   const searchWrapper = document.createElement('div');
@@ -343,11 +359,13 @@ function createSearchSelect(
   input.autocomplete = 'off';
 
   const dropdown = document.createElement('div');
+  dropdown.className = 'bz-belongings-overlay--dropdown'; // 标识钩子（层级已动态发号 ADR-0067）
+  dropdown.style.zIndex = String(allocZ()); // ADR-0067：动态发号（overlay 层叠上下文内最高，压过 modal 兄弟）
   dropdown.style.cssText = `
         position: absolute; top: 100%; left: 0; right: 0;
         background: ${bg}; border: 1px solid ${border};
         border-radius: 6px; max-height: 200px; overflow-y: auto;
-        display: none; z-index: ${zIndex};
+        display: none;
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
       `;
 
@@ -443,7 +461,12 @@ function createSearchSelect(
         input.dispatchEvent(new Event('input'));
       }
     } else if (e.key === 'Escape') {
-      dropdown.style.display = 'none';
+      // e1：下拉可见 → 只收下拉，不再冒泡到 escManager 连关整层弹窗（ESC 一次只关一层）；
+      // 修 c3：下拉不可见/无匹配时放行冒泡，ESC 照常经 escManager 关弹窗/主面板（不留 ESC 死区）
+      if (dropdown.style.display !== 'none') {
+        e.stopImmediatePropagation();
+        dropdown.style.display = 'none';
+      }
     }
   });
 
@@ -496,8 +519,7 @@ function createActionButton(
 function buildForm(
   fields: FormField[],
   palette: ModalPalette,
-  searchSelectInit?: (input: HTMLInputElement, field: FormField) => void,
-  searchSelectZIndex = DROPDOWN_Z
+  searchSelectInit?: (input: HTMLInputElement, field: FormField) => void
 ): { form: HTMLDivElement; inputs: Record<string, any> } {
   const { text, border, inputBg } = palette;
   const form = document.createElement('div');
@@ -515,7 +537,7 @@ function buildForm(
     let input: any;
 
     if (field.type === 'search-select') {
-      const searchWrapper = createSearchSelect(field, palette, searchSelectZIndex);
+      const searchWrapper = createSearchSelect(field, palette);
       const searchInput = searchWrapper.querySelector('input') as HTMLInputElement;
       if (searchSelectInit) searchSelectInit(searchInput, field);
       input = searchInput;
@@ -575,7 +597,7 @@ function buildForm(
 
 
 /** 弹窗公共结构（遮罩/弹窗/色板） */
-function createModalShell(zIndex: number, maxWidth: number, titleText: string): {
+function createModalShell(maxWidth: number, titleText: string): {
   overlay: HTMLDivElement;
   modal: HTMLDivElement;
   palette: ModalPalette;
@@ -588,11 +610,13 @@ function createModalShell(zIndex: number, maxWidth: number, titleText: string): 
   const palette = { bg, text, border, inputBg, isDark };
 
   const overlay = document.createElement('div');
+  overlay.className = 'bz-belongings-overlay--modal'; // 标识钩子（层级已动态发号 ADR-0067）
   overlay.style.cssText = `
       position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.5); z-index: ${zIndex};
+      background: rgba(0,0,0,0.5);
       display: flex; align-items: center; justify-content: center;
     `;
+  overlay.style.zIndex = String(allocZ()); // ADR-0067：弹窗每次新建，创建即显示即发号（modal 为子节点随动）
 
   const modal = document.createElement('div');
   modal.style.cssText = `
@@ -632,7 +656,7 @@ function editItemById(id: string): Promise<void> {
   // ----- 创建独立编辑弹窗 -----
   return new Promise((resolve) => {
     // P0-7：抬到 11100 档——companion 编辑弹窗必须压过抽屉遮罩 10999 / 抽屉本体 11000
-    const { overlay, modal, palette } = createModalShell(MODAL_Z, 480, '编辑物品');
+    const { overlay, modal, palette } = createModalShell(480, '编辑物品');
     // 抽屉来源的编辑：注册附属浮层（弹窗内点击不误关抽屉）
     if (sheetEditPending) registerSheetCompanion(overlay);
 
@@ -684,8 +708,7 @@ function editItemById(id: string): Promise<void> {
       item.description = inputs.description.value.trim();
       item.last_updated = new Date().toISOString();
 
-      await saveDatabase(database!);
-      render();
+      await saveAndRender();
       notice(`物品「${name}」已更新`, 'success');
       // ticket 079：编辑成功通知 smartcat（α 变化列表：snapshot vs 保存后的 item）
       emitDomainEvent('belongings', { kind: 'edit', title: name, changes: belongingsEditChanges(snapshot, item) });
@@ -749,7 +772,7 @@ function deleteItemById(id: string): Promise<void> {
 
   // ----- 创建独立确认弹窗 -----
   return new Promise((resolve) => {
-    const { overlay, modal, palette } = createModalShell(MODAL_Z + 1, 400, '确认删除');
+    const { overlay, modal, palette } = createModalShell(400, '确认删除');
     const { isDark } = palette;
 
     modal.style.maxHeight = 'none';
@@ -769,8 +792,7 @@ function deleteItemById(id: string): Promise<void> {
 
     const confirmBtn = createActionButton('🗑 删除', '#e74c3c', async () => {
       delete database!.items[id];
-      await saveDatabase(database!);
-      render();
+      await saveAndRender();
       notice(`已删除「${item.name}」`, 'success');
       // ticket 079：删除成功通知 smartcat（仅标题）
       emitDomainEvent('belongings', { kind: 'delete', title: item.name });
@@ -801,25 +823,32 @@ function deleteItemById(id: string): Promise<void> {
       }
     });
 
-    // 回车确认（P1-38：preventDefault 与 edit/add 弹窗对齐——拦原生按钮激活，Enter 仅触发一次删除回调）
+    // 回车处理（P1-38 + 修 c4：Enter 跟随当前焦点——焦点在「取消」→ 取消，不再焦点在取消却按 Enter 删除；
+    // 焦点在「删除」或未聚焦 → 确认删除；preventDefault 与 edit/add 弹窗对齐，拦原生按钮激活防双发）
     modal.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        confirmBtn.click();
+        if (document.activeElement === cancelBtn) {
+          cancelBtn.click();
+        } else {
+          confirmBtn.click();
+        }
       } else if (e.key === 'Escape') {
+        // e1：本地关确认弹窗即止，不再冒泡到 escManager 连关主面板（ESC 一次只关一层）
+        e.stopImmediatePropagation();
         cancelBtn.click();
       }
     });
 
-    // 聚焦删除按钮（防止误触）
-    setTimeout(() => confirmBtn.focus(), 100);
+    // P19：默认焦点不落在「删除」按钮（防误触），落在「取消」
+    setTimeout(() => cancelBtn.focus(), 100);
   });
 }
 
 // ----- 排序弹窗 -----
 export function showSortModal(): Promise<void> {
   return new Promise((resolve) => {
-    const { overlay, modal, palette } = createModalShell(MODAL_Z, 480, '排序设置');
+    const { overlay, modal, palette } = createModalShell(480, '排序设置');
     const { text, border } = palette;
     modal.style.maxHeight = 'none';
     modal.style.overflow = 'visible';
@@ -898,6 +927,8 @@ export function showSortModal(): Promise<void> {
     // ESC 关闭
     modal.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
+        // e1：本地关排序弹窗即止，不再冒泡到 escManager 连关主面板（ESC 一次只关一层）
+        e.stopImmediatePropagation();
         closeBtn.click();
       }
     });
@@ -907,7 +938,7 @@ export function showSortModal(): Promise<void> {
 /** 添加物品（弹窗） */
 export function addItem(): Promise<void> {
   return new Promise((resolve) => {
-    const { overlay, modal, palette } = createModalShell(MODAL_Z, 480, '添加物品');
+    const { overlay, modal, palette } = createModalShell(480, '添加物品');
 
     const fields: FormField[] = [
       { id: 'name', label: '📝 物品名称', type: 'text', placeholder: '请输入物品名称', required: true },
@@ -918,7 +949,7 @@ export function addItem(): Promise<void> {
       { id: 'description', label: '📋 描述（可选）', type: 'textarea', placeholder: '规格、颜色、购买原因等...' },
     ];
 
-    const { form, inputs } = buildForm(fields, palette, undefined, DROPDOWN_Z);
+    const { form, inputs } = buildForm(fields, palette);
 
     // 按钮容器
     const btnRow = document.createElement('div');
@@ -950,8 +981,7 @@ export function addItem(): Promise<void> {
       };
 
       database!.items[newItem.id] = newItem;
-      await saveDatabase(database!);
-      render();
+      await saveAndRender();
       notice(`物品「${name}」已添加`, 'success');
       // ticket 079：添加成功通知 smartcat（键值式完整信息，字段有才加）
       emitDomainEvent('belongings', { kind: 'add', item: newItem });
@@ -999,6 +1029,21 @@ export function addItem(): Promise<void> {
   });
 }
 
+/** 本会话写盘标记（P44 去双渲染）：saveAndRender 保存期间置位，modify 事件自写短路吸收 */
+let selfWritePending = false;
+
+/** 保存 + 渲染单点入口：先置写盘标记再保存，事件型自动刷新对自写出让（不再重载重渲染）；
+ *  外部修改（非本会话写盘）仍走 startAutoRefresh 的 modify 路径重载。 */
+async function saveAndRender(): Promise<void> {
+  selfWritePending = true;
+  try {
+    await saveDatabase(database!);
+  } finally {
+    selfWritePending = false;
+  }
+  render();
+}
+
 /** 打开期间监听数据文件变更自动刷新（用户拍板：去 ⏳ 按钮改实时）；面板隐藏时注销。
  *  监听对象是 belongings.json（json 数据文件）：域事件总线一期仅收编 md 事件不覆盖，维持原生订阅（ADR-0048 边界）。 */
 function startAutoRefresh(): void {
@@ -1006,6 +1051,11 @@ function startAutoRefresh(): void {
   const app = getApp();
   const off = app.vault.on('modify', (file: any) => {
     if (file && file.path === getDataFilePath()) {
+      // 自写短路（P44 去双渲染）：本会话 saveAndRender 已渲染，事件型刷新不再重载重渲染
+      if (selfWritePending) {
+        selfWritePending = false;
+        return;
+      }
       void (async () => {
         database = await loadDatabase();
         render();
@@ -1031,6 +1081,7 @@ export async function openBelongingsPanel(): Promise<void> {
     const overlayEl = document.getElementById('__gui_wu_ben__') as HTMLElement;
     // 移动端默认全屏：开关开=挂 .bz-win-mfs 全屏类（幂等，对已存在面板同样生效），关=常规卡
     applyMobileWindowFullscreen(overlayEl.firstElementChild as HTMLElement | null, tryGetSettings().belongingsMobileDefaultFullscreen === true);
+    topifyZ(overlayEl); // ADR-0067：显示即发号，谁后显示谁在上（modal 为子节点随动）
     overlayEl.style.visibility = 'visible';
     // 重新加载数据并渲染
     database = await loadDatabase();
@@ -1043,11 +1094,13 @@ export async function openBelongingsPanel(): Promise<void> {
 
   const overlay = document.createElement('div');
   overlay.id = '__gui_wu_ben__';
+  overlay.className = 'bz-belongings-overlay--main'; // 标识钩子（层级已动态发号 ADR-0067）
   overlay.style.cssText = `
       position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.5); z-index: 1000;
+      background: rgba(0,0,0,0.5);
       display: flex; align-items: center; justify-content: center;
     `;
+  overlay.style.zIndex = String(allocZ()); // ADR-0067：首建即显示即发号（modal 为子节点随动）
 
   const modal = document.createElement('div');
   modal.style.cssText = `
@@ -1107,20 +1160,9 @@ export async function openBelongingsPanel(): Promise<void> {
   settingsBtn.addEventListener('click', () => {
     openSettingsModal({
       title: '归物本设置',
-      build: (el) => {
-        const s = getSettings();
-        if (isMobileEnv()) {
-          new Setting(el)
-            .setName('移动端默认全屏')
-            .setDesc('移动端打开主窗口时默认全屏显示（≤768px；关=常规卡）')
-            .addToggle((toggle) =>
-              toggle.setValue(!!s.belongingsMobileDefaultFullscreen).onChange(async (v) => {
-                s.belongingsMobileDefaultFullscreen = v;
-                await saveSettings();
-              })
-            );
-        }
-      },
+      maxWidth: 520, // 拍板 Q11：空态域统一分组卡片口径、宽度向 520 看齐
+      // 空态域：唯一内容为通用「移动端」组（桌面端整组隐藏 → 照常显示空态文案）
+      schema: belongingSettingsSchema(),
       emptyText: '归物本没有可配置的设置项',
       emptyDesc: '数据文件路径由全局设置「数据存储路径」统一管理',
     });
@@ -1178,12 +1220,23 @@ export async function openBelongingsPanel(): Promise<void> {
   render();
   startAutoRefresh();
 
-  // 主题变化监听
-  const themeObserver = new MutationObserver(() => {
-    render();
+  // 主题变化监听（P44 去全量重渲染）：body class 任意变更不再全量重渲染，
+  // 仅当实际变化的类与渲染相关（主题类 theme-dark/theme-light）才重渲染
+  bodyThemeObserver?.disconnect();
+  let lastBodyClasses = document.body.className;
+  bodyThemeObserver = new MutationObserver(() => {
+    const cur = document.body.className;
+    if (cur === lastBodyClasses) return;
+    const prevTokens = new Set(lastBodyClasses.split(/\s+/).filter(Boolean));
+    const nextTokens = new Set(cur.split(/\s+/).filter(Boolean));
+    lastBodyClasses = cur;
+    let relevant = false;
+    for (const c of nextTokens) if (!prevTokens.has(c) && THEME_CLASSES.has(c)) { relevant = true; break; }
+    if (!relevant) for (const c of prevTokens) if (!nextTokens.has(c) && THEME_CLASSES.has(c)) { relevant = true; break; }
+    if (relevant) render();
   });
-  themeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
-  window.addEventListener('beforeunload', () => themeObserver.disconnect());
+  bodyThemeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  window.addEventListener('beforeunload', () => bodyThemeObserver?.disconnect());
 }
 
 /** 命令回调体：belongings-add-item（面板不打开，直接弹添加） */
@@ -1195,6 +1248,11 @@ export async function addBelongingsItemCommand(): Promise<void> {
 /** 卸载清理：移除主面板 DOM */
 export function cleanupBelongings(): void {
   stopAutoRefresh();
+  // 主题监听断开（l2：防卸载残留）
+  if (bodyThemeObserver) {
+    bodyThemeObserver.disconnect();
+    bodyThemeObserver = null;
+  }
   const el = document.getElementById('__gui_wu_ben__');
   if (el) el.remove();
   listContainer = null;

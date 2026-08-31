@@ -4,7 +4,9 @@
 import { moment } from 'obsidian';
 import { notice } from '../../core/notice';
 import { escManager } from '../../core/esc-manager';
+import { allocZ } from '../../core/z-order';
 import { parseFlexibleDateTime } from '../parser';
+import { state } from '../state';
 
 // ===== 滚轮列（原 2629-2782） =====
 
@@ -279,6 +281,23 @@ function updateAllColumns(picker: WheelPicker, shouldScroll = false) {
 
 // ===== 显示统一日期时间选择器（原 2865-3033） =====
 
+/**
+ * 滚轮年份动态范围（UX-34）：
+ * min = 数据最早年份（无数据时回落下限 1900，下限放宽至 1900）；
+ * max = 当前年份 + 1。
+ */
+function getYearRange(): { min: number; max: number } {
+  let earliest: number | null = null;
+  for (const entry of state.data.originalDiaryEntries) {
+    const y = parseInt(String(entry.date).split('-')[0], 10);
+    if (!Number.isNaN(y) && (earliest === null || y < earliest)) earliest = y;
+  }
+  return {
+    min: Math.max(1900, earliest ?? 1900),
+    max: new Date().getFullYear() + 1,
+  };
+}
+
 export function showDateTimePicker(initialMoment: any, onConfirm: (m: any) => void) {
   const existing = document.getElementById('unified-datetime-picker-mask');
   if (existing) existing.remove();
@@ -289,8 +308,9 @@ export function showDateTimePicker(initialMoment: any, onConfirm: (m: any) => vo
       {
         name: '年',
         unit: 'year',
-        min: 2000,
-        max: 2030,
+        // UX-34：动态范围——min 数据最早年份（下限放宽至 1900）、max 当前年份+1
+        min: () => getYearRange().min,
+        max: () => getYearRange().max,
         get: (m) => m.year(),
         set: (m, v) => m.year(v),
       },
@@ -336,7 +356,6 @@ export function showDateTimePicker(initialMoment: any, onConfirm: (m: any) => vo
   mask.style.cssText = `
     position: fixed; top:0; left:0; right:0; bottom:0;
     background: var(--background-modifier-cover);
-    z-index: 10010;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -436,6 +455,7 @@ export function showDateTimePicker(initialMoment: any, onConfirm: (m: any) => vo
   popup.appendChild(btnContainer);
 
   mask.appendChild(popup);
+  mask.style.zIndex = String(allocZ()); // ADR-0067:一次性选择器,创建即显示即发号(popup 为 mask 子节点随动)
   document.body.appendChild(mask);
 
   updateAllColumns(picker, true);

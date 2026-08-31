@@ -2,6 +2,7 @@
  * 影视 AI 推荐（ticket 14，源码 L1419-1650 逐字移植）
  */
 import type { App } from 'obsidian';
+import { allocZ } from '../core/z-order';
 import { pad2 } from '../core/utils';
 import { notice, notify } from '../core/notice';
 import { createAI } from '../core/ai';
@@ -205,7 +206,7 @@ export function buildSimilarPrompt(item: any, watched: any[]): string {
 }
 
 /**
- * 统一推荐结果窗口（AI 荐片 / 找同类共用）：居中卡片、头部行 + ✕ 关闭（bz-win-close）、
+ * 统一推荐结果窗口（AI 荐片 / 找同类共用）：居中卡片、头部行 + ❌ 关闭（bz-win-close）、
  * 内容区滚动隐藏滚动条；遮罩点击/ESC 关闭。与主窗口视觉规范一致。
  */
 export function showResultWindow(app: App, title: string, list: any[]): void {
@@ -215,10 +216,11 @@ export function showResultWindow(app: App, title: string, list: any[]): void {
   }
 
   const overlay = document.createElement('div');
+  overlay.className = 'bz-movie-overlay--1300'; // 标识钩子（层级已动态发号 ADR-0067）
+  overlay.style.zIndex = String(allocZ()); // 新建即显示即发号
   overlay.style.cssText = `
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
     background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center;
-    z-index: 1300;
   `;
 
   const modal = document.createElement('div');
@@ -236,7 +238,7 @@ export function showResultWindow(app: App, title: string, list: any[]): void {
   titleEl.style.cssText = 'font-size: 1.05rem; font-weight: 600;';
   titleEl.textContent = title;
   const closeBtn = document.createElement('button');
-  closeBtn.textContent = '✕';
+  closeBtn.textContent = '❌';
   closeBtn.className = 'bz-win-close';
   closeBtn.addEventListener('click', () => {
     overlay.remove();

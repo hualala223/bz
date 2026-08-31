@@ -2,19 +2,29 @@
  * 通用设置弹窗（ADR-0009 域设置弹窗）：各功能主面板右上角 ⚙️ 打开的功能专属设置弹窗。
  * 单例管理：同一时刻至多一个设置弹窗；重复调用先关闭旧弹窗（toggle 语义）。
  * 结构：mask + popup（标题栏 + 可滚动设置区），点击遮罩 / Esc 关闭（不放右上角关闭按钮）。
- * build 回调内用 obsidian Setting 挂设置项；未挂任何 .setting-item 时显示空态。
- * 重设计（2026-08 用户拍板方案 A 分组卡片）：build 内可用 createSettingsGroup 建
+ * 内容入口（ticket 131，ADR-0064）：`schema`（声明式渲染器 renderSettingsInto）。未挂任何
+ * .setting-item 时显示空态。
+ * 重设计（2026-08 用户拍板方案 A 分组卡片）：schema 内可用分组卡片
  * 「分组卡片」（原生图标+组名+项数徽标头 + 设置项体）；弹窗打开后徽标自动回填。
+ * 焦点管理（UX 整改 37）：打开聚焦弹窗内首个可交互设置项（跳过隐藏项；
+ * 移动端再跳过 input/textarea，避免弹软键盘遮挡并聚焦到按钮/开关/下拉），
+ * 关闭（遮罩/Esc/被顶替）还原焦点到触发元素；popup 挂 role="dialog" aria-modal="true"。
  */
 import { Setting, setIcon } from 'obsidian';
 import { createOverlay } from './dom';
 import { escManager } from './esc-manager';
+import { isMobileEnv } from './mobile';
+import { renderSettingsInto } from './settings-schema';
+import type { SettingsSchema } from './settings-schema';
+
+/** 弹窗内可交互元素选择器（读屏/焦点管理的通用口径） */
+const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 export interface SettingsModalOptions {
   /** 弹窗标题，如「书库设置」 */
   title: string;
-  /** 设置项构建回调：在滚动内容区挂 Setting（可多次调用） */
-  build: (el: HTMLElement) => void;
+  /** 声明式设置 schema（ADR-0064，唯一内容入口） */
+  schema?: SettingsSchema;
   /** 空态主文案（无设置项时显示；归物本/收藏本用） */
   emptyText?: string;
   /** 空态二级说明 */
@@ -84,6 +94,25 @@ export function refreshSettingsGroupCounts(content: HTMLElement): void {
   });
 }
 
+/**
+ * 移动端两行式标注（ticket 128，ADR-0061）：控件区（.setting-item-control）含 ≥2 个子元素的
+ * 设置行挂 .bz-setting-split 类（如「搜索框 + 下拉」等组合控件），纯 CSS 在窄视口拆成两行
+ * （名称+描述一行、控件区一行并允许内部折行）；单控件行（开关/下拉/单按钮）不挂类保持原生。
+ * ticket 133：路径设置行（.bz-path-picker-setting-row）直接跳过——空态控件区为「按钮 + chips 容器」
+ * 两个子元素，按计数会被误标两行式；其移动端单行由兜底类 CSS 保证（src/core/styles.css）。
+ * 实现口径：不依赖 `:has()`（顾虑 Obsidian 移动端 WebView 兼容性），由 JS 在 build 后遍历挂类
+ * （ADRs 对票二选一中选了挂类方案）。调用点：域设置弹窗 build 后（本模块）、主设置页 display
+ * 末尾（main.ts BzSettingTab）、动态重渲染处按需调用（如第二大脑自动双链明细）。
+ * 幂等：可对同一容器重复调用。类名仅 bz JS 挂载，原生非 bz 设置行不落类，天然不误伤。
+ */
+export function markSettingSplitRows(container: HTMLElement): void {
+  container.querySelectorAll('.setting-item').forEach((el) => {
+    if ((el as HTMLElement).classList.contains('bz-path-picker-setting-row')) return;
+    const ctl = (el as HTMLElement).querySelector('.setting-item-control');
+    (el as HTMLElement).classList.toggle('bz-setting-split', !!ctl && ctl.children.length >= 2);
+  });
+}
+
 let currentModal: { mask: HTMLElement; popup: HTMLElement; dispose: () => void; onClose?: () => void } | null = null;
 
 /** 关闭当前设置弹窗（无则静默）；触发该弹窗的 onClose（至多一次） */
@@ -99,19 +128,14 @@ export function closeSettingsModal(): void {
 /** 打开域设置弹窗（幂等：已开先关） */
 export function openSettingsModal(opts: SettingsModalOptions): void {
   closeSettingsModal();
+  // 打开前记录焦点归属，关闭时还原（被顶替/遮罩/Esc 均走 dispose）
+  const prevActive = document.activeElement;
 
   const { mask, popup } = createOverlay({
     maskId: 'bz-settings-modal-mask',
     popupId: 'bz-settings-modal-popup',
-    // z-index 家族表（全站统一层规，改层级前先对表）：
-    //   999x        主面板族（各域主面板 9999 / 遮罩 9998）
-    //   10001-10060 域模态旧档（各域历史弹窗/预览/加密确认等）
-    //   10050       设置弹窗（本组件，压域模态、被抽屉与 companion 盖）
-    //   10999-11000 统一抽屉（core/item-actions：遮罩 10999 + 本体 11000）
-    //   11100+      companion 档（必须 >11000：抽屉之上叠的域内小弹窗）
-    //   12000       movie 小窗
-    //   200000      attach 选择器
-    zIndex: 10050,
+    // z-index 动态发号（ADR-0067）：原静态层规家族表随动态层级制退役，
+    // 全站规则只有一条——谁后显示谁在上（settings-modal 每次打开新建 DOM，创建即显示）
     maxWidth: opts.maxWidth,
     onMaskClick: () => closeSettingsModal(),
   });
@@ -127,12 +151,15 @@ export function openSettingsModal(opts: SettingsModalOptions): void {
   const content = document.createElement('div');
   content.className = 'bz-settings-content';
 
-  opts.build(content);
-  // 分组卡片项数徽标回填（build 后、空态判断前）
-  refreshSettingsGroupCounts(content);
+  // ADR-0064 声明式渲染路径：渲染器内部完成徽标回填/两行式标注/显隐求值
+  renderSettingsInto(content, opts.schema ?? { groups: [] });
 
-  // 空态：build 未挂任何设置项（归物本/收藏本）
-  if (!content.querySelector('.setting-item')) {
+  // 空态：无任何「可见设置项」（隐藏项/纯操作行不抑制空态——对齐 refreshSettingsGroupCounts 口径；
+  // 归物本/收藏本等仅移动端组或空 schema 的域，桌面端照常显示空态文案）
+  const hasVisibleItem = Array.from(content.querySelectorAll<HTMLElement>('.setting-item')).some(
+    (el) => !el.classList.contains('bz-setting-action-row') && !isItemHidden(el)
+  );
+  if (!hasVisibleItem) {
     content.innerHTML = '';
     const empty = document.createElement('div');
     empty.className = 'bz-settings-empty';
@@ -152,6 +179,20 @@ export function openSettingsModal(opts: SettingsModalOptions): void {
   document.body.appendChild(popup);
   mask.style.display = 'block';
   popup.style.display = 'flex';
+  // UX 整改 37：读屏语义——弹窗容器为 dialog 模态（挂载后设置）
+  popup.setAttribute('role', 'dialog');
+  popup.setAttribute('aria-modal', 'true');
+  // 聚焦首个可交互设置项：跳过隐藏项（bz-setting-hidden / 内联 display none）；
+  // 移动端再跳过 input/textarea（避免弹软键盘遮挡，仅聚焦按钮/开关/下拉）
+  const firstFocusable = Array.from(popup.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).find((el) => {
+    if (isItemHidden(el)) return false;
+    if (isMobileEnv()) {
+      const tag = el.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return false;
+    }
+    return true;
+  });
+  if (firstFocusable) firstFocusable.focus();
 
   const handle = escManager.register('bz-settings-modal', {
     isVisible: () => !!currentModal,
@@ -165,6 +206,10 @@ export function openSettingsModal(opts: SettingsModalOptions): void {
       mask.remove();
       popup.remove();
       handle.unregister();
+      // 关闭后还原焦点到触发元素（元素仍连接时；被外部清理时跳过）
+      if (prevActive && prevActive instanceof HTMLElement && prevActive.isConnected) {
+        prevActive.focus();
+      }
     },
   };
 }

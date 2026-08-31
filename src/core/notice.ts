@@ -5,7 +5,6 @@
  * - 位置：桌面端右上角、从右侧滑入；移动端（max-width 768px）顶部居中、从上往下
  * - 堆叠 + 上限 5 条（超出挤掉最旧；常驻帧 duration<=0 / progress 默认不参与驱逐——P1-33：
  *   连续任务的常驻句柄不会被后续 toast 挤掉，setMessage/setType 始终有效）
- * - z-index 100000（最顶，盖过 Obsidian 全部 UI 层）
  * - 类型图标用 emoji（info ℹ️ / success ✅ / warning ⚠️ / error ❌ / pause ⏸️ / accept ✨ /
  *   delete 🗑️ / confirm ✓ / restore ↩️ / skip 🚫 / archive 📁 / progress 转圈）；
  *   类型由调用方显式指定（notice(msg, type)），不做消息内容自动归类
@@ -18,9 +17,13 @@
  * - 动态能力：setMessage（原地更新文本）/ setProgress（0-100 或 -1 不确定态）
  * - 富文本：title 标题行 + action 操作按钮（点击后自动收起）
  * - 时长：默认 info/success/warning 3s、error 5s；显式 duration 优先；
+ *   未指定时按文字长度动态计算（≤20 字用默认值，>20 字每多 1 字加 60ms，上限 15s）；
  *   progress 类型默认不自动消失（调用方控制）
  * - 点击通知本体即关闭
+ * - z-index 动态发号（ADR-0067）：每次弹出抬顶容器——toast 永远盖过最新打开的 overlay
  */
+import { allocZ } from './z-order';
+
 export type NoticeType =
   | 'info'
   | 'success'
@@ -113,6 +116,35 @@ export function notice(msg: string, type?: NoticeType, duration?: number): void 
   notify(msg, { type: type || 'info', duration });
 }
 
+/** 撤销型通知默认停留时长：比常规 toast 长，给用户足够的反悔窗口 */
+const UNDO_DURATION_MS = 6000;
+
+/**
+ * 撤销型通知（ticket 141 通病 1）：删除/移出/跳过类操作落地后，给 toast 挂「撤销」按钮，
+ * 点击执行回滚回调。把「此操作不可撤销」的事前威慑改成「已删除 + 可反悔」的事后兜底。
+ * 默认 delete 类型（🗑️）、6s 停留；跳过/归档等语义由调用方显式传 type。
+ */
+export function notifyUndo(
+  msg: string,
+  onUndo: () => void,
+  opts?: { type?: NoticeType; duration?: number }
+): NoticeHandle {
+  return notify(msg, {
+    type: (opts && opts.type) || 'delete',
+    duration: opts && opts.duration !== undefined ? opts.duration : UNDO_DURATION_MS,
+    action: { label: '撤销', onClick: onUndo },
+  });
+}
+
+/**
+ * 写盘失败统一提示（ticket 141 通病 2）：数据域裸 await 的保存调用失败时的人话错误 toast。
+ * 以前静默吞掉的 unhandled rejection 改走这里——用户改了但没存上，必须知道。
+ */
+export function notifySaveError(err: unknown, what?: string): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  notify(what ? `保存失败（${what}）：${msg}` : `保存失败：${msg}`, { type: 'error' });
+}
+
 /** 当前视口是否为移动端（决定默认位置/动画：移动端顶部居中，桌面右侧弹出） */
 function isMobileView(): boolean {
   return (
@@ -139,6 +171,23 @@ const OUT_CLASS: Record<NoticeVariant, string> = {
 
 function defaultDuration(type: NoticeType): number {
   return type === 'error' ? 5000 : 3000;
+}
+
+/** 基础阅读速度：每字符约 60ms（中英文混合均值）；短文本用 base 兜底 */
+const PER_CHAR_MS = 60;
+/** 低于此字符数不加时长，直接用 base */
+const SHORT_THRESHOLD = 20;
+
+/**
+ * 根据文字长度动态计算停留时间。
+ * 公式：base + max(0, len - 20) × 60ms，上限 15s 防止过长。
+ * 调用方显式指定 duration 时直接用显式值，不走此函数。
+ */
+function calcDuration(text: string, base: number): number {
+  const len = text.length;
+  if (len <= SHORT_THRESHOLD) return base;
+  const extra = (len - SHORT_THRESHOLD) * PER_CHAR_MS;
+  return Math.min(base + extra, 15000);
 }
 
 function ensureContainer(): HTMLElement {
@@ -238,8 +287,13 @@ function hideNow(n: InternalNotice): void {
   }
 }
 
-/** 按类型/显式 duration 设定自动消失计时；duration <= 0 或 progress 默认 = 常驻（persistent，不参与堆叠驱逐） */
-function armTimer(n: InternalNotice, kind: NoticeKind, explicitDuration?: number): void {
+/**
+ * 按类型/显式 duration 设定自动消失计时。
+ * - 显式 duration 优先
+ * - 未指定时根据文字长度动态计算（短文本用类型默认值，长文本按字数加时）
+ * - duration <= 0 或 progress 默认 = 常驻（persistent，不参与堆叠驱逐）
+ */
+function armTimer(n: InternalNotice, kind: NoticeKind, explicitDuration?: number, text?: string): void {
   if (n.timer !== null) {
     window.clearTimeout(n.timer);
     n.timer = null;
@@ -254,7 +308,8 @@ function armTimer(n: InternalNotice, kind: NoticeKind, explicitDuration?: number
     }
     return;
   }
-  const dur = explicitDuration !== undefined ? explicitDuration : defaultDuration(kind);
+  const base = defaultDuration(kind);
+  const dur = explicitDuration !== undefined ? explicitDuration : (text ? calcDuration(text, base) : base);
   if (dur <= 0) {
     n.persistent = true; // <= 0 = 常驻
     return;
@@ -269,6 +324,24 @@ function armTimer(n: InternalNotice, kind: NoticeKind, explicitDuration?: number
 export function __resetNoticeForTests(): void {
   live.length = 0;
   for (const k of Object.keys(recent)) delete recent[k];
+}
+
+/**
+ * 插件卸载清理（UX 整改 l2-toast，main.ts onunload 调用）：
+ * 清空容器 DOM + 存活/去重状态（语义同 __resetNoticeForTests，正式版出口），
+ * 随后移除通知容器节点；幂等，可重复调用。
+ */
+export function cleanupNotices(): void {
+  for (const n of live.splice(0)) {
+    if (n.timer !== null) {
+      window.clearTimeout(n.timer);
+      n.timer = null;
+    }
+    if (n.el.parentNode) n.el.parentNode.removeChild(n.el);
+  }
+  for (const k of Object.keys(recent)) delete recent[k];
+  const container = document.getElementById('bz-notice-container');
+  if (container && container.parentNode) container.parentNode.removeChild(container);
 }
 
 /** 空操作 handle：去重合并时返回（调用方安全调用 setMessage/setType/hide） */
@@ -302,7 +375,7 @@ export function notify(msg: string, opts?: NoticeOptions): NoticeHandle {
       if (r.n.isProgress !== isProgress || r.n.el.classList.contains('bz-notice--' + type) === false) {
         applyTypeToEl(r.n, kind);
       }
-      armTimer(r.n, kind, opts.duration);
+      armTimer(r.n, kind, opts.duration, msg);
       return noopHandle();
     }
     if (r && now - r.at < DEDUPE_WINDOW_MS) {
@@ -352,10 +425,11 @@ export function notify(msg: string, opts?: NoticeOptions): NoticeHandle {
 
   const n: InternalNotice = { el, timer: null, msgEl, progressEl, iconEl: icon, variant, isProgress, persistent: false };
 
-  // 操作按钮（可选）
+  // 操作按钮（可选；span 而非 button——Obsidian 核心 button 默认 height: var(--input-height) 会把通知框撑高）
   if (opts && opts.action) {
-    const btn = document.createElement('button');
+    const btn = document.createElement('span');
     btn.className = 'bz-notice-action';
+    btn.setAttribute('role', 'button');
     btn.textContent = opts.action.label;
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -369,6 +443,8 @@ export function notify(msg: string, opts?: NoticeOptions): NoticeHandle {
   // 点击本体关闭
   el.addEventListener('click', () => hideNow(n));
 
+  // 抬顶（ADR-0067）：toast 与 overlay 共享动态层级空间，弹出时重发号保证永远可见
+  container.style.zIndex = String(allocZ());
   container.appendChild(el);
 
   live.push(n);
@@ -378,8 +454,9 @@ export function notify(msg: string, opts?: NoticeOptions): NoticeHandle {
     if (r) r.n = n;
   }
 
-  // 自动消失计时
-  armTimer(n, kind, opts && opts.duration);
+  // 自动消失计时（无显式 duration 时按文字长度动态计算）
+  const fullText = (opts && opts.title ? opts.title + ' ' : '') + msg;
+  armTimer(n, kind, opts && opts.duration, fullText);
 
   return {
     el,
@@ -388,7 +465,9 @@ export function notify(msg: string, opts?: NoticeOptions): NoticeHandle {
     },
     setType(t: NoticeKind): void {
       applyTypeToEl(n, t);
-      armTimer(n, t);
+      // 重排计时（UX 整改 16）：传入当前正文，progress→success 等长文案按 60ms/字
+      // 动态显示，不再固定 3s；显式 duration 优先规则不变
+      armTimer(n, t, undefined, n.msgEl.textContent || undefined);
     },
     setProgress(pct: number): void {
       if (!n.progressEl) return;

@@ -1,32 +1,41 @@
 /**
- * 做题家 UI 测试（ticket 17 修正版）：startQuiz/单选/多选/loading/mask 点击/onComplete
+ * 做题家 UI 测试（ticket 141 重构版）：纯复习会话语义（普通模式随 ticket 098 退役入口一并删除）。
+ * 覆盖：startReviewSession 契约 / 单选多选判定 / 持久化后计数 / 答对 0.8s 亮绿后自动跳题（ticket 156）/
+ * 键盘快捷键 / 头部对错计数删除（ticket 156）/ 退出确认闸门 / 结果卡阶段防拆 DOM。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { MockVault, mockAppWithVault } from '../mock-vault';
 import { resetObsidianMocks, getNoticeMessages } from '../mock-obsidian-entry';
 import { setApp } from '../../src/core/app';
 import { QuizMasterUI, quizUI } from '../../src/quiz/ui';
-import { QUIZ_FILE_PATH, REVIEW_DATA_PATH } from '../../src/quiz/manager';
+import { QUIZ_FILE_PATH } from '../../src/quiz/manager';
+import type { QuizQuestion } from '../../src/quiz/manager';
 
 function makeApp(vault: MockVault) {
   return mockAppWithVault(vault);
 }
 
-/** 预置活跃复习条目 + 题库 */
+/** 预置题库（manager.removeQuestion 落盘断言需要 quiz.json 存在对应笔记键） */
 function seedQuiz(vault: MockVault, notes: Record<string, any[]>) {
-  const now = new Date();
   vault.files.set(QUIZ_FILE_PATH, JSON.stringify({ notes }));
-  vault.files.set(REVIEW_DATA_PATH, JSON.stringify(
-    Object.keys(notes).map((p, i) => ({
-      id: 'r' + i, filePath: p, name: p.split('/').pop()?.replace(/\.md$/, '') || p,
-      reviewStart: now.toISOString(), stage: 0, phase: 'ladder', stability: 1, difficulty: 0.3,
-      reviewHistory: [], totalReviews: 0, averageConfidence: 0,
-      nextReviewDate: new Date(now.getTime() + 60000).toISOString(), lastReviewed: null, lastDifficulty: null, completed: false,
-    }))
-  ));
 }
 
-describe('QuizMasterUI', () => {
+/** 微任务落盘等待（removeQuestion → jsonStore 写盘在微任务内结算） */
+async function flushPersist(): Promise<void> {
+  await new Promise((r) => setTimeout(r, 0));
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+/** 答对自动跳题延时等待（ticket 156：0.8s 亮绿反馈后进入下一题） */
+async function flushJump(): Promise<void> {
+  await new Promise((r) => setTimeout(r, 850));
+}
+
+const Q = (question: string, correctIndices: number[], notePath = 'A.md'): QuizQuestion =>
+  ({ question, options: ['甲', '乙', '丙', '丁'], correctIndices, notePath } as QuizQuestion);
+
+describe('QuizMasterUI（纯复习会话）', () => {
   beforeEach(() => {
     resetObsidianMocks();
     setApp(null as any);
@@ -35,14 +44,12 @@ describe('QuizMasterUI', () => {
     QuizMasterUI.settings = { enableMultipleChoice: true, questionsPerNote: '0', shuffleQuestions: false, difficulty: 'random' };
   });
 
-  it('startQuiz：渲染标题/题目/选项（A. 前缀结构）', async () => {
+  it('startReviewSession：渲染标题/题目/选项（A. 前缀结构）+ 头部对错计数', () => {
     const vault = new MockVault();
-    vault.files.set('A.md', '内容');
-    seedQuiz(vault, { 'A.md': [{ question: 'Q1?', options: ['甲', '乙', '丙', '丁'], correctIndices: [0] }] });
     const app = makeApp(vault);
     setApp(app);
     const ui = new QuizMasterUI();
-    await ui.startQuiz();
+    ui.startReviewSession({ questions: [Q('Q1?', [0])], onComplete: vi.fn() });
     const popup = document.getElementById('quiz-popup')!;
     expect(popup).not.toBeNull();
     expect(popup.textContent).toContain('Q1?');
@@ -51,18 +58,25 @@ describe('QuizMasterUI', () => {
     const btns = popup.querySelectorAll('.quiz-option-btn');
     expect(btns.length).toBe(4);
     expect(btns[0].querySelector('.check-mark')).not.toBeNull();
+    // ticket 156：头部对错计数已删除（右上角不再显示 ✅/❌ 统计）
+    expect(popup.querySelector('.bz-quiz-stats')).toBeNull();
   });
 
-  it('选项文本 HTML 转义：含 < & 字符按文本显示，不截断/不解析为标签', async () => {
+  it('普通做题模式已删除：实例无 startQuiz/showLoadingPopup', () => {
+    const ui = new QuizMasterUI();
+    expect((ui as any).startQuiz).toBeUndefined();
+    expect((ui as any).showLoadingPopup).toBeUndefined();
+  });
+
+  it('选项文本 HTML 转义：含 < & 字符按文本显示，不截断/不解析为标签', () => {
     const vault = new MockVault();
-    vault.files.set('A.md', '内容');
-    seedQuiz(vault, {
-      'A.md': [{ question: 'Q?', options: ['a < b & c', 'x>y', '正常文本', 'd'], correctIndices: [0] }],
-    });
     const app = makeApp(vault);
     setApp(app);
     const ui = new QuizMasterUI();
-    await ui.startQuiz();
+    ui.startReviewSession({
+      questions: [{ question: 'Q?', options: ['a < b & c', 'x>y', '正常文本', 'd'], correctIndices: [0], notePath: 'A.md' } as QuizQuestion],
+      onComplete: vi.fn(),
+    });
     const popup = document.getElementById('quiz-popup')!;
     const spans = popup.querySelectorAll('.quiz-option-btn span');
     const texts = [...spans].map((s) => s.textContent || '');
@@ -72,82 +86,69 @@ describe('QuizMasterUI', () => {
     expect(popup.querySelectorAll('.quiz-option-btn span').length).toBe(16);
   });
 
-  it('单选答对：标绿 + 800ms 自动下一题（splice 不 ++）+ 移除题目（落盘终态断言）', async () => {
+  it('单选答对：标绿 + 持久化成功自动进入下一题（无「下一题」按钮）+ splice 计数', async () => {
     const vault = new MockVault();
-    vault.files.set('A.md', '内容');
-    seedQuiz(vault, {
-      'A.md': [
-        { question: 'Q1?', options: ['甲', '乙', '丙', '丁'], correctIndices: [0] },
-        { question: 'Q2?', options: ['甲', '乙', '丙', '丁'], correctIndices: [1] },
-      ],
-    });
+    seedQuiz(vault, { 'A.md': [Q('Q1?', [0]), Q('Q2?', [1])] });
     const app = makeApp(vault);
     setApp(app);
     const ui = new QuizMasterUI();
-    await ui.startQuiz();
+    const onComplete = vi.fn();
+    ui.startReviewSession({ questions: [Q('Q1?', [0]), Q('Q2?', [1])], onComplete });
     expect(ui.totalQuestions).toBe(2);
-    // 答对 Q1
-    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
+    // 答对 Q1：答对不出现「下一题」按钮，正确选项即时标绿
     (document.querySelectorAll('.quiz-option-btn')[0] as HTMLElement).click();
-    // P2：计数在持久化成功后递增
-    await vi.advanceTimersByTimeAsync(1600);
+// P2：计数在持久化成功后递增
+    expect(document.querySelector('.quiz-next-btn')).toBeNull();
+    expect(document.querySelectorAll('.quiz-option-btn')[0].classList.contains('correct')).toBe(true);
+    // 持久化成功：计数递增；ticket 156 延时窗口内仍停留当前题（亮绿反馈）
+    await flushPersist();
     expect(ui.correctCount).toBe(1);
+    expect(document.getElementById('quiz-popup')!.textContent).toContain('Q1?');
+    // 0.8s 后自动进入 Q2（题号 = 已完成数 + 1 = 2/2）
+    await flushJump();
     expect(document.getElementById('quiz-popup')!.textContent).toContain('Q2?');
-    // 题号用已完成数+1：答对 Q1（splice 不递增 currentIndex）后第二题显示 2/2
     expect(document.getElementById('quiz-popup')!.textContent).toContain('(2/2)');
     // P0-2 落盘终态：被答对的 Q1 已删除，恰剩未答的 Q2
     let quiz = JSON.parse(vault.files.get(QUIZ_FILE_PATH)!);
     expect(quiz.notes['A.md'].map((q: any) => q.question)).toEqual(['Q2?']);
-    // 答对 Q2 → 全部完成（弹窗保留，onComplete 回调）
-    const onComplete = vi.fn();
-    ui.onComplete = onComplete;
+    // 答对 Q2 → 全部完成（延时后自动 onComplete 回调）
     (document.querySelectorAll('.quiz-option-btn')[1] as HTMLElement).click();
-    await vi.advanceTimersByTimeAsync(1600);
+await flushPersist();
+    await flushJump();
     expect(ui.correctCount).toBe(2);
     expect(onComplete).toHaveBeenCalledWith({ correct: 2, wrong: 0, total: 2, accuracy: 100 });
     expect(document.getElementById('quiz-popup')).not.toBeNull(); // 回调不关弹窗
-    // P0-2 终态：两题先后答对，落盘删除的恰是被答对的两题（空数组键保留）
     quiz = JSON.parse(vault.files.get(QUIZ_FILE_PATH)!);
     expect(quiz.notes['A.md']).toEqual([]);
-    vi.useRealTimers();
   });
 
-  it('P0-2：同笔记 5 题全对 → 库清空、会话完成回调 accuracy=100', async () => {
+  it('P0-2：同笔记 5 题全对 → 库清空、会话完成回调 accuracy=100（答对自动跳题）', async () => {
     const vault = new MockVault();
-    vault.files.set('A.md', '内容');
-    seedQuiz(vault, {
-      'A.md': [1, 2, 3, 4, 5].map((n) => ({ question: `Q${n}?`, options: ['甲', '乙', '丙', '丁'], correctIndices: [0] })),
-    });
+    seedQuiz(vault, { 'A.md': [1, 2, 3, 4, 5].map((n) => Q(`Q${n}?`, [0])) });
     const app = makeApp(vault);
     setApp(app);
     const ui = new QuizMasterUI();
-    await ui.startQuiz();
     const onComplete = vi.fn();
-    ui.onComplete = onComplete; // 开考后挂回调（startQuiz 入口会清理残留）
-    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
+    ui.startReviewSession({ questions: [1, 2, 3, 4, 5].map((n) => Q(`Q${n}?`, [0])), onComplete });
     for (let round = 1; round <= 5; round++) {
       (document.querySelectorAll('.quiz-option-btn')[0] as HTMLElement).click();
-      await vi.advanceTimersByTimeAsync(1600);
+await flushPersist();
       expect(ui.correctCount).toBe(round);
+      await flushJump(); // ticket 156：亮绿 0.8s 后自动进入下一题
     }
     expect(onComplete).toHaveBeenCalledWith({ correct: 5, wrong: 0, total: 5, accuracy: 100 });
     const quiz = JSON.parse(vault.files.get(QUIZ_FILE_PATH)!);
     expect(quiz.notes['A.md']).toEqual([]); // 全对 → 库空
-    expect(await import('../../src/quiz/manager').then((m) => new m.QuizManager().getUncompletedQuestions(app))).toHaveLength(0);
-    vi.useRealTimers();
   });
 
-  it('P2：持久化失败 → 恢复作答态且不重复计数；重答成功只计一次并落盘删除', async () => {
+  it('P2：持久化失败 → 恢复作答态且不重复计数；重答成功只计一次并自动完成落盘删除', async () => {
     const vault = new MockVault();
-    vault.files.set('A.md', '内容');
-    seedQuiz(vault, {
-      'A.md': [{ question: 'Q1?', options: ['甲', '乙', '丙', '丁'], correctIndices: [0] }],
-    });
+    seedQuiz(vault, { 'A.md': [Q('Q1?', [0])] });
     const app = makeApp(vault);
     setApp(app);
     const ui = new QuizMasterUI();
-    await ui.startQuiz();
-    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
+    const onComplete = vi.fn();
+    ui.startReviewSession({ questions: [Q('Q1?', [0])], onComplete });
     // 仅首次调用注入失败，其后走真实实现（验证重答真正落盘删除）
     const removeSpy = vi.spyOn(ui.manager, 'removeQuestion')
       .mockImplementationOnce(async () => {
@@ -156,32 +157,35 @@ describe('QuizMasterUI', () => {
     const btns = () => document.querySelectorAll('.quiz-option-btn');
     // 第一次答对：持久化失败
     (btns()[0] as HTMLElement).click();
-    await vi.advanceTimersByTimeAsync(50);
+    await flushPersist();
     expect(ui.correctCount).toBe(0); // 失败不计数
     expect(getNoticeMessages().some((m) => m.includes('删除题目失败'))).toBe(true);
-    // 作答态已恢复：按钮不再 disabled，可重新作答
+    // 作答态已恢复：按钮不再 disabled，仍停在当前题
     expect(btns()[0].classList.contains('disabled')).toBe(false);
-    // 重答成功：只计一次
+    expect(document.getElementById('quiz-popup')!.textContent).toContain('Q1?');
+    // 重答成功：只计一次，延时后自动完成
     (btns()[0] as HTMLElement).click();
-    await vi.advanceTimersByTimeAsync(1600);
+await flushPersist();
     expect(ui.correctCount).toBe(1);
     expect(removeSpy).toHaveBeenCalledTimes(2);
+    await flushJump();
+    expect(onComplete).toHaveBeenCalledWith({ correct: 1, wrong: 0, total: 1, accuracy: 100 });
     const quiz = JSON.parse(vault.files.get(QUIZ_FILE_PATH)!);
     expect(quiz.notes['A.md']).toEqual([]);
-    vi.useRealTimers();
   });
 
-  it('单选答错：正确标绿 + 点击项标红 + 下一题按钮（不删题）', async () => {
+  it('单选答错：正确标绿 + 点击项标红 + 下一题按钮（不删题）+ 头部计数', () => {
     const vault = new MockVault();
-    vault.files.set('A.md', '内容');
-    seedQuiz(vault, { 'A.md': [{ question: 'Q1?', options: ['甲', '乙', '丙', '丁'], correctIndices: [0] }] });
+    seedQuiz(vault, { 'A.md': [Q('Q1?', [0])] });
     const app = makeApp(vault);
     setApp(app);
     const ui = new QuizMasterUI();
-    await ui.startQuiz();
+    ui.startReviewSession({ questions: [Q('Q1?', [0])], onComplete: vi.fn() });
     const btns = document.querySelectorAll('.quiz-option-btn');
     (btns[1] as HTMLElement).click(); // 选错
     expect(ui.wrongCount).toBe(1);
+    // ticket 156：头部对错计数已删除
+    expect(document.querySelector('.bz-quiz-stats')).toBeNull();
     expect(btns[0].classList.contains('correct')).toBe(true);
     expect(btns[1].classList.contains('wrong')).toBe(true);
     const nextBtn = document.querySelector('.quiz-next-btn') as HTMLElement;
@@ -192,19 +196,13 @@ describe('QuizMasterUI', () => {
     expect(quiz.notes['A.md']).toHaveLength(1);
   });
 
-  it('题号进度：答错点下一题 → 题号递增（2/N）', async () => {
+  it('题号进度：答错点下一题 → 题号递增（2/N）', () => {
     const vault = new MockVault();
-    vault.files.set('A.md', '内容');
-    seedQuiz(vault, {
-      'A.md': [
-        { question: 'Q1?', options: ['甲', '乙', '丙', '丁'], correctIndices: [0] },
-        { question: 'Q2?', options: ['甲', '乙', '丙', '丁'], correctIndices: [0] },
-      ],
-    });
+    seedQuiz(vault, { 'A.md': [Q('Q1?', [0]), Q('Q2?', [0])] });
     const app = makeApp(vault);
     setApp(app);
     const ui = new QuizMasterUI();
-    await ui.startQuiz();
+    ui.startReviewSession({ questions: [Q('Q1?', [0]), Q('Q2?', [0])], onComplete: vi.fn() });
     expect(document.getElementById('quiz-popup')!.textContent).toContain('(1/2)');
     // 第一题答错 → 点下一题
     (document.querySelectorAll('.quiz-option-btn')[1] as HTMLElement).click();
@@ -213,16 +211,14 @@ describe('QuizMasterUI', () => {
     expect(document.getElementById('quiz-popup')!.textContent).toContain('(2/2)');
   });
 
-  it('多选：selected 勾选 + 提交判定（正确：绿 + splice 下一题；源码不递增计数）', async () => {
+  it('多选：selected 勾选 + 提交判定（正确：绿 + 自动完成 + 持久化计数）', async () => {
     const vault = new MockVault();
-    vault.files.set('A.md', '内容');
-    seedQuiz(vault, { 'A.md': [{ question: 'Q1?', options: ['甲', '乙', '丙', '丁'], correctIndices: [0, 2] }] });
+    seedQuiz(vault, { 'A.md': [{ ...Q('Q1?', [0, 2]) }] });
     const app = makeApp(vault);
     setApp(app);
     const ui = new QuizMasterUI();
-    await ui.startQuiz();
     const onComplete = vi.fn();
-    ui.onComplete = onComplete;
+    ui.startReviewSession({ questions: [Q('Q1?', [0, 2])], onComplete });
     const submit = document.querySelector('.quiz-submit-btn') as HTMLElement;
     expect(submit).not.toBeNull();
     expect(submit.textContent).toBe('提交答案');
@@ -231,28 +227,24 @@ describe('QuizMasterUI', () => {
     (btns[2] as HTMLElement).click();
     expect(btns[0].classList.contains('selected')).toBe(true);
     expect(btns[0].querySelector('.check-mark')).not.toBeNull();
-    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
     submit.click();
     expect(btns[0].classList.contains('correct')).toBe(true);
-    await vi.advanceTimersByTimeAsync(1600);
-    // ticket 098（ADR-0044）：多选计数 bug 解冻——答对递增 correctCount（唯一破铁律 1 项；
-    // P2：递增时机为持久化成功后）
+await flushPersist();
+    // ticket 098（ADR-0044）：多选答对递增 correctCount（P2：持久化成功后）
     expect(ui.correctCount).toBe(1);
-    vi.useRealTimers();
-    // 题目被 splice 移除 → 无题 → onComplete（计数修复后 accuracy=100）；落盘同步删除
+    // 题目被 splice 移除 → 答对延时后自动完题 → onComplete（accuracy=100）；落盘同步删除
+    await flushJump();
     expect(onComplete).toHaveBeenCalledWith({ correct: 1, wrong: 0, total: 1, accuracy: 100 });
     const quiz = JSON.parse(vault.files.get(QUIZ_FILE_PATH)!);
     expect(quiz.notes['A.md']).toEqual([]);
   });
 
-  it('多选答错：正确绿 + 错误选中红 + 下一题按钮', async () => {
+  it('多选答错：正确绿 + 错误选中红 + 下一题按钮', () => {
     const vault = new MockVault();
-    vault.files.set('A.md', '内容');
-    seedQuiz(vault, { 'A.md': [{ question: 'Q1?', options: ['甲', '乙', '丙', '丁'], correctIndices: [0, 2] }] });
     const app = makeApp(vault);
     setApp(app);
     const ui = new QuizMasterUI();
-    await ui.startQuiz();
+    ui.startReviewSession({ questions: [Q('Q1?', [0, 2])], onComplete: vi.fn() });
     const btns = document.querySelectorAll('.quiz-option-btn');
     (btns[0] as HTMLElement).click();
     (btns[1] as HTMLElement).click(); // 选 0+1，正确 0+2
@@ -262,85 +254,304 @@ describe('QuizMasterUI', () => {
     expect(document.querySelector('.quiz-next-btn')).not.toBeNull();
   });
 
-  it('mask 点击 = finishQuiz（onComplete 回调）', async () => {
+  it('ticket 15：多选零选择点提交 → notice「请至少选择一项」，不提交不判题', () => {
     const vault = new MockVault();
-    vault.files.set('A.md', '内容');
-    seedQuiz(vault, { 'A.md': [{ question: 'Q1?', options: ['甲', '乙', '丙', '丁'], correctIndices: [0] }] });
     const app = makeApp(vault);
     setApp(app);
     const ui = new QuizMasterUI();
-    await ui.startQuiz();
+    ui.startReviewSession({ questions: [Q('Q1?', [0, 2])], onComplete: vi.fn() });
+    (document.querySelector('.quiz-submit-btn') as HTMLElement).click();
+    expect(getNoticeMessages().some((m) => m === '请至少选择一项')).toBe(true);
+    // 未判题：无正确/错误高亮，无「下一题」，题目仍保留
+    const btns = document.querySelectorAll('.quiz-option-btn');
+    expect(btns[0].classList.contains('correct')).toBe(false);
+    expect(document.querySelector('.quiz-next-btn')).toBeNull();
+    expect(ui.correctCount).toBe(0);
+    expect(ui.wrongCount).toBe(0);
+  });
+
+  it('ticket 141/152：键盘快捷键——1-4/A-D 选择、Enter 提交/答错下一题', async () => {
+    const vault = new MockVault();
+    seedQuiz(vault, { 'A.md': [Q('Q1?', [0])] });
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
     const onComplete = vi.fn();
-    ui.onComplete = onComplete; // 开考后挂回调（startQuiz 入口会清理残留）
+    ui.startReviewSession({ questions: [Q('Q1?', [0])], onComplete });
+    // 数字键 1 选择第一项（单选即判）
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '1' }));
+    await flushPersist();
+    expect(ui.correctCount).toBe(1);
+    expect(document.querySelectorAll('.quiz-option-btn')[0].classList.contains('correct')).toBe(true);
+    // 答对自动完题（唯一一题，延时后触发）→ onComplete 已触发，无「下一题」按钮可点
+    await flushJump();
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('.quiz-next-btn')).toBeNull();
+    // 字母键 A：焦点在 body 时点击选项（无题可答，静默无害）
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }));
+    expect(onComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it('ticket 153：答错显示「下一题」按钮，Enter 可触发进入下一题', async () => {
+    const vault = new MockVault();
+    seedQuiz(vault, { 'A.md': [Q('Q1?', [0]), Q('Q2?', [1])] });
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
+    const onComplete = vi.fn();
+    ui.startReviewSession({ questions: [Q('Q1?', [0]), Q('Q2?', [1])], onComplete });
+    // 数字键 2 选错（正确为索引 0）
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '2' }));
+    expect(ui.wrongCount).toBe(1);
+    const nextBtn = document.querySelector('.quiz-next-btn') as HTMLElement;
+    expect(nextBtn).not.toBeNull(); // 答错才出现「下一题」按钮
+    // Enter 点「下一题」→ 进入 Q2
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(document.getElementById('quiz-popup')!.textContent).toContain('Q2?');
+    expect(document.getElementById('quiz-popup')!.textContent).toContain('(2/2)');
+  });
+
+  it('ticket 141：键盘 Enter 多选提交（零选择时走 warning 不判题）', async () => {
+    const vault = new MockVault();
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
+    ui.startReviewSession({ questions: [Q('Q1?', [0, 2])], onComplete: vi.fn() });
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c' }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(ui.correctCount).toBe(0);
+    // 勾选 0+2 后 Enter 提交 → 判对
+    await flushPersist();
+    expect(document.querySelectorAll('.quiz-option-btn')[0].classList.contains('correct')).toBe(true);
+  });
+
+  it('ticket 156：答对延时期间放弃做题 → 清除延时，不渲染僵尸题弹窗', async () => {
+    const vault = new MockVault();
+    seedQuiz(vault, { 'A.md': [Q('Q1?', [0]), Q('Q2?', [1])] });
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
+    const onComplete = vi.fn();
+    ui.startReviewSession({ questions: [Q('Q1?', [0]), Q('Q2?', [1])], onComplete });
+    // 答对 Q1 → 持久化成功，进入 0.8s 延时窗口
+    (document.querySelectorAll('.quiz-option-btn')[0] as HTMLElement).click();
+    await flushPersist();
+    expect(ui.correctCount).toBe(1);
+    // 延时窗口内 ESC → 放弃确认 → 结算关闭
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    const ok = document.getElementById('__shared_confirm_ok__') as HTMLElement;
+    expect(ok).not.toBeNull();
+    ok.click();
+    await flushJump(); // 若延时未清除，此处会迟到渲染 Q2 僵尸弹窗
+    expect(ui._sessionActive).toBe(false);
+    expect(document.getElementById('quiz-popup')).toBeNull();
+    expect(document.getElementById('quiz-mask')).toBeNull();
+    expect(onComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it('打乱出题顺序设置在会话入口生效（shuffleQuestions=false 保序；true 打乱后总题数不变）', () => {
+    const vault = new MockVault();
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
+    const questions = ['RQ1?', 'RQ2?', 'RQ3?'].map((q) => Q(q, [0]));
+    ui.startReviewSession({ questions, onComplete: vi.fn() });
+    expect(ui.currentQuestions.map((q) => q.question)).toEqual(['RQ1?', 'RQ2?', 'RQ3?']); // false 保序
+    ui.close();
+    QuizMasterUI.settings = { ...QuizMasterUI.settings, shuffleQuestions: true };
+    const rngSpy = vi.spyOn(ui, 'shuffleArray').mockImplementation((arr) => [...arr].reverse());
+    ui.startReviewSession({ questions, onComplete: vi.fn() });
+    expect(ui.totalQuestions).toBe(3); // 打乱不改总数
+    expect(ui.currentQuestions.map((q) => q.question)).toEqual(['RQ3?', 'RQ2?', 'RQ1?']);
+    rngSpy.mockRestore();
+    ui.close();
+  });
+
+  it('题目缺 notePath → 标题降级不崩溃（待重做队列曾致 split 报错）', () => {
+    const vault = new MockVault();
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
+    // 直接以缺 notePath 的题开复习会话（模拟旧数据/异常链路）
+    ui.startReviewSession({
+      questions: [{ question: 'NP?', options: ['a', 'b', 'c', 'd'], correctIndices: [0] } as any],
+      onComplete: null,
+    });
+    const popup = document.getElementById('quiz-popup')!;
+    expect(popup.textContent).toContain('NP?');
+    expect(popup.textContent).toContain('(1/1)');
+    ui.close();
+  });
+});
+
+describe('复习联动契约', () => {
+  beforeEach(() => {
+    resetObsidianMocks();
+    setApp(null as any);
+    document.body.innerHTML = '';
+    QuizMasterUI.ai = { json: vi.fn() } as any;
+    QuizMasterUI.settings = { enableMultipleChoice: true, questionsPerNote: '0', shuffleQuestions: false, difficulty: 'random' };
+  });
+
+  it('startReviewSession 设置会话状态并开始出题，endReviewSession 收尾弹窗', () => {
+    const vault = new MockVault();
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
+    const questions = [Q('RQ?', [0])];
+    const onComplete = vi.fn();
+    ui.startReviewSession({ questions, onComplete });
+    expect(ui._sessionActive).toBe(true);
+    expect(ui.currentIndex).toBe(0);
+    expect(ui.correctCount).toBe(0);
+    expect(ui.wrongCount).toBe(0);
+    expect(ui.totalQuestions).toBe(1);
+    expect(ui.onComplete).toBe(onComplete);
+    expect(document.getElementById('quiz-popup')!.textContent).toContain('RQ?');
+    // 结束会话：有未消费回调时防御性结算（防复习域外层 Promise 悬挂）
+    ui.endReviewSession();
+    expect(ui._sessionActive).toBe(false);
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    // 回调已消费后再结束 → 纯收尾
+    ui.endReviewSession();
+    expect(document.getElementById('quiz-popup')).toBeNull();
+  });
+
+  it('复习做题中途 ESC → 先确认，确认后按 total=0 结算，外层 Promise 不悬挂', async () => {
+    const vault = new MockVault();
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
+    const questions = [Q('RQ1?', [0]), Q('RQ2?', [1])];
+    // 模拟复习域：外层 Promise 等待 onComplete
+    const outer = new Promise<any>((resolve) => {
+      ui.startReviewSession({ questions, onComplete: (r) => resolve(r) });
+    });
+    expect(document.getElementById('quiz-popup')).not.toBeNull();
+    // 答题中途按 ESC → 先弹退出确认（未结算）
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    const confirmPopup = document.getElementById('__shared_confirm_popup__')!;
+    expect(confirmPopup).not.toBeNull();
+    expect(confirmPopup.textContent).toContain('放弃本次做题');
+    expect(confirmPopup.textContent).toContain('继续做题');
+    expect(document.getElementById('quiz-popup')).not.toBeNull(); // 确认前弹窗保留
+    // 确认放弃 → 结算 + 关闭
+    (document.getElementById('__shared_confirm_ok__') as HTMLElement).click();
+    const results = await outer;
+    expect(results).toEqual({ correct: 0, wrong: 0, total: 0, accuracy: 0 }); // ADR-0044：total=0 → again 既定语义
+    expect(document.getElementById('quiz-popup')).toBeNull(); // 结算后关闭
+  });
+
+  it('复习做题中途 ESC → 取消（继续做题）不结算；答完恰好一次回调', async () => {
+    const vault = new MockVault();
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
+    const onComplete = vi.fn();
+    ui.startReviewSession({ questions: [Q('RQ1?', [0]), Q('RQ2?', [1])], onComplete });
+    // ESC → 确认弹窗 → 取消 → 继续做题（会话不结算、弹窗保留）
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(document.getElementById('__shared_confirm_popup__')).not.toBeNull();
+    (document.getElementById('__shared_confirm_cancel__') as HTMLElement).click();
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(document.getElementById('quiz-popup')).not.toBeNull();
+    expect(document.getElementById('quiz-popup')!.textContent).toContain('RQ1?');
+    // 继续作答到完成 → 恰好一次回调（答对 0.8s 亮绿后自动跳题）
+    (document.querySelectorAll('.quiz-option-btn')[0] as HTMLElement).click(); // 答对 RQ1
+    await flushPersist();
+    await flushJump(); // 自动进入 RQ2
+    (document.querySelectorAll('.quiz-option-btn')[1] as HTMLElement).click(); // 答对 RQ2（自动进入）
+    await flushPersist();
+    await flushJump();
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onComplete).toHaveBeenCalledWith({ correct: 2, wrong: 0, total: 2, accuracy: 100 });
+  });
+
+  it('复习做题中途点遮罩 → 确认闸门；取消继续、确认按已答结算', async () => {
+    const vault = new MockVault();
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
+    const onComplete = vi.fn();
+    ui.startReviewSession({ questions: [Q('RQ1?', [0]), Q('RQ2?', [1])], onComplete });
+    // 点遮罩 → 先确认（不直接结算）
     (document.getElementById('quiz-mask') as HTMLElement).click();
+    expect(document.getElementById('__shared_confirm_popup__')).not.toBeNull();
+    expect(onComplete).not.toHaveBeenCalled();
+    // 取消 → 继续做题
+    (document.getElementById('__shared_confirm_cancel__') as HTMLElement).click();
+    expect(document.getElementById('quiz-popup')).not.toBeNull();
+    // 再点遮罩 → 确认放弃 → 按已答结算（0 题）
+    (document.getElementById('quiz-mask') as HTMLElement).click();
+    (document.getElementById('__shared_confirm_ok__') as HTMLElement).click();
+    await Promise.resolve(); // 流程框确认走 Promise 微任务（ticket 131），等一拍再断言
+    expect(onComplete).toHaveBeenCalledTimes(1);
     expect(onComplete).toHaveBeenCalledWith({ correct: 0, wrong: 0, total: 0, accuracy: 0 });
   });
 
-  it('AI 未初始化 → ⚠️ 提示（dur 5000）', async () => {
-    QuizMasterUI.ai = null;
+  it('结果卡阶段（回调已消费）点遮罩/ESC 被忽略——不拆 DOM，复习循环 Promise 不悬挂', async () => {
     const vault = new MockVault();
     const app = makeApp(vault);
     setApp(app);
     const ui = new QuizMasterUI();
-    await ui.startQuiz();
-    const { getNoticeMessages } = await import('../mock-obsidian-entry');
-    const msgs = getNoticeMessages();
-    expect(msgs[msgs.length - 1]).toBe('AI 服务未配置，无法生成题目');
-  });
-
-  it('P2：题库空且无活跃条目 → 提示后收尾，不再静默', async () => {
-    const vault = new MockVault();
-    // quiz.notes 空 + review.json 无活跃条目（completed 或缺失）
-    vault.files.set(QUIZ_FILE_PATH, JSON.stringify({ notes: {} }));
-    vault.files.set(REVIEW_DATA_PATH, JSON.stringify([]));
-    const app = makeApp(vault);
-    setApp(app);
-    const ui = new QuizMasterUI();
-    await ui.startQuiz();
-    const msgs = getNoticeMessages();
-    expect(msgs[msgs.length - 1]).toBe('没有活跃笔记，无法生成题目');
-    expect(document.getElementById('quiz-loading')).toBeNull(); // loading 已收尾
-    expect(document.getElementById('quiz-popup')).toBeNull(); // 不渲染题目
-  });
-
-  it('空题库 → loading 弹窗 + 生成第一活跃笔记题目', async () => {
-    const vault = new MockVault();
-    vault.files.set('A.md', '这是一段笔记内容。');
-    // 有活跃条目但 quiz.notes 空
-    const now = new Date();
-    vault.files.set(QUIZ_FILE_PATH, JSON.stringify({ notes: {} }));
-    vault.files.set(REVIEW_DATA_PATH, JSON.stringify([{
-      id: 'r1', filePath: 'A.md', name: 'A', reviewStart: now.toISOString(), stage: 0, phase: 'ladder',
-      stability: 1, difficulty: 0.3, reviewHistory: [], totalReviews: 0, averageConfidence: 0,
-      nextReviewDate: new Date(now.getTime() + 60000).toISOString(), lastReviewed: null, lastDifficulty: null, completed: false,
-    }]));
-    const app = makeApp(vault);
-    setApp(app);
-    const ui = new QuizMasterUI();
-    const gen = vi.spyOn(ui.generator, 'generate').mockResolvedValue([
-      { question: 'GQ?', options: ['a', 'b', 'c', 'd'], correctIndices: [0] },
-    ]);
-    // mock ai.json（generate 内部用）
-    (QuizMasterUI.ai as any).json = vi.fn().mockResolvedValue('{"questions":[]}');
-    await ui.startQuiz();
-    expect(gen).toHaveBeenCalled();
-    expect(document.getElementById('quiz-popup')!.textContent).toContain('GQ?');
-  });
-
-  it('loading 弹窗：quiz-mask id + ⏳ 在上 + spinner 在下', () => {
-    const vault = new MockVault();
-    const app = makeApp(vault);
-    setApp(app);
-    const ui = new QuizMasterUI();
-    ui.showLoadingPopup('正在获取题库，请稍候...');
-    const mask = document.getElementById('quiz-mask')!;
-    const loading = document.getElementById('quiz-loading')!;
-    expect(mask).not.toBeNull();
-    expect(loading.textContent).toContain('⏳ 正在获取题库，请稍候...');
-    expect(loading.querySelector('.spinner')).not.toBeNull();
-    // ESC 关闭
+    const onComplete = vi.fn();
+    ui.startReviewSession({ questions: [Q('RQ1?', [0])], onComplete });
+    // 答对唯一一题 → 0.8s 亮绿后自动完题消费回调（复习域显示结果卡）
+    (document.querySelectorAll('.quiz-option-btn')[0] as HTMLElement).click();
+    await flushPersist();
+    await flushJump();
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    // 结果卡阶段：遮罩/ESC 均被忽略（弹窗 DOM 保留给复习域驱动）
+    (document.getElementById('quiz-mask') as HTMLElement).click();
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    expect(ui.loadingMask).toBeNull();
+    expect(document.getElementById('quiz-popup')).not.toBeNull();
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    // 复习域收尾：close 强制拆除
+    ui.close();
+    expect(document.getElementById('quiz-popup')).toBeNull();
+  });
+
+  it('复习换题过渡不结算——多题会话中途回调不触发，完成后恰好一次', async () => {
+    const vault = new MockVault();
+    seedQuiz(vault, { 'A.md': [Q('RQ1?', [0]), Q('RQ2?', [1])] });
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
+    const onComplete = vi.fn();
+    ui.startReviewSession({ questions: [Q('RQ1?', [0]), Q('RQ2?', [1])], onComplete });
+    // 答对第一题 → 0.8s 亮绿后自动进入下一题
+    (document.querySelectorAll('.quiz-option-btn')[0] as HTMLElement).click();
+    await flushPersist();
+    expect(onComplete).not.toHaveBeenCalled(); // 过渡不得误触发结算
+    await flushJump();
+    expect(document.getElementById('quiz-popup')!.textContent).toContain('RQ2?');
+    // 答对第二题 → 会话完成 → 回调恰好一次
+    (document.querySelectorAll('.quiz-option-btn')[1] as HTMLElement).click();
+    await flushPersist();
+    await flushJump();
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onComplete).toHaveBeenCalledWith({ correct: 2, wrong: 0, total: 2, accuracy: 100 });
+  });
+
+  it('ticket 099：多选不显示徽标/提示条，提交按钮位于选项下方', () => {
+    const vault = new MockVault();
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
+    ui.startReviewSession({
+      questions: [Q('M?', [0, 2]), Q('S?', [0])],
+      onComplete: vi.fn(),
+    });
+    const popup = document.getElementById('quiz-popup')!;
+    expect(popup.querySelector('.quiz-multi-badge')).toBeNull();
+    expect(popup.textContent).not.toContain('本题为多选题');
+    expect(popup.textContent).toContain('📝 A (1/2)');
+    const opts = popup.querySelectorAll('.quiz-option-btn');
+    const submit = popup.querySelector('.quiz-submit-btn') as HTMLElement;
+    // submit 与最后一个选项同容器且位于其后（compareDocumentPosition：FOLLOWING=4）
+    expect(opts[opts.length - 1].compareDocumentPosition(submit) & 4).toBeTruthy();
+    ui.close();
   });
 
   it('ensureQuiz：quizUI.ai 实例镜像同步（复习域经实例读取判断）', async () => {
@@ -356,119 +567,7 @@ describe('QuizMasterUI', () => {
   });
 });
 
-describe('复习联动契约', () => {
-  beforeEach(() => {
-    resetObsidianMocks();
-    setApp(null as any);
-    document.body.innerHTML = '';
-    QuizMasterUI.ai = { json: vi.fn() } as any;
-    QuizMasterUI.settings = { enableMultipleChoice: true, questionsPerNote: '0', shuffleQuestions: false, difficulty: 'random' };
-  });
-
-  it('startReviewSession 设置会话状态并开始出题，endReviewSession 退出复习模式', () => {
-    const vault = new MockVault();
-    const app = makeApp(vault);
-    setApp(app);
-    const ui = new QuizMasterUI();
-    const questions = [
-      { question: 'RQ?', options: ['a', 'b', 'c', 'd'], correctIndices: [0], notePath: 'A.md' },
-    ];
-    const onComplete = vi.fn();
-    ui.startReviewSession({ questions, onComplete });
-    expect(ui._reviewMode).toBe(true);
-    expect(ui.currentQuestions).toEqual(questions);
-    expect(ui.currentIndex).toBe(0);
-    expect(ui.correctCount).toBe(0);
-    expect(ui.wrongCount).toBe(0);
-    expect(ui.totalQuestions).toBe(1);
-    expect(ui.onComplete).toBe(onComplete);
-    expect(document.getElementById('quiz-popup')!.textContent).toContain('RQ?');
-    // 结束会话：有未消费回调时按 finishQuiz 语义只回调不关闭
-    ui.endReviewSession();
-    expect(ui._reviewMode).toBe(false);
-    expect(onComplete).toHaveBeenCalledTimes(1);
-    // 回调已消费后再结束 → 无回调 → 关闭弹窗
-    ui.endReviewSession();
-    expect(document.getElementById('quiz-popup')).toBeNull();
-  });
-
-  it('P1-1：复习做题中途 ESC（close）→ 回调按 total=0 结算，外层 Promise 不悬挂', async () => {
-    const vault = new MockVault();
-    const app = makeApp(vault);
-    setApp(app);
-    const ui = new QuizMasterUI();
-    const questions = [
-      { question: 'RQ1?', options: ['a', 'b', 'c', 'd'], correctIndices: [0], notePath: 'A.md' },
-      { question: 'RQ2?', options: ['a', 'b', 'c', 'd'], correctIndices: [1], notePath: 'A.md' },
-    ];
-    // 模拟复习域：外层 Promise 等待 onComplete
-    const outer = new Promise<any>((resolve) => {
-      ui.startReviewSession({ questions, onComplete: (r) => resolve(r) });
-    });
-    expect(document.getElementById('quiz-popup')).not.toBeNull();
-    // 答题中途按 ESC
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    const results = await outer;
-    expect(results).toEqual({ correct: 0, wrong: 0, total: 0, accuracy: 0 }); // ADR-0044：total=0 → again 既定语义
-    expect(document.getElementById('quiz-popup')).toBeNull(); // 结算后关闭
-  });
-
-  it('P1-1：复习换题过渡不结算——多题会话中途回调不触发，完成后恰好一次', async () => {
-    const vault = new MockVault();
-    vault.files.set('A.md', '内容');
-    const app = makeApp(vault);
-    setApp(app);
-    const ui = new QuizMasterUI();
-    const onComplete = vi.fn();
-    ui.startReviewSession({
-      questions: [
-        { question: 'RQ1?', options: ['a', 'b', 'c', 'd'], correctIndices: [0], notePath: 'A.md' },
-        { question: 'RQ2?', options: ['a', 'b', 'c', 'd'], correctIndices: [1], notePath: 'A.md' },
-      ],
-      onComplete,
-    });
-    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
-    // 答对第一题 → 换题过渡（renderModal 内部只拆 DOM）
-    (document.querySelectorAll('.quiz-option-btn')[0] as HTMLElement).click();
-    await vi.advanceTimersByTimeAsync(1600);
-    expect(onComplete).not.toHaveBeenCalled(); // 过渡不得误触发结算
-    expect(document.getElementById('quiz-popup')!.textContent).toContain('RQ2?');
-    // 答对第二题 → 会话完成 → 回调恰好一次
-    (document.querySelectorAll('.quiz-option-btn')[1] as HTMLElement).click();
-    await vi.advanceTimersByTimeAsync(1600);
-    expect(onComplete).toHaveBeenCalledTimes(1);
-    expect(onComplete).toHaveBeenCalledWith({ correct: 2, wrong: 0, total: 2, accuracy: 100 });
-    vi.useRealTimers();
-  });
-
-  it('P1-1：残留回调清理——复习中断后再普通做题，旧回调不再被误触发', async () => {
-    const vault = new MockVault();
-    vault.files.set('A.md', '内容');
-    seedQuiz(vault, { 'A.md': [{ question: 'NQ?', options: ['甲', '乙', '丙', '丁'], correctIndices: [0] }] });
-    const app = makeApp(vault);
-    setApp(app);
-    const ui = new QuizMasterUI();
-    const staleCb = vi.fn();
-    // 上次复习会话（题不带 notePath：删除安全空转），答题中途 ESC 中断
-    ui.startReviewSession({
-      questions: [{ question: 'RQ?', options: ['a', 'b', 'c', 'd'], correctIndices: [0] } as any],
-      onComplete: staleCb,
-    });
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    expect(staleCb).toHaveBeenCalledTimes(1); // 中断时结算一次
-    // 之后普通做题（入口清理残留 onComplete）→ 做完触发新回调，旧回调不再误触发
-    await ui.startQuiz();
-    const newCb = vi.fn();
-    ui.onComplete = newCb;
-    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
-    (document.querySelectorAll('.quiz-option-btn')[0] as HTMLElement).click();
-    await vi.advanceTimersByTimeAsync(1600);
-    vi.useRealTimers();
-    expect(staleCb).toHaveBeenCalledTimes(1);
-    expect(newCb).toHaveBeenCalledWith({ correct: 1, wrong: 0, total: 1, accuracy: 100 });
-  });
-});
-describe('ticket 099：多选 UI（无徽标/无提示条，提交位置保留）', () => {
+describe('题型徽标（本地分支保留）：多选「多选题（选 N 项）」+ 提交按钮位置；单选「单选题」', () => {
   beforeEach(() => {
     resetObsidianMocks();
     setApp(null as any);
@@ -489,7 +588,14 @@ describe('ticket 099：多选 UI（无徽标/无提示条，提交位置保留�
     const app = makeApp(vault);
     setApp(app);
     const ui = new QuizMasterUI();
-    await ui.startQuiz();
+    // ticket 141 后普通做题模式删除：改用 startReviewSession 显式带题
+    ui.startReviewSession({
+      questions: [
+        { question: 'M?', options: ['甲', '乙', '丙', '丁'], correctIndices: [0, 2], notePath: 'A.md' },
+        { question: 'S?', options: ['甲', '乙', '丙', '丁'], correctIndices: [0], notePath: 'A.md' },
+      ],
+      onComplete: vi.fn(),
+    });
     const popup = document.getElementById('quiz-popup')!;
     // 多选：题型徽标 + 提交按钮（选项下方）
     expect(popup.querySelector('.quiz-type-badge')!.textContent).toBe('多选题（选 2 项）');
@@ -497,12 +603,13 @@ describe('ticket 099：多选 UI（无徽标/无提示条，提交位置保留�
     const opts = popup.querySelectorAll('.quiz-option-btn');
     const submit = popup.querySelector('.quiz-submit-btn') as HTMLElement;
     expect(opts[opts.length - 1].compareDocumentPosition(submit) & 4).toBeTruthy();
-    // 勾选正确项（0+2）→ 提交 → 正确反馈 → splice → 下一题（单选：显示「单选题」、无提交按钮）
+    // 勾选正确项（0+2）→ 提交 → 正确反馈 → splice → 自动跳下一题（单选：显示「单选题」、无提交按钮）
     (opts[0] as HTMLElement).click();
     (opts[2] as HTMLElement).click();
     submit.click();
     expect(popup.textContent).toContain('✅ 回答正确！');
-    await new Promise((r) => setTimeout(r, 1600));
+    await flushPersist();
+    await flushJump();
     const popup2 = document.getElementById('quiz-popup')!;
     expect(popup2.querySelector('.quiz-type-badge')!.textContent).toBe('单选题');
     expect(popup2.querySelector('.quiz-submit-btn')).toBeNull();
@@ -572,7 +679,7 @@ describe('多选徽标：按数量复习（hideOptionCount）不提示正确选�
     ui.close();
   });
 
-  it('按数量复习后普通做题：多选徽标恢复「多选题（选 N 项）」（hideOptionCount 不残留）', async () => {
+  it('按数量复习后新一轮会话：多选徽标恢复「多选题（选 N 项）」（hideOptionCount 不残留）', async () => {
     const vault = new MockVault();
     vault.files.set('A.md', '内容');
     seedQuiz(vault, {
@@ -589,8 +696,11 @@ describe('多选徽标：按数量复习（hideOptionCount）不提示正确选�
     });
     expect(document.getElementById('quiz-popup')!.querySelector('.quiz-type-badge')!.textContent).toBe('多选题');
     ui.close();
-    // 普通做题（startQuiz）：会话重置，徽标恢复显示数量
-    await ui.startQuiz();
+    // 新一轮会话（不传 hideOptionCount）：徽标恢复显示数量，无残留
+    ui.startReviewSession({
+      questions: [{ question: 'M?', options: ['甲', '乙', '丙', '丁'], correctIndices: [0, 2] }],
+      onComplete: null,
+    });
     expect(document.getElementById('quiz-popup')!.querySelector('.quiz-type-badge')!.textContent).toBe('多选题（选 2 项）');
     ui.close();
   });

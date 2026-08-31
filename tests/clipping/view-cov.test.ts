@@ -1,6 +1,6 @@
 /**
  * 剪藏本面板补充覆盖测试（src/clipping/view.ts 未触达分支）：
- * 面板显隐切换（showImmediately=false / 已存在重开并重载）、头部按钮（🔍/⏳/📰/❌）、
+ * 面板显隐切换（showImmediately=false / 已存在重开零扫描）、头部按钮（🔍/⏳/📰/❌）、
  * ESC 关闭、parseArticleFile 容错、删除失败兜底、失效反链来源、最小字段文章、
  * 空容器直调安全、滚动未到底不加载、抽屉头部结构、移动端设置组、批次非法值回退。
  */
@@ -15,11 +15,12 @@ import {
   unloadClipping,
 } from '../../src/clipping/view';
 import { MockVault } from '../mock-vault';
+import { emitDomainEvent } from '../../src/core/domain-bus';
 import { resetObsidianMocks, Platform as MockPlatform } from '../mock-obsidian-entry';
 
-function makeArticleMd(link: string, site: string, title: string, created: string, extra = '') {
+function makeArticleMd(url: string, site: string, title: string, created: string, extra = '') {
   return `---
-link: "${link}"
+url: "${url}"
 author: "作者"
 site: "${site}"
 summary: "摘要"
@@ -99,15 +100,19 @@ describe('剪藏本面板显隐与头部按钮', () => {
     expect(mask.style.visibility).toBe('hidden');
   });
 
-  it('已存在面板且数据为空时以 true 重开 → 触发重新加载', async () => {
+  it('已存在面板重开零扫描：无事件不补数据；modify 事件经监听通道增量补卡（B1 常驻监听，ticket 130）', async () => {
     const { vault } = await setup();
     await initArticleView(true); // 目录尚不存在 → 空态
     await flush();
     expect(document.querySelector('.article-empty')).not.toBeNull();
-    // 补入文章后面板仍挂着（模块内 allArticles 为空）→ 重开触发补加载
+    // 补入文章但不派发域事件 → 重开不重载（旧状态下直接展示），依旧空态——数据由常驻监听增量维护
     vault.files.set('我的/文章/A.md', makeArticleMd('https://x.com/a', '知乎', 'A', '2025-06-02T08:00:00.000Z'));
     await initArticleView(true);
     await flush();
+    expect(document.querySelectorAll('.article-entry-card').length).toBe(0);
+    // 派发 clipping:file-modified → 监听通道防抖结算后增量补卡（重开零扫描替代原「重开即重载」）
+    emitDomainEvent('clipping:file-modified', { path: '我的/文章/A.md' });
+    await new Promise((r) => setTimeout(r, 400));
     expect(document.querySelectorAll('.article-entry-card').length).toBe(1);
   });
 
@@ -160,8 +165,7 @@ describe('剪藏本面板显隐与头部按钮', () => {
     expect(document.querySelectorAll('.article-entry-card').length).toBe(2);
   });
 
-  // 注：源码中 ⏳「重新加载文章」按钮创建后从未挂载到 DOM（refreshBtn 无 appendChild），
-  // 属不可达 UI 分支（兼容性冻结不改产线码），其回调无法经真实路径触达，故无用例。
+  // 注：⏳「重新加载文章」按钮为不可达死代码（创建后从未挂载），已随 UX 整改删除。
 
   it('📰 资讯按钮：隐藏面板并经 commands 裸调用 bz-news-open（域间互调约定 id）', async () => {
     const { app } = await setup();
@@ -190,8 +194,9 @@ describe('剪藏本面板显隐与头部按钮', () => {
     const settingsBtn = [...document.querySelectorAll('button')].find((b) => b.title === '剪藏本设置')!;
     settingsBtn.click();
     const popup = document.getElementById('bz-settings-modal-popup')!;
+    await new Promise((r) => setTimeout(r, 50)); // 数据源组异步替换（news.json 缺失 → 引导块）
     const heads = [...popup.querySelectorAll('.bz-settings-group-head')];
-    expect(heads.map((el) => (el as HTMLElement).textContent!.trim())).toEqual(['基础2 项', '智能1 项', '移动端1 项']);
+    expect(heads.map((el) => (el as HTMLElement).textContent!.trim())).toEqual(['基础2 项', '智能1 项', '数据源1 项', '移动端1 项']);
   });
 });
 
@@ -202,20 +207,20 @@ describe('剪藏本数据解析与容错', () => {
     document.body.innerHTML = '';
   });
 
-  it('parseArticleFile：无 frontmatter / 缺 link / 缺 created / 读文件抛错 → 均返回 null', async () => {
+  it('parseArticleFile：无 frontmatter / 缺 url / 缺 created / metadataCache 抛错 → 均返回 null', async () => {
     const { vault, app } = await setup();
     vault.files.set('我的/文章/nofm.md', '正文（无 frontmatter）');
-    vault.files.set('我的/文章/nolink.md', '---\ncreated: 2025-06-02T08:00:00.000Z\n---\n正文');
-    vault.files.set('我的/文章/nocreated.md', '---\nlink: "https://x.com/a"\n---\n正文');
+    vault.files.set('我的/文章/nourl.md', '---\ncreated: 2025-06-02T08:00:00.000Z\n---\n正文');
+    vault.files.set('我的/文章/nocreated.md', '---\nurl: "https://x.com/a"\n---\n正文');
 
     expect(await parseArticleFile(vault.file('我的/文章/nofm.md'))).toBeNull();
-    expect(await parseArticleFile(vault.file('我的/文章/nolink.md'))).toBeNull();
+    expect(await parseArticleFile(vault.file('我的/文章/nourl.md'))).toBeNull();
     expect(await parseArticleFile(vault.file('我的/文章/nocreated.md'))).toBeNull();
 
-    // 读文件抛错：console.warn 兜底不中断
+    // metadataCache 抛错：console.warn 兜底不中断（rawContent 已废弃，解析不再读文件本体）
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    (app as any).vault.read = async () => {
-      throw new Error('disk error');
+    (app as any).metadataCache.getFileCache = () => {
+      throw new Error('cache error');
     };
     vault.files.set('我的/文章/bad.md', makeArticleMd('https://x.com/a', '知乎', 'bad', '2025-06-02T08:00:00.000Z'));
     expect(await parseArticleFile(vault.file('我的/文章/bad.md'))).toBeNull();
@@ -235,7 +240,7 @@ describe('剪藏本数据解析与容错', () => {
 
   it('最小字段文章：站点回退「未知」、无作者标记、非法链接不抛错', async () => {
     const { vault } = await setup({ articleDirectory: '我的/文章' });
-    vault.files.set('我的/文章/min.md', '---\nlink: "不是合法URL"\ncreated: 2025-06-02T08:00:00.000Z\n---\n正文');
+    vault.files.set('我的/文章/min.md', '---\nurl: "不是合法URL"\ncreated: 2025-06-02T08:00:00.000Z\n---\n正文');
     await initArticleView(true);
     await flush();
     const metaRow = document.querySelector('.article-entry-meta') as HTMLElement;
@@ -307,14 +312,13 @@ describe('剪藏本渲染辅助与滚动', () => {
     const entry = {
       file: {},
       path: '我的/文章/A.md',
-      link: 'https://x.com/a',
+      url: 'https://x.com/a',
       author: '',
       site: '知乎',
       summary: '',
       tags: [],
       created: new Date('2025-06-02T08:00:00.000Z'),
       title: '标题A',
-      rawContent: '',
       hasBacklink: true,
       backlinkSources: ['我的/阅读/B.md'],
     };

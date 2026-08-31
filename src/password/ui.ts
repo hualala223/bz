@@ -5,12 +5,11 @@
  * 主密码流程：首次设置（再次输入确认）→ 解锁 → 加密驱动（showPasswordDialog）。
  * 统一抽屉（桌面右键/移动长按）：复制账号/复制密码/编辑/删除；卡片保留平台链接点击与 👁 显隐（用户拍板）。
  */
-import { Setting } from 'obsidian';
 import { notice } from '../core/notice';
 import { getApp } from '../core/app';
 import { escManager } from '../core/esc-manager';
-import { confirm } from '../core/confirm';
-import { createIconBtn } from '../core/dom';
+import { openFlowDialog } from '../core/flow-dialog';
+import { createIconBtn, topifyZ } from '../core/dom';
 import {
   attachItemActions,
   registerSheetCompanion,
@@ -19,9 +18,11 @@ import {
   type ItemAction,
 } from '../core/item-actions';
 import { formatRelativeTime } from '../core/utils';
-import { getSettings, saveSettings, tryGetSettings } from '../core/settings-provider';
-import { applyMobileWindowFullscreen, isMobileEnv } from '../core/mobile';
-import { createSettingsGroup, openSettingsModal } from '../core/settings-modal';
+import { tryGetSettings } from '../core/settings-provider';
+import { applyMobileWindowFullscreen } from '../core/mobile';
+import { openSettingsModal } from '../core/settings-modal';
+import { mobileFullscreenGroup } from '../core/settings-common';
+import type { SettingsSchema } from '../core/settings-schema';
 import { ensureSafeUnlocked } from '../encrypt';
 import { DataManager, type PasswordEntry } from './data';
 
@@ -72,9 +73,40 @@ export function armClipboardClear(): void {
   }, CLIPBOARD_CLEAR_DELAY_MS);
 }
 
-/** 复制敏感内容：写入剪贴板成功后布防定时清空（P2） */
+/** 复制敏感内容：写入剪贴板成功后布防定时清空（P2）。
+ *  clipboard API 缺失（非安全上下文/部分 WebView）时 writeText 会**同步抛 TypeError**，
+ *  此处 try/catch 转成 rejected promise，保证调用方 .catch 始终能收到（对照 armClipboardClear 兜底先例）。
+ */
 export function copySensitiveText(text: string): Promise<void> {
-  return navigator.clipboard.writeText(text).then(() => armClipboardClear());
+  try {
+    return navigator.clipboard.writeText(text).then(() => armClipboardClear());
+  } catch (e) {
+    return Promise.reject(e);
+  }
+}
+
+/** 密码本设置 schema（ticket 131 声明式；启动快照语义——改动需重载生效，首次改动提示一次 ticket 55）
+ *  置于模块顶层供文案 lint 直接引用。 */
+export function passwordSettingsSchema(): SettingsSchema {
+  let reloadWarned = false;
+  const warnReload = () => {
+    if (!reloadWarned) {
+      reloadWarned = true;
+      notice('密码本设置已保存，重载插件后生效', 'info');
+    }
+  };
+  return {
+    groups: [
+      { icon: 'key-round', name: '生成', rows: [
+        { type: 'text', name: '密码生成字符集', desc: '随机生成密码时使用的字符集', binding: { key: 'passwordCharset' }, onCommit: warnReload },
+        { type: 'text', name: '密码生成长度', desc: '随机生成密码的字符个数', binding: { key: 'passwordLength' }, onCommit: warnReload },
+      ]},
+      { icon: 'shield', name: '安全', rows: [
+        { type: 'toggle', name: '安全模式', desc: '关闭密码本窗口时立即上锁，保险箱同步锁定', binding: { key: 'securityMode' }, onChange: warnReload },
+      ]},
+      mobileFullscreenGroup('passwordMobileDefaultFullscreen'),
+    ],
+  };
 }
 
 export class UIManager {
@@ -94,6 +126,8 @@ export class UIManager {
   pendingPassword: string | null = null;
   /** 抽屉来源的编辑（保存成功后关抽屉，与收藏本/归物本同决策） */
   sheetEditPending = false;
+  /** 搜索输入防抖计时器（ticket 43：快速连续输入只渲染最后一次，避免逐键整表 load/解密） */
+  searchRenderTimer: ReturnType<typeof setTimeout> | null = null;
   // 内部标志
   _initialized = false;
   // 添加弹窗引用
@@ -126,7 +160,7 @@ export class UIManager {
     this.searchInput.placeholder = '搜索平台、账号、备注...';
     this.searchInput.addEventListener('input', (e) => {
       this.searchKeyword = (e.target as HTMLInputElement).value.trim();
-      this.renderList();
+      this.scheduleSearchRender();
     });
     this.searchContainer.appendChild(this.searchInput);
 
@@ -154,7 +188,7 @@ export class UIManager {
     const mask = document.createElement('div');
     mask.id = id;
     mask.style.cssText =
-      'position:fixed;top:0;left:0;right:0;bottom:0;background:var(--background-modifier-cover);z-index:9998;display:none;';
+      'position:fixed;top:0;left:0;right:0;bottom:0;background:var(--background-modifier-cover);display:none;';
     mask.onclick = () => this.hide();
     return mask;
   }
@@ -163,7 +197,7 @@ export class UIManager {
     const popup = document.createElement('div');
     popup.id = 'pw-popup';
     popup.style.cssText =
-      'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--background-primary);border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,0.2);z-index:9999;width:90%;max-width:700px;max-height:80vh;display:none;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;';
+      'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--background-primary);border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,0.2);width:90%;max-width:700px;max-height:80vh;display:none;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;';
     return popup;
   }
 
@@ -192,57 +226,7 @@ export class UIManager {
     });
     // 密码本设置弹窗（ADR-0009 域设置弹窗；分组卡片重设计）
     const settingsBtn = createIconBtn('⚙️', '密码本设置', () => {
-      openSettingsModal({
-        title: '密码本设置',
-        maxWidth: 560,
-        build: (el) => {
-          const s = getSettings();
-          // ===== 生成组：字符集 + 长度 =====
-          const genGroup = createSettingsGroup(el, { icon: 'key-round', name: '生成' });
-          new Setting(genGroup)
-            .setName('密码生成字符集')
-            .setDesc('随机生成密码时使用的字符集')
-            .addText((text) =>
-              text.setValue(s.passwordCharset || '').onChange(async (v) => {
-                s.passwordCharset = v;
-                await saveSettings();
-              })
-            );
-          new Setting(genGroup)
-            .setName('密码生成长度')
-            .setDesc('随机生成密码的字符个数')
-            .addText((text) =>
-              text.setValue(s.passwordLength || '').onChange(async (v) => {
-                s.passwordLength = v;
-                await saveSettings();
-              })
-            );
-          // ===== 安全组 =====
-          const secureGroup = createSettingsGroup(el, { icon: 'shield', name: '安全' });
-          new Setting(secureGroup)
-            .setName('安全模式')
-            .setDesc('关闭密码本窗口时立即上锁，保险箱同步锁定')
-            .addToggle((toggle) =>
-              toggle.setValue(!!s.securityMode).onChange(async (v) => {
-                s.securityMode = v;
-                await saveSettings();
-              })
-            );
-          // ===== 移动端组（仅移动端显示） =====
-          if (isMobileEnv()) {
-            const mobileGroup = createSettingsGroup(el, { icon: 'smartphone', name: '移动端' });
-            new Setting(mobileGroup)
-              .setName('移动端默认全屏')
-              .setDesc('移动端打开主窗口时默认全屏，关闭则显示常规卡片')
-              .addToggle((toggle) =>
-                toggle.setValue(!!s.passwordMobileDefaultFullscreen).onChange(async (v) => {
-                  s.passwordMobileDefaultFullscreen = v;
-                  await saveSettings();
-                })
-              );
-          }
-        },
-      });
+      openSettingsModal({ title: '密码本设置', maxWidth: 560, schema: passwordSettingsSchema() });
     });
     const closeBtn = createIconBtn('❌', '关闭', () => this.hide());
 
@@ -261,6 +245,7 @@ export class UIManager {
     if (!this._initialized) this.ensureElements();
     // 移动端默认全屏：开关开=挂 .bz-win-mfs 全屏类（幂等），关=常规卡
     applyMobileWindowFullscreen(this.popup, tryGetSettings().passwordMobileDefaultFullscreen === true);
+    topifyZ(this.mask!, this.popup!); // ADR-0067：显示即发号，谁后显示谁在上
     this.mask!.style.display = 'block';
     this.popup!.style.display = 'flex';
     this.renderList();
@@ -276,6 +261,15 @@ export class UIManager {
   }
 
   // ---------- 渲染列表 ----------
+  /** 搜索输入防抖（ticket 43）：180ms 内连续键入只渲染最后一次，逐键不作整表 load/解密 */
+  private scheduleSearchRender() {
+    if (this.searchRenderTimer !== null) clearTimeout(this.searchRenderTimer);
+    this.searchRenderTimer = setTimeout(() => {
+      this.searchRenderTimer = null;
+      void this.renderList();
+    }, 180);
+  }
+
   async renderList() {
     if (!this.entriesContainer) return;
     this.entriesContainer.innerHTML = '';
@@ -417,8 +411,9 @@ export class UIManager {
       label: '复制账号',
       onClick: () => {
         if (item.account) {
-          void copySensitiveText(item.account); // 复制后 60s 尽力清空剪贴板（P2）
-          notice('账号已复制', 'success');
+          copySensitiveText(item.account) // 复制后 60s 尽力清空剪贴板（P2）
+            .then(() => notice('账号已复制', 'success'))
+            .catch(() => notice('复制失败，请手动复制', 'error')); // 与 generatePassword 复制失败同口径（ticket 4）
         }
       },
     });
@@ -428,8 +423,9 @@ export class UIManager {
       label: '复制密码',
       onClick: () => {
         if (item.password) {
-          void copySensitiveText(item.password); // 复制后 60s 尽力清空剪贴板（P2）
-          notice('密码已复制', 'success');
+          copySensitiveText(item.password) // 复制后 60s 尽力清空剪贴板（P2）
+            .then(() => notice('密码已复制', 'success'))
+            .catch(() => notice('复制失败，请手动复制', 'error')); // 与 generatePassword 复制失败同口径（ticket 4）
         }
       },
     });
@@ -506,7 +502,7 @@ export class UIManager {
     this.addMask = document.createElement('div');
     this.addMask.id = 'pw-add-mask';
     this.addMask.style.cssText =
-      'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.3);z-index:10001;display:none;';
+      'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.3);display:none;';
     this.addMask.onclick = (e) => {
       if (e.target === this.addMask) this.closeAddDialog();
     };
@@ -515,7 +511,7 @@ export class UIManager {
     this.addPopup.id = 'pw-add-popup';
     this.addPopup.className = 'pw-add-dialog';
     this.addPopup.style.cssText =
-      'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--background-primary);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.3);z-index:10002;padding:24px;max-width:420px;width:90%;display:none;';
+      'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--background-primary);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.3);padding:24px;max-width:420px;width:90%;display:none;';
 
     const title = document.createElement('h4');
     title.id = 'pw-add-title';
@@ -721,6 +717,7 @@ export class UIManager {
       this._passwordInput.value = pwd;
       this.pendingPassword = null;
     }
+    topifyZ(this.addMask!, this.addPopup!); // ADR-0067：显示即发号
     this.addMask!.style.display = 'block';
     this.addPopup!.style.display = 'block';
     this._platformInput.focus();
@@ -740,9 +737,18 @@ export class UIManager {
     }
   }
 
-  // ---------- 确认（代理到 core confirm） ----------
+  // ---------- 确认（代理到 core flow-dialog） ----------
   showConfirm(title: string, message: string, onConfirm: () => void) {
-    confirm({ title: title || '确认', message: message || '', onConfirm });
+    void openFlowDialog({
+      title: title || '确认',
+      message: message || '',
+      actions: [
+        { label: '取消', value: 'cancel' },
+        { label: '确定', value: 'ok', cta: true },
+      ],
+    }).then((v) => {
+      if (v === 'ok') onConfirm();
+    });
   }
 
   // ---------- 解锁（统一走保险箱主密码弹窗：共享同一解锁态，不再自绘） ----------
@@ -843,8 +849,16 @@ export class PasswordAppController {
     notice('密码已暂存，打开“添加条目”时将自动填入');
   }
 
-  /** 卸载清理：移除注入 DOM */
+  /** 卸载清理：移除注入 DOM；取消剪贴板自动清空与搜索防抖计时（l2-pw/ticket 43 残留定时器） */
   cleanup() {
+    if (clipboardClearTimer !== null) {
+      clearTimeout(clipboardClearTimer);
+      clipboardClearTimer = null;
+    }
+    if (this.uiManager.searchRenderTimer !== null) {
+      clearTimeout(this.uiManager.searchRenderTimer);
+      this.uiManager.searchRenderTimer = null;
+    }
     const ids = ['pw-mask', 'pw-popup', 'pw-add-mask', 'pw-add-popup'];
     for (const id of ids) {
       const el = document.getElementById(id);

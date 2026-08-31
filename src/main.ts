@@ -4,8 +4,8 @@
  * 命令 id 统一 `bz-` 前缀（ADR-0004 修订：2025 用户决策统一品牌前缀），不设置默认快捷键，
  * 卸载时 removeCommand 清理——取代原脚本的 window.__*CommandRegistered 防重标志。
  */
-import { Plugin, PluginSettingTab, Setting } from 'obsidian';
-import { notice } from './core/notice';
+import { Plugin, PluginSettingTab } from 'obsidian';
+import { notice, cleanupNotices } from './core/notice';
 import { escManager } from './core/esc-manager';
 import { closeItemMenu } from './core/item-actions';
 import { setApp, getApp } from './core/app';
@@ -13,9 +13,11 @@ import { setAISettingsProvider, resetAIProviderCache } from './core/ai';
 import { setSettingsProvider, setSettingsSaver } from './core/settings-provider';
 import { clearDomainEvents } from './core/domain-bus';
 import { attachObsidianAdapter, detachObsidianAdapter } from './core/obsidian-adapter';
+import { renderSettingsInto } from './core/settings-schema';
+import { mainSettingsSchema } from './core/settings-main-schema';
 import { setBzSettingsProvider, unloadBz, ensureBz } from './memo';
 
-import BzSettings, { DEFAULT_SETTINGS } from './settings';
+import BzSettings, { DEFAULT_SETTINGS, migrateSecondBrainSettings } from './settings';
 
 // 15 域（懒加载：首次命令/事件触发时 ensureXxx 幂等初始化）
 import { openBzPanel, createMemoItem } from './memo';
@@ -25,17 +27,26 @@ import { openNewsReader, unloadNewsReader } from './news';
 import { openPasswordManager, addPasswordEntry, generatePassword, unloadPassword } from './password';
 import { openFavoritesPanel, addFavoriteItem, unloadFavorites } from './favorites';
 import { openLibrary, openBookNotes, unloadLibrary } from './library';
-import { showReadingReport } from './reading-report';
+import { showReadingReport, unloadReadingReport } from './reading-report';
 import { openMovieManager, addMovieItem, unloadMovie } from './movie';
 // 影视分析报告（独立域，ADR-0048）
 import { openMovieReport, unloadMovieReport } from './movie-report';
+// 复习计划（9 域内命令走 import；按数量复习入口 reviewCountStart 为本地分支独有，ticket 01-06）
 import { openReviewPanel, reviewAddCurrent, reviewRemoveCurrent, reviewJumpOverdue, reviewMarkDialog, reviewMarkRating, reviewStart, reviewCountStart, ensureReview, unloadReview } from './review';
-import { openFlashReference, openFlashChat } from './flash';
+// 第二大脑（ticket 103 起原闪念正名接管，ADR-0051——flash 域已删除）
+import {
+  openSecondBrainPanel,
+  openSecondBrainReference,
+  openSecondBrainChat,
+  rebuildSecondBrainLinks,
+  runSecondBrainLinkAll,
+  unloadSecondBrain,
+} from './secondbrain';
 import { openPomodoro, unloadPomodoro, ensurePomodoro } from './pomodoro';
 import { mountPomodoroStatusBar, unmountPomodoroStatusBar } from './pomodoro/statusbar';
-// B站下载器启动命令（外部工具 @jwbz/bili-downloader，tools/bili-downloader，ADR-0011）
-import { openBiliDownloader } from './bili-downloader';
-// 附件搬移（ticket 65 新域：移动当前笔记附件，fileManager 自动更新内部链接 + 主页磁贴播种）
+// 文献盒（literature 域，ADR-0072 自 bili-downloader 迁出；网页版已移除，见 tools/bili-downloader）
+import { openLiteraturePanel, openTermNote, unloadLiterature } from './literature';
+// 附件搬移（ticket 65 新域：移动当前笔记附件，fileManager 自动更新内部链接 + 入口页磁贴播种）
 import { openAttachMove, ensureAttachSeed, ATTACH_COMMAND_ID } from './attach';
 // 保险箱（encrypt 域：移出式清单容器加密，正文+图片/视频附件；原名「加密保险箱」，ticket 68 更名仅文案）
 import { openEncrypt, encryptCurrentNote, unloadEncrypt, mountEncryptStatusBar, unmountEncryptStatusBar } from './encrypt';
@@ -52,15 +63,15 @@ import { loadAll } from './diary/store';
 import { state as diaryState } from './diary/state';
 import { applyUiSettings, init as diaryInit, showDiaryPanel, unregisterEscLayer } from './diary/ui/panel';
 // 小橘陪伴猫（smartcat 域：桌面宠物 + AI 陪伴；AI 走 bz core/ai，数据单 json smartcat.json）
-import { ensureSmartCat, unloadSmartCat, openSmartCat, openSmartCatChat, hideSmartCat, openSmartcatDashboard, applySmartcatPowerState, normalizeSmartcatOffMode, type SmartcatOffMode } from './smartcat';
+import { ensureSmartCat, unloadSmartCat, openSmartCat, openSmartCatChat, hideSmartCat, openSmartcatDashboard, normalizeSmartcatOffMode } from './smartcat';
 
 /** 命令表：id/name 统一命名（spec「命令 id 全清单」第 9 轮：bz-<域>-<动作>，icon 与入口页磁贴一致） */
 const COMMANDS: { id: string; name: string; icon: string; callback: () => void }[] = [
-  // 主页
-  { id: 'bz-home', name: '主页', icon: 'home', callback: () => openLauncherPanel(getApp()) },
+  // 入口页（t1：主页 → 入口页，术语随 CONTEXT.md；id bz-home 不变）
+  { id: 'bz-home', name: '入口页', icon: 'home', callback: () => openLauncherPanel(getApp()) },
   // 备忘录
   { id: 'bz-memo-open', name: '备忘录', icon: 'sticky-note', callback: () => openBzPanel(getApp()) },
-  { id: 'bz-memo-add', name: '写备忘', icon: 'pencil', callback: () => createMemoItem(getApp()) },
+  { id: 'bz-memo-add', name: '加备忘', icon: 'pencil', callback: () => createMemoItem(getApp()) },
   // 归物本
   { id: 'bz-belongings-add', name: '加物品', icon: 'archive', callback: () => addBelongingsItem(getApp()) },
   { id: 'bz-belongings-open', name: '归物本', icon: 'package', callback: () => openBelongings(getApp()) },
@@ -78,13 +89,13 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void }
   // 书库
   { id: 'bz-library-open', name: '书库', icon: 'library', callback: () => openLibrary(getApp()) },
   { id: 'bz-book-notes-open', name: '读书笔记', icon: 'book-open', callback: () => openBookNotes(getApp()) },
-  // 阅读数据分析报告
-  { id: 'bz-reading-report-open', name: '阅读分析报告', icon: 'bar-chart-3', callback: () => showReadingReport(getApp()) },
+  // 阅读数据分析报告（t2：阅读分析报告 → 阅读数据分析报告，术语随 CONTEXT.md）
+  { id: 'bz-reading-report-open', name: '阅读数据分析报告', icon: 'bar-chart-3', callback: () => showReadingReport(getApp()) },
   // 影视
   { id: 'bz-movie-open', name: '影视', icon: 'film', callback: () => openMovieManager(getApp()) },
-  { id: 'bz-movie-add', name: '写影视', icon: 'clapperboard', callback: () => addMovieItem(getApp()) },
-  // 影视分析报告（独立域，ADR-0048）
-  { id: 'bz-movie-report', name: '影视分析报告', icon: 'clapperboard', callback: () => openMovieReport(getApp()) },
+  { id: 'bz-movie-add', name: '加影视', icon: 'clapperboard', callback: () => addMovieItem(getApp()) },
+  // 影视分析报告（独立域，ADR-0048；f7 解冻：去 clapperboard 重复 → pie-chart，id/名称契约不动）
+  { id: 'bz-movie-report', name: '影视分析报告', icon: 'pie-chart', callback: () => openMovieReport(getApp()) },
   // 复习计划（9 命令）
   { id: 'bz-review-open', name: '复习计划', icon: 'calendar', callback: () => openReviewPanel(getApp()) },
   { id: 'bz-review-start', name: '开始复习', icon: 'play', callback: () => reviewStart(getApp()) },
@@ -93,17 +104,25 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void }
   { id: 'bz-review-remove', name: '移出复习计划', icon: 'minus', callback: () => reviewRemoveCurrent(getApp()) },
   { id: 'bz-review-overdue', name: '复习（跳转逾期）', icon: 'alarm-clock', callback: () => reviewJumpOverdue(getApp()) },
   { id: 'bz-review-rate', name: '复习（选择难度）', icon: 'gauge', callback: () => reviewMarkDialog(getApp()) },
-  { id: 'bz-review-again', name: '复习：忘了（Again）', icon: 'rotate-ccw', callback: () => reviewMarkRating(getApp(), 'again') },
-  { id: 'bz-review-hard', name: '复习：困难（Hard）', icon: 'trending-up', callback: () => reviewMarkRating(getApp(), 'hard') },
-  { id: 'bz-review-good', name: '复习：一般（Good）', icon: 'check', callback: () => reviewMarkRating(getApp(), 'good') },
-  { id: 'bz-review-easy', name: '复习：简单（Easy）', icon: 'sparkles', callback: () => reviewMarkRating(getApp(), 'easy') },
-  // 闪念
-  { id: 'bz-flash-open', name: '闪念', icon: 'zap', callback: () => openFlashReference(getApp()) },
-  { id: 'bz-flash-chat', name: '闪念对话', icon: 'message-circle', callback: () => openFlashChat(getApp()) },
+  // f3：评级四命令去英文后缀并统一「复习（X）」标点（id 不动）
+  { id: 'bz-review-again', name: '复习（忘了）', icon: 'rotate-ccw', callback: () => reviewMarkRating(getApp(), 'again') },
+  { id: 'bz-review-hard', name: '复习（困难）', icon: 'trending-up', callback: () => reviewMarkRating(getApp(), 'hard') },
+  { id: 'bz-review-good', name: '复习（一般）', icon: 'check', callback: () => reviewMarkRating(getApp(), 'good') },
+  { id: 'bz-review-easy', name: '复习（简单）', icon: 'sparkles', callback: () => reviewMarkRating(getApp(), 'easy') },
+  // 第二大脑（ticket 103：原闪念正名接管，主面板为统一入口）
+  { id: 'bz-secondbrain-panel', name: '第二大脑面板', icon: 'brain', callback: () => openSecondBrainPanel(getApp()) },
+  // f7：与「第二大脑面板」区分——本命令打开参考侧边栏（右侧窄窗/移动端抽屉参考 tab）
+  { id: 'bz-secondbrain-open', name: '第二大脑参考', icon: 'zap', callback: () => openSecondBrainReference(getApp()) },
+  { id: 'bz-secondbrain-chat', name: '第二大脑对话', icon: 'message-circle', callback: () => openSecondBrainChat(getApp()) },
+  // 自动双链（ticket 111）：当前笔记重跑一次关联（正文大改后的手动兜底入口）
+  { id: 'bz-secondbrain-rebuild-links', name: '重跑当前笔记关联', icon: 'link', callback: () => rebuildSecondBrainLinks(getApp()) },
+  // 自动双链（ticket 115）：存量未连接笔记手动批量补链（启动自动补链的显式兜底）
+  { id: 'bz-secondbrain-link-all', name: '为未关联笔记批量补链', icon: 'link-2', callback: () => runSecondBrainLinkAll(getApp()) },
   // 番茄钟（ticket 26-32 新域）
   { id: 'bz-pomodoro-open', name: '番茄钟', icon: 'timer', callback: () => openPomodoro(getApp()) },
-  // B站下载器（外部工具 @jwbz/bili-downloader，tools/bili-downloader，ADR-0011）
-  { id: 'bz-bili-open', name: 'B站下载器', icon: 'tv-minimal-play', callback: () => openBiliDownloader() },
+  // 文献盒（literature 域：主面板=文献笔记列表 + 视频录入/文字录入/设置；ADR-0072 迁出、ADR-0071 AI 回迁）
+  { id: 'bz-literature-open', name: '文献盒', icon: 'list-video', callback: () => openLiteraturePanel(getApp()) },
+  { id: 'bz-literature-note-term', name: '术语生成文献笔记', icon: 'book-type', callback: () => openTermNote(getApp()) },
   // 附件搬移（ticket 65 新域：移动当前笔记附件到指定文件夹，fileManager 自动更新内部链接）
   { id: ATTACH_COMMAND_ID, name: '移动附件', icon: 'folder-down', callback: () => openAttachMove(getApp()) },
   // 保险箱（encrypt 域：移出式清单容器加密；原名「加密保险箱」，ticket 68 更名仅文案）
@@ -111,7 +130,8 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void }
   { id: 'bz-encrypt-lock', name: '加密当前笔记', icon: 'lock-keyhole', callback: () => encryptCurrentNote(getApp()) },
   // 小橘陪伴猫（smartcat 域）
   { id: 'bz-smartcat-open', name: '小橘', icon: 'cat', callback: () => openSmartCat(getApp()) },
-  { id: 'bz-smartcat-chat', name: '小橘聊天', icon: 'message-circle', callback: () => openSmartCatChat(getApp()) },
+  // f7：去 message-circle 重复（第二大脑对话保留）→ messages-square
+  { id: 'bz-smartcat-chat', name: '小橘聊天', icon: 'messages-square', callback: () => openSmartCatChat(getApp()) },
   { id: 'bz-smartcat-hide', name: '隐藏小橘', icon: 'eye-off', callback: () => hideSmartCat() },
   { id: 'bz-smartcat-dashboard', name: '小橘数据面板', icon: 'activity', callback: () => openSmartcatDashboard(getApp()) },
 ];
@@ -158,6 +178,8 @@ export default class BzPlugin extends Plugin {
       delete old.gestureSwipeDown;
       migrated = true;
     }
+    // ticket 103 迁移：闪念 16 键 → secondBrain* 更名平移（META_PATH/VEC_PATH 废弃清除）
+    if (migrateSecondBrainSettings(this.settings)) migrated = true;
     // P2：迁移完成立即落盘——storagePath/手势结果写回 data.json，迁移 warning 不随每次启动重播
     if (migrated) void this.saveSettings();
     setApp(this.app);
@@ -194,7 +216,7 @@ export default class BzPlugin extends Plugin {
       this.registeredCommandIds.push(c.id);
     }
 
-    // 附件搬移：主页磁贴自动播种（desktop+mobile 末尾，幂等）
+    // 附件搬移：入口页磁贴自动播种（desktop+mobile 末尾，幂等）
     void ensureAttachSeed(this.app);
 
     // ribbon 主入口：备忘录面板 + 日记本
@@ -225,7 +247,7 @@ export default class BzPlugin extends Plugin {
         ensureMemoFileSync(this.app);
         ensureFavoritesFileSync(this.app);
       }
-      if (this.settings.flashEnabled) ensureFlashOnReady(this.app);
+      if (this.settings.secondBrainEnabled) ensureSecondBrainOnReady(this.app);
       // 复习计划：到期提醒开启时常驻（ticket 100——监听/染色/轮询统一启动；否则懒加载）；enableAutoNotify 缺省视为开
       if (this.settings.enableAutoNotify !== false) void ensureReview(this.app);
       // 番茄钟：启动即恢复（load+recover，正在倒计时则后台继续/按设置自动弹窗）
@@ -245,6 +267,8 @@ export default class BzPlugin extends Plugin {
   async onunload() {
     // 统一右键菜单/长按抽屉浮层先收口（fix(main)：卸载接线补全）
     closeItemMenu();
+    // toast 卸载清理（UX 整改 l2-toast）：清空通知容器 DOM + 存活/去重状态
+    cleanupNotices();
     // 清理裸注册命令（统一 bz- 前缀，必须显式 removeCommand）
     for (const id of this.registeredCommandIds) {
       try {
@@ -263,6 +287,9 @@ export default class BzPlugin extends Plugin {
     unloadLauncherPanel();
     unloadEncrypt();
     unloadSmartCat();
+    // 第二大脑：窄窗/抽屉 DOM、5s 防抖定时器、DeepSeek 服务、模块单例复位（ticket 107 补接线——
+    // 原先 unloadSecondBrain 导出但从未被调用，禁用插件后残留窗体且防抖 refresh 仍会触发）
+    unloadSecondBrain();
     // 各域卸载清理补全（fix(main)：unload 函数均不内部触发 ensure，可无条件调用；
     // 未初始化域调用为幂等空清理，不引起无谓装载）
     unloadPassword();
@@ -271,10 +298,13 @@ export default class BzPlugin extends Plugin {
     unloadReview();
     unloadMovie();
     unloadMovieReport();
+    unloadReadingReport();
     unloadLibrary();
     unloadNewsReader();
     unloadArticleView();
     unloadAutoSummary();
+    // 文献盒（ADR-0072 迁出：面板 DOM + 模块单例复位）
+    unloadLiterature();
     // 域事件总线收口：摘除 vault 订阅点 + 清空全部域事件订阅（总线为进程内单例，随插件卸载全量清空）
     detachObsidianAdapter();
     clearDomainEvents();
@@ -309,6 +339,8 @@ export default class BzPlugin extends Plugin {
       /* 命令可能已被移除 */
     }
     diaryState.events.fileListenerAttached = false;
+    // 卸载兜底（UX 整改 l2）：异步尾任务禁用前若 notify 重建过通知容器，此处再次清理
+    cleanupNotices();
   }
 
   async saveSettings() {
@@ -327,8 +359,9 @@ export default class BzPlugin extends Plugin {
       ['pwStoragePath', dirOf(this.settings.pwStoragePath)],
       ['favoritesStoragePath', dirOf(this.settings.favoritesStoragePath)],
       ['reviewStoragePath', dirOf(this.settings.reviewStoragePath)],
-      ['META_PATH', fileDir(this.settings.META_PATH, 'ai_completion_meta.json')],
-      ['VEC_PATH', fileDir(this.settings.VEC_PATH, 'ai_completion_vectors.vec')],
+      // ticket 103：META_PATH/VEC_PATH 已从接口删除；此处仅 ADR-0009 首次迁移窗口读旧 data.json 残值
+      ['META_PATH', fileDir(String((this.settings as any).META_PATH ?? ''), 'ai_completion_meta.json')],
+      ['VEC_PATH', fileDir(String((this.settings as any).VEC_PATH ?? ''), 'ai_completion_vectors.vec')],
     ];
     const vals = oldPaths.map(([, v]) => v || 'CONFIG/STORAGE');
     if (vals.every((v) => v === vals[0])) {
@@ -364,16 +397,18 @@ export default class BzPlugin extends Plugin {
   }
 }
 
-/** 闪念在布局就绪后初始化（按设置开关） */
-function ensureFlashOnReady(app: any) {
+/** 第二大脑在布局就绪后初始化（按设置开关；ticket 103 原闪念懒加载换线） */
+function ensureSecondBrainOnReady(app: any) {
   // 延迟到 onLayoutReady 之后的事件循环，避免 onload 时序问题
   setTimeout(() => {
-    // 动态引入避免循环依赖；闪念自身懒加载
-    import('./flash').then((m) => m.ensureFlash(app));
+    // 动态引入避免循环依赖；第二大脑自身懒加载
+    import('./secondbrain').then((m) => m.ensureSecondBrain(app));
   }, 0);
 }
 
 // ===== 设置页（ADR-0009：单页平铺，只含「🤖 AI」「📂 数据存储路径」两区块）=====
+// ticket 131：两区块 schema 化（ADR-0064 声明式渲染器），原私有 textSetting/toggleSetting/
+// pathSetting helper 退役（text 防抖落盘/onCommit 一次性提示语义收口 core 渲染器）。
 
 export class BzSettingTab extends PluginSettingTab {
   plugin: BzPlugin;
@@ -386,122 +421,10 @@ export class BzSettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    const s = this.plugin.settings;
-    const save = async () => {
-      await this.plugin.saveSettings();
-    };
-
-    // 🤖 AI 区块：服务商下拉 + 动态显示对应 API Key
-    containerEl.createDiv({ cls: 'bz-setting-section-title', text: '🤖 AI' });
-    let deepseekRow: Setting | null = null;
-    let opencodeRow: Setting | null = null;
-    const refreshKeys = () => {
-      const isDeepseek = s.aiProvider === 'deepseek';
-      if (deepseekRow) deepseekRow.settingEl.toggleClass('bz-setting-hidden', !isDeepseek);
-      if (opencodeRow) opencodeRow.settingEl.toggleClass('bz-setting-hidden', isDeepseek);
-    };
-    new Setting(containerEl)
-      .setName('AI 服务商')
-      .setDesc('选择 AI 服务商，切换后显示对应的 API Key 配置')
-      .addDropdown((dd) => {
-        dd.addOption('deepseek', 'DeepSeek');
-        dd.addOption('opencode-go', 'OpenCode Go');
-        dd.setValue(s.aiProvider === 'deepseek' ? 'deepseek' : 'opencode-go');
-        dd.onChange(async (v) => {
-          s.aiProvider = v;
-          refreshKeys();
-          await save();
-        });
-      });
-    deepseekRow = new Setting(containerEl)
-      .setName('DeepSeek API Key')
-      .setDesc('留空则回退读取 QuickAdd data.json 里的 key')
-      .addText((text) =>
-        text
-          .setValue(s.deepseekApiKey)
-          .onChange(async (v) => {
-            s.deepseekApiKey = v;
-            await save();
-          })
-      );
-    opencodeRow = new Setting(containerEl)
-      .setName('OpenCode Go API Key')
-      .setDesc('从 opencode.ai/zen 订阅后获取')
-      .addText((text) =>
-        text
-          .setValue(s.opencodeGoApiKey)
-          .onChange(async (v) => {
-            s.opencodeGoApiKey = v;
-            await save();
-          })
-      );
-    refreshKeys();
-
-    // 📂 数据存储路径区块：共享 storagePath（ADR-0009，JSON 数据文件统一目录）
-    containerEl.createDiv({ cls: 'bz-setting-section-title', text: '📂 数据存储路径' });
-    this.textSetting(
-      containerEl,
-      '数据存储路径',
-      '所有 JSON 数据文件（备忘录/归物本/密码本/收藏本/复习计划/做题家/闪念）的统一存放目录',
-      s.storagePath,
-      save,
-      (v) => (s.storagePath = v)
-    );
-
-    // 🐱 小橘区块（ticket 103：设置页开关 + 三档关闭方式，立即生效）
-    containerEl.createDiv({ cls: 'bz-setting-section-title', text: '🐱 小橘' });
-    let offModeRow: Setting | null = null;
-    const refreshOffModeRow = () => {
-      if (offModeRow) offModeRow.settingEl.toggleClass('bz-setting-hidden', !!s.smartcatEnabled);
-    };
-    // 关闭方式归一（旧数据/未知值 → stop；smartcat 模块提供共享判定）
-    const currentOffMode = (): SmartcatOffMode => normalizeSmartcatOffMode(s.smartcatOffMode);
-    new Setting(containerEl)
-      .setName('启用小橘')
-      .setDesc('关闭后按「关闭方式」处理；彻底停机期间的笔记活动不会进入小橘记忆，重开后也不补记')
-      .addToggle((toggle) =>
-        toggle.setValue(!!s.smartcatEnabled).onChange(async (v: boolean) => {
-          s.smartcatEnabled = v;
-          await save();
-          // 运行时对账：立即生效（Q2 拍板）
-          await applySmartcatPowerState(this.plugin.app, v, currentOffMode());
-          refreshOffModeRow();
-        })
-      );
-    offModeRow = new Setting(containerEl)
-      .setName('关闭方式')
-      .setDesc('彻底停机：猫与后台全部停止；仅隐藏：猫消失但后台仍感知记录；仅不自动启动：本次照旧、重启后需命令召唤')
-      .addDropdown((dd) => {
-        dd.addOption('stop', '彻底停机（后台全部停止）');
-        dd.addOption('hide', '仅隐藏（后台仍感知）');
-        dd.addOption('lazy', '仅不自动启动（召唤可用）');
-        dd.setValue(currentOffMode());
-        dd.onChange(async (v: string) => {
-          s.smartcatOffMode = v;
-          await save();
-          // 关闭状态下切换关闭方式 → 立即按新档对账（立即生效语义；开启状态下切换仅留待下次关闭）
-          if (!s.smartcatEnabled) await applySmartcatPowerState(this.plugin.app, false, currentOffMode());
-        });
-      });
-    refreshOffModeRow();
+    // AI 服务商切换 → 密钥行显隐走 visibleWhen；存储路径 onCommit warning 文案逐字保留
+    // （schema 定义见 core/settings-main-schema.ts）；渲染器统一完成徽标/两行式标注/初始显隐
+    // 小橘电源控制（启用/三档关闭方式）已随架构迁移进小橘 ⚙️ 设置弹窗（src/smartcat/ui.ts 电源组）
+    renderSettingsInto(containerEl, mainSettingsSchema());
   }
 
-  // ---- 设置项 helper ----
-  private textSetting(containerEl: HTMLElement, name: string, desc: string, value: string, onSave: () => Promise<void>, apply: (v: string) => void, placeholder?: string): Setting {
-    return new Setting(containerEl).setName(name).setDesc(desc).addText((text) =>
-      text.setValue(value).setPlaceholder(placeholder || '').onChange(async (v) => {
-        apply(v);
-        await onSave();
-      })
-    );
-  }
-
-  private toggleSetting(containerEl: HTMLElement, name: string, desc: string, value: boolean, onSave: () => Promise<void>, apply: (v: boolean) => void): Setting {
-    return new Setting(containerEl).setName(name).setDesc(desc).addToggle((toggle) =>
-      toggle.setValue(value).onChange(async (v) => {
-        apply(v);
-        await onSave();
-      })
-    );
-  }
 }

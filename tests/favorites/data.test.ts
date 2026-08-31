@@ -51,6 +51,32 @@ describe('DataManager', () => {
     expect((await dm.getAll()).map((d) => d.id)).toEqual(['2']);
   });
 
+  it('restoreItem（ticket 141 通病 1）：删除后撤销，完整条目原样插回', async () => {
+    const item = {
+      id: '1', tags: ['GitHub'], title: 'A', description: '简介', pinned: true,
+      url: 'https://github.com/a/b', balance: '9.9', balanceCacheTime: 123, balanceError: null,
+      linkedNote: '笔记.md', created: '2025-06-01 08:00:00', type: 'GitHub',
+      llmConfig: { apiKeys: 'sk-1', balanceUrl: 'https://api.example.com/balance' },
+      archived: false,
+    };
+    await dm.add(item as any);
+    await dm.delete('1');
+    expect(await dm.getAll()).toEqual([]);
+
+    await dm.restoreItem(item as any);
+    const data = await dm.getAll();
+    expect(data.length).toBe(1);
+    expect(data[0]).toEqual(item as any); // 全字段原样（含 llmConfig/pinned/balance，不走 add 重置）
+  });
+
+  it('restoreItem：同 id 已存在 → 幂等跳过不重复插入', async () => {
+    const item = { id: '1', tags: [], title: 'A', description: '', pinned: false, url: '', balance: null, balanceCacheTime: null, balanceError: null, linkedNote: null, created: '', type: '' } as any;
+    await dm.add(item);
+    await dm.restoreItem(item); // 并发写回场景：同 id 已存在
+    const data = await dm.getAll();
+    expect(data.length).toBe(1);
+  });
+
   it('13 字段落盘格式', async () => {
     const item = {
       id: '1234567890', tags: ['GitHub'], title: 'T', description: 'D', pinned: true,
@@ -62,6 +88,24 @@ describe('DataManager', () => {
     const saved = JSON.parse(vault.files.get('CONFIG/STORAGE/favorites.json')!);
     expect(saved[0]).toEqual(item);
     expect(Object.keys(saved[0]).length).toBe(13); // 12 必选字段 + llmConfig
+  });
+
+  it('归档字段（ticket 140）：旧格式零迁移可读；归档 update 为加法扩展', async () => {
+    await dm.add({ id: '1', tags: ['GitHub'], title: 'A', description: '', pinned: false, url: '', balance: null, balanceCacheTime: null, balanceError: null, linkedNote: null, created: '2025-01-01 00:00:00', type: 'GitHub' } as any);
+    // 旧数据（无 archived 字段）原样读回 = 未归档
+    expect((await dm.getAll())[0].archived).toBeUndefined();
+
+    await dm.update('1', { archived: true, archivedAt: '2026-08-30 10:00:00' });
+    const saved = JSON.parse(vault.files.get('CONFIG/STORAGE/favorites.json')!);
+    expect(saved[0].archived).toBe(true);
+    expect(saved[0].archivedAt).toBe('2026-08-30 10:00:00');
+    expect(Object.keys(saved[0]).length).toBe(14); // 12 基准字段（无 llmConfig）+ archived + archivedAt
+
+    // 未归档条目不携带归档字段（写路径不加字段，兼容性最小扰动）
+    await dm.add({ id: '2', tags: [], title: 'B', description: '', pinned: false, url: '', balance: null, balanceCacheTime: null, balanceError: null, linkedNote: null, created: '', type: '' } as any);
+    const saved2 = JSON.parse(vault.files.get('CONFIG/STORAGE/favorites.json')!);
+    expect(Object.keys(saved2[0]).length).toBe(12); // unshift 在前 = 新条目 B（12 基准字段，无归档键）
+    expect(saved2[1].archived).toBe(true); // 已归档条目不受第二次写入影响
   });
 });
 

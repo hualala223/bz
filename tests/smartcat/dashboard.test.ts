@@ -12,6 +12,7 @@ import {
   buildEmotionTimeline,
   buildEmotionDistribution,
   buildSourceDistribution,
+  resolveTrackedDirLabel,
   distributionRows,
   buildGrowthTrail,
   buildWeeklyReports,
@@ -48,7 +49,7 @@ function fixtureData(): SmartCatData {
   d.memory.reflection.digestCount = 2;
   d.memory.reflection.lastReflectAt = Date.now() - 60 * 1000;
   const iso = (agoMin: number) => new Date(Date.now() - agoMin * 60 * 1000).toISOString();
-  d.memory.stream = [
+  d.memory.memoryStream = [
     { id: 'm1', created: iso(10), lastAccessed: iso(10), description: '用户说：今天完成了复习计划，很开心', importance: 0.8, type: 'observation', source: 'chat', emotion: 'happy' },
     { id: 'm2', created: iso(30), lastAccessed: iso(30), description: '你写了日记：最近有点低落', importance: 0.6, type: 'observation', source: 'diary', emotion: 'sad' },
     { id: 'i1', created: iso(5), lastAccessed: iso(5), description: '【洞察】用户坚持复习', importance: 0.75, type: 'insight', source: 'reflection', evidenceIds: ['m1'] },
@@ -96,23 +97,71 @@ describe('dashboard 纯函数', () => {
 
   it('buildEmotionTimeline 仅带情绪条目、新→旧排序、截断 limit', () => {
     const d = fixtureData();
-    const tl = buildEmotionTimeline(d.memory.stream, 20);
+    const tl = buildEmotionTimeline(d.memory.memoryStream, 20);
     expect(tl.length).toBe(2); // m1 happy / m2 sad（m3 无情绪、i1 无情绪）
     expect(tl[0].emotion).toBe('happy');
     expect(tl[1].emotion).toBe('sad');
     expect(tl[0].time).toBeGreaterThanOrEqual(tl[1].time);
-    expect(buildEmotionTimeline(d.memory.stream, 1).length).toBe(1);
+    expect(buildEmotionTimeline(d.memory.memoryStream, 1).length).toBe(1);
   });
 
   it('buildEmotionDistribution 只计观察；buildSourceDistribution 中文归并', () => {
     const d = fixtureData();
-    expect(buildEmotionDistribution(d.memory.stream)).toEqual({ happy: 1, sad: 1 });
-    const rows = distributionRows(buildSourceDistribution(d.memory.stream));
+    expect(buildEmotionDistribution(d.memory.memoryStream)).toEqual({ happy: 1, sad: 1 });
+    const rows = distributionRows(buildSourceDistribution(d.memory.memoryStream));
     const labels = rows.map((r) => r.label);
     expect(labels).toContain('聊天');
     expect(labels).toContain('日记');
     expect(labels).toContain('闪念');
     expect(rows[0].count).toBeGreaterThanOrEqual(rows[rows.length - 1].count); // 降序
+  });
+
+  it('buildSourceDistribution（ticket 163）：洞察按「洞察」单列一行；行为小结保留「行为小结」行', () => {
+    const d = fixtureData();
+    // 加一条行为小结（observation + source=digest）与一条周报洞察
+    d.memory.memoryStream.push(
+      { id: 'dg1', created: new Date().toISOString(), lastAccessed: new Date().toISOString(), description: '行为小结文案', importance: 0.6, type: 'observation', source: 'digest' },
+      { id: 'wr1', created: new Date().toISOString(), lastAccessed: new Date().toISOString(), description: '周报洞察', importance: 0.8, type: 'insight', source: 'weekly-report' },
+    );
+    const dist = buildSourceDistribution(d.memory.memoryStream);
+    expect(dist['洞察']).toBe(2); // i1 reflection + wr1 weekly-report
+    expect(dist['行为小结']).toBe(1);
+    expect(dist['日记']).toBe(1);
+    expect(dist['聊天']).toBe(1);
+  });
+
+  it('resolveTrackedDirLabel + buildSourceDistribution（ticket 163）：note 引用条目按追查目录分行；未命中回退「记忆目录」', () => {
+    const note = (path: string, extra: Record<string, any> = {}): any => ({
+      id: 'n1', created: new Date().toISOString(), lastAccessed: new Date().toISOString(),
+      description: path, importance: 0.5, type: 'observation', source: 'note', ref: { path, locator: undefined }, ...extra,
+    });
+    const dirs = ['我的/日记', '我的/信'];
+    // 我的/信 命中 → 标签为该配置目录
+    expect(resolveTrackedDirLabel(note('我的/信/第1封信.md'), dirs)).toBe('我的/信');
+    // 子目录前缀命中；反斜杠归一
+    expect(resolveTrackedDirLabel(note('我的/信/子目录/a.md'), dirs)).toBe('我的/信');
+    expect(resolveTrackedDirLabel(note('我的\\信\\a.md'), dirs)).toBe('我的/信');
+    // 不在配置目录 → null（回退旧标签）
+    expect(resolveTrackedDirLabel(note('归档/网页剪藏/x.md'), dirs)).toBeNull();
+    // 无 dirs / 非 note → null
+    expect(resolveTrackedDirLabel(note('我的/信/a.md'))).toBeNull();
+    expect(resolveTrackedDirLabel({ ...note('我的/信/a.md'), source: 'diary' } as any, dirs)).toBeNull();
+    // 无 ref 时从 description 取路径段
+    expect(resolveTrackedDirLabel({ ...note('我的/信/a.md'), ref: undefined } as any, dirs)).toBe('我的/信');
+    // 分布聚合：note 按目录分行
+    const stream = [
+      note('我的/信/第1封信.md'),
+      note('我的/信/第2封信.md'),
+      note('归档/网页剪藏/x.md'), // 不在配置 → 记忆目录
+      { id: 'd1', created: new Date().toISOString(), lastAccessed: new Date().toISOString(), description: '日记段', importance: 0.8, type: 'observation', source: 'diary' },
+    ];
+    const dist = buildSourceDistribution(stream, dirs);
+    expect(dist['我的/信']).toBe(2);
+    expect(dist['记忆目录']).toBe(1);
+    expect(dist['日记']).toBe(1);
+    // 未传 dirs → 全部 note 归「记忆目录」（旧口径兼容）
+    const distNoDirs = buildSourceDistribution(stream);
+    expect(distNoDirs['记忆目录']).toBe(3);
   });
 
   it('buildGrowthTrail 时间倒序、来源中文化、非法时间过滤、详情摘要', () => {
@@ -173,7 +222,7 @@ describe('openSmartcatDashboard UI', () => {
     expect(popup!.querySelector('.bz-win-head')).not.toBeNull();
     expect(popup!.querySelector('#smartcat-dash-close')).not.toBeNull();
     expect(popup!.querySelector('#smartcat-dash-refresh')).toBeNull(); // 097 C1：手动刷新按钮已删
-    expect(popup!.querySelectorAll('.bz-sc-dash-tab').length).toBe(5);
+    expect(popup!.querySelectorAll('.bz-sc-dash-tab').length).toBe(6); // P3: 新增行为页签
     const overview = popup!.querySelector('[data-pane="overview"]') as HTMLElement;
     expect(overview.style.display).not.toBe('none');
     expect(overview.textContent).toContain('心情好');
@@ -198,6 +247,35 @@ describe('openSmartcatDashboard UI', () => {
     expect(memPane.textContent).toContain('聊天');
   }, 15000);
 
+  it('记忆页签来源分布（ticket 163）：配置记忆目录时 note 条目按追查目录分行；最近记忆列表同口径', async () => {
+    const d = fixtureData();
+    d.memory.memoryStream.push(
+      { id: 'n1', created: new Date().toISOString(), lastAccessed: new Date().toISOString(), description: '我的/信/第1封信.md', importance: 0.5, type: 'observation', source: 'note', ref: { path: '我的/信/第1封信.md', locator: undefined } },
+      { id: 'n2', created: new Date().toISOString(), lastAccessed: new Date().toISOString(), description: '我的/信/第2封信.md', importance: 0.5, type: 'observation', source: 'note', ref: { path: '我的/信/第2封信.md', locator: undefined } },
+    );
+    const vault = new MockVault();
+    vault.create(getSmartcatFilePath(), JSON.stringify(d));
+    const app = mockAppWithVault(vault);
+    setApp(app);
+    setSettingsProvider(() => ({
+      storagePath: 'CONFIG/STORAGE',
+      smartcatEnabled: true,
+      smartcatMobileDefaultFullscreen: false,
+      memoryDirectories: ['我的/日记', '我的/信'],
+    }) as any);
+    await openSmartcatDashboard(app as any);
+    const popup = document.getElementById('smartcat-dashboard-panel')!;
+    (popup.querySelector('[data-tab="memory"]') as HTMLElement).click();
+    const memPane = popup.querySelector('[data-pane="memory"]') as HTMLElement;
+    // 来源分布卡：我的/信 独立分行；洞察行计入（fixture i1）
+    expect(memPane.textContent).toContain('记忆来源分布');
+    expect(memPane.textContent).toContain('我的/信');
+    expect(memPane.textContent).toContain('洞察');
+    expect(memPane.textContent).not.toContain('记忆目录');
+    // 最近记忆列表：note 行标签同样显示 我的/信
+    expect(memPane.querySelectorAll('.bz-sc-dash-memory').length).toBe(6);
+  }, 15000);
+
   it('P1-29：固定按钮经常驻实例通道落盘——常驻侧任意保存后 pinned 保持 true（不被副本回滚）', async () => {
     const { app, vault } = makeApp(fixtureData());
     // 模拟常驻实例通道（与 index ensureSmartCat 注册的 apply 同构）：改内存对象 + 统一 dataSaver
@@ -220,12 +298,12 @@ describe('openSmartcatDashboard UI', () => {
       await new Promise((r) => setTimeout(r, 20)); // 异步写盘 + 重渲染
       // 磁盘已写入 pinned=true
       let onDisk = JSON.parse(vault.files.get(getSmartcatFilePath())!);
-      expect(onDisk.memory.stream.find((m: any) => m.id === 'i1').pinned).toBe(true);
+      expect(onDisk.memory.memoryStream.find((m: any) => m.id === 'i1').pinned).toBe(true);
       // 常驻侧触发任意保存（如心情衰减/观察落盘）
       resident.mood.pad.pleasure = 61;
       await saveSmartCatData(app as any, resident);
       onDisk = JSON.parse(vault.files.get(getSmartcatFilePath())!);
-      expect(onDisk.memory.stream.find((m: any) => m.id === 'i1').pinned).toBe(true); // 修正未被回滚
+      expect(onDisk.memory.memoryStream.find((m: any) => m.id === 'i1').pinned).toBe(true); // 修正未被回滚
       // 面板重渲染后按钮态翻转
       const btn2 = document.querySelector('[data-pane="memory"] .bz-sc-dash-insight-actions .bz-sc-dash-mini-btn') as HTMLButtonElement;
       expect(btn2.textContent).toBe('取消固定');
@@ -262,7 +340,7 @@ describe('openSmartcatDashboard UI', () => {
   /** 带两期周报的夹具（报告页签专用；不动共享 fixtureData 以免影响既有计数断言） */
   function fixtureWithReports(): SmartCatData {
     const d = fixtureData();
-    d.memory.stream.push(
+    d.memory.memoryStream.push(
       { id: 'wr1', created: new Date(Date.now() - 3600 * 1000).toISOString(), lastAccessed: new Date(Date.now() - 3600 * 1000).toISOString(), description: '【本周懂你报告】这周你写了三篇日记，心情整体向上。', importance: 0.8, type: 'insight', source: 'weekly-report' },
       { id: 'wr2', created: new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString(), lastAccessed: new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString(), description: '【本周懂你报告】上周你的主题是复习计划。', importance: 0.8, type: 'insight', source: 'weekly-report' },
     );

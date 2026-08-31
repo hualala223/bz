@@ -7,13 +7,13 @@ import { setApp } from '../../src/core/app';
 import { setSettingsProvider } from '../../src/core/settings-provider';
 import {
   loadArticles, render, markAsRead, skipArticle, saveToClip, hide,
-  loadStats, recordStat, renderMarkdown, toDatetime, init, show,
+  loadStats, recordStat, renderMarkdown, toDatetime, localDayKey, init, show,
 } from '../../src/news/reader';
 import { MockVault } from '../mock-vault';
 import { resetObsidianMocks, Platform as MockPlatform, hasNotice } from '../mock-obsidian-entry';
 import { onDomainEvent } from '../../src/core/domain-bus';
 // ticket 076 观测点换线（域事件派发）：真实总线 + onDomainEvent('news', spy) 挂间谍，
-// 断言 reader 只对「保存」发事件（跳过不发）；载荷 {kind:'read'|'saved', evt, clipPath?}
+// 断言 reader 对「保存/跳过」发事件（阅读无独立动作不发）；载荷 {kind:'read'|'saved', evt, clipPath?}
 let newsSpy: import('vitest').Mock<(evt?: unknown) => void>;
 let offNewsSpy: () => void = () => {};
 
@@ -63,8 +63,8 @@ async function setup() {
   document.body.innerHTML = '';
   document.head.innerHTML = '';
   const vault = new MockVault();
-  vault.files.set('CONFIG/STORAGE/news.json', JSON.stringify(NEWS_JSON));
-  vault.files.set('CONFIG/STORAGE/news-stats.json', JSON.stringify({ totalRead: 0, totalSaved: 0, totalSkipped: 0, byPlatform: {}, byDate: {} }));
+  // ticket 124（ADR-0060）：四段结构 fixture（stats 内嵌；旧 news-stats.json 由迁移测试覆盖）
+  vault.files.set('CONFIG/STORAGE/news.json', JSON.stringify({ articles: NEWS_JSON, stats: { totalRead: 0, totalSaved: 0, totalSkipped: 0, byPlatform: {}, byDate: {} }, bilibiliUps: [], sources: { zhihu: true, guokr: true, bilibili: true } }));
   const app = makeApp(vault);
   setApp(app);
   _vault = vault; // 测试内共享 vault 引用（供 getVault）
@@ -112,26 +112,35 @@ describe('聚合讯阅读流', () => {
 
     expect(document.querySelector('.news-card-title')!.textContent).toBe('第二篇新闻');
     expect(document.querySelector('.news-counter')!.textContent).toContain('2 / 2');
-    // news.json 写回 read 标记
+    // news.json 写回 read 标记 + state（ticket 124：保留策略档位依据）
     const saved = JSON.parse((getVault().files as Map<string, string>).get('CONFIG/STORAGE/news.json')!);
-    expect(saved[0].read).toBe(true);
-    expect(saved[0].body).toBeUndefined(); // delete a.body
+    expect(saved.articles[0].read).toBe(true);
+    expect(saved.articles[0].state).toBe('skipped');
+    expect(saved.articles[0].body).toBeUndefined(); // delete a.body
   });
 
-  it('跳过：不发任何 news 事件（域统计照记）', async () => {
+  it('跳过：发 read 入口事件（state=skipped，2026-08-27 追加拍板→行为流）+ 域统计照记', async () => {
     await loadStats(); // 重置模块级 stats（防跨用例串扰）后再动作
     await loadArticles();
     render();
     skipArticle();
-    expect(newsSpy).not.toHaveBeenCalled();
-    const stats = JSON.parse((getVault().files as Map<string, string>).get('CONFIG/STORAGE/news-stats.json')!);
-    expect(stats.totalSkipped).toBe(1);
+    await new Promise((r) => setTimeout(r, 0)); // 冲刷 saveStats 写回链（ticket 124：stats 内嵌 news.json）
+    expect(newsSpy).toHaveBeenCalledTimes(1);
+    expect(newsSpy).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'read',
+      evt: expect.objectContaining({ title: '第一篇新闻', platform: '知乎日报', state: 'skipped' }),
+    }));
+    expect(hasSavedEvt()).toBe(false); // 跳过只发 read 入口，不发 saved（无 auto-summary 补全）
+    const saved = JSON.parse((getVault().files as Map<string, string>).get('CONFIG/STORAGE/news.json')!);
+    expect(saved.stats.totalSkipped).toBe(1);
   });
 
-  it('保存：仅发 read 入口事件（ticket 076 修订：三态 → 仅保存），时长取整分钟 ≥1', async () => {
+  it('保存：仅发 read 入口事件（ticket 076 修订后：保存/跳过均经 read 入口，时长取整分钟 ≥1）', async () => {
     await loadArticles();
     render();
     markAsRead('saved');
+    // 冲刷 saveArticles 写回链（防 fire-and-forget 跨测试泄漏——统一数据读写层多一层 promise，时序更敏感）
+    await new Promise((r) => setTimeout(r, 0));
     expect(newsSpy).toHaveBeenCalledTimes(1);
     expect(newsSpy).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'read',
@@ -140,24 +149,47 @@ describe('聚合讯阅读流', () => {
     expect(hasSavedEvt()).toBe(false); // 仅 saveToClip 流程登记补全，直接 markAsRead 不发 saved
   });
 
-  it('阅读时长：打开起算 → 关闭暂停 → 重开同篇续算 → 下一篇后重置（仅保存带时长）', async () => {
-    vi.useFakeTimers();
+  it('阅读时长：打开起算 → 关闭暂停 → 重开同篇续算 → 下一篇后重置（保存带时长，跳过同口径）', async () => {
+    // 跨用例串扰防护：前面 markAsRead 测试残留 currentIndex 指向第二篇，
+    // 会让 loadArticles 的 anchorCursor 锚定到第二篇（统一数据读写层微秒时序暴露此脆弱性）。
+    // 用 resetModules 拿全新模块状态（reader-cov 同款先例），保证从第一篇起算。
+    vi.resetModules();
+    const fresh = await import('../../src/news/reader');
+    const freshApp = await import('../../src/core/app');
+    const freshBus = await import('../../src/core/domain-bus');
+    const freshObsidian = await import('../mock-obsidian-entry');
+    freshObsidian.resetObsidianMocks();
+    document.body.innerHTML = '';
+    document.head.innerHTML = '';
+    const vault = new MockVault();
+    vault.files.set('CONFIG/STORAGE/news.json', JSON.stringify({ articles: NEWS_JSON, stats: { totalRead: 0, totalSaved: 0, totalSkipped: 0, byPlatform: {}, byDate: {} }, bilibiliUps: [], sources: { zhihu: true, guokr: true, bilibili: true } }));
+    freshApp.setApp({ vault, metadataCache: {}, workspace: { openLinkText: vi.fn() } } as any);
+    fresh.init(false);
+    // 挂到新模块的域总线（旧 newsSpy 是旧模块实例的，resetModules 后失效）
+    const freshSpy = vi.fn((_evt?: unknown) => {});
+    const freshOff = freshBus.onDomainEvent('news', (evt) => freshSpy(evt));
+    const freshLastEvt = () => {
+      const calls = freshSpy.mock.calls.map((c: any[]) => c[0]).filter((m: any) => m?.kind === 'read');
+      return calls[calls.length - 1]?.evt;
+    };
     try {
-      await loadArticles();
-      render();                                              // 打开第一篇 → 起算
-      vi.setSystemTime(Date.now() + 3 * 60 * 1000);          // 读 3 分钟
-      hide();                                                // 关闭 → 暂停
-      vi.setSystemTime(Date.now() + 2 * 60 * 60 * 1000);     // 关着 2 小时（不计入）
-      render();                                              // 重开同篇 → 续算
-      vi.setSystemTime(Date.now() + 1 * 60 * 1000);          // 再读 1 分钟
-      markAsRead('saved');                                   // 累计 4 分钟
-      expect(lastReadEvt()).toMatchObject({ state: 'saved', durationMin: 4 });
+      vi.useFakeTimers();
+      await fresh.loadArticles();
+      fresh.render();                                          // 打开第一篇 → 起算
+      vi.setSystemTime(Date.now() + 3 * 60 * 1000);            // 读 3 分钟
+      fresh.hide();                                            // 关闭 → 暂停
+      vi.setSystemTime(Date.now() + 2 * 60 * 60 * 1000);       // 关着 2 小时（不计入）
+      fresh.render();                                          // 重开同篇 → 续算
+      vi.setSystemTime(Date.now() + 1 * 60 * 1000);            // 再读 1 分钟
+      fresh.markAsRead('saved');                               // 累计 4 分钟
+      expect(freshLastEvt()).toMatchObject({ state: 'saved', durationMin: 4 });
       // 内部 render 已切到下一篇 → 累计清零
-      vi.setSystemTime(Date.now() + 5 * 60 * 1000);          // 下一篇读 5 分钟
-      markAsRead('saved');
-      expect(lastReadEvt()).toMatchObject({ title: '第二篇新闻', state: 'saved', durationMin: 5 });
+      vi.setSystemTime(Date.now() + 5 * 60 * 1000);            // 下一篇读 5 分钟
+      fresh.markAsRead('saved');
+      expect(freshLastEvt()).toMatchObject({ title: '第二篇新闻', state: 'saved', durationMin: 5 });
     } finally {
       vi.useRealTimers();
+      freshOff();
     }
   });
 
@@ -186,7 +218,7 @@ describe('聚合讯阅读流', () => {
   it('打开时只剩最后一篇：按钮即完成说明，读完显示最终计数 1 / 1', async () => {
     const vault = getVault();
     const saved = JSON.parse(vault.files.get('CONFIG/STORAGE/news.json')!);
-    saved[0].read = true; // 只留第二篇未读
+    saved.articles[0].read = true; // 只留第二篇未读
     vault.files.set('CONFIG/STORAGE/news.json', JSON.stringify(saved));
     await loadStats();
     await loadArticles();
@@ -199,29 +231,32 @@ describe('聚合讯阅读流', () => {
     expect(document.querySelector('.news-bottombar .news-counter')!.textContent).toContain('1 / 1');
   });
 
-  it('news-stats.json：recordStat 累计并落盘（byPlatform/byDate）', async () => {
+  it('news.json stats 段：recordStat 累计并落盘（byPlatform/byDate）', async () => {
     await loadStats();
     recordStat('skipped', NEWS_JSON[0]);
     recordStat('saved', NEWS_JSON[1]);
+    await new Promise((r) => setTimeout(r, 0)); // 冲刷 saveStats 写回链
     const vault = getVault();
-    const stats = JSON.parse(vault.files.get('CONFIG/STORAGE/news-stats.json')!);
+    const saved = JSON.parse(vault.files.get('CONFIG/STORAGE/news.json')!);
+    const stats = saved.stats;
     expect(stats.totalRead).toBe(2);
     expect(stats.totalSaved).toBe(1);
     expect(stats.totalSkipped).toBe(1);
     expect(stats.byPlatform['知乎日报']).toBe(1);
     expect(stats.byPlatform['果壳']).toBe(1);
-    const today = new Date().toISOString().substring(0, 10);
+    // x2b：byDate 键为本地日（与实现同口径，避免 UTC+8 凌晨跨日断言）
+    const today = localDayKey();
     expect(stats.byDate[today]).toBe(2);
   });
 
-  it('saveToClip：写入 归档/网页剪藏/标题.md（含 link/author/site/tags/dataviewjs 代码块）并 markAsRead', async () => {
+  it('saveToClip：写入 归档/网页剪藏/标题.md（含 url/author/site/tags/dataviewjs 代码块）并 markAsRead', async () => {
     await loadArticles();
     render();
     await saveToClip();
 
     const vault = getVault();
     const md = vault.files.get('归档/网页剪藏/第一篇新闻.md');
-    expect(md).toContain('link: "https://zhihu.com/a"');
+    expect(md).toContain('url: "https://zhihu.com/a"');
     expect(md).toContain('author: "甲"');
     expect(md).toContain('site: "知乎日报"');
     expect(md).toContain('tags:\n  - "AI"');
@@ -253,7 +288,7 @@ describe('聚合讯阅读流', () => {
 
     const md = vault.files.get('归档/网页剪藏/特殊字符新闻.md')!;
     // 每个双引号标量行都保持合法 YAML 形状（内部引号均被转义，无裸换行断行）
-    for (const key of ['link', 'author', 'site', 'summary', 'date']) {
+    for (const key of ['url', 'author', 'site', 'summary', 'date']) {
       expect(md).toMatch(new RegExp(`^${key}: "(?:[^"\\\\]|\\\\.)*"$`, 'm'));
     }
     expect(md).toMatch(/^tags:\n {2}- "(?:[^"\\]|\\.)*"\n {2}- "(?:[^"\\]|\\.)*"$/m);
@@ -266,16 +301,23 @@ describe('聚合讯阅读流', () => {
     expect(summary).toContain('第一行 第二行 \\"引用\\"');
   });
 
-  it('剪藏保存失败 → 「❌ 保存失败」', async () => {
+  it('剪藏保存失败 → 人话 toast（技术详情只进 console，m1b-news）', async () => {
     const vault = getVault();
     // 让 create 抛错
     vault.create = async () => {
-      throw new Error('磁盘错误');
+      throw new Error('ENOSPC: no space left on device');
     };
-    await loadArticles();
-    render();
-    await saveToClip();
-    expect(hasNotice(/保存失败/)).toBe(true);
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await loadArticles();
+      render();
+      await saveToClip();
+      expect(hasNotice(/保存失败/)).toBe(true);
+      expect(hasNotice(/ENOSPC/)).toBe(false); // 技术异常不裸露给用户
+      expect(errSpy).toHaveBeenCalled(); // 详情进 console
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 
   it('renderMarkdown：转义 XSS 后再渲染', () => {

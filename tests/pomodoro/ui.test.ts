@@ -3,6 +3,8 @@
  * fake timers（含 Date）：tick 轮询与倒计时时间推进可控。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import { MockVault, mockAppWithVault } from '../mock-vault';
 import { resetObsidianMocks, hasNotice } from '../mock-obsidian-entry';
 import { setApp } from '../../src/core/app';
@@ -217,7 +219,10 @@ describe('番茄钟弹窗', () => {
     const { app } = setup();
     await openPomodoro(app);
     expect(el('pomodoro-mask')).not.toBeNull();
-    expect(el('pomodoro-mask').style.zIndex).toBe('9998'); // 域主弹窗层级：低于设置页/设置弹窗
+    // ADR-0067：遮罩 z 动态发号（JS openPomodoro），样式源不再持有静态档
+    expect(Number.isFinite(parseInt(el('pomodoro-mask').style.zIndex, 10))).toBe(true);
+    const css = readFileSync(resolve(process.cwd(), 'src/pomodoro/styles.css'), 'utf8');
+    expect(/#pomodoro-mask\s*\{[^}]*z-index:/.test(css)).toBe(false);
     const popup = el('pomodoro-popup');
     expect(popup).not.toBeNull();
     expect(popup.querySelector('#pomodoro-ring-svg')).not.toBeNull();

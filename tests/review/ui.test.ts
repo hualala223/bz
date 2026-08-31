@@ -40,6 +40,8 @@ describe('UIManager', () => {
     resetObsidianMocks();
     document.body.innerHTML = '';
     setApp(null as any);
+    // 测试隔离加固：统一注入空 provider（不依赖跨用例残留；storagePath 空 → 回退 CONFIG/STORAGE）
+    setSettingsProvider(() => ({}) as any);
   });
 
   it('构造即建常驻 DOM（display none）+ 样式注入', () => {
@@ -54,12 +56,15 @@ describe('UIManager', () => {
     expect(popup).not.toBeNull();
     expect(mask.style.display).toBe('none');
     expect(popup.style.display).toBe('none');
-    expect(mask.style.zIndex).toBe('9998');
-    expect(popup.style.maxWidth).toBe('800px');
+    expect(Number.isFinite(parseInt(mask.style.zIndex, 10))).toBe(true); // 动态发号（ADR-0067）
+    // ticket 141：布局样式收敛 styles.css，显隐保留功能性内联
     expect(document.querySelector('style[data-review-styles]')).toBeNull(); // 样式已收敛 styles.css，不再运行时注入
     expect(document.getElementById('review-btn-add')).not.toBeNull();
     // 无 emoji 标题
     expect(popup.querySelector('h3')!.textContent).toBe('复习计划');
+    // ticket 141：头行走 .bz-win-head 统一规范，关闭钮挂 .bz-win-close
+    expect(popup.querySelector('.bz-win-head')!.querySelector('h3')!.textContent).toBe('复习计划');
+    expect(popup.querySelector('.bz-win-close')).not.toBeNull();
     ui.destroy();
   });
 
@@ -114,7 +119,7 @@ describe('UIManager', () => {
     ui.destroy();
   });
 
-  it('搜索过滤 + 空态文案', async () => {
+  it('搜索过滤 + 空态文案（ticket l6：空态带首步引导）', async () => {
     const vault = new MockVault();
     seed(vault);
     const app = makeApp(vault);
@@ -131,6 +136,15 @@ describe('UIManager', () => {
     ui.searchInput!.value = 'ZZZ';
     await ui.refreshPanel();
     expect(container.textContent).toContain('没有复习计划 🎉');
+    // ticket l6：空态补首步引导
+    expect(container.textContent).toContain('打开任意笔记使用「加入复习计划」命令');
+    expect(container.textContent).toContain('设置中添加监听文件夹');
+    // 归档空态：不带引导
+    ui.showArchived = true;
+    ui.searchInput!.value = 'ZZZ';
+    await ui.refreshPanel();
+    expect(container.textContent).toContain('没有已完成（归档）的复习');
+    expect(container.textContent).not.toContain('加入复习计划');
     ui.destroy();
   });
 
@@ -149,7 +163,8 @@ describe('UIManager', () => {
     const btns = dialog.querySelectorAll('.diff-btn');
     expect(btns.length).toBe(5);
     expect(btns[0].textContent).toContain('🟥 忘了（Again）');
-    expect((btns[0] as HTMLElement).style.borderLeft).toContain('3px solid rgb(255, 71, 87)'); // #ff4757
+    // ticket 141：难度色标收敛 CSS（data-diff 属性驱动），内联 border-left 已移除
+    expect((btns[0] as HTMLElement).dataset.diff).toBe('again');
     expect((btns[4] as HTMLElement).dataset.diff).toBe('cancel');
     // 外点关闭（等 100ms 后 handler 注册完成，再点外部区域）
     await new Promise((r) => setTimeout(r, 150));
@@ -159,17 +174,27 @@ describe('UIManager', () => {
     ui.destroy();
   });
 
-  it('确认框：confirm-* id + 确定按钮 accent', async () => {
+  it('移出确认走共享流程框（ticket 141：自绘确认框迁移 openFlowDialog）', async () => {
     const vault = new MockVault();
+    seed(vault);
     const app = makeApp(vault);
     setApp(app);
     const dm = new ReviewDataManager(app);
     const ui = new UIManager(app, dm);
-    ui.showConfirm('移出复习计划', '确定移出“A”？', () => {});
-    expect(ui.confirmPopup).not.toBeNull();
-    expect(ui.confirmPopup!.style.display).toBe('flex');
-    expect(document.getElementById('confirm-title')!.textContent).toBe('移出复习计划');
-    expect(document.getElementById('confirm-message')!.textContent).toBe('确定移出“A”？');
+    ui.showMain();
+    await ui.refreshPanel();
+    const container = document.getElementById('review-entries-container')!;
+    const card = container.querySelector('.review-card') as HTMLElement;
+    card.dispatchEvent(new MouseEvent('contextmenu', { button: 2, bubbles: true, cancelable: true, clientX: 60, clientY: 60 }));
+    const removeItem = [...document.querySelectorAll('.bz-item-menu-item')].find(
+      (b) => b.textContent!.includes('移出复习计划')
+    ) as HTMLElement;
+    removeItem.click();
+    await new Promise((r) => setTimeout(r, 10));
+    const flowPopup = document.getElementById('__shared_confirm_popup__')!;
+    expect(flowPopup).not.toBeNull();
+    expect(flowPopup.textContent).toContain('移出复习计划');
+    expect(flowPopup.textContent).toContain('确定移出');
     ui.destroy();
   });
 
@@ -192,11 +217,17 @@ describe('UIManager', () => {
     settingsBtn.click();
     const popup = document.getElementById('bz-settings-modal-popup')!;
     expect(popup.textContent).toContain('复习计划设置');
-    const names = () => [...popup.querySelectorAll('.setting-item')].map((el) => (el as HTMLElement).dataset.name);
+    const names = () =>
+      [...popup.querySelectorAll('.setting-item')]
+        .filter((el) => !(el as HTMLElement).closest('.bz-settings-group')!.classList.contains('bz-setting-hidden'))
+        .map((el) => (el as HTMLElement).dataset.name);
     // 无检查间隔（已删）
     expect(names()).not.toContain('检查间隔（秒）');
-    // 分组卡片头（组名；桌面端无「移动端」组）
-    const groupNames = [...popup.querySelectorAll('.bz-settings-group-name')].map((el) => el.textContent);
+// 分组卡片头（组名；桌面端移动端组挂 bz-setting-hidden 整组隐藏——ticket 131 声明式联动保留结构；
+    // 按数量复习组为本地分支移植，位于复习节奏与自动化之间）
+    const isHiddenGroup = (el: Element) =>
+      Boolean((el.closest('.bz-settings-group') as HTMLElement | null)?.classList.contains('bz-setting-hidden'));
+    const groupNames = [...popup.querySelectorAll('.bz-settings-group-name')].filter((el) => !isHiddenGroup(el)).map((el) => el.textContent);
     expect(groupNames).toEqual(['检查提醒', '做题家', '复习节奏', '按数量复习', '自动化', '界面']);
     // 检查提醒组
     expect(names()).toContain('到期提醒');
@@ -207,12 +238,20 @@ describe('UIManager', () => {
     expect(names()).toContain('每篇笔记出题数量');
     expect(names()).toContain('打乱出题顺序');
     expect(names()).toContain('出题难度');
+    // ticket f8-quiz（解冻文案）：出题数量 desc 补「留空/0=自动」
+    const perNoteSetting = [...popup.querySelectorAll('.setting-item')].find(
+      (el) => (el as HTMLElement).dataset.name === '每篇笔记出题数量'
+    ) as HTMLElement;
+    expect((perNoteSetting as any).__setting.desc).toContain('留空/0=自动');
     // 复习节奏组
     expect(names()).toContain('每日复习上限');
     expect(names()).toContain('复习间隔缩放');
+    // 自动化组：监听文件夹 + 排除名单（ticket 57）
+    expect(names()).toContain('监听文件夹');
+    expect(names()).toContain('排除名单');
     // 界面组
     expect(names()).toContain('文件树标记');
-    // 分组项数徽标（隐藏项不计；自动化组的「＋ 添加监听文件夹」为纯操作行，挂 bz-setting-action-row 豁免）
+    // 分组项数徽标（隐藏项不计；自动化组 = 监听文件夹 path 行 + 排除名单行）
     const badge = (groupName: string) =>
       [...popup.querySelectorAll('.bz-settings-group')].find(
         (g) => g.querySelector('.bz-settings-group-name')!.textContent === groupName
@@ -220,7 +259,7 @@ describe('UIManager', () => {
     expect(badge('检查提醒')).toBe('2 项');
     expect(badge('做题家')).toBe('5 项');
     expect(badge('复习节奏')).toBe('2 项');
-    expect(badge('自动化')).toBe('1 项');
+    expect(badge('自动化')).toBe('2 项');
     expect(badge('界面')).toBe('1 项');
     ui.destroy();
   });
@@ -230,44 +269,60 @@ describe('UIManager', () => {
     seed(vault);
     const app = makeApp(vault);
     setApp(app);
-    setSettingsProvider(() => ({ forceQuizForReview: false } as any));
+    // 稳定引用：声明式联动（visibleWhen）经 tryGetSettings 读值，provider 必须返回同一对象引用
+    const quizSettings: any = { forceQuizForReview: false };
+    setSettingsProvider(() => quizSettings);
     const dm = new ReviewDataManager(app);
     const ui = new UIManager(app, dm);
     ui.showMain();
     (document.getElementById('review-btn-settings') as HTMLElement).click();
     const popup = document.getElementById('bz-settings-modal-popup')!;
-    const quizBox = popup.querySelector('#review-quiz-settings') as HTMLElement;
-    expect(quizBox.style.display).toBe('none');
-    // 做题家组徽标：出题子容器隐藏时仅计 toggle → 1 项
+    // 做题家子项显隐（ticket 131 visibleWhen 声明式：隐藏行留在 DOM 但带 .bz-setting-hidden）
+    const hiddenOf = (name: string) => {
+      const el = [...popup.querySelectorAll('.setting-item')].find(
+        (s) => (s as HTMLElement).dataset.name === name
+      ) as HTMLElement;
+      return el?.classList.contains('bz-setting-hidden');
+    };
+    expect(hiddenOf('允许多选题')).toBe(true);
+    expect(hiddenOf('每篇笔记出题数量')).toBe(true);
+    // 做题家组徽标：出题子项隐藏时仅计 toggle → 1 项
     const badge = () =>
       [...popup.querySelectorAll('.bz-settings-group')].find(
         (g) => g.querySelector('.bz-settings-group-name')!.textContent === '做题家'
       )!.querySelector('.bz-settings-group-count')!.textContent;
     expect(badge()).toBe('1 项');
-    // 用做题测难度 toggle 开启 → 出题子容器显示，徽标经 refreshSettingsGroupCounts 刷新 → 5 项
+    // 用做题测难度 toggle 开启 → 出题子项显示（visibleWhen 重求值 + 徽标刷新），徽标 → 5 项
     const toggleSetting = [...popup.querySelectorAll('.setting-item')].find(
       (el) => (el as HTMLElement).dataset.name === '用做题测难度'
     ) as HTMLElement;
     const toggle = (toggleSetting as any).__setting.controls[0];
     toggle.trigger(true);
     await new Promise((r) => setTimeout(r, 20));
-    expect(quizBox.style.display).toBe('');
+    expect(hiddenOf('允许多选题')).toBe(false);
+    expect(hiddenOf('每篇笔记出题数量')).toBe(false);
     expect(badge()).toBe('5 项');
     closeSettingsModal();
     ui.destroy();
   });
 
-  it('ESC：confirm 优先，其次主面板', async () => {
+  it('ESC：流程框层优先关闭，主面板不被误关；二次 ESC 才收主面板（escManager 层级）', async () => {
     const vault = new MockVault();
     const app = makeApp(vault);
     setApp(app);
     const dm = new ReviewDataManager(app);
     const ui = new UIManager(app, dm);
     ui.showMain();
-    ui.showConfirm('t', 'm', () => {});
+    // 打开共享流程框（模拟移出确认在途）
+    const { openFlowDialog } = await import('../../src/core/flow-dialog');
+    const dialogPromise = openFlowDialog({ message: 'm', actions: [{ label: '取消', value: 'cancel' }, { label: '确定', value: 'ok' }] });
+    await new Promise((r) => setTimeout(r, 0));
+    // 第一次 ESC：流程框关闭（取消语义），主面板保留
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    expect(ui.confirmPopup!.style.display).toBe('none');
+    await dialogPromise;
+    expect(document.getElementById('__shared_confirm_mask__')).toBeNull();
     expect(ui.mask!.style.display).toBe('block');
+    // 第二次 ESC：主面板关闭（escManager 'review-main' 层）
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(ui.mask!.style.display).toBe('none');
     ui.destroy();
@@ -291,7 +346,8 @@ describe('UIManager', () => {
     expect(removeItem).toBeTruthy();
     removeItem.click();
     await new Promise((r) => setTimeout(r, 10));
-    expect(document.getElementById('confirm-title')!.textContent).toBe('移出复习计划');
+    // ticket 141：确认框迁移共享流程框
+    expect(document.getElementById('__shared_confirm_popup__')!.textContent).toContain('移出复习计划');
     ui.destroy();
   });
 
@@ -479,8 +535,11 @@ describe('移动端默认全屏（ticket 68）', () => {
     const ui = new UIManager(app, dm);
     setSettingsProvider(() => ({}) as any);
     const settingNames = () =>
-      [...document.querySelectorAll('#bz-settings-modal-popup .setting-item')].map((el) => (el as HTMLElement).dataset.name);
-    // 桌面端：无该行（设置项名在 dataset.name，与既有断言口径一致）
+      [...document.querySelectorAll('#bz-settings-modal-popup .setting-item')]
+        // ticket 131：隐藏行留在 DOM 带 .bz-setting-hidden，桌面端可见性过滤后与原行为一致
+        .filter((el) => !(el as HTMLElement).closest('.bz-settings-group')!.classList.contains('bz-setting-hidden'))
+        .map((el) => (el as HTMLElement).dataset.name);
+    // 桌面端：无该行（移动端组整组隐藏；设置项名在 dataset.name，与既有断言口径一致）
     (document.getElementById('review-btn-settings') as HTMLElement).click();
     expect(settingNames()).not.toContain('移动端默认全屏');
     // 移动端：有该行（toggle 语义：再点先关旧再开新）
@@ -544,7 +603,7 @@ describe('ticket 098 UI：做题家图标移除 / 挂起记录删除线 / 监听
     ui.destroy();
   });
 
-  it('⚙️ 设置弹窗：监听文件夹 chip（名字+关闭标签）+ 添加按钮打开文件夹选择弹窗', async () => {
+  it('⚙️ 设置弹窗：监听文件夹为通用 path 行（chips + 添加…），✕ 移除连带清理排除记录', async () => {
     const vault = new MockVault();
     seed(vault);
     const app = makeApp(vault);
@@ -559,30 +618,77 @@ describe('ticket 098 UI：做题家图标移除 / 挂起记录删除线 / 监听
     const popup = document.getElementById('bz-settings-modal-popup')!;
     const names = () => [...popup.querySelectorAll('.setting-item')].map((el) => (el as HTMLElement).dataset.name);
     expect(names()).toContain('监听文件夹');
-    // 已有监听目录 → chip 形态（名字 + ✕ 关闭标签）
-    const watchBox = popup.querySelector('#review-watch-folders')!;
-    expect(watchBox.querySelector('.bz-review-watch-name')!.textContent).toBe('卡片盒');
-    const chipClose = watchBox.querySelector('.bz-review-watch-close') as HTMLElement;
+    // 已有监听目录 → 通用 path chips 形态（名字 + ✕，ticket 133 设置行样式）
+    const row = [...popup.querySelectorAll('.setting-item')].find(
+      (el) => (el as HTMLElement).dataset.name === '监听文件夹'
+    ) as HTMLElement;
+    expect(row.classList.contains('bz-path-picker-setting-row')).toBe(true);
+    const chipName = row.querySelector('.bz-path-picker-chip-name')!;
+    expect(chipName.textContent).toBe('卡片盒');
+    const chipClose = row.querySelector('.bz-path-picker-chip-x') as HTMLElement;
     expect(chipClose).not.toBeNull();
-    // ✕ 关闭标签移除该目录（同时清空其下排除记录，见 watch.test removeWatchedFolder）；异步链路 → 轮询等待
+    // ✕ 移除该目录（onChange 连带清空其下排除记录并落盘，见 watch.test removeWatchedFolder）；异步链路 → 轮询等待
     chipClose.click();
-    for (let i = 0; i < 100 && popup.querySelector('#review-watch-folders .bz-review-watch-chip'); i++) {
+    for (let i = 0; i < 100 && row.querySelector('.bz-path-picker-chip'); i++) {
       await new Promise((r) => setTimeout(r, 10));
     }
-    expect(popup.querySelector('#review-watch-folders .bz-review-watch-chip')).toBeNull();
-    // ＋ 添加监听文件夹 → 打开附件搬移同款选择弹窗（ticket 099 追加复用；层级 200000 压设置弹窗）
-    const addBtn = [...popup.querySelectorAll('#review-watch-folders button')].find(
-      (b) => b.textContent === '＋ 添加监听文件夹'
-    ) as HTMLElement;
+    expect(row.querySelector('.bz-path-picker-chip')).toBeNull();
+    expect(settings.reviewWatchedFolders).toEqual([]);
+    // 空态恢复紧凑「添加…」按钮 → 点击打开文件夹选择弹窗
+    const addBtn = row.querySelector('.bz-path-picker-btn--slim') as HTMLElement;
     expect(addBtn).toBeTruthy();
     addBtn.click();
-    for (let i = 0; i < 100 && !document.getElementById('bz-attach-folder-mask'); i++) {
+    for (let i = 0; i < 100 && !document.getElementById('bz-path-picker-mask'); i++) {
       await new Promise((r) => setTimeout(r, 10));
     }
-    const pickerMask = document.getElementById('bz-attach-folder-mask')!;
+    const pickerMask = document.getElementById('bz-path-picker-mask')!;
     expect(pickerMask).not.toBeNull();
-    expect(pickerMask.querySelector('.bz-attach-title')!.textContent).toBe('选择监听文件夹');
-    expect(pickerMask.querySelector('.bz-attach-btn--primary')!.textContent).toBe('确定');
+    const pickerPopup = document.getElementById('bz-path-picker-popup')!;
+    expect(pickerPopup.querySelector('.bz-path-picker-title')!.textContent).toBe('选择监听文件夹');
+    expect(pickerPopup.querySelector('.bz-path-picker-btn--primary')!.textContent).toBe('确定');
+    const pmz = parseInt(pickerMask.style.zIndex, 10);
+    expect(Number.isFinite(pmz)).toBe(true); // 动态发号（ADR-0067），后开压过设置弹窗
+    closeSettingsModal();
+    ui.destroy();
+  });
+
+  it('⚙️ 设置弹窗：监听文件夹新增目录收编确认取消 → 否决本次变更（chips 与落盘均回退）', async () => {
+    const vault = new MockVault();
+    seed(vault);
+    vault.files.set('新目录/A.md', '正文');
+    const app = makeApp(vault);
+    setApp(app);
+    const settings: any = { reviewWatchedFolders: ['卡片盒'], reviewExcludedNotes: [] };
+    setSettingsProvider(() => settings);
+    const dm = new ReviewDataManager(app);
+    const ui = new UIManager(app, dm);
+    ui.showMain();
+    (document.getElementById('review-btn-settings') as HTMLElement).click();
+    const popup = document.getElementById('bz-settings-modal-popup')!;
+    const row = [...popup.querySelectorAll('.setting-item')].find(
+      (el) => (el as HTMLElement).dataset.name === '监听文件夹'
+    ) as HTMLElement;
+    // 空态按钮不在（已有卡片盒 chip）→ chip 文本点击重开选择器
+    (row.querySelector('.bz-path-picker-chip-name') as HTMLElement).click();
+    for (let i = 0; i < 100 && !document.getElementById('bz-path-picker-popup'); i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    // 勾选「新目录」→ 确定 → 弹存量收编确认 → 点「取消」→ 该目录不加入
+    const pickerPopup = document.getElementById('bz-path-picker-popup')!;
+    const opt = pickerPopup.querySelector('.bz-path-picker-row[data-path="新目录"]') as HTMLElement;
+    opt.click();
+    (pickerPopup.querySelector('.bz-path-picker-btn--primary') as HTMLElement).click();
+    for (let i = 0; i < 100 && !document.getElementById('__shared_confirm_popup__'); i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    (document.getElementById('__shared_confirm_cancel__') as HTMLElement).click();
+    for (let i = 0; i < 100 && row.querySelectorAll('.bz-path-picker-chip').length !== 1; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    // chips 回退为仅卡片盒，落盘同样不含新目录
+    const chipNames = () => [...row.querySelectorAll('.bz-path-picker-chip-name')].map((el) => el.textContent);
+    expect(chipNames()).toEqual(['卡片盒']);
+    expect(settings.reviewWatchedFolders).toEqual(['卡片盒']);
     closeSettingsModal();
     ui.destroy();
   });
@@ -601,5 +707,184 @@ describe('ticket 098 UI：做题家图标移除 / 挂起记录删除线 / 监听
     hideSpy.mockClear();
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(hideSpy).not.toHaveBeenCalled(); // 旧逻辑残留监听会再次触发
+  });
+});
+
+describe('ticket 57：排除名单管理 UI', () => {
+  beforeEach(() => {
+    resetObsidianMocks();
+    document.body.innerHTML = '';
+    setApp(null as any);
+    setSettingsProvider(() => ({} as any));
+  });
+
+  function lastNoticeText(): string {
+    const c = document.getElementById('bz-notice-container');
+    return c ? c.textContent || '' : '';
+  }
+
+  it('设置弹窗：排除名单 chip 展示 + 单条解除（其余保留）', async () => {
+    const vault = new MockVault();
+    seed(vault);
+    const app = makeApp(vault);
+    setApp(app);
+    const settings: any = { reviewWatchedFolders: [], reviewExcludedNotes: ['卡片盒/A.md', '卡片盒/B.md'] };
+    setSettingsProvider(() => settings);
+    const dm = new ReviewDataManager(app);
+    const ui = new UIManager(app, dm);
+    ui.showMain();
+    (document.getElementById('review-btn-settings') as HTMLElement).click();
+    const popup = document.getElementById('bz-settings-modal-popup')!;
+    const list = popup.querySelector('#review-excluded-list')!;
+    const chipNames = () => [...list.querySelectorAll('.bz-review-exclude-name')].map((el) => el.textContent);
+    expect(chipNames()).toEqual(['卡片盒/A.md', '卡片盒/B.md']);
+    // ✕ 解除单条 → 其余保留 + toast
+    const removeBtn = list.querySelector('.bz-review-exclude-remove') as HTMLElement;
+    expect(removeBtn.getAttribute('aria-label')).toBe('解除排除 卡片盒/A.md');
+    removeBtn.click();
+    for (let i = 0; i < 100 && list.querySelectorAll('.bz-review-exclude-remove').length === 2; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(settings.reviewExcludedNotes).toEqual(['卡片盒/B.md']);
+    expect(chipNames()).toEqual(['卡片盒/B.md']);
+    expect(lastNoticeText()).toContain('已解除排除');
+    closeSettingsModal();
+    ui.destroy();
+  });
+
+  it('设置弹窗：排除名单空态「暂无排除笔记」', async () => {
+    const vault = new MockVault();
+    seed(vault);
+    const app = makeApp(vault);
+    setApp(app);
+    setSettingsProvider(() => ({ reviewExcludedNotes: [] } as any));
+    const dm = new ReviewDataManager(app);
+    const ui = new UIManager(app, dm);
+    ui.showMain();
+    (document.getElementById('review-btn-settings') as HTMLElement).click();
+    const popup = document.getElementById('bz-settings-modal-popup')!;
+    const list = popup.querySelector('#review-excluded-list')!;
+    expect(list.textContent).toContain('暂无排除笔记');
+    closeSettingsModal();
+    ui.destroy();
+  });
+});
+
+describe('ticket x5：列表键盘路径', () => {
+  beforeEach(() => {
+    resetObsidianMocks();
+    document.body.innerHTML = '';
+    setApp(null as any);
+  });
+
+  function showList(vault: MockVault): UIManager {
+    const app = makeApp(vault);
+    setApp(app);
+    const dm = new ReviewDataManager(app);
+    const ui = new UIManager(app, dm);
+    ui.showMain();
+    return ui;
+  }
+
+  it('方向键移动焦点 + 回车弹难度弹窗（可复习条目）', async () => {
+    const vault = new MockVault();
+    seed(vault); // A（逾期）、B（未逾期）
+    const ui = showList(vault);
+    await ui.refreshPanel();
+    const container = document.getElementById('review-entries-container')!;
+    const cards = [...container.querySelectorAll('.review-card')] as HTMLElement[];
+    expect(cards.length).toBe(2);
+    expect(cards[0].tabIndex).toBe(0); // 卡片可聚焦（Tab 原生可达，无焦点陷阱）
+    // 无焦点时 ArrowDown → 聚焦第一张
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(document.activeElement).toBe(cards[0]);
+    // ArrowDown → 第二张；ArrowUp → 回第一张
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(document.activeElement).toBe(cards[1]);
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    expect(document.activeElement).toBe(cards[0]);
+    // Enter → 难度弹窗（与抽屉「开始复习」同路径）
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    const dlg = document.querySelector('.difficulty-dialog') as HTMLElement;
+    expect(dlg).not.toBeNull();
+    expect(dlg.textContent).toContain('标记复习');
+    ui.destroy();
+  });
+
+  it('回车：挂起记录 → 打开原文路径（文件缺失提示），不弹难度窗', async () => {
+    const vault = new MockVault();
+    const now = new Date();
+    seed(vault, [
+      {
+        id: '3', filePath: 'GONE.md', name: 'GONE', reviewStart: now.toISOString(), stage: 0, phase: 'ladder',
+        stability: 1, difficulty: 0.3, reviewHistory: [], totalReviews: 0, averageConfidence: 0,
+        nextReviewDate: new Date(now.getTime() + 3600000).toISOString(), lastReviewed: null, lastDifficulty: null, completed: false,
+      },
+    ]);
+    const ui = showList(vault);
+    await ui.refreshPanel();
+    const container = document.getElementById('review-entries-container')!;
+    const cards = [...container.querySelectorAll('.review-card')] as HTMLElement[];
+    const goneCard = cards.find((c) => c.querySelector('.review-content')!.textContent === 'GONE')!;
+    expect(goneCard).toBeTruthy();
+    goneCard.focus();
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(document.querySelector('.difficulty-dialog')).toBeNull();
+    const c = document.getElementById('bz-notice-container');
+    expect(c!.textContent).toContain('文件已删除');
+    ui.destroy();
+  });
+
+  it('回车：难度弹窗点难度 → markReview 落盘（键盘全路径闭环）', async () => {
+    const vault = new MockVault();
+    seed(vault);
+    const ui = showList(vault);
+    await ui.refreshPanel();
+    const container = document.getElementById('review-entries-container')!;
+    const cards = [...container.querySelectorAll('.review-card')] as HTMLElement[];
+    cards[0].focus();
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    const dlg = document.querySelector('.difficulty-dialog') as HTMLElement;
+    const goodBtn = [...dlg.querySelectorAll('.diff-btn')].find((b) => b.textContent!.includes('一般')) as HTMLElement;
+    goodBtn.click();
+    await new Promise((r) => setTimeout(r, 50));
+    const items = await new ReviewDataManager(ui.app).loadItems();
+    expect(items.find((i) => i.filePath === 'A.md')!.lastDifficulty).toBe('good');
+    ui.destroy();
+  });
+});
+
+describe('ticket s1：难度弹窗文件名 XSS 转义', () => {
+  beforeEach(() => {
+    resetObsidianMocks();
+    document.body.innerHTML = '';
+    setApp(null as any);
+  });
+
+  it('恶意文件名经 escapeHtml 显示为文本', async () => {
+    const vault = new MockVault();
+    const evilName = '<img src=x onerror=alert(1)>';
+    vault.files.set(`${evilName}.md`, '正文');
+    const now = new Date();
+    vault.files.set(REVIEW_FILE_PATH, JSON.stringify([
+      {
+        id: '1', filePath: `${evilName}.md`, name: evilName, reviewStart: now.toISOString(), stage: 1, phase: 'ladder',
+        stability: 1, difficulty: 0.3, reviewHistory: [], totalReviews: 0, averageConfidence: 0,
+        nextReviewDate: new Date(now.getTime() - 1000).toISOString(), lastReviewed: null, lastDifficulty: null, completed: false,
+      },
+    ]));
+    const app = makeApp(vault);
+    setApp(app);
+    const dm = new ReviewDataManager(app);
+    const ui = new UIManager(app, dm);
+    const items = await dm.loadItems();
+    ui.showDifficultyDialog(items[0], () => {});
+    const dlg = document.querySelector('.difficulty-dialog') as HTMLElement;
+    expect(dlg).not.toBeNull();
+    expect(dlg.textContent).toContain('标记复习：' + evilName);
+    expect(dlg.querySelector('img')).toBeNull(); // 未被当作 HTML 解析
+    expect(dlg.innerHTML).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    ui.destroy();
   });
 });

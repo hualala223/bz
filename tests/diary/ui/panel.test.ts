@@ -222,8 +222,9 @@ describe('滚轮日期时间选择器（ticket 07）', () => {
     expect(columns.length).toBe(5);
     // 2月29天（2024 闰年）
     const dayColumn = document.querySelectorAll('#unified-datetime-picker-mask .datetime-number-item');
-    // 年(2000-2030=31) + 月(12) + 日(29) + 时(24) + 分(60)
-    expect(dayColumn.length).toBe(31 + 12 + 29 + 24 + 60);
+    // 年列动态（UX-34：数据最早年份 2024 ~ 当前年份+1）+ 月(12) + 日(29) + 时(24) + 分(60)
+    const yearCount = new Date().getFullYear() + 1 - 2024 + 1;
+    expect(dayColumn.length).toBe(yearCount + 12 + 29 + 24 + 60);
     // ESC 或点击遮罩关闭
     (document.getElementById('unified-datetime-picker-mask') as HTMLElement).remove();
   });
@@ -262,15 +263,20 @@ describe('设置读取（ticket 09 前置）', () => {
     (settingsBtn as HTMLElement).click();
     const popup = document.getElementById('bz-settings-modal-popup')!;
     expect(popup.textContent).toContain('日记本设置');
-    // 分组卡片结构：3 组（目录/显示/默认视图；移动端组桌面不渲染），原生图标 + 徽标回填项数
-    const heads = [...popup.querySelectorAll('.bz-settings-group-head')];
-    expect(heads.map((el) => (el as HTMLElement).textContent!.trim())).toEqual(['目录4 项', '显示5 项', '默认视图3 项']);
-    expect(heads.map((el) => el.querySelector('.bz-settings-group-icon')!.getAttribute('data-icon'))).toEqual(['folder-open', 'eye', 'monitor']);
-    const names = [...popup.querySelectorAll('.bz-settings-group-body .setting-item')].map((el) => (el as HTMLElement).dataset.name);
+    // 分组卡片结构：4 组可见（目录/显示/默认视图/维护；移动端组挂 bz-setting-hidden 整组隐藏——ticket 131），原生图标 + 徽标回填项数
+    const isHiddenGroup = (el: Element) =>
+      Boolean((el.closest('.bz-settings-group') as HTMLElement | null)?.classList.contains('bz-setting-hidden'));
+    const heads = [...popup.querySelectorAll('.bz-settings-group-head')].filter((el) => !isHiddenGroup(el));
+    expect(heads.map((el) => (el as HTMLElement).textContent!.trim())).toEqual(['目录4 项', '显示5 项', '默认视图3 项', '维护0 项']);
+    expect(heads.map((el) => el.querySelector('.bz-settings-group-icon')!.getAttribute('data-icon'))).toEqual(['folder-open', 'eye', 'monitor', 'wrench']);
+    const names = [...popup.querySelectorAll('.bz-settings-group-body .setting-item')]
+      .filter((el) => !el.classList.contains('bz-setting-hidden'))
+      .map((el) => (el as HTMLElement).dataset.name);
     expect(names).toEqual([
-      '日记目录', '影视目录', '信目录', '每批加载数量',
+      '日记目录', '影视目录', '信件目录', '每批加载数量',
       '显示标签计数', '默认日期取自文件', '标签按钮显示表情', '卡片内容渲染方式', '标签排序',
       '面板默认日期筛选', '默认选中标签', '保存后进入编辑',
+      '日记解析检测',
     ]);
   });
 

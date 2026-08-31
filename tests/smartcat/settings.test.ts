@@ -2,7 +2,7 @@
  * smartcat 设置弹窗测试（UI 层）：
  * 1) 移动端长按开设置 → 关闭（遮罩）→ 拖拽恢复（回归：onClose 复位 isSettingsOpen 交互锁）；
  * 2) 外观平铺色块选择器（13 皮肤、active 跟随、点击落盘并即时换肤）；
- * 3) 人格成长数据列表桌面/移动同套显示（2026-08-23 合并一套拍板，推翻原「移动端删除」差异）；
+ * 3) 人格成长可视化与重置成长已移除（ticket 123 UI 拍板），设置弹窗无相关元素；
  * 4) 设置弹窗移动端全屏跟随 smartcatMobileDefaultFullscreen（与聊天/数据面板同一开关）；
  * 5) 「打开数据面板」行替换原「每周懂你报告」（周报移入数据面板「报告」页签）；
  * 6) 分组卡片结构（2026-08 方案 A：外观/可视化/互动/记忆 + 移动端）与文案规范（标题无括号、
@@ -18,7 +18,7 @@ import { openSmartcatSettings } from '../../src/smartcat/ui';
 import { CAT_CONTAINER_ID } from '../../src/smartcat/ui';
 import { closeSettingsModal } from '../../src/core/settings-modal';
 
-let settings: any = { storagePath: 'CONFIG/STORAGE', smartcatEnabled: true, smartcatMobileDefaultFullscreen: false };
+let settings: any = { storagePath: 'CONFIG/STORAGE', smartcatEnabled: true, smartcatOffMode: 'stop', smartcatMobileDefaultFullscreen: false };
 
 function makeApp() {
   const vault = new MockVault();
@@ -50,7 +50,7 @@ const baseConfig = () => ({
 beforeEach(() => {
   resetObsidianMocks();
   document.body.innerHTML = '';
-  settings = { storagePath: 'CONFIG/STORAGE', smartcatEnabled: true, smartcatMobileDefaultFullscreen: false };
+  settings = { storagePath: 'CONFIG/STORAGE', smartcatEnabled: true, smartcatOffMode: 'stop', smartcatMobileDefaultFullscreen: false };
   unloadSmartCat();
 });
 
@@ -100,11 +100,6 @@ describe('外观平铺色块选择器', () => {
       },
       settingsKeys: { enabled: true, mobileFullscreen: keys?.mobileFullscreen ?? false },
       setMobileFullscreen: async () => {},
-      getPersonalityGrowth: () => ({
-        ocean: { openness: 0.6, conscientiousness: 0.5, extraversion: 0.4, agreeableness: 0.7, neuroticism: 0.3 },
-        traits: { warmth: 0.6 },
-      }),
-      resetPersonalityGrowth: async () => {},
       onAppearanceChanged: (skin) => hooks.appearances.push(skin),
     });
   }
@@ -139,21 +134,31 @@ describe('外观平铺色块选择器', () => {
     expect(hooks.saves.length).toBe(1);
   });
 
-  it('人格成长数据列表桌面/移动同套显示（2026-08-23 合并一套）', () => {
+  it('人格成长可视化与重置成长已移除（ticket 123 UI 拍板）', () => {
     const hooks = { saves: [] as any[], appearances: [] as string[] };
-    // 桌面端：有人格面板
+    // 桌面端：无人格面板、无重置成长按钮
     Platform.isMobile = false;
     openWith(baseConfig(), hooks);
-    expect(document.querySelector('.bz-sc-personality-panel')).not.toBeNull();
-    expect(document.querySelector('.setting-item[data-name="重置成长"]')).not.toBeNull();
-    // 移动端：同样有人格面板与重置行（分端差异已删除），皮肤网格仍在
+    expect(document.querySelector('.bz-sc-personality-panel')).toBeNull();
+    expect(document.querySelector('.setting-item[data-name="重置成长"]')).toBeNull();
+    expect(document.querySelector('.bz-sc-skin-grid')).not.toBeNull();
+    // 移动端：同样无人格面板与重置行，皮肤网格仍在
     closeSettingsModal();
     document.body.innerHTML = '';
     Platform.isMobile = true;
     openWith(baseConfig(), hooks);
-    expect(document.querySelector('.bz-sc-personality-panel')).not.toBeNull();
-    expect(document.querySelector('.setting-item[data-name="重置成长"]')).not.toBeNull();
+    expect(document.querySelector('.bz-sc-personality-panel')).toBeNull();
+    expect(document.querySelector('.setting-item[data-name="重置成长"]')).toBeNull();
     expect(document.querySelector('.bz-sc-skin-grid')).not.toBeNull();
+  });
+
+  it('设置弹窗无彩色条形类元素（.bz-sc-personality-panel / .bz-sc-trait-row 不出现）', () => {
+    const hooks = { saves: [] as any[], appearances: [] as string[] };
+    openWith(baseConfig(), hooks);
+    expect(document.querySelector('.bz-sc-personality-panel')).toBeNull();
+    expect(document.querySelector('.bz-sc-trait-row')).toBeNull();
+    expect(document.querySelector('.bz-sc-trait-bar')).toBeNull();
+    expect(document.querySelector('.bz-sc-trait-fill')).toBeNull();
   });
 
   it('设置弹窗移动端全屏跟随 smartcatMobileDefaultFullscreen（与聊天/数据面板同一开关）', () => {
@@ -187,7 +192,6 @@ describe('外观平铺色块选择器', () => {
       },
       settingsKeys: { enabled: true, mobileFullscreen: false },
       setMobileFullscreen: async () => {},
-      getPersonalityGrowth: () => null,
       onOpenDashboard: () => {
         dashboardOpened++;
         closeSettingsModal();
@@ -218,36 +222,92 @@ describe('分组卡片结构（2026-08 方案 A）与文案规范', () => {
       },
       settingsKeys: { enabled: true, mobileFullscreen: false },
       setMobileFullscreen: async () => {},
-      getPersonalityGrowth: () => ({
-        ocean: { openness: 0.6, conscientiousness: 0.5, extraversion: 0.4, agreeableness: 0.7, neuroticism: 0.3 },
-        traits: { warmth: 0.6 },
-      }),
-      resetPersonalityGrowth: async () => {},
+      onOpenDashboard: () => {},
       onAppearanceChanged: (skin) => hooks.appearances.push(skin),
     });
   }
 
-  it('桌面端四组：外观/可视化/互动/记忆，图标与项数徽标正确', () => {
+  it('桌面端十组（含本地支线移植的电源组）：电源/外观/可视化/互动/记忆/记忆目录/存储与记忆/记忆巩固/关联/显示，图标与项数徽标正确', () => {
     const hooks = { saves: [] as any[], appearances: [] as string[] };
     Platform.isMobile = false;
     openWith(baseConfig(), hooks);
     const popup = document.getElementById('bz-settings-modal-popup')!;
-    const heads = [...popup.querySelectorAll('.bz-settings-group')].map((g) => ({
-      icon: g.querySelector('.bz-settings-group-icon')!.getAttribute('data-icon'),
-      name: g.querySelector('.bz-settings-group-name')!.textContent,
-      count: g.querySelector('.bz-settings-group-count')!.textContent,
-    }));
+    // ticket 131：移动端组挂 bz-setting-hidden 整组隐藏但仍留 DOM（可在移动端重求值），可见组过滤后与原行为一致
+    const heads = [...popup.querySelectorAll('.bz-settings-group')]
+      .filter((g) => !g.classList.contains('bz-setting-hidden'))
+      .map((g) => ({
+        icon: g.querySelector('.bz-settings-group-icon')!.getAttribute('data-icon'),
+        name: g.querySelector('.bz-settings-group-name')!.textContent,
+        count: g.querySelector('.bz-settings-group-count')!.textContent,
+      }));
     expect(heads).toEqual([
+      // 电源组（ticket 103 本地移植）：开关开（默认）→ 关闭方式行挂 bz-setting-hidden，可见 1 项
+      { icon: 'power', name: '电源', count: '1 项' },
       { icon: 'palette', name: '外观', count: '0 项' },
-      { icon: 'bar-chart-3', name: '可视化', count: '1 项' },
-      { icon: 'message-circle', name: '互动', count: '3 项' },
-      { icon: 'archive', name: '记忆', count: '4 项' },
+      // 「打开数据面板」为 button 操作行（bz-setting-action-row 豁免徽标计数，ticket 131 声明式语义）
+      { icon: 'bar-chart-3', name: '可视化', count: '0 项' },
+      { icon: 'message-circle', name: '互动', count: '4 项' },
+      { icon: 'archive', name: '记忆', count: '6 项' },
+      // ADR-0069 记忆目录（记忆目录流）：多文件夹选择（path-picker 多选）
+      { icon: 'folder-open', name: '记忆目录', count: '1 项' },
+      // P3 新增三组（ticket 123）
+      { icon: 'database', name: '存储与记忆', count: '2 项' },
+      // ticket 162 记忆巩固精简（反思阈值 + 引用摘录两行；移动端组已挪到面板末尾）
+      // ticket 163：+1 反思洞察条数上限（共 3 行）
+      { icon: 'moon', name: '记忆巩固', count: '3 项' },
+      { icon: 'link', name: '关联', count: '2 项' },
+      { icon: 'eye', name: '显示', count: '1 项' },
     ]);
-    // 外观组内为色块网格（无 Setting 行，不计徽标），可视化组内人格面板 + 重置成长
+    // 外观组内为色块网格（无 Setting 行，不计徽标），可视化组内仅「打开数据面板」
     expect(popup.querySelector('.bz-settings-group-body .bz-sc-skin-grid')).not.toBeNull();
-    expect(popup.querySelector('.bz-settings-group-body .bz-sc-personality-panel')).not.toBeNull();
+    expect(popup.querySelector('.bz-settings-group-body .bz-sc-personality-panel')).toBeNull();
     // 弹窗宽度 560（分组卡片方案）
     expect(popup.style.maxWidth).toBe('560px');
+  });
+
+  it('电源组（ticket 103 本地移植）：启用开关触发 onPowerStateChange；关闭后「关闭方式」现身，切档触发对账', async () => {
+    const hooks = { saves: [] as any[], appearances: [] as string[] };
+    const powerCalls: Array<[boolean, string]> = [];
+    Platform.isMobile = false;
+    setSettingsProvider(() => settings);
+    openSmartcatSettings({
+      getConfig: () => baseConfig(),
+      saveConfig: async (c) => {
+        hooks.saves.push(JSON.parse(JSON.stringify(c)));
+      },
+      settingsKeys: { enabled: true, mobileFullscreen: false },
+      setMobileFullscreen: async () => {},
+      onOpenDashboard: () => {},
+      onPowerStateChange: async (enabled, offMode) => {
+        powerCalls.push([enabled, offMode]);
+      },
+    });
+    const popup = document.getElementById('bz-settings-modal-popup')!;
+    const powerRow = (name: string) =>
+      [...popup.querySelectorAll('.setting-item')].find((el) => (el as HTMLElement).dataset.name === name) as HTMLElement;
+    const toggle = (el: HTMLElement): any => (el as any).__setting.controls.find((c: any) => typeof c.trigger === 'function');
+    const select = (el: HTMLElement): any => (el as any).__setting.controls.find((c: any) => c.options);
+    // 开关开启：下拉行隐藏
+    const enabledRow = powerRow('启用小橘');
+    expect(enabledRow).toBeTruthy();
+    expect(enabledRow.classList.contains('bz-setting-hidden')).toBe(false);
+    const offModeRow = powerRow('关闭方式');
+    expect(offModeRow.classList.contains('bz-setting-hidden')).toBe(true);
+    // 关开关（默认 stop）→ 触发对账 + 下拉现身
+    toggle(enabledRow).trigger(false);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(powerCalls).toEqual([[false, 'stop']]);
+    expect(offModeRow.classList.contains('bz-setting-hidden')).toBe(false);
+    const dd = select(offModeRow);
+    expect(dd.value).toBe('stop');
+    expect(Object.keys(dd.options)).toEqual(['stop', 'hide', 'lazy']);
+    // 关闭态切档 hide → 立即对账
+    dd.trigger('hide');
+    await new Promise((r) => setTimeout(r, 5));
+    expect(powerCalls).toEqual([
+      [false, 'stop'],
+      [false, 'hide'],
+    ]);
   });
 
   it('文案规范：标题无括号、描述一句话且无禁用符号，旧标题行已移除', () => {
@@ -280,7 +340,7 @@ describe('分组卡片结构（2026-08 方案 A）与文案规范', () => {
     expect(mobileGroup.querySelector('.bz-settings-group-count')!.textContent).toBe('1 项');
   });
 
-  it('无成长数据且有数据面板入口：可视化组仅「打开数据面板」1 项、无人格面板', () => {
+  it('可视化组仅有「打开数据面板」1 项、无人格面板', () => {
     const hooks = { saves: [] as any[], appearances: [] as string[] };
     Platform.isMobile = false;
     openSmartcatSettings({
@@ -290,7 +350,6 @@ describe('分组卡片结构（2026-08 方案 A）与文案规范', () => {
       },
       settingsKeys: { enabled: true, mobileFullscreen: false },
       setMobileFullscreen: async () => {},
-      getPersonalityGrowth: () => null,
       onOpenDashboard: () => {},
       onAppearanceChanged: (skin) => hooks.appearances.push(skin),
     });
@@ -298,7 +357,8 @@ describe('分组卡片结构（2026-08 方案 A）与文案规范', () => {
       (g) => g.querySelector('.bz-settings-group-name')!.textContent === '可视化'
     )! as HTMLElement;
     expect(viz).not.toBeUndefined();
-    expect(viz.querySelector('.bz-settings-group-count')!.textContent).toBe('1 项');
+    // 「打开数据面板」为 button 操作行（actionRow 豁免徽标，ticket 131 声明式语义）
+    expect(viz.querySelector('.bz-settings-group-count')!.textContent).toBe('0 项');
     expect(viz.querySelector('.setting-item[data-name="打开数据面板"]')).not.toBeNull();
     expect(viz.querySelector('.bz-sc-personality-panel')).toBeNull();
   });

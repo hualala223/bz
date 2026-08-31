@@ -15,7 +15,7 @@ import { emitDomainEvent, clearDomainEvents } from '../../src/core/domain-bus';
 import { attachObsidianAdapter, detachObsidianAdapter } from '../../src/core/obsidian-adapter';
 import {
   ensureSmartCat, unloadSmartCat, openSmartCatChat, hideSmartCat,
-  parseClipFrontmatter, maybeProactiveCare,
+  parseClipFrontmatter, maybeProactiveCare, __typewriterEffectForTests,
   __getSmartcatInternals, __setDiarySettleMsForTests, __setNoteSettleMsForTests,
   __setNewsSaveTimeoutForTests, __getNewsPendingSavesForTests,
   __getDiaryTimersForTests, __getNoteTimersForTests, __setLibraryDebounceMsForTests,
@@ -125,7 +125,7 @@ describe('动作观察入口（方法监听）', () => {
     expect(__getSmartcatInternals().initialized).toBe(false);
   });
 
-  it('收藏本/归物本/番茄钟/备忘录/影视 动作各产出对应观察', async () => {
+  it('收藏本/归物本/番茄钟/备忘录/影视 动作各产出对应观察（P2b：行为域走行为流）', async () => {
     const { app } = makeApp();
     await ensureSmartCat(app);
     emitDomainEvent('favorites', { kind: 'add', item: { title: 'GitHub', tags: ['工具'], description: '代码托管', url: 'https://github.com', pinned: false } as any });
@@ -134,36 +134,43 @@ describe('动作观察入口（方法监听）', () => {
     emitDomainEvent('memo', { kind: 'completed', title: '买菜' });
     emitDomainEvent('movie', { kind: 'rated', name: '美丽人生', fromRating: 3.5, toRating: 4.5 });
     await sleep(150);
-    const stream: any[] = __getSmartcatInternals().data.memory.stream;
-    const desc = (frag: string) => stream.some((m) => m.description.includes(frag));
-    expect(desc('你收藏了《GitHub》')).toBe(true);
-    expect(desc('你登记了新物品《Kindle》')).toBe(true);
-    expect(desc('你用番茄钟完成了 25 分钟专注')).toBe(true);
-    expect(desc('你完成了待办「买菜」')).toBe(true);
-    expect(desc('你把《美丽人生》的评分从 3.5 改为 4.5')).toBe(true);
+    // 行为域（favorites/belongings/memo）→ 行为流
+    const beh: any[] = __getSmartcatInternals().data.memory.behaviorStream;
+    const behHas = (frag: string) => beh.some((b) => b.description.includes(frag));
+    expect(behHas('favorites:added GitHub')).toBe(true);
+    expect(behHas('belongings:added Kindle')).toBe(true);
+    expect(behHas('memo:completed 买菜')).toBe(true);
+    // ADR-0069：pomodoro:focus-done → behavior 流（rich name 直落行为描述）
+    expect(behHas('pomodoro:focus-done 番茄钟 25 分钟专注')).toBe(true);
+    // 影视 → behavior 流（ADR-0069：事件类全退记忆流；富描述在 snapshot.summary）
+    expect(beh.some((b) => b.metadata?.snapshot?.summary?.includes('你把《美丽人生》的评分从 3.5 改为 4.5'))).toBe(true);
+    expect(__getSmartcatInternals().data.memory.memoryStream.length).toBe(0);
 
     // noteSource 关闭 → 后续动作静默
-    const before = stream.length;
+    const before = beh.length;
     __getSmartcatInternals().data.config.noteSource = false;
     emitDomainEvent('pomodoro', { kind: 'focus-done', minutes: 30 });
     await sleep(80);
-    expect(__getSmartcatInternals().data.memory.stream.length).toBe(before);
+    expect(__getSmartcatInternals().data.memory.behaviorStream.length).toBe(before);
   });
 
-  it('news read 立即形态观察（bus 载荷 kind=read → notifyNewsRead 收编入口）', async () => {
+  it('news read 立即形态观察（P2b：行为域走行为流）', async () => {
     const { app } = makeApp();
     await ensureSmartCat(app);
     emitDomainEvent('news', { kind: 'read', evt: { title: '好文', platform: '聚合讯', state: 'read', durationMin: 6 } });
     await sleep(120);
-    const stream: any[] = __getSmartcatInternals().data.memory.stream;
-    expect(stream[stream.length - 1].description).toContain('你阅读了《好文》（聚合讯·读了 6 分钟）');
+    const beh: any[] = __getSmartcatInternals().data.memory.behaviorStream;
+    const last = beh[beh.length - 1];
+    expect(last.source).toBe('news');
+    expect(last.type).toBe('read');
+    expect(last.description).toContain('news:read 好文');
   });
 });
 
 describe('parseClipFrontmatter 解析', () => {
-  it('list 标签/半角冒号 summary/带引号 link', () => {
-    const out = parseClipFrontmatter('---\nlink: "https://a.com"\nsummary: "一段摘要"\ntags:\n  - 科技\n  - AI\n---\n正文');
-    expect(out.link).toBe('https://a.com');
+  it('list 标签/半角冒号 summary/带引号 url', () => {
+    const out = parseClipFrontmatter('---\nurl: "https://a.com"\nsummary: "一段摘要"\ntags:\n  - 科技\n  - AI\n---\n正文');
+    expect(out.url).toBe('https://a.com');
     expect(out.summary).toBe('一段摘要');
     expect(out.tags).toEqual(['科技', 'AI']);
   });
@@ -176,7 +183,7 @@ describe('parseClipFrontmatter 解析', () => {
   it('inline 数组标签；非法 inline 回退 list；无 frontmatter 全空', () => {
     expect(parseClipFrontmatter('---\ntags: ["a","b"]\n---\nx').tags).toEqual(['a', 'b']);
     expect(parseClipFrontmatter('---\ntags: [bad\n---\nx').tags).toEqual([]);
-    expect(parseClipFrontmatter('没有 frontmatter')).toEqual({ summary: '', tags: [], link: '' });
+    expect(parseClipFrontmatter('没有 frontmatter')).toEqual({ summary: '', tags: [], url: '' });
   });
 
   it('tags 列表块被后续键终止', () => {
@@ -307,15 +314,16 @@ describe('vault 活动路由（diary/note/clipping/短路）', () => {
     await sleep(10); // 事件处理是异步链：先让微任务跑完再查计时表
     expect([...__getDiaryTimersForTests().keys()].some((k) => k.includes('\u000110:00'))).toBe(true);
     await sleep(90);
-    let stream: any[] = __getSmartcatInternals().data.memory.stream;
-    expect(stream.some((m) => m.description.includes(`你在 ${todayStr()} 10:00 写了一篇日记`))).toBe(true);
+    let beh: any[] = __getSmartcatInternals().data.memory.behaviorStream;
+    // ADR-0069：diary:created 走 behavior 流（富描述在 snapshot.summary）
+    expect(beh.some((m) => m.metadata?.snapshot?.summary?.includes(`你在 ${todayStr()} 10:00 写了一篇日记`))).toBe(true);
 
     // 新增条目 C → 静置后照常首落（改名前完成结算窗口）
     vault.files.set(p1, entryA + '\n# 🌙 10:00\n晚上记录一条新的想法内容\n# ✨ 11:00\n再记一条用于改名迁移验证');
     vault.emit('modify', vault.file(p1));
     await sleep(90);
-    stream = __getSmartcatInternals().data.memory.stream;
-    expect(stream.some((m) => m.description.includes(`你在 ${todayStr()} 11:00 写了一篇日记`))).toBe(true);
+    beh = __getSmartcatInternals().data.memory.behaviorStream;
+    expect(beh.some((m) => m.metadata?.snapshot?.summary?.includes(`你在 ${todayStr()} 11:00 写了一篇日记`))).toBe(true);
 
     // 同目录改名 → 计时/跟踪快照 key 迁移到新路径（防假删除重刷首落）
     await vault.rename(vault.file(p1), p2);
@@ -323,25 +331,24 @@ describe('vault 活动路由（diary/note/clipping/短路）', () => {
     await sleep(10);
     expect([...__getDiaryTimersForTests().keys()].every((k) => k.startsWith(p2 + '\u0001'))).toBe(true);
 
-    // 条目消失（modify diff）→ 删除观察 + 计时清理
+    // 条目消失（modify diff）→ 删除观察（behavior 流）+ 计时清理
     vault.files.set(p2, entryA);
     vault.emit('modify', vault.file(p2));
     await sleep(40);
-    stream = __getSmartcatInternals().data.memory.stream;
-    const yestStr = `${yest.getFullYear()}-${yp(yest.getMonth() + 1)}-${yp(yest.getDate())}`;
-    expect(stream.some((m) => m.description === `你删除了 ${yestStr} 11:00 的日记`)).toBe(true);
+    beh = __getSmartcatInternals().data.memory.behaviorStream;
+    const yestStr = `${yest.getFullYear()}-${yp(yest.getMonth() + 1)}-${yp(yest.getDate())}`;    expect(beh.some((m) => m.source === 'diary' && m.type === 'deleted')).toBe(true);
 
-    // 文件删除事件（有跟踪快照）→ 逐条删除观察（日期取自最近一次快照：已随改名后的文件日期）
+    // 文件删除事件（有跟踪快照）→ 逐条删除观察（behavior 流）
     vault.emit('delete', { path: p2 });
     await sleep(40);
-    stream = __getSmartcatInternals().data.memory.stream;
-    expect(stream.some((m) => m.description === `你删除了 ${yestStr} 09:00 的日记`)).toBe(true);
+    const beh2 = __getSmartcatInternals().data.memory.behaviorStream;
+    expect(beh2.filter((m) => m.source === 'diary' && m.type === 'deleted').length).toBeGreaterThanOrEqual(2);
 
-    // 从未跟踪过的日期文件删除 → 文件级单条兜底
+    // 从未跟踪过的日期文件删除 → 文件级单条兜底（behavior 流）
     vault.emit('delete', { path: `${dir}/2020-01-01.md` });
     await sleep(40);
-    stream = __getSmartcatInternals().data.memory.stream;
-    expect(stream.some((m) => m.description === '你删除了 2020-01-01 的日记')).toBe(true);
+    const beh3 = __getSmartcatInternals().data.memory.behaviorStream;
+    expect(beh3.some((m) => m.source === 'diary' && m.type === 'deleted')).toBe(true);
   }, 20000);
 
   it('卡片盒/现代诗/信：修改静置首落、删除观察、移出目录观察、信准入拒绝', async () => {
@@ -362,27 +369,29 @@ describe('vault 活动路由（diary/note/clipping/短路）', () => {
     vault.files.set('我的/信/第一封.md', '亲爱的朋友');
     vault.emit('modify', vault.file('我的/信/第一封.md'));
     await sleep(40);
-    const stream: any[] = __getSmartcatInternals().data.memory.stream;
-    expect(stream.some((m) => m.description.includes('你在卡片盒记下了「想法一」'))).toBe(true);
-    expect(stream.some((m) => m.description.includes('你在 2016-12-30 08:00 写了一首现代诗「161230 忧郁啊」'))).toBe(true);
-    expect(stream.some((m) => m.source === 'letter')).toBe(false);
+    const noteBeh: any[] = __getSmartcatInternals().data.memory.behaviorStream;
+    // ADR-0069：flash:created / poem:created 均走 behavior 流（富描述在 snapshot.summary）
+    expect(noteBeh.some((m) => m.source === 'flash' && m.type === 'created')).toBe(true);
+    expect(noteBeh.some((m) => m.metadata?.snapshot?.summary?.includes('你在 2016-12-30 08:00 写了一首现代诗「161230 忧郁啊」'))).toBe(true);
+    expect(noteBeh.some((m) => m.source === 'letter')).toBe(false);
     expect(__getNoteTimersForTests().has('我的/信/第一封.md')).toBe(false);
 
-    // 删除已跟踪的诗 → 删除观察
+    // 删除已跟踪的诗 → 删除观察（behavior 流）
     vault.emit('delete', { path: '我的/现代诗/161230 忧郁啊.md' });
     await sleep(40);
-    expect(stream.some((m) => m.description === '你删除了现代诗「161230 忧郁啊」')).toBe(true);
+    expect(noteBeh.some((m) => m.source === 'poem' && m.type === 'deleted')).toBe(true);
 
-    // 卡片盒改名移出观察目录 → 按旧跟踪产删除观察
+    // 卡片盒改名移出观察目录 → 按旧跟踪产删除观察（behavior 流）
     vault.emit('rename', { path: '其他/想法一.md' }, '卡片盒/想法一.md');
     await sleep(40);
-    expect(stream.some((m) => m.description === '你删除了卡片盒「想法一」')).toBe(true);
+    const noteBeh2 = __getSmartcatInternals().data.memory.behaviorStream;
+    expect(noteBeh2.some((m) => m.source === 'flash' && m.type === 'deleted')).toBe(true);
   }, 20000);
 
   it('影视/番茄钟/reading 路径短路不产观察；无关 md 静默', async () => {
     const { app, vault } = makeApp();
     await ensureSmartCat(app);
-    const before = __getSmartcatInternals().data.memory.stream.length;
+    const before = __getSmartcatInternals().data.memory.memoryStream.length;
     vault.files.set('我的/影视/肖申克.md', '---\nstatus: watched\n---\n经典');
     vault.emit('modify', vault.file('我的/影视/肖申克.md'));
     vault.files.set('书库/三体.md', '阅读中');
@@ -392,42 +401,46 @@ describe('vault 活动路由（diary/note/clipping/短路）', () => {
     vault.files.set('随手笔记.md', '普通笔记');
     vault.emit('modify', vault.file('随手笔记.md'));
     await sleep(80);
-    expect(__getSmartcatInternals().data.memory.stream.length).toBe(before);
+    expect(__getSmartcatInternals().data.memory.memoryStream.length).toBe(before);
   });
 
   it('noteSource 关闭时 vault 活动整链静默', async () => {
     const { app, vault } = makeApp();
     await ensureSmartCat(app);
     __getSmartcatInternals().data.config.noteSource = false;
-    const before = __getSmartcatInternals().data.memory.stream.length;
+    const before = __getSmartcatInternals().data.memory.memoryStream.length;
     vault.files.set('卡片盒/另一条.md', '# 另一条\n内容');
     vault.emit('modify', vault.file('卡片盒/另一条.md'));
     vault.emit('delete', { path: '我的/现代诗/不存在诗.md' });
     await sleep(40);
-    expect(__getSmartcatInternals().data.memory.stream.length).toBe(before);
+    expect(__getSmartcatInternals().data.memory.memoryStream.length).toBe(before);
   });
 });
 
 describe('聚合讯待补全登记（ticket 076/084b）', () => {
-  it('剪藏 modify 命中登记 → 补全完整保存观察并移除登记', async () => {
+  it('剪藏 modify 命中登记 → 补全完整保存观察并移除登记（P2b：行为流）', async () => {
     const { app, vault } = makeApp();
     const clip1 = '归档/网页剪藏/文章一.md';
-    vault.files.set(clip1, '---\nlink: "https://ex.com/a"\nsummary: "精彩摘要"\ntags:\n  - 科技\n  - AI\n---\n正文');
+    vault.files.set(clip1, '---\nurl: "https://ex.com/a"\nsummary: "精彩摘要"\ntags:\n  - 科技\n  - AI\n---\n正文');
     await ensureSmartCat(app);
     __setNewsSaveTimeoutForTests(10 * 60 * 1000); // 先不让降级定时器捣乱
     emitDomainEvent('news', { kind: 'saved', evt: { title: '好文', platform: '聚合讯', state: 'saved', durationMin: 5 }, clipPath: clip1 });
-    await sleep(30); // 等 link 异步登记
+    await sleep(30); // 等 url 异步登记
     const pending = __getNewsPendingSavesForTests().get(clip1) as any;
-    expect(pending.link).toBe('https://ex.com/a');
+    expect(pending.url).toBe('https://ex.com/a');
 
     vault.emit('modify', vault.file(clip1));
     await sleep(60);
-    const stream: any[] = __getSmartcatInternals().data.memory.stream;
-    expect(stream.some((m) => m.description === '你保存了《好文》（聚合讯·读了 5 分钟）：精彩摘要 #科技 #AI')).toBe(true);
+    const beh: any[] = __getSmartcatInternals().data.memory.behaviorStream;
+    const last = beh[beh.length - 1];
+    expect(last.source).toBe('news');
+    expect(last.type).toBe('saved');
+    expect(last.metadata.extras.summary).toBe('精彩摘要');
+    expect(last.metadata.extras.tags).toEqual(['科技', 'AI']);
     expect(__getNewsPendingSavesForTests().has(clip1)).toBe(false);
   }, 20000);
 
-  it('等待超时未等 auto-summary → 降级保存观察（无摘要形态）并清登记', async () => {
+  it('等待超时未等 auto-summary → 降级保存观察（无摘要形态）并清登记（P2b：行为流）', async () => {
     const { app, vault } = makeApp();
     await ensureSmartCat(app);
     __setNewsSaveTimeoutForTests(40);
@@ -435,8 +448,12 @@ describe('聚合讯待补全登记（ticket 076/084b）', () => {
     vault.files.set(clip2, '纯正文没有 frontmatter');
     emitDomainEvent('news', { kind: 'saved', evt: { title: '第二篇', platform: 'RSS', state: 'saved', durationMin: 2 }, clipPath: clip2 });
     await sleep(120);
-    const stream: any[] = __getSmartcatInternals().data.memory.stream;
-    expect(stream.some((m) => m.description === '你保存了《第二篇》（RSS·读了 2 分钟）')).toBe(true);
+    const beh: any[] = __getSmartcatInternals().data.memory.behaviorStream;
+    const last = beh[beh.length - 1];
+    expect(last.source).toBe('news');
+    expect(last.type).toBe('saved');
+    expect(last.metadata.name).toBe('第二篇');
+    expect(last.metadata.extras.platform).toBe('RSS');
     expect(__getNewsPendingSavesForTests().has(clip2)).toBe(false);
   }, 20000);
 });
@@ -483,7 +500,7 @@ describe('欢迎回来回程语（visibilitychange）', () => {
     const { app } = makeApp();
     await ensureSmartCat(app);
     const d: any = __getSmartcatInternals().data;
-    d.memory.stream = mkStream(4);
+    d.memory.memoryStream = mkStream(4);
     vi.spyOn(Math, 'random').mockReturnValue(0.95); // 走时段语料 + 作息分支双命中
     vi.useFakeTimers();
     const restore = toggleHidden(true);
@@ -504,15 +521,15 @@ describe('主动关心 maybeProactiveCare（导出测试驱动）', () => {
     await ensureSmartCat(app);
     const d: any = __getSmartcatInternals().data;
     d.config.proactiveCare = false;
-    d.memory.stream = mkStream(5);
+    d.memory.memoryStream = mkStream(5);
     await maybeProactiveCare();
     expect(bubbles.length).toBe(0);
     d.config.proactiveCare = true;
-    d.memory.stream = [];
+    d.memory.memoryStream = [];
     await maybeProactiveCare();
     expect(bubbles.length).toBe(0);
     // 上限满（非安静期）：间隔/作息放行但计数达 cap
-    d.memory.stream = mkStream(5);
+    d.memory.memoryStream = mkStream(5);
     d.editingData = {
       ...(d.editingData || {}),
       proactiveCare: { week: isoWeekKey(), count: 2, lastAt: Date.now() - 4 * DAY_MS },
@@ -525,7 +542,7 @@ describe('主动关心 maybeProactiveCare（导出测试驱动）', () => {
     const { app } = makeApp();
     await ensureSmartCat(app);
     const d: any = __getSmartcatInternals().data;
-    d.memory.stream = mkStream(5);
+    d.memory.memoryStream = mkStream(5);
     d.editingData = {
       ...(d.editingData || {}),
       proactiveCare: { week: isoWeekKey(), count: 0, lastAt: Date.now() - 4 * DAY_MS },
@@ -557,7 +574,13 @@ describe('定时任务链路（趋势漂移 / 每周报告 / 关系史叙事）'
     const { app } = makeApp();
     await ensureSmartCat(app);
     const d: any = __getSmartcatInternals().data;
-    d.memory.stream = mkStream(4);
+    // ticket 162：周报首窗锚定第一条洞察日期——洞察 created 回填 8 天前（首窗 [首洞察, +7d) 已满），
+    // 观察带情绪保留（趋势漂移原料）
+    const insightCreated = new Date(Date.now() - 8 * 86400000).toISOString();
+    d.memory.memoryStream = [
+      ...mkStream(4),
+      ...mkStream(3).map((m: any, i: number) => ({ ...m, id: `ins${i}`, created: insightCreated, type: 'insight', source: 'reflection', theme: ['工作', '兴趣', '关系'][i] })),
+    ];
     d.editingData = {
       ...(d.editingData || {}),
       weeklyReport: { weekKey: '2020-W01', at: 0 },
@@ -573,19 +596,62 @@ describe('定时任务链路（趋势漂移 / 每周报告 / 关系史叙事）'
 
     // +30min（10:30）→ 周报 tick 恰 h=10 生成；叙事扫描同刻首轮
     await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
-    expect(d.memory.stream.some((m: any) => m.description.includes('【本周懂你报告】'))).toBe(true);
+    expect(d.memory.memoryStream.some((m: any) => m.description.includes('【本周懂你报告】'))).toBe(true);
     expect(d.editingData.weeklyReport.weekKey).toBe(isoWeekKey());
     expect(bubbles.some((b) => b.startsWith('喵~ 我读完这周关于你的记录了'))).toBe(true);
-    expect(d.memory.stream.some((m: any) => m.description.includes('【一起的日子】'))).toBe(true);
+    expect(d.memory.memoryStream.some((m: any) => m.description.includes('【一起的日子】'))).toBe(true);
     expect(d.editingData.dossierScanKey).toBe(isoWeekKey());
 
     // +60min → 周报 tick h≠10 静默；叙事本周已生成不重复
     await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
-    const countBefore = d.memory.stream.filter((m: any) => m.description.includes('【一起的日子】')).length;
+    const countBefore = d.memory.memoryStream.filter((m: any) => m.description.includes('【一起的日子】')).length;
     await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
-    const countAfter = d.memory.stream.filter((m: any) => m.description.includes('【一起的日子】')).length;
+    const countAfter = d.memory.memoryStream.filter((m: any) => m.description.includes('【一起的日子】')).length;
     expect(countAfter).toBe(countBefore);
   }, 30000);
+
+  it('常驻心跳节拍（p2 合并后时机不变）：10 分钟分派主动关心，9 分 59 秒不触发', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 26, 9, 30, 0));
+    vi.spyOn(Math, 'random').mockReturnValue(0.9); // 压制陪伴概率分支（speakProbability 0.3 恒不触发）
+    const { app } = makeApp();
+    await ensureSmartCat(app);
+    const d: any = __getSmartcatInternals().data;
+    d.memory.memoryStream = mkStream(5);
+    d.editingData = {
+      ...(d.editingData || {}),
+      proactiveCare: { week: isoWeekKey(), count: 0, lastAt: Date.now() - 4 * DAY_MS },
+    };
+    // 先过 2s（覆盖 startCompanionMode 的 1000ms 欢迎语）建立基线
+    await vi.advanceTimersByTimeAsync(2000);
+    const base = bubbles.length;
+    // 9 分 59 秒：未到 10 分钟节拍（20 节拍 × 30s）→ 主动关心不触发
+    await vi.advanceTimersByTimeAsync(9 * 60 * 1000 + 59 * 1000 - 2000);
+    expect(bubbles.length).toBe(base);
+    // 10 分钟整：心跳分派主动关心 → 气泡 +1、计数 +1
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(0); // 冲刷 maybeProactiveCare 的 await 微任务
+    expect(bubbles.length).toBeGreaterThan(base);
+    expect(d.editingData.proactiveCare.count).toBe(1);
+  }, 20000);
+});
+
+describe('打字机点击跳过（UX 47）', () => {
+  it('点击目标气泡立即完成全文渲染并清理 interval', async () => {
+    vi.useFakeTimers();
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    const p = __typewriterEffectForTests(el, '你好，世界！', 1000);
+    vi.advanceTimersByTime(1000); // 1 打字节拍 → 1 字
+    expect(el.textContent).toBe('你');
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await p;
+    expect(el.textContent).toBe('你好，世界！');
+    // interval 已清：再推进不再增长（防残留定时器）
+    vi.advanceTimersByTime(10_000);
+    expect(el.textContent).toBe('你好，世界！');
+    el.remove();
+  });
 });
 
 describe('域 JSON 感知（library 盲通道）', () => {
@@ -612,7 +678,8 @@ describe('域 JSON 感知（library 盲通道）', () => {
     vault.emit('modify', vault.file(weavePath));
     // 即时事件（逐条 await 入流）+ 防抖窗口（40ms）结算划线：并发跑全量时 CPU 争抢会拉伸
     // 异步链，固定 sleep 会假超时——改为轮询等待目标条目落流（deadline 内到齐即通过）
-    const descs = () => (__getSmartcatInternals().data.memory.stream as any[]).map((m) => m.description);
+    // ADR-0069：library 事件全走 behavior 流（富描述在 snapshot.summary）
+    const descs = () => (__getSmartcatInternals().data.memory.behaviorStream as any[]).map((m) => m.metadata?.snapshot?.summary ?? m.description);
     const waitForDesc = async (text: string, deadlineMs = 8000): Promise<boolean> => {
       const t0 = Date.now();
       while (!descs().includes(text)) {
@@ -625,8 +692,9 @@ describe('域 JSON 感知（library 盲通道）', () => {
     expect(await waitForDesc('你读完了《三体》')).toBe(true);
     expect(await waitForDesc('你读了《三体》约 15 分钟（读到 40%）')).toBe(true);
     expect(await waitForDesc('你在《三体》划了条重点：「很震撼的一段」')).toBe(true);
-    const stream: any[] = __getSmartcatInternals().data.memory.stream;
-    expect(stream.filter((m) => m.source === 'domain:library').length).toBeGreaterThanOrEqual(4);
+    const beh: any[] = __getSmartcatInternals().data.memory.behaviorStream;
+    expect(beh.filter((m) => m.source === 'library').length).toBeGreaterThanOrEqual(4);
+    expect(__getSmartcatInternals().data.memory.memoryStream.filter((m) => m.source === 'library').length).toBe(0);
     // 「读完」命中 dossier 正性白名单 → 事件表即写（经 onObservation 钩子）；划线防抖结算后落表
     const hasDossier = async (): Promise<boolean> => {
       const t0 = Date.now();

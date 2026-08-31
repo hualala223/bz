@@ -44,6 +44,37 @@ test('buildFileName：裁切/压缩标记组合（时间恒显小时位）', () 
   assert.equal(core.buildFileName({ ...base, page: 'P2', trimmed: true, start: 10, end: 80 }), '测试视频_BV1GJ411x7h7_P2_clip_00-00-10-00-01-20.mp4')
 })
 
+test('needsCompressFallback：压缩件严格更大才回退（相等/更小/stat 异常都不回退）', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'bili-fallback-'))
+  const small = path.join(d, 'small.bin')
+  const big = path.join(d, 'big.bin')
+  const equal = path.join(d, 'equal.bin')
+  fs.writeFileSync(small, Buffer.alloc(10))
+  fs.writeFileSync(big, Buffer.alloc(20))
+  fs.writeFileSync(equal, Buffer.alloc(10))
+  // 压缩件 > 压缩输入 → 回退（采纳原文件）
+  assert.equal(core.needsCompressFallback(small, big), true)
+  // 压缩件 <= 压缩输入 → 不回退（采纳压缩件）
+  assert.equal(core.needsCompressFallback(big, small), false)
+  assert.equal(core.needsCompressFallback(small, equal), false)
+  // 输入文件缺失（stat 异常）→ 保守不回退
+  assert.equal(core.needsCompressFallback(path.join(d, 'no.bin'), big), false)
+  fs.rmSync(d, { recursive: true, force: true })
+})
+
+test('decodeBatchArg：b64: 前缀 base64 解码（shell 安全形态）；else JSON 直解析（手动命令行）；坏 JSON 双形态抛 SyntaxError', () => {
+  const task = { url: 'BV1GJ411x7h7', start: '0:12', end: '1:30', page: null, options: { compress: true, crf: 23 } }
+  const b64 = Buffer.from(JSON.stringify(task), 'utf8').toString('base64')
+  // b64: 前缀 → base64 解码（插件经 shell 启动的形态，P2-5）
+  assert.deepEqual(core.decodeBatchArg('b64:' + b64), task)
+  // 无前缀 → 按 JSON 直解析（手动命令行形态）
+  assert.deepEqual(core.decodeBatchArg(JSON.stringify(task)), task)
+  // 坏 JSON：直传形态
+  assert.throws(() => core.decodeBatchArg('{"url":'), SyntaxError)
+  // 坏 JSON：b64: 形态（解码后仍是坏 JSON）
+  assert.throws(() => core.decodeBatchArg('b64:' + Buffer.from('{', 'utf8').toString('base64')), SyntaxError)
+})
+
 test('uniquePath：重名自动加序号', () => {
   const f = path.join(tmp, '重名.mp4')
   fs.writeFileSync(f, 'x')
@@ -394,167 +425,24 @@ test('cleanupCache：只删超期原件，保留新文件；目录不存在返�
   assert.equal(core.cleanupCache({ cacheDir: path.join(tmp, 'no-such-dir') }), 0)
 })
 
-test('sanitizeMdTitle：非法字符清洗 + 截断 50 + 空兜底', () => {
-  assert.equal(core.sanitizeMdTitle('a/b\\c:d'), 'a_b_c_d')
-  assert.equal(core.sanitizeMdTitle('x'.repeat(200)).length, 50)
-  assert.equal(core.sanitizeMdTitle('   '), '文献笔记')
-})
+// ---------- parseTranscriptUnits（转写协议）----------
 
-test('chunkTranscript：按句边界切块、单块不超上限、内容保序不丢失', () => {
-  const t = Array.from({ length: 200 }, (_, i) => `第${i}句。`).join('')
-  const chunks = core.chunkTranscript(t, 400)
-  assert.ok(chunks.length > 1)
-  for (const c of chunks) assert.ok(c.length <= 400, `块长 ${c.length} 超限`)
-  assert.equal(chunks.join(''), t)
-})
-
-test('chunkTranscript：超长单句硬切 / 空输入', () => {
-  const long = '啊'.repeat(600)
-  const chunks = core.chunkTranscript(long, 400)
-  assert.ok(chunks.length >= 2)
-  for (const c of chunks) assert.ok(c.length <= 400)
-  assert.equal(chunks.join('').length, 600)
-  assert.deepEqual(core.chunkTranscript(''), [])
-})
-
-test('buildLiteratureNote：frontmatter 四键 + 引号转义 + 正文在前 embed 连排', () => {
-  const md = core.buildLiteratureNote({
-    title: '讲"述"', tags: ['科普', 'AI 前沿'], summary: '一句话', source: 'BV1GJ411x7h7',
-    body: '润色后的正文。', embeds: ['![[CONFIG/APPENDIX/a.mp4]]', '![[CONFIG/APPENDIX/b.mp4]]'],
-  })
-  assert.ok(md.startsWith('---\n'))
-  assert.ok(md.includes('\n---\n'))
-  assert.ok(md.includes('title: "讲\\"述\\""'))
-  assert.ok(md.includes('  - "科普"\n  - "AI 前沿"'))
-  assert.ok(md.includes('summary: "一句话"'))
-  assert.ok(md.includes('source: "BV1GJ411x7h7"'))
-  assert.ok(md.includes('![[CONFIG/APPENDIX/a.mp4]]\n\n![[CONFIG/APPENDIX/b.mp4]]'))
-  assert.ok(md.indexOf('润色后的正文。') < md.indexOf('![[CONFIG/APPENDIX/a.mp4]]'))
-})
-
-test('loadBzAiConfig：opencode-go 默认 + 未写 aiProvider 走默认', () => {
-  const vault = path.join(tmp, 'vault-ai')
-  const dir = path.join(vault, '.obsidian', 'plugins', 'bz')
-  fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(path.join(dir, 'data.json'), JSON.stringify({ aiProvider: 'opencode-go', opencodeGoApiKey: 'k1' }))
-  const ai = core.loadBzAiConfig({ vaultPath: vault })
-  assert.equal(ai.provider, 'opencode-go')
-  assert.equal(ai.apiKey, 'k1')
-  assert.equal(ai.model, 'deepseek-v4-flash')
-  assert.ok(ai.endpoint.includes('opencode.ai'))
-  fs.writeFileSync(path.join(dir, 'data.json'), JSON.stringify({ opencodeGoApiKey: 'k1' }))
-  assert.equal(core.loadBzAiConfig({ vaultPath: vault }).provider, 'opencode-go')
-})
-
-test('loadBzAiConfig：deepseek 走 deepseekApiKey', () => {
-  const vault = path.join(tmp, 'vault-ai-ds')
-  const dir = path.join(vault, '.obsidian', 'plugins', 'bz')
-  fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(path.join(dir, 'data.json'), JSON.stringify({ aiProvider: 'deepseek', deepseekApiKey: 'k2' }))
-  const ai = core.loadBzAiConfig({ vaultPath: vault })
-  assert.equal(ai.apiKey, 'k2')
-  assert.ok(ai.endpoint.includes('api.deepseek.com'))
-})
-
-test('loadBzAiConfig：缺 key / 缺文件 / 缺 vaultPath 报错文案', () => {
-  const vault = path.join(tmp, 'vault-ai-nokey')
-  const dir = path.join(vault, '.obsidian', 'plugins', 'bz')
-  fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(path.join(dir, 'data.json'), JSON.stringify({ aiProvider: 'opencode-go' }))
-  assert.throws(() => core.loadBzAiConfig({ vaultPath: vault }), /AI 密钥缺失/)
-  assert.throws(() => core.loadBzAiConfig({ vaultPath: path.join(tmp, 'vault-ai-empty') }), /找不到 bz 插件数据文件/)
-  assert.throws(() => core.loadBzAiConfig({}), /未配置 vaultPath/)
-})
-
-// ---------- aiChat / aiJson（mock https.request，零网络）----------
-
-function mockHttpsRequest(resp, captured) {
-  return (url, opts, cb) => {
-    const req = new EventEmitter()
-    let body = ''
-    req.write = c => { body += c; if (captured) captured({ url, opts, body }) }
-    req.end = () => setTimeout(() => {
-      const res = new EventEmitter()
-      res.statusCode = resp.status || 200
-      cb(res)
-      if (resp.body !== undefined) res.emit('data', Buffer.from(JSON.stringify(resp.body)))
-      res.emit('end')
-    }, 0)
-    return req
-  }
-}
-
-test('aiChat：POST chat/completions 解析 content，带鉴权头', async () => {
-  const calls = []
-  const requestImpl = mockHttpsRequest({ status: 200, body: { choices: [{ message: { content: 'ok' } }] } }, c => calls.push(c))
-  const out = await core.aiChat({ endpoint: 'https://api.deepseek.com/', apiKey: 'k', model: 'm', messages: [{ role: 'user', content: 'hi' }], requestImpl })
-  assert.equal(out, 'ok')
-  assert.equal(calls[0].url, 'https://api.deepseek.com/chat/completions')
-  assert.equal(calls[0].opts.headers.Authorization, 'Bearer k')
-  const sent = JSON.parse(calls[0].body)
-  assert.equal(sent.model, 'm')
-  assert.equal(sent.messages[0].content, 'hi')
-})
-
-test('aiChat：HTTP 4xx/5xx 抛错误文案（OpenAI 与 opencode 嵌套格式）', async () => {
-  await assert.rejects(
-    core.aiChat({ endpoint: 'https://x', apiKey: 'k', model: 'm', messages: [], requestImpl: mockHttpsRequest({ status: 401, body: { error: { message: 'bad key' } } }) }),
-    /AI 请求失败：bad key/
-  )
-  await assert.rejects(
-    core.aiChat({ endpoint: 'https://x', apiKey: 'k', model: 'm', messages: [], requestImpl: mockHttpsRequest({ status: 500, body: { error: { type: 'x', error: { message: 'server down' } } } }) }),
-    /AI 请求失败：server down/
-  )
-})
-
-test('aiChat：超时销毁转错误', async () => {
-  const requestImpl = (url, opts, cb) => {
-    const req = new EventEmitter()
-    req.write = () => {}
-    req.end = () => {}
-    req.destroy = e => { req.emit('error', e) }
-    setTimeout(() => req.emit('timeout'), 5)
-    return req
-  }
-  await assert.rejects(core.aiChat({ endpoint: 'https://x', apiKey: 'k', model: 'm', messages: [], timeoutMs: 5, requestImpl }), /AI 请求超时/)
-})
-
-test('aiJson：JSON 模式解析 + 残留文本容错提取', async () => {
-  const ok = await core.aiJson({ endpoint: 'https://x', apiKey: 'k', model: 'm', messages: [], requestImpl: mockHttpsRequest({ status: 200, body: { choices: [{ message: { content: '{"title":"标题","tags":["a"]}' } }] } }) })
-  assert.deepEqual(ok, { title: '标题', tags: ['a'] })
-  const fuzzy = await core.aiJson({ endpoint: 'https://x', apiKey: 'k', model: 'm', messages: [], requestImpl: mockHttpsRequest({ status: 200, body: { choices: [{ message: { content: '好的，结果如下：{"title":"T"}' } }] } }) })
-  assert.equal(fuzzy.title, 'T')
-})
-
-test('buildLiteratureNote：视频块对象（wiki + 对应转文字）逐段依次排布，字符串兼容', () => {
-  const md = core.buildLiteratureNote({
-    title: 'T', tags: ['a'], summary: 's', source: 'BV',
-    body: '润色正文。',
-    embeds: [
-      { wiki: '![[CONFIG/APPENDIX/a.mp4]]', transcript: '第一段转录' },
-      { wiki: '![[CONFIG/APPENDIX/b.mp4]]', transcript: '第二段转录' },
-    ],
-  })
-  assert.ok(md.includes('![[CONFIG/APPENDIX/a.mp4]]\n\n第一段转录'))
-  assert.ok(md.includes('![[CONFIG/APPENDIX/b.mp4]]\n\n第二段转录'))
-  assert.ok(md.indexOf('润色正文。') < md.indexOf('![[CONFIG/APPENDIX/a.mp4]]'))
-  assert.ok(md.indexOf('第一段转录') < md.indexOf('![[CONFIG/APPENDIX/b.mp4]]'))
-  const md2 = core.buildLiteratureNote({ title: 'T', body: 'b', embeds: ['![[x.mp4]]'] })
-  assert.ok(md2.includes('![[x.mp4]]'))
-})
-
-test('parseTranscriptUnits：逐文件转录输出解析（多行、乱行容错）', () => {
+test('parseTranscriptUnits：同文件多行聚合 + 文件结束空哨兵（逐段转录协议，ticket 117）', () => {
   const units = core.parseTranscriptUnits([
     '\x1eC:\\a.mp4\x1f第一段文本\x1f',
+    '\x1eC:\\a.mp4\x1f第二段文本\x1f',
+    '\x1eC:\\a.mp4\x1f\x1f',                  // 完成哨兵：不计文本、不新增条目
     '前导噪声行',
-    '\x1eC:\\b.mp4\x1f第二段文本\x1f',
     '',
+    '\x1eC:\\b.mp4\x1f第三段文本\x1f',
+    '\x1eD:\\c.mp4\x1f\x1f',                  // 仅哨兵（整文件无文本）→ 不产生条目
+    '\x1eC:\\b.mp4\x1f\x1f',
   ].join('\n'))
   assert.equal(units.length, 2)
   assert.equal(units[0].file, 'C:\\a.mp4')
-  assert.equal(units[0].text, '第一段文本')
+  assert.equal(units[0].text, '第一段文本 第二段文本')
   assert.equal(units[1].file, 'C:\\b.mp4')
-  assert.equal(units[1].text, '第二段文本')
+  assert.equal(units[1].text, '第三段文本')
   assert.deepEqual(core.parseTranscriptUnits(''), [])
   assert.deepEqual(core.parseTranscriptUnits('abc\n'), [])
 })

@@ -1,52 +1,75 @@
 #!/usr/bin/env node
 // ================================================================
-// B站下载器 - CLI 入口
+// B站下载器 - CLI 入口（ticket 136 起仅无头批处理，网页版已移除）
 // 用法:
-//   bili-dl             启动本地服务 + 自动打开浏览器
-//   bili-dl --port 8080 指定端口（默认随机空闲端口）
-//   bili-dl --no-open   只打印地址，不自动开浏览器
+//   bili-dl --batch '<json>'   无头批处理（Obsidian 插件「文献盒」面板后台引擎）
+//       json = {"url":"…","start":"mm:ss|hh:mm:ss(.S)|null","end":"…","options":{...}}；start/end 都 null = 整片不剪辑
+//       或 --batch 'b64:<base64>'（插件经 shell 启动时用——JSON 引号/空格会被 shell 对消，base64 安全，P2-5）
+//       options（bz「文献盒」设置全量下发，全部可选）：quality、keepVideo、outputDir、compress（缺省开）、
+//       crf（缺省 23，范围 18-28）、vaultPath、ffmpegPath、ffprobePath、pythonPath、whisperModel、cacheDir、cacheRetentionDays
+//       stdout 逐步打 [bz-step] 行（解析中 → 下载中 → 剪辑中(有起止才跑) → 压缩中(缺省开) → 转文字中
+//       → 交付中(keepVideo=false 时跳过)）；压缩中若压缩件比原文件还大自动回退用原文件（ticket 145）；
+//       进度打 [bz-p] 行（{"phase":"download|trim|compress|transcribe","pct":0-100|null}，300ms 节流，pct=null 为不确定）；
+//       成功末尾一行 [bz-result] {"transcript":"<转录临时文件绝对路径>","video":"CONFIG/APPENDIX/xxx.mp4"|null}
+//       （transcript = UTF-8 转录全文临时文件，插件读取后自删；video 为 vault 相对/绝对路径，null = 未交付）并 exit 0；
+//       任一步失败 stderr 给中文原因（含缺失前置引导，如 whisper 环境）并 exit 1，不写 [bz-result]。
+//       断点续跑（ADR-0067，ticket 136 机械产物）：成功步骤产物（剪辑件/压缩件/转写稿）留存缓存目录，
+//       同一任务重跑自动从出错步骤继续，不重跑已成功步骤。
+//       --batch 模式不打印横幅、不起服务，避免污染协议。
 // ================================================================
-const { execSync } = require('child_process')
+const os = require('os')
+const path = require('path')
 const fs = require('fs')
-const { createServer, TMP_DIR, startValidate } = require('./server')
+const core = require('./core')
+const cfg = require('./config')
 
 const args = process.argv.slice(2)
-const portIdx = args.indexOf('--port')
-const port = portIdx >= 0 ? Number(args[portIdx + 1]) || 0 : 0
-const noOpen = args.includes('--no-open')
 
-function openBrowser(url) {
-  try {
-    const plat = process.platform
-    if (plat === 'win32') execSync(`start "" "${url}"`, { stdio: 'ignore' })
-    else if (plat === 'darwin') execSync(`open "${url}"`, { stdio: 'ignore' })
-    else execSync(`xdg-open "${url}"`, { stdio: 'ignore' })
-  } catch {
-    console.log(`[B站下载器] 自动打开浏览器失败，请手动访问: ${url}`)
+// ---- 无头批处理（--batch）：core.runBatch 的薄壳 + 协议输出 ----
+function runBatchMode(rawJson) {
+  if (rawJson === undefined) {
+    console.error('缺少 --batch 参数（需要 JSON 字符串，如 --batch \'{"url":"BV…","start":null,"end":null}\'）')
+    process.exit(1)
   }
+  let task
+  try {
+    task = core.decodeBatchArg(rawJson)
+  } catch (e) {
+    console.error(`--batch 参数不是合法 JSON：${e.message}`)
+    process.exit(1)
+  }
+  if (!task || typeof task !== 'object' || Array.isArray(task)) {
+    console.error('--batch 参数必须是 JSON 对象（{"url":"…","start":"…|null","end":"…|null"}）')
+    process.exit(1)
+  }
+  if (!task.url || typeof task.url !== 'string' || !String(task.url).trim()) {
+    console.error('缺少 url（B站视频链接或 BV 号）')
+    process.exit(1)
+  }
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bili-dl-batch-'))
+  core.runBatch(task, {
+    conf: cfg.loadConfig(),
+    cookie: cfg.loadCookie(),
+    onStep: name => console.log(`[bz-step] ${name}`),
+    // 进度行：phase + 0-100 整数百分比（null = 不确定，绝不假报）
+    onProgress: p => console.log(`[bz-p] ${JSON.stringify({ phase: p.phase || 'step', pct: Number.isFinite(p.pct) ? Math.round(p.pct) : null })}`),
+    // 解析信息行（ADR-0067）：标题/UP主 落库 → 面板行内「文字+链接」
+    onInfo: info => console.log(`[bz-info] ${JSON.stringify(info)}`),
+    tmpDir: tmp,
+  }).then(r => {
+    try { fs.rmSync(tmp, { recursive: true, force: true }) } catch {}
+    console.log(`[bz-result] ${JSON.stringify({ transcript: r.transcript, video: r.video })}`)
+    process.exit(0)
+  }).catch(e => {
+    try { fs.rmSync(tmp, { recursive: true, force: true }) } catch {}
+    console.error((e && e.message) || String(e))
+    process.exit(1)
+  })
 }
 
-function cleanup() {
-  try { fs.rmSync(TMP_DIR, { recursive: true, force: true }) } catch {}
-}
-
-process.on('SIGINT', () => { console.log('\n[B站下载器] 正在退出…'); cleanup(); process.exit(0) })
-process.on('SIGTERM', () => { cleanup(); process.exit(0) })
-process.on('exit', cleanup)
-
-const server = createServer()
-server.listen(port, '127.0.0.1', () => {
-  const real = server.address().port
-  const url = `http://127.0.0.1:${real}`
-  console.log('==============================================')
-  console.log('  B站下载器')
-  console.log(`  地址: ${url}`)
-  console.log('  按 Ctrl+C 退出')
-  console.log('==============================================')
-  startValidate()   // 异步验证 Cookie 状态，推送给页面
-  if (!noOpen) openBrowser(url)
-})
-server.on('error', e => {
-  console.error(`[B站下载器] 服务启动失败: ${e.message}`)
+const batchIdx = args.indexOf('--batch')
+if (batchIdx >= 0) runBatchMode(args[batchIdx + 1])
+else {
+  console.error('用法：bili-dl --batch \'{"url":"BV…","start":null,"end":null}\'（ticket 136 起仅无头批处理，网页版已移除）')
   process.exit(1)
-})
+}

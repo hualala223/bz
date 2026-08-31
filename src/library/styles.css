@@ -1,6 +1,7 @@
 /* ==================== 书库域样式（src/library/styles.css） ==================== */
 /* ============ 书库 library（ticket 62 样式收敛：原 ui.ts 内联 → bz-lib-*） ============ */
-/* 遮罩分层：1000 主面板 / 1100 筛选；读书笔记壳 11100 与编辑弹窗 11101 为抽屉附属档
+/* 遮罩分层：9997 主面板（原 1000 档）/ 9998 筛选（原 1100 档）——e3 抬档归主面板族；
+   读书笔记壳 11100 与编辑弹窗 11101 为抽屉附属档
    （P0-7：必须压过统一抽屉遮罩 10999/本体 11000，对照 movie 12000） */
 .bz-lib-overlay {
   position: fixed;
@@ -13,10 +14,11 @@
   align-items: center;
   justify-content: center;
 }
-.bz-lib-overlay--1000 { z-index: 1000; }
-.bz-lib-overlay--1100 { z-index: 1100; background: rgba(0, 0, 0, 0.3); }
-.bz-lib-overlay--11100 { z-index: 11100; }
-.bz-lib-overlay--11101 { z-index: 11101; }
+/* e3 抬档：修饰符名保留旧 z 值作稳定挂类契约（JS 引用不变），实际层级见值；
+   筛选档保留 0.3 半透明底（与主面板 0.5 区分用，统一去背景的例外，勿删） */
+/* 层级已动态发号（ADR-0067）：--1000/--1100/--11100/--11101 修饰名仅作标识钩子；
+   筛选档保留 0.3 半透明底（与主面板 0.5 区分用，勿删） */
+.bz-lib-overlay--1100 { background: rgba(0, 0, 0, 0.3); }
 
 .bz-lib-modal {
   background: var(--background-primary);
@@ -36,9 +38,10 @@
   border: 1px solid var(--background-modifier-border);
 }
 @media (max-width: 768px) {
-  /* 原强制全屏规则已废止（ticket 68：真全屏统一走 .bz-win-mfs）；常规卡收窄留边 */
-  .bz-lib-modal--full,
-  .bz-lib-modal--full-lg {
+  /* 原强制全屏规则已废止（ticket 68：真全屏统一走 .bz-win-mfs）；常规卡收窄留边。
+     须排除真全屏态：同权重 !important 下本块源序靠后会压过通用 100vw，导致全屏宽度只剩 95% */
+  .bz-lib-modal--full:not(.bz-win-mfs),
+  .bz-lib-modal--full-lg:not(.bz-win-mfs) {
     width: 95% !important;
     max-width: 95% !important;
   }

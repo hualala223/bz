@@ -108,6 +108,17 @@ describe('书库面板', () => {
     expect(app.workspace.openLinkText).toHaveBeenCalledWith('书库/活着.md', '', false);
   });
 
+  it('主面板关闭按钮统一 ❌（ticket 130）：字符 + bz-win-close 类（createIconBtn ❌ 分支）', async () => {
+    vault.files.set('书库/活着.md', BOOK_MD);
+    const app = makeApp(vault);
+    showLibrary(app);
+    await new Promise((r) => setTimeout(r, 20));
+    const closeBtn = [...document.querySelectorAll<HTMLElement>('#__book_library__ button')].find((b) => b.title === '关闭') as HTMLButtonElement;
+    expect(closeBtn).toBeDefined();
+    expect(closeBtn.textContent).toBe('❌'); // 关闭按钮统一 ❌ emoji（chips 移除 ✕ 不动）
+    expect(closeBtn.classList.contains('bz-win-close')).toBe(true);
+  });
+
   it('桌面右键 → 菜单「读书笔记」→ 划线弹窗打开', async () => {
     vault.files.set('书库/活着.md', BOOK_MD);
     vault.files.set('书库/读书笔记/活着.md', NOTE_MD);
@@ -125,11 +136,18 @@ describe('书库面板', () => {
     expect(overlay.textContent).toContain('📚 《活着》的读书笔记');
   });
 
-  it('无书 → Notice 提示且遮罩移除（EPUB 合并后判空）', async () => {
+  it('空库 → 窗口保留并内嵌空态（l4：路径 + tags 说明 + ⚙️ 设置入口，不自动关窗）', async () => {
     showLibrary(makeApp(vault));
     await new Promise((r) => setTimeout(r, 20));
-    expect(hasNotice(/未找到任何书籍笔记/)).toBe(true);
-    expect(document.getElementById('__book_library__')).toBeNull();
+    const overlay = document.getElementById('__book_library__')!;
+    expect(overlay).not.toBeNull(); // 不再自动关窗
+    expect(overlay.textContent).toContain('书库「书库」中还没有书籍笔记');
+    expect(overlay.textContent).toContain('tags: book');
+    expect(hasNotice(/未找到任何书籍笔记/)).toBe(false); // 短 toast 已废弃
+    // ⚙️ 设置入口 → 打开书库设置弹窗
+    const settingsEntry = [...overlay.querySelectorAll('button')].find((b) => b.textContent!.includes('去设置'))!;
+    settingsEntry.click();
+    expect(document.getElementById('bz-settings-modal-popup')).not.toBeNull();
   });
 
   it('渲染卡片（标题/作者/进度/时长/划线/想法/书评）', async () => {
@@ -173,7 +191,7 @@ describe('书库面板', () => {
     expect(document.getElementById('__book_library__')!.textContent).toContain('活着');
   });
 
-  it('⚙️ 打开书库设置弹窗（分组卡片：目录/列表显示/移动端）；🔀 为筛选弹窗', () => {
+  it('⚙️ 打开书库设置弹窗（分组卡片：目录/列表显示；移动端组桌面整组隐藏）；🔀 为筛选弹窗', () => {
     vault.files.set('书库/活着.md', BOOK_MD);
     setSettingsProvider(() => ({ libraryFolderPath: '书库', bookTag: 'book' } as any));
     const app = makeApp(vault);
@@ -184,11 +202,16 @@ describe('书库面板', () => {
     settingsBtn.click();
     const popup = document.getElementById('bz-settings-modal-popup')!;
     expect(popup.textContent).toContain('书库设置');
-    // 分组卡片结构：桌面 2 组（目录/列表显示；移动端组移动端才渲染），原生图标 + 徽标回填项数
-    const heads = [...popup.querySelectorAll('.bz-settings-group-head')];
+    // 分组卡片结构：桌面 2 组可见（目录/列表显示；移动端组挂 bz-setting-hidden 整组隐藏——ticket 131
+    // 声明式联动保留结构），原生图标 + 徽标回填项数
+    const isHiddenGroup = (el: Element) =>
+      Boolean((el.closest('.bz-settings-group') as HTMLElement | null)?.classList.contains('bz-setting-hidden'));
+    const heads = [...popup.querySelectorAll('.bz-settings-group-head')].filter((el) => !isHiddenGroup(el));
     expect(heads.map((el) => (el as HTMLElement).textContent!.trim())).toEqual(['目录2 项', '列表显示5 项']);
     expect(heads.map((el) => el.querySelector('.bz-settings-group-icon')!.getAttribute('data-icon'))).toEqual(['folder-open', 'eye']);
-    const names = [...popup.querySelectorAll('.bz-settings-group-body .setting-item')].map((el) => (el as HTMLElement).dataset.name);
+    const names = [...popup.querySelectorAll('.bz-settings-group-body .setting-item')]
+      .filter((el) => !el.classList.contains('bz-setting-hidden'))
+      .map((el) => (el as HTMLElement).dataset.name);
     expect(names).toEqual([
       '书库文件夹', '书籍识别标签',
       '显示文件大小', '显示阅读时长', '显示划线数', '显示想法数', '显示书评摘要',
@@ -213,6 +236,36 @@ describe('书库面板', () => {
     await new Promise((r) => setTimeout(r, 20));
     const overlay = [...document.querySelectorAll('div')].find((d) => d.textContent!.includes('的读书笔记'))!;
     expect(overlay.textContent).toContain('📭 没有找到高亮或批注');
+  });
+
+  it('showBookNotes 先建壳放「正在加载…」占位，read 完成后填入内容（l4）', async () => {
+    vault.files.set('书库/活着.md', NOTE_MD);
+    let release!: (v: string) => void;
+    const app = makeApp(vault);
+    app.vault.read = vi.fn(() => new Promise<string>((r) => { release = r; })) as any;
+    showBookNotes(app, '书库/活着.md');
+    await new Promise((r) => setTimeout(r, 10));
+    // 读未返回时壳已建好并显示占位
+    const shell = document.querySelector('.bz-lib-overlay--11100') as HTMLElement;
+    expect(shell).not.toBeNull();
+    expect(shell.querySelector('.bz-lib-notes-body')!.textContent).toContain('正在加载…');
+    release(NOTE_MD);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(shell.textContent).toContain('❝ 原文一');
+  });
+
+  it('showBookNotes read 失败 → 壳内人话错误文案（不崩溃、壳保留）', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vault.files.set('书库/活着.md', NOTE_MD);
+    const app = makeApp(vault);
+    app.vault.read = vi.fn().mockRejectedValue(new Error('disk io')) as any;
+    showBookNotes(app, '书库/活着.md');
+    await new Promise((r) => setTimeout(r, 20));
+    const shell = document.querySelector('.bz-lib-overlay--11100') as HTMLElement;
+    expect(shell).not.toBeNull();
+    expect(shell.querySelector('.bz-lib-notes-body')!.textContent).toContain('笔记读取失败，请稍后重试');
+    expect(errSpy).toHaveBeenCalled();
+    errSpy.mockRestore();
   });
 
   it('openBookNotes：无活动文件 → 「没有打开的文件」', () => {
@@ -381,15 +434,18 @@ describe('移动端默认全屏（ticket 68）', () => {
     expect(modal!.classList.contains('bz-win-mfs')).toBe(true);
   });
 
-  it('书库设置弹窗：仅移动端显示「移动端默认全屏」行', async () => {
+  it('书库设置弹窗：仅移动端显示「移动端默认全屏」行（ticket 131 声明式：隐藏行留 DOM 带 bz-setting-hidden）', async () => {
     const vault = new MockVault();
     vault.files.set('书库/活着.md', BOOK_MD);
     setSettingsProvider(() => ({ libraryFolderPath: '书库', bookTag: 'book' } as any));
     const app = makeApp(vault);
     showLibrary(app);
     const settingsBtn = [...document.querySelectorAll('button')].find((b) => b.title === '书库设置')!;
+    // 可见性过滤：移动端组整组 + 行级 bz-setting-hidden（隐藏行仍留在 DOM）
     const settingNames = () =>
-      [...document.querySelectorAll('#bz-settings-modal-popup .setting-item')].map((el) => (el as HTMLElement).dataset.name);
+      [...document.querySelectorAll('#bz-settings-modal-popup .setting-item')]
+        .filter((el) => !el.classList.contains('bz-setting-hidden'))
+        .map((el) => (el as HTMLElement).dataset.name);
     settingsBtn.click();
     expect(settingNames()).not.toContain('移动端默认全屏');
     MockPlatform.isMobile = true;
@@ -452,20 +508,16 @@ describe('书库修复回归（fx-library）', () => {
     }
   });
 
-  it('P0-7：读书笔记壳 z-index 落在 11100/11101 档（压过抽屉遮罩 10999/本体 11000）', async () => {
+  it('读书笔记壳 z 动态发号（ADR-0067）：创建即分配，样式源不再持有静态档', async () => {
     vault.files.set('书库/活着.md', NOTE_MD);
     showBookNotes(makeApp(vault), '书库/活着.md');
     await new Promise((r) => setTimeout(r, 20));
-    // 壳元素挂新档类名；jsdom 不做 CSS 级联，z-index 档位以源样式表规则为准断言 ≥11100
     const shell = document.querySelector('.bz-lib-overlay--11100') as HTMLElement | null;
     expect(shell).not.toBeNull();
+    const mz = parseInt(shell!.style.zIndex, 10);
+    expect(Number.isFinite(mz)).toBe(true);
     const css = readFileSync(resolve(process.cwd(), 'src/library/styles.css'), 'utf8');
-    const zi = (cls: string): number => {
-      const m = css.match(new RegExp(`\\.bz-lib-overlay--${cls}\\s*\\{\\s*z-index:\\s*(\\d+)`));
-      return m ? parseInt(m[1], 10) : -1;
-    };
-    expect(zi('11100')).toBeGreaterThanOrEqual(11100); // 壳：压过遮罩 10999 与抽屉本体 11000
-    expect(zi('11101')).toBeGreaterThan(zi('11100')); // 编辑弹窗档仍压过壳
+    expect(/\.bz-lib-overlay--\d+\s*\{[^}]*z-index:/.test(css)).toBe(false);
     // 旧低档类名不再被读书笔记壳使用
     expect(shell!.className).not.toContain('--1200');
   });

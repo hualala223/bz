@@ -1,18 +1,292 @@
-## 2026-08-28 小橘设置页开关与三档关闭方式（ticket 103；issues 72+73，主仓库直接实现）
+## 2026-08-30 文献笔记补视频双链（ticket 151，用户实测「生成的文献笔记没有视频」）
 
-**状态：完成（grilling Q1–Q9 定稿 → spec issue 71 → tickets 72/73 拆分 → 实现+测试全绿）**
+**状态：ADR-0066/0073 定义「正文=润色+视频双链」但 AI 回迁时实现漏掉——generateVideoNote 增 videoPath 参数、正文嵌 `![[路径]]`；note-gen/processor 测试绿 + tsc 0，构建已部署**
 
-- 插件设置页新增「🐱 小橘」区块：「启用小橘」开关（既有 smartcatEnabled 键补 UI，默认 true 不变）+「关闭方式」下拉（新键 smartcatOffMode=stop/hide/lazy，默认 stop，仅开关关闭时显示——复用 AI 区块 bz-setting-hidden 条件显隐）
-- 三档立即生效：stop=unloadSmartCat 全量停机（监听/定时器/记忆流累积全停，重启不挂载，期间笔记活动不进记忆流不补记）；hide=收起 DOM 后台照跑（未装配→ensureSmartCat(startHidden) 隐藏启动装配：容器不出现/问好不闪现/装配期 display:none 防闪现；已装配→hideSmartCat）；lazy=当场零变化（Q8）重启不自动挂载
-- 启动门控：开→ensure；关+hide→ensure(startHidden)；关+lazy/stop→跳过；命令守卫收在模块入口 openSmartCat/openSmartCatChat（isSmartcatStopped 读插件设置单点判定）：仅 stop 档拒绝 + toast「小橘已在设置中关闭」（notice info，ICONS 无新增），hide/lazy 召唤即启动；hide 命令停机档未初始化天然 no-op；dashboard 恒可用
-- 电源对账 applySmartcatPowerState：on→装配/幂等重挂（remountVisibleCat 抽取复用 P1-28 路径）；stop→closeSettingsModal（清 ⚙️ 弹窗残留）+unload；hide→隐藏启动/收起；lazy→不动；ensure 竞态守卫天然覆盖「快速开关」中间态
-- 兼容冻结：设置仅新增可选键（旧 data.json 缺省容忍零迁移）、smartcat.json 零改动、smartcatEnabled 默认值与既有测试 mock 全不动
-- 测试三既有 seam 零新增：settings-tab（渲染/条件显隐/三档驱动/关闭态切档对账/持久化）、power-state 新文件（模块入口：startHidden 装配/对账三档/重开/⚙️弹窗清理/守卫拒绝+放行+通知正文）、smoke（四态启动门控 spy + 命令表不变）
-- 文档：CONTEXT.md 新增「关闭方式 (Off Mode)」词条（隐藏≠关闭术语锐化）、spec.md 103 节、本 PROGRESS、issues 72/73
-- 门禁实录：tsc 0 错；全量 vitest 2634 绿（diary/ui/real-data.test.ts 曾读旧 vault 路径 E:/Obsidian/叫我包仔 而失败——真实库已迁 `N:/仓库/仓库-新/-0.笔记汇总库`，非回归；同日随部署目标一并改正，复测全绿）；pnpm run build 通过（三件套同步仓库根 + 真实 vault 插件目录，路径单点定义 scripts/vault-dir.mjs）
-- 提交：feat（ticket 103）合 master
+- ✅ **根因**：generateVideoNote 从不接收 videoPath，正文只拼 frontmatter + 润色正文；CLI 交付的 mp4（[bz-result] video）在 _aiStep 拿到后从未进笔记
+- ✅ **修复**：note-gen.ts opts 增 `videoPath?: string | null` → 非空时正文尾部 `## 视频` + `![[vault相对路径]]`（反斜杠归一）；keepVideo=false（未交付）→ 无视频段；frontmatter 九键不动
+- ✅ **接线**：processor.ts _aiStep 传 videoPath（此前被丢弃）
+- ✅ **测试**：note-gen +1（视频段/反斜杠归一）+ 既有用例补「未传 → 无视频段」；processor 成功链路断言补 videoPath 键；tsc 0
+- 📄 文档：issues/151；CONTEXT「文献笔记」词条；spec 尾部；PROGRESS 本条目
+- ⏳ 收尾：全量测试确认 → 提交；用户侧重载插件后重跑任务即带视频（已有笔记可手动补）
 
-## 2026-08-26 解散 AI Agent 域（ticket 102；worktree/dissolve-ai-agent）
+## 2026-08-30 Python 路径填写体验：填 python 即可 + 通用默认 + 引导文案（ticket 150）
+
+**状态：DEFAULTS.pythonPath 通用化 'python'；ENOENT 与未配置错误细分引导（where python）；tools 52 + ui/processor 测试 + tsc 全绿**
+
+- ✅ **config.js**：DEFAULTS.pythonPath 由开发机专属绝对路径改 `'python'`（spawn 走 PATH），注释教 Windows 用 `where python` 查绝对路径；rc 有值仍覆盖
+- ✅ **core.js**：777 未配置文案教填写方式（保留「未配置 pythonPath」子串）；转写 catch 对 `/无法启动 Python|ENOENT/` 专报「找不到 Python…where python 可查」，不再误报 faster-whisper 未装
+- ✅ **ui.ts**：humanizeError 四分支独立匹配（找不到 Python / 未配置 pythonPath / pip install faster-whisper / 通用 whisper——ENOENT 不含 whisper 词须独立）；设置 desc 更新「装了 Python 一般填 python 即可」
+- ✅ **测试**：tools +2（ENOENT 引导、未配置引导）；ui.test.ts +找不到 Python 断言；全量 + tsc 0
+- 📄 文档：issues/150；CONTEXT「文献盒」词条补；spec 尾部；PROGRESS 本条目
+- 🔍 本机实测：Python312（rc 指向）faster-whisper 1.2.1 已装 → 留空即可用；PATH python（miniconda）未装 → 填 `python` 需先在对应环境 pip install faster-whisper
+- ⏳ 收尾：构建部署 → 提交
+
+## 2026-08-30 文献盒转写失败修复：留空键不下发回退 rc（ticket 149）
+
+**状态：用户实测转写环节整批失败（提示检查 Python 路径/Whisper 模型，但设置留空）→ 根因 options 空串覆盖 rc/DEFAULTS 兜底；相关测试 + tsc 绿，构建已部署**
+
+- ✅ **根因**：processor.ts 对「留空=跟随工具配置」键下发空串，core.js `{...rc默认, ...options}` 合并覆盖 rc 的可用 pythonPath（本机 rc 有 C:/Users/PC/.../Python312/python.exe）→ py 空 → 「rc 未配置 pythonPath」→ UI 匹配 faster-whisper 给提示，形成「留空→报错让填→desc 说留空跟随」怪圈
+- ✅ **修复**：processor.ts 新增 nonEmpty()——pythonPath/outputDir/ffmpegPath/ffprobePath/whisperModel/cacheDir 留空 → undefined 不下发（JSON.stringify 省略），rc/DEFAULTS 兜底生效；显式填写仍覆盖；vaultPath/quality/keepVideo/compress/crf/cacheRetentionDays 不变
+- ✅ **提示细分**：ui.ts humanizeError whisper 分支三分——未配置 pythonPath（rc 也无）→「语音转写未配置：请在文献盒设置填写『Python 路径』（留空将跟随工具默认配置）」；faster-whisper 未安装 →「语音转写失败：faster-whisper 未安装，请在目标 Python 中运行 pip install faster-whisper」；其它 → 原提示
+- ✅ **测试**：processor 空设置用例改断言留空键不在下发 JSON（toEqual 忽略 undefined）；ui.test.ts humanizeError 新增三断言；全量测试 + tsc 0
+- 📄 文档：issues/149 立项；CONTEXT「文献盒」词条补留空不下发；spec 尾部；PROGRESS 本条目
+- ⏳ 收尾：构建部署（main.js 已同步根目录 + E 盘）→ 提交
+
+## 2026-08-30 文献盒第四轮：批量按钮纯 emoji + --batch base64 传输修复（ticket 148 + 147）
+
+**状态：用户实测批量处理整批失败（--batch JSON 经 shell 引号被对消）→ 修复 + 按钮去文字；tools 50 测试 + bz 全量 221 文件/3534 用例绿 + tsc 0**
+
+- ✅ **ticket 147 修复 --batch JSON**：根因 `resolveBatchSpawn` shell:true 下发含引号空格 JSON，Windows cmd 对消引号致 argv 损坏（报 position 1 JSON 错）。方案：core.js 加 `decodeBatchArg`（`b64:` 前缀 base64 解码 / 无前缀直解析双形态），cli.js 改用它；插件侧 taskJson 经 Buffer base64 后 `b64:` 前缀下发——base64 无引号无空格，shell 全程安全
+- ✅ **ticket 148 批量按钮纯 emoji**（用户拍板「不要有文字显示，单纯的 emoji」）：空闲 `▶️`/运行中 `⏹`，终止 vs 终止整批区分移到 title hover（中止批量处理 / 中止整批（处理失败任务中））；移动端整钮隐藏不变，`#lit-btn-video-run` 契约与 `batchAbortLabel` 逻辑不动
+- ✅ **测试**：tools `node --test` 50 全绿（新增 decodeBatchArg 单测）；processor.test.ts 两处 spawn 参数断言改 b64 解码；ui.test.ts 按钮断言改纯 emoji + 补 title 断言；全量 221 文件/3534 用例绿 + tsc 0
+- 📄 文档：issues/147 + issues/148 立项；CONTEXT.md「B站下载」「文献盒」词条补 b64/纯 emoji；spec 尾部两节；PROGRESS 本条目
+- ⏳ 收尾：构建部署（main.js/styles.css 同步）→ 全局 @jwbz/bili-downloader 副本同步 core.js/cli.js（hash 校验）
+
+## 2026-08-28 路径设置行空态/已选态翻转 + 选择器列表排序（ticket 133；master 84bca3c）
+
+**状态：路径行空态只显紧凑次级按钮、已选态隐藏按钮且 chip 可点重开选择器、选择器列表「已选置顶→库根→整体反转（中文在前英文在后）」；全量 209 文件/3297 用例绿 + tsc 0**
+
+- ✅ **路径设置行**（`renderPathSettingRow`）：空态只显示紧凑次级「选择…/添加…」按钮（去 setCta accent，样式 `.bz-path-picker-btn--slim`），去掉「未选择」灰字；已选态按钮移出 DOM（`syncBtn`——控件区恒 1 子元素 → `markSettingSplitRows` 不挂 `.bz-setting-split` → 移动端名称/描述与控件区同行）；chip 文本点击重开选择器（`renderPathChips` 新增 `onChipClick`，✕ 事件不冒泡）、✕ 保留清除并回空态；单选/多选同套
+- ✅ **选择器列表排序**：已选置顶（`pinnedAtOpen` 打开时定格快照，点击勾选不重排）→ 库根第二梯队 → 其余整体反转（原 sort() 码点升序逆排：中文在前、英文在后；英文组内小写在前大写在后）；搜索时置顶仅对命中项生效；数据层 `foldersFromFiles`/`collectVaultFolders` 排序不动（反转只在 UI 渲染层 `orderedList`）
+- ✅ **测试**：`path-picker-ui.test.ts` 排序断言更新 + 新增用例（空态/已选态按钮翻转、chip 重开、onChipClick、置顶/反转/点击不重排/搜索命中置顶）；`settings-tab.test.ts` 已选态无「选择…」按钮断言；全量 209 文件/3297 用例绿 + tsc 0
+- 📌 文档：issues/133 定稿；grill-with-docs 三轮 Q&A 拍板（范围/空态组成/已选态交互/按钮样式/列表排序）
+
+## 2026-08-28 设置页声明化 Wave-2 完成（ticket 131；ADR-0064；master 4985f64）
+
+**状态：13 域设置弹窗 + UP 名单弹窗全部 schema 化并合入 master；全量 209 文件/3292 用例绿 + tsc 0；build 参数已收尾退役**
+
+- ✅ **域组 A**（`88682a4`，diary/memo/belongings/password）：四域 schema 工厂导出（供文案 lint 引用）；迁移期 core 三处补正——① `mobileFullscreenGroup` 组级 visibleWhen（isMobileEnv）② `openSettingsModal` 空态改可见项计数 ③ select 行空值回退首选项
+- ✅ **域组 B**（`bab8d88`，clipping+数据源组+UP 名单弹窗/favorites/library）：自动摘要详设 visibleWhen 联动（含标签数量二次联动）；数据源组（news.json 异步外部数据）整段 custom 插槽兜底 + 组壳保持；**UP 名单管理弹窗 = renderSettingsInto 渲染进自建 overlay**（bz-up-manager-mask/-popup id 与 z 序 10100/10101 零变化，不换 openSettingsModal 防顶掉底层弹窗）；favorites 空态 + maxWidth 520；library 闭包工厂退役
+- ✅ **域组 C**（`51f28d1`，movie/review/pomodoro/encrypt/secondbrain/smartcat）：六域 41 组/72 行；review 做题家子项显隐改 visibleWhen、监听文件夹 chips custom 插槽 + 添加按钮 actionRow；pomodoro 音量+试听同行按钮 custom；smartcat 皮肤网格 custom + 外部数据三函数绑定保双落盘；encrypt 移动端 warnReload 手写组保行为（预设无回调通道——渲染器缺口评估留待后续）
+- ✅ **文案 lint 三组**：`settings-copy-lint-{a,b,c}.test.ts` 各自注册本组域 schema 零违规（白名单 2 项注明理由：review 出题数量 desc、secondbrain「启用」短标题）；ticket 100 修正清单逐项落 doc
+- ✅ **build 参数收尾退役**（`4985f64`）：设置弹窗内容入口唯一化 `schema`（`renderSettingsInto` 直入，缺省空 groups）；`tests/settings-modal.test.ts` 全部 build 用例改写为 schema/custom 等价；`.auto-summary-detail` 死 CSS（随 visibleWhen 平铺消失）三规则清理；issues/131 置已完成
+- 📄 文档：ADR-0064、issues/131 已完成、HANDOFF.md 补 B/C 纪要；worktree t131-domains-{a,b,c} 待清理
+- ⏳ 收尾中：构建部署（产物直出 E 盘）→ worktree 清理 → Review（diff 审查 + 自审 + 门禁确认）
+
+## 2026-08-27 设置页声明化 Wave-1 完成（ticket 131；ADR-0064；master 1f76ef7 全绿 206 文件/3284 用例 + tsc 0）
+
+**状态：Wave-1（core 地基 + 主设置页 + 流程框声明）已合并 master；Wave-2（13 域弹窗迁移）交接至新会话——代理运行时资源耗尽，见 `.scratch/ticket-131-wave2/HANDOFF.md`**
+
+- ✅ **设置 schema 渲染器**（`src/core/settings-schema.ts`，518 行）：十类行 + `renderSettingsInto`——键直绑（keyof BzSettings 收窄）/外部 get-set-save 逃生口、text 800ms 防抖+blur+Enter+onCommit 一次性提示（对齐旧 textSetting 逐字语义）、toggle 即时、number 钳制、visibleWhen 声明式联动（显隐+组徽标+两行式一并收口）、path 接 ADR-0061 选择器、actionRow 豁免、custom 插槽
+- ✅ **通用设置组**（`settings-common.ts`）：`mobileFullscreenGroup(key, {desc?})`（desc 覆盖对齐四处差异文案）；批次数/排序下拉不同构未抽（TODO 留头）
+- ✅ **主设置页 schema 化**（`settings-main-schema.ts` + main.ts display 两区块）；旧私有 helper 退役；ticket 100 存量文案 4 处修正（键名/行为不动）
+- ✅ **流程框声明**（`flow-dialog.ts`）：openFlowDialog 承继 `__shared_confirm_*` DOM 契约（铁律 3）；confirm 退役、23 处调用点（15 文件）全量改写、文案逐字零变化
+- ✅ **文案 lint 引擎**（`settings-copy-lint-engine.ts` 抽离可复用，供 Wave-2 各组独立注册）；`.bz-tab-*` 死类清理
+- ✅ `settings-modal.ts`：schema 入口 + build @deprecated 过渡（13 域迁移完收尾删除）
+- 📄 文档：ADR-0064、issues/131 定稿、CONTEXT 四词条、spec/PROGRESS；Wave-2 交接文档 `.scratch/ticket-131-wave2/HANDOFF.md`（三份子代理 prompt 附录）
+- ⏳ 待办（新会话）：并发派 A/B/C 三组域迁移 → 合并 → build 参数收尾退役 → 构建部署 → Review
+
+## 2026-08-27 设置页声明化定案（ticket 131 定稿；grill-with-docs 拍板 Q1–Q18，ADR-0064）
+
+**状态：设计共识闭环（原想法 A/B「行助手 + 组分发」升格为全页声明式 schema + 流程框声明），待排期实施**
+
+- 📋 **形态**：全页声明式 schema（对象字面量，builder 否决）；`openSettingsModal` 只收 schema、build 回调退役；行类型十类（基准五类 + custom 插槽/button/info/number/textarea）；键直绑 + get/set/save 逃生口 + onChange/onCommit；visibleWhen 声明式联动（core 重求值 + 分组徽标收口）
+- 📋 **范围**：13 域设置弹窗 + 主设置页（AI/存储路径两区块）+ UP 名单管理弹窗（schema 内容经 renderSettingsInto 进自建 overlay，z 序零变化——单例设置弹窗会顶掉底层弹窗故不换承载）；encrypt 仅 ⚙️（主密码/体检清理/预览窗流程展示型不动）；favorites/belongings 统一分组卡片
+- 📋 **流程框声明**：{title, message, actions} 新 API；core/confirm 退役、23 处调用点（15 文件）全量改写；`__shared_confirm_*` DOM 契约保持（铁律 3）
+- 📋 **通用组首批**：移动端默认全屏 11 键收敛、批次数数字行、排序/默认筛选下拉、warnReload 收敛为 onCommit 内置语义
+- 📋 **迁移与清理**：一次性全量单提交（域逐个替换自验）；main.ts 私有 helper + diary/pomodoro/library 域内工厂退役；`.bz-tab-*` 死类清理；ticket 100 文案测试期 lint
+- 📄 文档：issues/131 重写定稿、ADR-0064、CONTEXT 四词条（声明式设置页/通用设置组/插槽行/流程框声明）、spec.md ticket 131 节；PROGRESS 本条
+
+## 2026-xx-xx B 站不走 24h 窗口（ticket 127）：每 UP 最近 N 条页面可设 + UP 弹窗 Cookie 配置引导
+
+**状态：worktree/ticket127 实施完成，待合并（issues/127；watcher v1.1.2；全量测试 + tsc 0）**
+
+- ✅ **根因**：B 站源按滚动 24h 窗口抓取——长期未更新的 UP 永远 0 条（uid 已入名单、watcher 每轮都抓但 24h 内无新视频）；API 未登录返回 412 风控需要 Cookie
+- ✅ **每 UP 最近 N 条**：新增 news.json 可选段 `bilibiliMaxItems`（默认 10，夹取 1..50）；watcher 新增纯函数 `collectBilibiliBatch`（无窗口、按最近优先收满 N 条未抓过的即停）；插件「数据源」组 UP 名单段内新增「B站抓取条数」行，随 B 站开关整段隐藏
+- ✅ **Cookie 配置引导**：新增可选段 `bilibiliCookie`；watcher 优先用配置值，未配置回退自动引导（buvid3），都失败打印引导文案；插件「UP 主名单管理」弹窗底部新增 Cookie 配置区（引导文案 + 输入 + 保存/清除 + 已配置/未配置状态联动）
+- ✅ **测试**：watcher node:test +4；数据层 +4；UI 层 +2；全量绿 + tsc 0
+- 📄 文档：issues/127；watcher README/CONTEXT v1.1.2；CONTEXT 词条更新；PROGRESS 本条
+
+## 2026-xx-xx B 站 UP 名单整合（ticket 126）：整段联动隐藏 + 管理按钮独立弹窗 + UP 主名字/头像回填
+
+**状态：master 直接实现完成，待提交（issues/126；watcher v1.1.1；全量测试 + tsc 0 + 构建部署）**
+
+- ✅ **整段联动**：B 站源开关关闭 → 整个「UP 主名单」段（`[data-up-section]`，含按钮行）隐藏，不再残留名单行
+- ✅ **管理按钮 + 独立弹窗**：组内 UP 名单收敛为「管理」按钮行（desc=已跟踪 N 位+名字预览），点击开独立 overlay（层 10100）做添加/删除，增删后弹窗与组内概要同刷
+- ✅ **名字/头像回填**：watcher v1.1.1 B 站抓取时取 `module_author` name/face 回填 news.json 第五段 `bilibiliUpInfo`（uid→{name,avatar}，头像转 https）；插件解析容错（缺段/损坏→空），展示 name??uid，移除 UP 同步清资料；旧四段/纯数组无感兼容
+- ✅ **测试**：数据层 +5、UI 层重写 3+新增 1、watcher 单测 +3；watcher node:test 全绿
+- 📄 文档：issues/126；CONTEXT「剪藏本」「UP 主名单」「UP 主资料」；watcher README/CONTEXT v1.1.1；PROGRESS 本条
+
+## 2026-xx-xx 剪藏本两个小问题（ticket 125）：先弹窗后加载提示 + 自动摘要详设去左边距平级
+
+**状态：master 直接实现完成，待提交（issues/125；全量测试 + tsc 0 + 构建部署）**
+
+- ✅ **根因（ticket 125）**：`parseArticleFile` 无内部 await，`Promise.all` 的 map 回调同步执行——整批解析抢在浏览器首帧绘制前跑完，加载提示与内容同帧出现，点击剪藏本后无反馈直到「窗口+内容」同时弹出（观感=等加载完才弹窗）
+- ✅ **先窗口后加载**：提取 `showLoadingHint()`；`loadAllArticles` 在 `isLoadingData=true` 后让出一个宏任务再解析（首帧绘制「窗口+加载提示」，数据就绪整体替换）；**重开路径同样先提示再重载**（不残留旧列表，保留 B1 重开即重载）
+- ✅ **自动摘要详设平级**：`.auto-summary-detail` 左边距 44px→0，摘要长度/生成标签/标签数量/摘要时机四行与「自动摘要」行左缘对齐
+- ✅ **测试**：+1 UI 例（首开与重开均先弹窗+加载提示、卡数 0，宏任务后渲染替换）；clipping/entries 61 例全绿
+- 📄 文档：issues/125；PROGRESS 本条
+
+## 2026-08-27 聚合讯 B 站 UP 主聚合 + 数据源设置（ticket 124；grill-with-docs 定案，ADR-0060）
+
+**状态：master 713efff 合并完成；合并复核全量 3136 测试通过（198 文件）+ tsc 0 + 构建部署（产物已落 E:/Obsidian/叫我包仔/.obsidian/plugins/bz/）；worktree 已清理**
+
+- 📋 **grill 定案（Q1-Q18）**：检测信号=news.json 存在（引导块 vs 设置项两条路径）；news.json 四段化 {articles/stats/bilibiliUps/sources}（旧数组自动迁移、news-stats.json 并入）；B 站聚合=仅视频投稿（DYNAMIC_TYPE_AV）24h 窗口 + cookie 引导；平台名「B站」；保留策略=未读不处理/已保存 3 天/已跳过 7 天（插件侧清理，设置可调）；UP 名单仅存 uid（粘贴链接解析）；三源独立开关；自动摘要详设三键（长度档位/标签开关数量/时机默认保存后立刻）
+- ✅ **实现**：`src/news/data.ts`（四段读写/迁移/uid 解析/保留策略纯函数）+ `src/news/source-settings.ts`（数据源组数据层）+ reader.ts 四段化（loadAll 一次读盘、markAsRead 写 state、写回串行队列防两写回互相覆盖）+ 剪藏设置「数据源」组 + 自动摘要详设 + settings 7 新键
+- ✅ **watcher**：tools/news-watcher 1.1.0——四段读写、sources 开关三源、B 站源（cookie 引导 + 动态 API + 仅 AV + 24h 翻页 + 双去重 + body=简介+封面+链接）、buildBilibiliArticle 纯函数 + node:test
+- ✅ **测试**：+4 文件（data 迁移/保留/uid 解析、source-settings、数据源组 UI 两路径、processor 详设、index 时机各例）；既有 news/clipping/auto-summary 用例按新契约同步（fixture 四段化、断言可见性过滤）；mock 补 addExtraButton/MockButton.setIcon
+- 📄 文档：spec 章节、issue 124、ADR-0060、CONTEXT 五词条（数据源开关/UP 主名单/保留策略/摘要时机/剪藏本更新）、watcher README
+
+## 2026-09-01 小橘记忆流/行为流重构（ticket 123；grill-with-docs 定案，ADR-0055~0059）
+
+**状态：多 worktree 并行实施完成并全部合入 master（4 merge + 1 build 修复）；全量 195 文件 / 3106 测试全绿 + tsc 0 + 构建部署（产物落 vault 与仓库根）**
+
+- ✅ **P1 数据基座（e06fc4f）**：types.ts 新增 StructuredMeta/BehaviorItem、MemoryStream v2（memoryStream+behaviorStream 双流同文件）；routing.ts（45+ source:action 路由表 + resolveRouting 三级解析）；addObservation 新签名（source + structured，路由自动推导 importance/emotion/stream，旧签名保留过时包装）；behavior-trim.ts 滚动窗口（默认 30 天/1000 条）；data.ts 旧 schema 检测重置（stream/version<2 → 空双流）+ vec 重建；settings.ts 5 新键（behaviorMaxDays/behaviorMaxCount/showBehaviorLog/enableAutoLinking/linkWindowDays）；全库 `.stream → .memoryStream` 迁移（32 文件）；review 修复 interaction-cov mock 字段
+- ✅ **P2c 分层策略（588fa69）**：content-completion-detector.ts（minLength 20/稳定 30s/会话 5min/forceComplete/时钟注入）+ snapshot-generator.ts（shouldRegenerateSnapshot 30% 阈值 LCS diff/simpleHash/generateSnapshot AI 注入+非AI兜底/emotion 白名单）——纯新增文件零修改；review P1 修复（timeout 后状态清除防重复）
+- ✅ **P2b 行为域（64f41ca）**：memo/news/favorites/belongings/pomodoro 五域 build*Structured 纯函数 + index.ts notify* 改走新签名（B6 300ms 防重/B8 到期扫描顺序/news 补全降级逻辑全部保留）；review 补 memo:due 显式路由
+- ✅ **P3 用户体验层（5e9cce2）**：dashboard 行为日志页签（showBehaviorLog 控制）+ promote 按钮；memory.ts 新增 promoteToMemory/queryBehavior/summarizeBehavior/linkRelatedMemories/buildStoryline；设置弹窗 3 组 5 控件；review 2×P1 修复（promote/settings 落盘 saveSettings）
+- ✅ **P2a 创作/情感域（75fb7a6）**：description-generators.ts 策略注册表（movie/book/diary_entry/letter/poem/chat_message/insight + fallback，snapshot.summary 优先）；diary/movie/library/chat 接线改新签名；**review P0 捕获：flash(卡片盒) 被误改 memory → 恢复 behavior（用户拍板知识内容不进记忆流）**；P1 修复（library credibility/description 截断/movie default 分支）
+- 🔧 **样式位置修复（9d079e6）**：P3 行为日志样式误写根 styles.css（构建产物被覆盖丢失）→ 移入 src/smartcat/styles.css 收敛处重建
+- 📄 文档：ADR-0055~0059、issues/123、spec.md、CONTEXT 词条、PROGRESS 本条；worktree 已清理
+- ⚡ **追加拍板（2026-08-27）**：聚合讯「跳过」（markAsRead('skipped') → 点「下一篇」）也发观察入行为流——reader.ts 跳过分支补 `emitDomainEvent('news', {kind:'read', evt(state:'skipped')})`，smartcat 侧 `news:skipped` 路由（原为死代码）生效；「阅读」无独立 UI 动作不发；reader.test.ts「跳过不发」反例反转、news-action.test.ts 补 skipped 行为流用例、news-source/index 注释与 spec/issues 同步
+
+## 2026-08-27 日记「未解析行」主动检测+手动修复 与 第二大脑移动端 IP 防呆（ticket 121 / 122，grill-with-docs 定案）
+
+**状态：master 直接实现完成，待提交（ADR-0054 + issues/121 + issues/122；全量 2915 测试绿 + tsc 0 + 构建部署产物已落）**
+
+- ✅ **实现（ticket 121）**：`src/diary/repair.ts` 扫描/修复引擎（R1 补空格 / R2 时间补零 / 时间越界与无可修头行的游离正文 → 不可修清单；applyRepairs 按行号 before 匹配替换）；`src/diary/ui/repair-modal.ts` 检测面板（zIndex 11200 companion 档、分批并发扫描进度条、两区汇报、一键修复 confirm 后 vault.modify、点击行 openAtLine 编辑器 setCursor 定位、重新检测）；`loadAll` 移除启动自动 toast（UX-9 数字通知退役）；日记⚙️设置弹窗「维护」组加「检测日记解析」按钮；样式收 `src/diary/styles.css`
+- ✅ **实现（ticket 122）**：`src/secondbrain/local-ip.ts`（enumerateLanIPs 过滤 internal/loopback/link-local/IPv6；getLanIPs 走 window.require('os')，esbuild external 'os'）；第二大脑⚙️弹窗基础组加「本机局域网 IP（电脑）」行（桌面端探测展示 + 确认后一键填入 remote URL；移动端显示引导文案）
+- ✅ **测试**：+4 文件 22 例（repair 引擎 11 / 检测面板 4 / IP 枚举 4 / 第二大脑设置弹窗 3）；UX-9 两用例按新契约改写（loadAll 不再弹 toast、检测入口迁面板）；日记设置弹窗分组断言加「维护」组；MockButton 补 setCta；全量 2915 绿 + tsc 0
+- 📄 文档：ADR-0054（修复≠改格式，冻结边界立据）；issues/121、122；CONTEXT 词条「未解析行」「远程 Ollama URL」；spec 用户故事 26/52；PROGRESS 本条
+
+## 2026-08-27 第二大脑正文大改自动重跑（ticket 119：v1.4 基准哈希 + 修改监听）
+
+**状态：master 3256b1c 合并完成；合并复核全量 2724 测试通过（179 文件）+ tsc 0 + 构建部署（产物已落 E:/Obsidian/叫我包仔/.obsidian/plugins/bz/）**
+
+- ✅ **用户拍板机制**：「记录第一次向量后的文件，如果改动笔记后，再次向量的文件有变化才走查新索引」→ 用全文内容哈希做基准，**内容实质变化才重跑建链**（Obsidian 高频保存但内容未变 / 自写 related 触发 → 哈希相同 → 不空转裁判；杜绝自触发死循环）
+- ✅ **基准状态**：新数据文件 `CONFIG/STORAGE/secondbrain_link_state.json`（`{ path: { hash, linkedAt } }`，STORAGE 目录随 Syncthing 流动；损坏/非对象/旧形态容错为空）；每次 `processNote` 成功（含监听/队列消费/补链/手动重跑）写入后刷新；不可达入队/失败不记；文件删除 `dropLinkBaseline` 清条目
+- ✅ **修改监听**：`LinkAgentWatcher` 订阅 `vault:md-modified`（`linkAgentScopes` 范围门 + 防抖聚合，复用既有批次管道）；冲刷时 `filterChangedForRelink` 过滤——基准相同剔除 / 正文大改保留 / **无基准（升级前存量已连接笔记）保留**（重跑一次并从结果重建基准）
+- ✅ 纯自动：无新命令、无新按钮、无新设置项；批次沿用串行锁与通知规则（N=0 静默）；过滤异常按全部修改保留兜底
+- ✅ 测试：数据层 +4（状态 CRUD/覆盖/移除/损坏与非对象容错/STORAGE 路径），UI 层 +5（成功建链记基准含 related·幂等重跑刷新·入队不记 / filterChangedForRelink 五分支 / dropLinkBaseline / 修改聚合与混合批次 / 过滤异常兜底 / scope 与开关门），watcher stub 补 `filterChangedForRelink`+`dropLinkBaseline`；smoke 无新命令不变
+- 📄 文档：spec v1.4（状态文件/修改监听/基准过滤/验收标准）；issue 119；CONTEXT 第二大脑词条并入正文大改自动重跑；PROGRESS 本条
+
+## 2026-08-27 第二大脑建链检索查询改全文嵌入（ticket 118：召回优化）
+
+**状态：master 4bc3d7b 合并完成；合并复核全量 2714 测试通过（179 文件）+ tsc 0 + 构建部署（产物已落 E:/Obsidian/叫我包仔/.obsidian/plugins/bz/）**
+
+- ✅ **用户澄清机制**：全文进向量模型 = 建链检索的**查询端**；检索只是"召回候选"，**建链条数由 AI 裁判择优决定**（"只链实质关联，存疑不链"）
+- ✅ **查询端全文嵌入**：`findCandidates` 以正文全文（剥 frontmatter、去空白）生成查询向量，超长按 `LINK_QUERY_MAX_CHARS=8000` 安全截尾（bge-m3 上下文约 8192 token）；替代原 800 字摘要截断——长笔记中后段语义参与召回
+- ✅ 真机例证：弗洛伊德一篇的候选被 9 张「文明」主题卡（阿兹特克/古埃及/玛雅…）大量挤占 Top-8，裁判全否后仅批 弗洛伊德主义 → 解释"为什么只有一条链接"（用户侧提升手段：调大 TopK + 重跑当前笔记关联）
+- ✅ 测试：UI/通知层 +1（全文查询 2000+ 字进查询、20000 字截 ≤8000）；spec v1.3、issue 118、CONTEXT 同步
+- 🔬 **实测对比（2026-08-27，脚本 `.scratch/sb-query-compare/compare.mjs`，两轮）**：对文献盒弗洛伊德/尼采两篇，V1=全文查询 vs V2=简介+标签查询（各 62 字）→ 召回 Top-8 几乎同一批（弗洛伊德主义/尼采/人性/康德/柏拉图…思想类卡），裁判最终建链两轮完全一致（弗洛伊德↔弗洛伊德主义、尼采↔尼采，与库中实链吻合）；个别候选（如王阳明）是否入选呈裁判输出随机性、与查询方式无关 → **结论：短文献上简介+标签并不会更好，维持全文查询**（长笔记时全文才显优势）；"链更多"的用户侧手段仍是调大 TopK / 重跑
+
+## 2026-08-27 第二大脑范围语义修订（ticket 116：候选=全索引库 / 范围=目标侧 / 两目录字段默认空）
+
+**状态：master 09d37b9 合并完成；合并复核全量 2710 测试通过（179 文件）+ tsc 0 + 构建部署（产物已落 E:/Obsidian/叫我包仔/.obsidian/plugins/bz/）**
+
+- ✅ **根因（真机复现）**：范围缺省回退「文献盒」且同时过滤候选 → 文献盒仅 1 篇时候选恒为空 → 「处理中 1/1 篇」但 0 产出、「未发现实质关联」——弗洛伊德明明在索引里却不进候选
+- ✅ **候选取向（用户拍板）**：`findCandidates` 去掉 `linkAgentScopes` 过滤 —— 候选来源 = 白名单索引库全部笔记，剔除自身/缺失文件/encrypt 锁定；范围（`matchesScope`）只管目标/触发侧（监听 + 补链目标 + 死链扫描），空 = 任何路径不命中
+- ✅ **双字段默认空（用户拍板）**：`DEFAULT_SETTINGS.linkAgentScopes=''`、`secondBrainAllowPaths=''`；`parseScopeList` 空值返回 `[]`（删 `LINK_AGENT_DEFAULT_SCOPE` 回退）；`buildConfig.ALLOW_PATHS` 空=[]；`whitelistedFiles` 空白名单 = 不录任何文件（原"空=全库"一并修订）—— 空 = 什么也不录，不是全库
+- ✅ 文案：⚙️ 弹窗「白名单目录 / 单篇候选数量 TopK / 关联范围 / 自动双链」四处描述按新语义更新
+- ✅ 测试：数据层（空值=[]/matchesScope/默认值）+ UI 层（候选不受范围限制、空范围 backfill no-targets、监听空范围不触发、显式范围回归）；spec v1.2、issue 116、CONTEXT 同步
+- ⚠ 用户实配保持「文献盒」（data.json 不代改）：启动补链目标 = 文献盒 1 篇，候选来自全索引库 → 弗洛伊德将正常链接到相关卡片
+
+## 2026-08-27 第二大脑存量笔记启动自动补链（ticket 115：启动补链 + 批量补链命令）
+
+**状态：master 1975912 合并完成；合并复核全量 2708 测试通过（179 文件）+ tsc 0 + 构建部署（产物已落 E:/Obsidian/叫我包仔/.obsidian/plugins/bz/）**
+
+- ✅ **根因定位（真机）**：`linkAgentScopes` 默认仅「文献盒」而文献盒只有 1 篇笔记（候选池自排除后为 0）+ 自动建链只监听新建落盘（存量永远不触发）→ 全库 0 条 related、队列空、一切静默——非 bug，是 v1 设计边界 + 配置 + 库内容叠加
+- ✅ **数据层 `computeBackfillTargets` 纯函数**：目标 = scope 内 md，剔除已含 related（`related` 即进度检查点，中断续跑天然增量）/ encrypt 锁定 / 队列内待重试条目；去重、字典序稳定输出
+- ✅ **管线 `backfillMissingLinks`**：开关门 → 可达性探测（不可达返回 unreachable 静默，下次启动重试）→ 目标清单 → `processBatch(targets, { assumeReachable: true })`（入口已探测不再逐篇探测）；`processBatch` 增全局串行锁（线程安全：与监听批次排队互斥，refresh/AI 裁判绝不并发）
+- ✅ **启动接线**：`startStartupBackfill`（等待索引装载后执行、启动路径静默）；`ensureSecondBrain` 中「队列消费 → 存量补链」依序串行
+- ✅ **命令 `bz-secondbrain-link-all`**：存量批量补链的显式兜底，按结果通知（完成 N 篇/M 条 / 未发现实质关联 / 无待补链 / embedding 不可达 / 开关已关闭）
+- ✅ 测试：数据层 +4（目标清单筛选/去重/字典序/谓词实时），UI/通知层 +10（补链 done 汇总 / 不可达 / no-targets / 队列排除 / 串行锁 maxActive=1 / 命令五分支），smoke 命令 id 同步
+- 📄 文档：spec v1.1（①b 存量补链 / 手动命令 / 验收标准）；CONTEXT.md 第二大脑词条并入 link agent 与存量补链说明；issue 115 status 待合并
+
+## 2026-08-26 第二大脑初始化断点可续 + 白名单目录选择器（ticket 114；编号与并行 core 113 错开）
+
+**状态：master ef5c56a 合并完成；全量 2695 例绿 + tsc 0 + 构建部署**
+
+- ✅ **断点暂存续嵌**：长库初始化/重建期间按「时间 ≥5s + 新增完成块 ≥200」双阈值（CHECKPOINT_POLICY
+  可测收紧）把已完整嵌完文件 `mergeWrite` 落盘；中断（关页/重启/Ollama 失联）后重开自动增量续嵌，
+  不再整库从零重来；行序布局不变式与数据格式零改动（最终写回与暂存共用同一 mergeWrite）
+- ✅ **关页重开恢复进度视图**：原缺陷「初始化中途关页重开 → 回引导态 + 按钮点击无反应」（initializing
+  守卫静默吞点击 + 进度 UI 未恢复）；现 render() 检测 store.isRefreshing() → 恢复实时进度视图（fire-and-forget
+  不阻塞 open）；重复点击接回进度而非静默失效；startInitialIndex 抽为 runInitialIndexView 点击/重开两路共用
+- ✅ **白名单目录选择器**：whitelist.ts 纯函数（parse/format/normalize——祖先去冗余后代/collectFolderInfos——
+  每级祖先+根级单文件聚合计数）+ whitelist-modal 弹窗（搜索过滤 + checkbox 层级列表 + 已选 chips ✕ +
+  清空/全选/确定，z-index 11200 companion 档）；设置页白名单行 = 文本框+📁 选择+chips 预览，
+  「关联范围」行同步 📁 按钮；存储格式不变（逗号分隔字符串），兼容冻结零破坏
+- ✅ **测试**：白名单纯函数 / 断点暂存恢复续嵌 / 重开进度视图 / fake store 补 isRefreshing，共 +10 例
+- 📄 文档：issues/114、本票编号与并行 core 域 ticket 113（通知时长）错开
+
+## 2026-08-26 通知动态停留时长（ticket 113）
+
+**状态：测试 + tsc 全绿；待合并**
+
+- ✅ 未指定 duration 时按文字长度动态计算停留时间：≤20 字用类型默认值，>20 字每多 1 字加 60ms，上限 15s
+- ✅ 显式 duration 仍优先；progress 类型不变
+- ✅ 新增 2 个测试用例（长文本动态延长、显式 duration 优先）
+- 📄 文档：CONTEXT.md 通知时长描述更新、issues/113、ADR-0053
+
+## 2026-08-26 第二大脑统计卡改版 + 灵感参考悬停全文（ticket 109）
+
+**状态：全量测试 + tsc 0 全绿；合并 c09a700（另一会话幽灵卡修复）后以 4c96be9 合入 master**
+
+- ✅ 顶卡 7→6：删「内容规模」「白名单覆盖」，新增「嵌入维度」卡；桌面一行 6 列、移动端 3×2；≥10K 用 K/M 缩写、hover 千分位精确值
+- ✅ 「最厚笔记 Top5」连根删（区块+computeStats.topThickets+测试）；清死代码 clearSummaryCache / fmtScale
+- ✅ 灵感参考悬停浮层：460px 加宽 + overflow-wrap 断词 + 取消 150px 限高 + top 贴屏钳制（异步渲染后二次钳制）；拖出缩放与浮卡全文经核实为既有能力，不动
+- 🔀 与并行会话的刷新竞态修复（c09a700，同改 reference-panel.ts）正交自动合并且共存验证通过
+
+## 2026-08-26 第二大脑面板打磨（ticket 108，ADR-0052）
+
+**状态：secondbrain 117 例全绿（新增 11）+ tsc 0 错误；worktree/sb-panel-polish**
+
+- ✅ **主面板**：存储占用合计单值（hover 明细）；上次索引/最近向量化改共享 formatRelativeTime；趋势柱铺满整行；来源分布树形逐级展开（左对齐取消固定列宽、▸/▾ 递归下钻、每级聚合全量计数）；新维度 ×4（白名单覆盖率/内容规模总字数·平均块长·每篇块数/最厚笔记 Top5/索引一致性健康灯）
+- ✅ **打开即增量索引**：hasPendingChanges 预扫描（新文件/变更/删除）；有待处理 → 全屏进度视图接管（「正在同步索引」），完成自动切统计；无变更直进统计
+- ✅ **重新索引**：设置弹窗 → confirm 确认 → 关设置 → 开主面板自动全量重建（rebuildAll：清空 meta/vec/VP 缓存后整库重嵌，失败可重试）
+- ✅ **AI 通道统一（ADR-0052）**：对话+概括走主设置页 core AI，不回退 Ollama；删对话三键 UI（键保留不消费）；两端 DeepSeek 复选框删除；ollamaChat 函数保留标注预留
+- ✅ **参考窄窗**：删 🤖/⚙️，emoji 按钮 🔄/◀️▶️/❌，标题去 📚，收起边条 📖，密度切换（📃/📑 会话内）
+- ✅ **对话改居中弹窗**：core createOverlay 9998/9999，无头部按钮，遮罩+ESC 关闭
+- ✅ **测试**：statistics（树/维度）+ hasPendingChanges/rebuildAll + UI（增量接管/重建/弹窗/失败气泡）共 +11 例
+- 📄 文档：spec 55-58 + Further Notes、issues/108、CONTEXT 三术语（引导态/增量索引/重新索引）、ADR-0052、AGENTS 决策 6
+
+## 2026-08-25 第二大脑首用引导 + 隐形 bug 清剿（ticket 107，ADR-0051 补记）
+
+**状态：secondbrain 106 例全绿（新增 10）+ tsc 0 错误；worktree/sb-init-onboarding**
+
+- ✅ **首用引导**：无向量数据时三命令统一开主面板引导态（说明 + 开始按钮）；首次向量化须用户点击触发——启动空库不再自动全量嵌入、vault modify 防抖未就绪不生效；进度条实时更新，完成自动切统计面板，失败给原因可重试（QA 全败仍报「完成」，以 isIndexReady 判定）
+- 🐞 **隐形 bug 头号发现**：`src/secondbrain/styles.css` 从未创建——ticket 103「样式收敛根 styles.css」实际未落盘，全部第二大脑 UI 以裸 DOM 发布（部署的 styles.css 零 bz-sb 规则）；本次补齐全套样式并接入 build-css.mjs 聚合清单
+- ✅ **行为修订三处（bz 改进）**：refresh 并发去重（启动/防抖/面板三入口并发致向量段错位且不自愈）；损坏态自愈（meta 有条目但向量为空 → 全量重建）；移动端嵌入走远程 Ollama URL
+- ✅ **移植回归修复**：getEmbeddingsBatch 空结果恢复抛「向量为空」（畸形 2xx 登记空向量会致行映射错位）；renderMarkdown 异步回退死路径；makeDraggable 视口钳制（QA L906-908）；jumpToChunk/后台 refresh 补 .catch；DeepSeek 模型设置生效（chat() 硬编码模型名）；main.ts onunload 补接线 unloadSecondBrain()（残留窗体 + 卸载后防抖仍嵌入）
+- ✅ 附带修复：内容态打开改为 refresh 完成后重渲统计（原先总展示上一轮旧数据）；reference-panel 在途检索 post-await 守卫；主面板死类 bz-win-mfs-host 移除
+
+## 2026-08-25 第二大脑完成（ticket 103 取代 18：闪念正名接管 + QuickAdd 完整复刻，ADR-0051）
+
+**状态：全量 2595 测试通过（172 文件）+ tsc 0 错误 + 构建部署完成；提交 worktree/second-brain**
+
+- ✅ **正名接管**：`src/flash` → `src/secondbrain` 整体更名完全接管；命令换代 `bz-secondbrain-panel/open/chat`（主面板统一入口）；`'flash'` 笔记类型词汇（path-classify/smartcat source/credibility/域事件）冻结不动
+- ✅ **行为对齐 QA 八处**：分块保段落边界、cos=`max(0,1−d²/2)`、句界集补中文分号/省略号+整行空白回退上一行尾、TF-IDF chunk 粒度且索引复用、文本检索返回命中段+QA 加权评分、VP 树 mu/minD/maxD 包络剪枝+构建缓存（另加向量数组身份失效校验）、parallelMap 自适应并发（起始 3）、移动端提示词「【参考】」；保留 bz 四改进（Ollama 30s 超时/MobileBuffer 写入/真⚙️弹窗/jumpToChunk offsetToPos）
+- ✅ **修缺陷四处**：refresh 仅删除不落盘（提前 return 跳过 save；白名单清空同径）；旧向量段偏移按「删除前」键序计算（原实现非末尾删除会错位）；分块大段路径 buffer 不清致内容重复（QA 同源）；批量嵌入失败→逐条回退成功路径未回填 fileChunksMap 致合并越界 RangeError
+- ✅ **设置与数据换代**：16 键更名 `secondBrain*` onload 迁移删旧（META_PATH/VEC_PATH 清除）；新增 `secondBrainMobileDefaultFullscreen`（默认 true，主面板移动端全屏）；meta v7→v8 首载一次性整库重嵌（约 19688 块静默后台跑）+ 数据文件更名 `secondbrain_meta.json`/`secondbrain_vectors.vec`
+- ✅ **QuickAdd 差距 9/9 复刻**：入口接线+启动自动化（ensureSecondBrain 幂等 + vault modify 经 domain-bus 5s 防抖静默刷新）、DeepSeek 走 core/ai createAI（弃 window.__utils）、参考卡长按拖出浮卡状态机（250ms 浮起/15px 拖出/双击归位回原位）、悬停预览智能左右定位、过滤当前文件、卡片 markdown 渲染、移动端全套交互（双 tab/拖拽吸附 45·75vh/<18vh mini 胶囊/selectionchange/光标轮询/长按震动跳转）、VP 缓存、自适应并发
+- ✅ **新增主面板统一弹窗**：统计卡片（块数/笔记数/维度/存储占用/上次索引）+来源分布横条+近 12 周趋势自绘迷你图+最近向量化 Top10 点击跳转+AI 一键概括（缓存 secondbrain_panel.json 可重新生成/清除）；打开即自动增量刷新；头部 📚💬→⚙️→✕ 仅移动端全屏显示
+- ✅ **样式统一**：全部表面 bz-sb-* 类名收敛根 styles.css（+547 行），废除 sh-* 运行时 style 注入与 globalThis 挂载；ESC 一律走 escManager 层级
+- ✅ **测试**：tests/secondbrain 重写+新建 10 文件 96 例全绿（含 A/B/C 删中间文件合并不错位回归、cos 公式反转断言、v8 迁移、设置迁移 5 例、浮卡/窄窗 jsdom 冒烟）；smoke 断言三条新命令并种旧 flashEnabled 验证迁移链路
+- 📄 文档：ADR-0051、CONTEXT.md「第二大脑/闪念笔记」双词条、AGENTS.md 四处、README 六处、spec.md 五处修订+Further Notes；issue 18 关闭 superseded、issue 103 done
+
+## 2026-08-25 第二大脑开工（ticket 103 取代 18：闪念正名接管 + QuickAdd 完整复刻）
+
+**状态：设计共识闭环（grilling 设计树走完，用户逐项拍板），worktree/second-brain 开工**
+
+- 📋 **基准裁定**：QuickAdd `CONFIG/SCRIPTS/Quickadd/闪念.js`（2311 行单文件）为完整原型；`src/flash` 为当年移植的未接线半成品（index 占位、四 UI 模块 WIP、两命令只弹「迁移中」，数据/纯函数层可用并被 smartcat 复用）。本票完成实现并正名「第二大脑」，issue 18 关闭 superseded
+- 📋 **命名三层拆分**：功能=第二大脑；模块 `src/secondbrain/`、命令 `bz-secondbrain-open/chat/panel`、设置键 `secondBrain*`；笔记类型词汇 `'flash'`（path-classify 卡片盒分类/smartcat source/credibility 0.9/`flash:*` 域事件）冻结不动——「闪念笔记」是文档类型，「第二大脑」是功能模块
+- 📋 **行为对齐 QA 八处**：分块保段落边界、cos=`1−d²/2`（bz 版失真正交≈0.29）、句界集补中文分号/省略号+空行回退上一行尾、TF-IDF 以 chunk 为文档单位且索引复用、文本检索返回命中段+QA 加权评分、VP 树 minD/maxD 包络剪枝+构建缓存、parallelMap 自适应并发、移动端提示词「【参考】」；**保留 bz 四改进**（Ollama 30s 超时/MobileBuffer 写入/真⚙️弹窗/jumpToChunk 修复）；**修 refresh 仅删除不落盘真病灶**（无 mtime 变化提前 return 跳过 save）
+- 📋 **兼容破例三项（用户拍板，将记 ADR）**：命令 id 换代不留别名（旧 id 从无真实外部调用者）；17 设置键全量更名 `secondBrain*` + onload 迁移删旧键（废弃 META_PATH/VEC_PATH 清除）；meta v7→v8 首载一次性整库重嵌（约 19688 块，静默后台+进度通知）+ 数据文件更名 `secondbrain_meta.json`/`secondbrain_vectors.vec`
+- 📋 **新增面**：主面板统一弹窗（统计卡片+来源分布+近 12 周趋势自绘迷你图+最近 Top10+AI 一键概括缓存 `secondbrain_panel.json`；打开即自动增量刷新；头部 📚💬→⚙️→✕ 仅移动全屏）；⚙️ 三分组+移动端全屏行+清概括缓存行；全部 UI 表面统一 BZ 样式（`bz-secondbrain-*` 收敛根 styles.css，废除 sh-* 运行时 style 注入）
+- ⏳ 实施中
+
+## 2026-08-25 剪藏 frontmatter 主字段 link→url（ADR-0050；用户拍板豁免兼容性冻结）
+
+**状态：全量 2569 绿（171 文件）+ tsc 0 + 构建部署完成；vault 存量 138 篇已批量迁移**
+
+- 换名范围四域：剪藏本解析（clipping/view.ts ArticleEntry.url）、聚合讯存剪写入模板（news/reader.ts saveToClip `url:`）、剪藏归档 URL 精确匹配（memo/clip-archive.ts 读 frontmatter url）、smartcat 待补全登记/rename 反查锚点（NewsPendingSave.url + parseClipFrontmatter 只认 `url:`）
+- **不做双读兼容**（用户拍板「不用做兼容」）：读取只认 url；auto-summary 零改动自然跟随（frontmatter 原样合并保留）
+- 存量迁移：`.scratch/clipping-link-to-url/migrate.mjs`（frontmatter 块内键名替换，BOM/CRLF/值/正文逐字节保留；夹具干跑验证后执行）——140 篇扫描、138 改写、2 跳过（无 link）、0 失败；行数基线比对零差异、`^link:` 清零；备份在 `.scratch/clipping-link-to-url/vault-backup/`
+- 文档：ADR-0050、CONTEXT.md「剪藏归档」词条措辞
+- ⚠️ 遗留人工项：**Obsidian Web Clipper 浏览器扩展模板属性 link→url 需手动改**——扩展配置在浏览器侧插件无法代改，未改前新剪落文件只有 link 字段，剪藏本不收录
+
+
 
 **状态：全量 2202 绿（148 文件）+ tsc 0；worktree/dissolve-ai-agent 已提交，待合并 master + 构建部署**
 
@@ -38,6 +312,21 @@
 - ✅ **1.2.3（2026-08-25，用户反馈三项）**：① **转文字逐段化**——`/api/transcribe` 带 segments 按「所选段落」逐段转录（存 `T.segmentTranscripts`），不再整片转录；② **下载后段落为空**——去掉自动整片段落，时间轴圈选草稿 `S.draft` 后手动「+ 添加段落」，空段落=整片交付/转录；③ **笔记视频块布局**——分开交付多段 = 每交付文件「视频链接、对应转文字」依次排，合并 = 单块；另修**拖末尾把手视频不跟随**（end 处理改为 seek 到结束位）
 - ✅ **1.2.4（2026-08-25，未发布·本地验证期；用户拍板冻结 npm publish）**：**bz 插件临时指针**——`bz-bili-open` spawn 改本仓库未发布 CLI（`node "D:/Obsidian/bz/tools/bili-downloader/cli.js"`，存在即优先，源码注释标记修复期，稳定后删除恢复全局 bili-dl，插件构建已部署 vault）；**快捷命令严格顺序五步**（①应用剪辑 ②应用压缩 ③转文字 ④AI 润色=新 `/api/note-prepare`、存 `T.polishedNote` ⑤生成笔记=交付+写笔记复用润色，AI 只跑一次；`#flow-status` 步骤展示、串行不并行）；**转录单进程单次模型加载多文件**（PY_TRANSCRIBE 多文件 + `\x1e/\x1f` 单元分隔 + `parseTranscriptUnits`，修多段「一直转录中无效果」）；**修草稿态滑块重置**（`syncFromActive` 用 `S.draft`，把手跟随不回零）；**压缩完成清「编码中」残影**。工具 `npm test` 65 全绿、插件 bili 测试 9 全绿、tsc 0、构建部署（指针入产物）
 - ⏳ 待办：本地全流程实机验证（下载→圈选段落→五步生成笔记→obsidian 跳转）；验证通过后再评估 `npm publish`（冻结中）
+
+## 2026-08-27 bili-dl 体验优化十项（ticket 117；worktree/bili-ux，用户采纳 P1 六项 + P3 三项 + AI 润色进度反馈）
+
+**状态：实现完成（工具 + 插件启动器），待测试/构建/合并门禁**
+
+- ✅ **转文字进度反馈**：PY_TRANSCRIBE 逐段 flush（`\x1e<file>\x1f<seg>\x1f\n`）+ 文件结束空行哨兵（标记完成、不计文本）；`parseTranscriptUnits` 同文件多行聚合；服务端 `transcribe-phase`（model/work + done/total，哨兵行驱动文件级计数，resolve 后兜底补齐）；前端 ts-status 三态 + 已用计时（本地 setInterval，完成/失败清除）
+- ✅ **AI 润色进度**：`runNoteAi` 先算全量切块总数，`note-progress` 带 `phase/meta|polish/done/total`；`#flow-status` 升级为「进度条 + 阶段文案 + 已用计时」一行（`#flow-bar/#flow-text/#flow-elapsed`，.flow 样式），meta 不定进度（indet）、正文逐块实进度；快捷命令步骤 4 起启动本地计时
+- ✅ **刷新恢复任务**：`GET /api/state` 快照（phase/url/info/quality/分P/curDur/segments/mode/crf/transcript/transcriptSig/lastFiles(补 finalPath)）；DOMContentLoaded 拉取重建解析卡/预览/段落/转录/结果卡（静默交付渲染不重复复制）；busy 阶段恢复时置 busy + 提示；不回传 cookie/临时路径
+- ✅ **取消确认**：`confirm()` 文案点明删除未交付临时产物；交付结果渲染改行内结构 + 「打开所在文件夹」按钮（`POST /api/reveal`，win32 `explorer /select` spawn 免 shell，`revealApi.impl` 可打桩）；文献笔记成功后同款按钮（note.path）
+- ✅ **实例复用**：cli.js 端口文件 `~/.bilibili-dl-port` + 存活探测（读页面含「B站下载器」才算）；复用打印同格式地址行 + 开浏览器后退出；`cleanup` 不删端口文件（复用路径退出会误删旧实例文件）；`--port` 显式指定跳过复用
+- ✅ **插件启动反馈**：spawn 即 `notice('正在启动 B站下载器…')`（消除启动空窗）；6s 兜底改**软超时**（不 settle），close 非 0/error 可覆盖升级失败提示；`tests/bili-downloader/index-cov.test.ts` 三个旧语义用例同步修订（stderr 后仍只 1 条启动提示 / close(0) 叠加启动提示 / 软超时后 error→close 可升级，error settle 后 close 不再改口）
+- ✅ **P3 三项**：`fmtPrec` 先归一 0.1s 再拆位（修 x.95~x.99 进位显示错乱）；`.handle::after` 透明热区 20×28px + z-index 3（长视频好拖）；`#seg-hint` 空段落引导（下载/回退原片显示、添加首段隐藏、恢复/重置联动）
+- ✅ **设置页新键说明剔除**：复查 index.html 已具备 cacheDir/cacheRetentionDays/literatureFolder 中文说明，P3-13 误报不做
+- ✅ **文档**：spec（.scratch/bili-downloader-ux/spec.md）、issue 117、tools/bili-downloader/CONTEXT.md 三词条（任务快照/转写进度/AI 润色进度）+ 规则「重复启动复用实例」、README 特性五条
+- ⏳ 待办：工具 `npm test` + 插件 `pnpm test`/tsc 全绿 → 构建部署 → 合并 master → 清理 worktree
 
 ## 2026-08-26 域事件总线一期（ticket 101；worktree/event-bus）
 
@@ -182,7 +471,8 @@
 
 - **ticket 36 小橘「懂你」闭环（用户反馈「配合不密切、数据给得不恰当」；ADR-0025 + issue 36；git worktree worktree/smartcat-companion 开发）**：三包落地。**A 情绪闭环**——推翻旧拍板「情绪不直接改写 PAD」：`mood.emotionResonanceDelta`（纯函数，VAD→PAD 差量：负面增益 6>正面 4、calm/neutral 趋 0）+ `applyEmotionResonance` + `applyTrendDrift`（近 48h 趋势 30 分钟节流回写 PAD）；`memory.onObservation` 钩子（index 接线：每条观察 → registerEmotion + 共振；聊天手动 registerEmotion 移除）。**B 全通道记忆**——新 `src/smartcat/companion-context.ts` `buildCompanionContext`（作息+情绪趋势+信任/依恋+检索记忆）经 `generatePrompt` 新参 `companionContext`（`## 你了解的用户` 节）注入聊天（记忆段从 user 尾部移入 system）/自言自语/欢迎回来（作息感知气泡）/书评/主动关心。**C 数据诚实化**——① 聊天记忆去重限流（`addObservation(…,{dedupe:true})`：近 20 条同内容短路省 LLM 打分 + 非 calm 情绪 or importance≥0.55 才落库）；② `trustUpdate` 增 neutral 语义（click/note_* 不动 trust 且跳过软收拢，修「warm 恒真」侵蚀死代码）；③ `preferredHour` 假众数→真众数（复用作息画像 peakHour，无记忆数据兜底当前小时）；④ 矛盾检测动词表补 看了/读了/剪藏了/记下 +「在…记下」前缀（闪念源）；⑤ 周报 `padAvg` 取周内观察情绪 VAD 均值（无情绪样本回退当前 PAD，不再抄现值）；⑥ 检索 `retrieve(query,topN,{lexicalQuery})` 词法降级用纯用户消息（免「情绪/时段」索引词稀释命中率）。文档：ADR-0025、CONTEXT.md 情绪/心情/记忆流/RL 词条同步 + 新术语「温和共振」「懂你上下文块」（并修正 α 漂移：0.66/0.95/1.5、decay 0.982、TRUST_CAP=0.85 软收拢、ticket 029 全内容 LLM 打分），issue 36。**测试**：smartcat 域 195 全绿（新增 mood 共振/趋势/众数/中性信任、memory 去重限流/钩子/lexicalQuery、cognitive 新事实模板、report padAvg 推导、新 companion-context 6 用例），全量 1357 绿 + tsc 0。
 
-- **ticket 036 小橘「懂你」闭环 + 云端打分范围（用户反馈「配合不密切、数据不当」；ADR-0025 + issue 36；git worktree worktree/smartcat-companion 开发，并入 master）**：三包落地后追加「记忆打分范围」智能默认。① **A 情绪闭环**——推翻旧拍板「情绪不直接改写 PAD」：emotionResonanceDelta（纯函数，VAD→PAD 差量：负面增益 6>正面 4、calm/neutral 趋 0）+ pplyEmotionResonance + pplyTrendDrift（近 48h 趋势 30 分钟节流回写 PAD）；memory.onObservation 钩子（index 接线：每条观察 → registerEmotion + 共振）。② **B 全通道记忆**——新 companion-context.ts uildCompanionContext（作息+情绪趋势+信任/依恋+检索记忆）经 generatePrompt 新参 companionContext（## 你了解的用户 节）注入聊天/自言自语/欢迎回来（作息感知气泡）/书评/主动关心。③ **C 数据诚实化**——聊天记忆去重限流（opts.dedupe：近 20 条同内容短路 + 非 calm 或 importance≥0.55 才落库）；	rustUpdate 增 neutral（click/note_* 不动 trust，修 warm 恒真死代码）；preferredHour 真众数（复用作息画像 peakHour）；矛盾检测动词表补看了/读了/剪藏了/记下+「在…记下」；周报 padAvg 取周内情绪 VAD 均值；检索 etrieve 增 lexicalQuery（词法降级免「情绪/时段」噪音）。④ **云端打分范围 config.cloudScoring 智能默认（用户追加拍板）**——shouldCloudScore：日记/反省/闪念恒 LLM、剪藏/影评/书库/诗/信 ≥30 字 LLM、聊天/域 JSON 本地规则分（省隐形大头，活跃用户日调用减半）；弹窗「记忆打分范围」可切 全部/智能/仅日记/本地。与并行 ticket 071 数据面板（bz-smartcat-dashboard）合并共存（merge 冲突仅 mood.ts 相邻插入，手解保留两侧）。文档：ADR-0025（含追加决策节）、CONTEXT.md 情绪/心情/记忆流/RL 词条同步 + 新术语「温和共振」「懂你上下文块」、issue 36。**测试**：smartcat 199（+4 打分档位/零调用/local/config），全量 1375 绿 + tsc 0。
+- **ticket 036 小橘「懂你」闭环 + 云端打分范围（用户反馈「配合不密切、数据不当」；ADR-0025 + issue 36；git worktree worktree/smartcat-companion 开发，并入 master）**：三包落地后追加「记忆打分范围」智能默认。① **A 情绪闭环**——推翻旧拍板「情绪不直接改写 PAD」：emotionResonanceDelta（纯函数，VAD→PAD 差量：负面增益 6>正面 4、calm/neutral 趋 0）+ pplyEmotionResonance + pplyTrendDrift（近 48h 趋势 30 分钟节流回写 PAD）；memory.onObservation 钩子（index 接线：每条观察 → registerEmotion + 共振）。② **B 全通道记忆**——新 companion-context.ts uildCompanionContext（作息+情绪趋势+信任/依恋+检索记忆）经 generatePrompt 新参 companionContext（## 你了解的用户 节）注入聊天/自言自语/欢迎回来（作息感知气泡）/书评/主动关心。③ **C 数据诚实化**——聊天记忆去重限流（opts.dedupe：近 20 条同内容短路 + 非 calm 或 importance≥0.55 才落库）；	rustUpdate 增 neutral（click/note_* 不动 trust，修 warm 恒真死代码）；preferredHour 真众数（复用作息画像 peakHour）；矛盾检测动词表补看了/读了/剪藏了/记下+「在…记下」；周报 padAvg 取周内情绪 VAD 均值；检索 
+etrieve 增 lexicalQuery（词法降级免「情绪/时段」噪音）。④ **云端打分范围 config.cloudScoring 智能默认（用户追加拍板）**——shouldCloudScore：日记/反省/闪念恒 LLM、剪藏/影评/书库/诗/信 ≥30 字 LLM、聊天/域 JSON 本地规则分（省隐形大头，活跃用户日调用减半）；弹窗「记忆打分范围」可切 全部/智能/仅日记/本地。与并行 ticket 071 数据面板（bz-smartcat-dashboard）合并共存（merge 冲突仅 mood.ts 相邻插入，手解保留两侧）。文档：ADR-0025（含追加决策节）、CONTEXT.md 情绪/心情/记忆流/RL 词条同步 + 新术语「温和共振」「懂你上下文块」、issue 36。**测试**：smartcat 199（+4 打分档位/零调用/local/config），全量 1375 绿 + tsc 0。
 
 - **ticket 70 样式按域拆分（铁律 9 修订，用户指令「铁律9 改成css按域拆分」；git worktree worktree/rule9-css-split 开发）**：① **源文件布局**——视觉样式源按域拆分：`src/<域>/styles.css` ×14（diary/launcher/memo/news/clipping/password/favorites/review/quiz/pomodoro/library/attach/encrypt/movie）+ `src/core/styles.css`（共享：设置页分页、主窗口头部行统一规范、core 层 notice/settings-modal/confirm/dom、移动端主窗口默认全屏、统一右键菜单/长按抽屉）；原 2979 行单文件 styles.css 的 22 个分节逐字切块搬运（无损校验：按原序重组 byte-identical；去注释规则行排序 2664=2664）。② **构建聚合**——新 `scripts/build-css.mjs`：SOURCES 清单顺序聚合生成根 `styles.css`（产物勿手改）+ 同步插件目录；esbuild.config.mjs 接线（build 一次聚合 / dev 经 fs.watch(src/**) 监听 src/**/*.css 自动重新聚合）。③ **顺序安全审计**——跨节选择器全量比对：仅 win-head/core/移动端全屏的 `!important` 支配对与互不冲突复合选择器（.active/.overdue/.bz-item-sheet-head 均无裸规则重复；slideUp 五处定义同义），拼接顺序=原文档顺序（共享节前置），级联行为不变。④ 文档同步：AGENTS.md 铁律 9 重写 + 架构行 + 主窗口样式规范引用、CONTEXT.md 新术语「样式按域拆分」+ Rules + 密码本词条去「含样式注入」、spec.md 构建/样式/CSS 规模三处、encrypt-suite spec 铁律 9 行、ADR-0020、issue 70。测试无样式表断言无需改动。
 
@@ -588,3 +878,48 @@
 - ✅ **C1 自动刷新**：手动 🔄 按钮删除（smartcat-dash-refresh id 移除留档）；vault modify 命中 smartcat.json/memo.json 防抖 3s 静默重读渲染（保持当前页签、零 toast、窗口内重置合并、失败保旧画面）；closeSmartcatDashboard 全量 offref+clearTimeout，幂等重开无泄漏；escManager 与 mask 关闭路径未动
 - ⚠ 必要偏差：洞察废弃徽标文案按票 B2 统一为「已被推翻」（原「已废弃（人工）/已废弃」双文案取消，insight-version.test.ts 断言同步更新）；面板模块无 Component 宿主，监听以 vault.on EventRef + close offref 落地（与 registerEvent 清理语义等价）
 - 📄 文档：spec.md Further Notes 追加一行；issue 097 status done
+
+
+## 2026-08-26 第二大脑切块剥离 frontmatter 完成（ticket 110）
+**状态：分支全量 2630 测试通过（176 文件，BZ_TEST_MAX_WORKERS=8 双 worktree 并发限流）+ tsc 0 错误；合并 master 复核同绿；worktree/ticket-110-chunk-strip rebase 后 ff 合并（abf288e）**
+
+- ✅ **chunk.ts 切块管线 embedChunks**：stripFrontmatter（Obsidian 同口径：^--- 界定、容忍 CRLF/文末闭合、未闭合不剥）→ smartChunk → 空正文兜底截断 → 标题并入首块；纯 frontmatter 文件返回 [] 不入索引
+- ✅ **vector-store meta v8→v9**：doRefresh 换用 embedChunks；旧库经 load() 版本不符路径自动清空、下次 refresh 全量重建（一次性 re-embed 桌面执行）
+- ⚠ 关键决策：标题在 smartChunk 之后显式前缀（拼进输入会被大段 flush 丢弃）；首块可超 CHUNK_SIZE 一个标题长度（bge-m3 无碍）
+- ✅ 测试：pure.test.ts +5（YAML 不进块/标题在首块/边界形态）；vector-store.test.ts 版本重建端到端重写；6 个既有 secondbrain 测试适配 v9
+- 📄 文档：CONTEXT.md 词条 v9 口径；issue 110 status done
+
+## 2026-08-26 第二大脑自动双链管线完成（ticket 111）
+**状态：分支全量 2667 测试通过（178 文件，含 link-agent-data 16 例 + link-agent-ui 26 例）+ tsc 0 错误；合并 master 复核 2672 全绿；worktree/ticket-111-link-agent rebase 后 ff 合并（886dd9a + d473857）**
+
+- ✅ **link-agent/{data,pipeline,watch}.ts**：队列 secondbrain_link_queue.json CRUD（存事件不存半成品，Syncthing 随 vault 跨设备）｜可达性门 1.5s 探测→不可达入队/可达就地管线｜范围内向量近邻 Top-K→core AI 档案卡裁判严格 JSON（指令前缀固定吃前缀缓存，「只链实质关联存疑不链」）→ processFrontMatter 单侧幂等写 related（默认不限量由 AI 决定，MaxLinks>0 才截断）
+- ✅ **linkAgentScopes 可配置范围**（用户拍板中途变更）：一份清单同源决定监听目录与候选过滤，缺省回退「文献盒」；⚙️ 弹窗明细五行显隐联动（TopK8/上限0=不限/完成通知/自动清理/关联范围）；命令 bz-secondbrain-rebuild-links 解除范围限制
+- ✅ **队列消费与死链清理**：域初始化非空且可达自动消费「待处理关联已处理完毕：N 篇 / 新建 M 条」；清理走域事件总线 + 30 分钟低频巡检兜底，encrypt 三态边界（无清单正常清理/解锁态清单内视为存活/锁定态整体跳过）+ 同名 basename 歧义不判死；通知全部查表 ICONS、dedupeKey 合并动态更新，N=0 与零变化静默
+- ⚠ 必要偏离：⚙️ 弹窗实际位于 panel.ts openSecondBrainSettings（票面白名单误写 config.ts）；向量库无「按笔记向量取近邻」公开入口，以正文摘要再嵌一次绕行（每篇多一次 embedding，ticket 112 可一并优化）
+- 📄 文档：spec `.scratch/secondbrain-link-agent/spec.md` 定稿；issue 111 status done；质量反馈闭环已立项 issue 112（排在合并后）
+
+## 2026-08-27 第二大脑数据文件整合完成（ticket 120，用户拍板）
+**状态：分支全量 secondbrain 17 文件 220 用例 + encrypt 等受影响域全绿（23 文件 391 用例）+ tsc 0 错误；新增 store-file.test.ts 9 用例（迁移/损坏/串行写链/link 段打通）；worktree/sb-single-file**
+
+- ✅ **store-file.ts 共享数据层**：单文件 `secondbrain.json` 三段（meta/panel/link）+ 串行写链 mutateStore（读改写原子化，杜绝 meta/queue/state/panel 并发交错覆盖）；损坏留档 .corrupt- 重建（jsonStore 同款）；新文件缺失且无旧数据 → 空结构不落盘（保持空库不产生文件语义）
+- ✅ **一次性迁移**：四旧 JSON（secondbrain_meta/panel/link_queue/link_state）读旧合并组装 → 写新 → 删旧；旧 vec `secondbrain_vectors.vec` → 改名 `secondbrain.vec`（rename 缺失时读改写删兜底）；幂等（新文件在即跳过）；迁移经串行链保护
+- ✅ **消费方改造**：vector-store（load/saveStore 改 meta 段，vec 路径换代）、panel（概括缓存改 panel 段，统计 stat 改新文件）、link-agent/data（queue/state 改 link 段，对外 API 签名不变）
+- ✅ **config.ts**：META_PATH → STORE_PATH（secondbrain.json）、VEC_PATH → secondbrain.vec
+- ✅ **测试适配**：4 个 vector-store/panel 测试 + 2 个 link-agent 测试路径/预置换代（storeJSON 包装 + readMeta 断言）；mock-vault adapter exists/rename 补 binaryFiles 支持
+- ✅ **测试**：store-file.test.ts 9 例（四旧合并组装/vec 改名/幂等/空库不落盘/段容错/损坏留档/并发 50+50 mutate 不丢段/link 段打通）
+- 📄 文档：issues/120 立项；spec v1.5 数据设计改单文件；CONTEXT 词条；AGENTS 领域清单表（secondbrain.json + secondbrain.vec）；PROGRESS 本条目
+- ⏳ 待办：合并 master 后构建部署（main.js/styles.css 同步）；vault 遗留 ai_completion_meta.json + ai_completion_vectors.vec 本地删除（用户拍板）
+
+---
+
+## 本地分支移植记录（2026-09 合并入主线，merge commit）
+
+以下为本地分支（yeshimei/bz master，16 commits）自 merge-base 6c6653b 起的独有工作，随完全合并一并并入主线，主干实现以 hualala 新版为基座：
+
+| 提交 | 内容 |
+|---|---|
+| 4d320cf / ec9e1f6 / 0dcb06d / a8d514d / 322d04b | **复习·按数量复习（ticket 01-06）**：数据层选择算法（候选文件夹 `卡片盒/笔记盒`、默认篇数、历史配比 reviewCountHistoryRatio）+ 入口按钮/篇数弹窗 + 逐篇做题与排期写入 + 原文档内嵌预览 + 汇总页与重做本篇 + 设置分组。移植后设置并入声明式 schema（复习节奏组之后），其余语义原样 |
+| 060d483 / 1d5478a / c829c21 / 2a3f03a / 1c35d54 / 919f672 | **文件树染色健壮化与自愈（ticket 48 收敛）**：`[data-path]` 精确匹配 + 文本层多备选退避（tree-item-inner→nav-file-title-content→el）+ MutationObserver 监听文件树容器（展开/折叠/节点出现即时染色）+ 懒渲染 2s 自愈重试（移动端抽屉未开场景）+ 诊断代码移除。合并后与主线 applyReviewStyles 融合：theirs 签名 + 多备选目标 + 自愈重试 |
+| 84b470d / 344de1e | **做题界面题型标识与反馈**：单/多选徽标、答案 ✅❌ 图标、答对反馈条、答对停留反馈窗口。合并后答对自动跳题取主线 ticket 153/156（0.8s 延时），本地反馈条保留（addFeedbackBanner） |
+| 9de4e0a | **小橘设置页开关与三档关闭方式（ticket 103 本地；与主线 ticket 103「第二大脑正名接管」编号冲突，两实现并存）**：`smartcatOffMode`=stop/hide/lazy、startHidden 装配旗标、applySmartcatPowerState 电源对账（⚙️ 弹窗电源组） |
+| 90ea1cc | **构建/数据路径单点**：`scripts/vault-dir.mjs` 恢复（esbuild.config.mjs 与 build-css.mjs 共用），产物直出真实 vault `N:/仓库/仓库-新/-0.笔记汇总库/.obsidian/plugins/bz/`；真实数据测试同改 |

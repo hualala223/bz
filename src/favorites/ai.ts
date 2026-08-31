@@ -4,6 +4,7 @@
 import { requestUrl } from 'obsidian';
 import { createAI } from '../core/ai';
 import type { AIService } from '../core/ai';
+import { getSettings } from '../core/settings-provider';
 import type { FavoritesItem } from './types';
 
 // ==================== AI 服务 ====================
@@ -14,8 +15,18 @@ export class FavoritesAIService {
     this.ai = createAI();
   }
 
+  /**
+   * AI 是否已配置（ticket 23 + 审查建议 C：真实读取插件 AI 配置，替代恒真的 !!this.ai）。
+   * 判定口径与 core/ai.ts getAIProvider 一致：provider = aiProvider || 'opencode-go'；
+   * - opencode-go 无 legacy 兜底：缺 opencodeGoApiKey 即拦截；
+   * - deepseek 的 quickadd data.json 兜底是异步文件读取（core/ai getAIProvider 运行时判定），
+   *   插件设置缺 key 不判死——交给运行时兜底，避免误拦仅 QuickAdd data.json 配置的老用户。
+   */
   isAvailable(): boolean {
-    return !!this.ai;
+    if (!this.ai) return false;
+    const s = getSettings();
+    const provider = s.aiProvider || 'opencode-go';
+    return provider === 'opencode-go' ? !!s.opencodeGoApiKey : true;
   }
 
   /**

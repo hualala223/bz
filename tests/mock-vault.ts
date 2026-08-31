@@ -20,7 +20,7 @@ export class MockVault {
       this.files.set(path, content);
       this.modifiedPaths.push(path);
     },
-    exists: async (path: string): Promise<boolean> => this.files.has(path) || this.dirs.has(path),
+    exists: async (path: string): Promise<boolean> => this.files.has(path) || this.binaryFiles.has(path) || this.dirs.has(path),
     remove: async (path: string): Promise<void> => {
       this.files.delete(path);
       this.binaryFiles.delete(path);
@@ -29,19 +29,49 @@ export class MockVault {
     mkdir: async (path: string): Promise<void> => {
       this.dirs.add(path);
     },
+    /** adapter 级二进制读写（store-file 冲突自愈/迁移等经 app.vault.adapter 直读直写 .vec 用） */
+    readBinary: async (path: string): Promise<ArrayBuffer> => {
+      const bytes = this.binaryFiles.get(path);
+      if (bytes) {
+        return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+      }
+      const v = this.files.get(path);
+      if (v === undefined) throw new Error('file not found: ' + path);
+      const enc = new TextEncoder().encode(v);
+      return enc.buffer.slice(enc.byteOffset, enc.byteOffset + enc.byteLength) as ArrayBuffer;
+    },
+    writeBinary: async (path: string, data: ArrayBuffer): Promise<void> => {
+      this.binaryFiles.set(path, new Uint8Array(data));
+      this.modifiedPaths.push(path);
+    },
     rename: async (oldPath: string, newPath: string): Promise<void> => {
       const v = this.files.get(oldPath);
-      if (v === undefined) return;
-      this.files.delete(oldPath);
-      this.files.set(newPath, v);
-      this.modifiedPaths.push(newPath);
+      if (v !== undefined) {
+        this.files.delete(oldPath);
+        this.files.set(newPath, v);
+        this.modifiedPaths.push(newPath);
+        return;
+      }
+      const b = this.binaryFiles.get(oldPath);
+      if (b !== undefined) {
+        this.binaryFiles.delete(oldPath);
+        this.binaryFiles.set(newPath, b);
+        this.modifiedPaths.push(newPath);
+      }
     },
     list: async (path: string): Promise<{ files: string[]; folders: string[] }> => {
-      const prefix = path.endsWith('/') ? path : path + '/';
-      const files = [...this.files.keys()].filter((p) => p.startsWith(prefix) && !p.slice(prefix.length).includes('/'));
-      const folders = [...this.files.keys()]
+      // 根目录（'' 或 '/'）→ prefix 为空（否则 '' + '/' = '/' 匹配不到任何库内路径）
+      const prefix = !path || path === '/' ? '' : path.endsWith('/') ? path : path + '/';
+      const allKeys = [...this.files.keys(), ...this.binaryFiles.keys()];
+      const files = allKeys.filter((p) => p.startsWith(prefix) && !p.slice(prefix.length).includes('/'));
+      const folders = allKeys
         .filter((p) => p.startsWith(prefix) && p.slice(prefix.length).includes('/'))
         .map((p) => prefix + p.slice(prefix.length).split('/')[0]);
+      // 显式注册的空目录（createFolder/dirs）并入 folders（ticket 128：统一路径选择器依赖
+      // adapter.list 补齐空目录；此前只派生自文件路径，空目录不出现）
+      for (const d of this.dirs) {
+        if (d.startsWith(prefix) && !d.slice(prefix.length).includes('/')) folders.push(d);
+      }
       return { files, folders: [...new Set(folders)] };
     },
   };
