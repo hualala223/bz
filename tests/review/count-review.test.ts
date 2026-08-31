@@ -234,12 +234,17 @@ describe('countReviewLoop（ticket 02 骨架：逐篇做题 + 正确率 + 下一
     void quiz._cb({ correct: 2, wrong: 0, total: 2, accuracy: 100 });
     await new Promise((r) => setTimeout(r, 30));
     expect(quiz.popup.innerHTML).toContain('查看原文档');
+    // ADR-0067 动态层级：预览显示即发号，必须盖过已显示的做题弹窗（合并后修复：原写死 10061 被 dynamic z 压住）
+    quiz.popup.style.zIndex = '100000';
     (quiz.popup.querySelector('#quiz-view-note') as HTMLElement).click();
     await new Promise((r) => setTimeout(r, 50));
     // 预览渲染全文（mock MarkdownRenderer 写 textContent）
     const body = document.querySelector('#note-preview-body');
     expect(body).toBeTruthy();
     expect(body!.textContent).toContain('正文内容ABC');
+    const previewPopup = document.querySelector('#note-preview-popup') as HTMLElement;
+    expect(previewPopup).toBeTruthy();
+    expect(Number(previewPopup.style.zIndex)).toBeGreaterThan(Number(quiz.popup.style.zIndex));
     // ❌ 关闭预览 → 回到结果卡 → 下一篇照常推进（末篇按钮为「查看汇总」，id 不变）
     (document.querySelector('#note-preview-popup button:last-child') as HTMLElement).click();
     await new Promise((r) => setTimeout(r, 20));

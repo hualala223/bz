@@ -5,6 +5,7 @@
  */
 import type { App, TFile } from 'obsidian';
 import { MarkdownRenderer, Component } from 'obsidian';
+import { topifyZ } from '../core/z-order';
 
 /** 打开笔记预览弹层（返回前自动渲染；关闭由遮罩/❌/ESC 触发） */
 export async function showNotePreview(app: App, filePath: string, title?: string): Promise<void> {
@@ -19,10 +20,11 @@ export async function showNotePreview(app: App, filePath: string, title?: string
 
   const mask = document.createElement('div');
   mask.id = 'note-preview-mask';
-  Object.assign(mask.style, { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.35)', zIndex: '10060' });
+  Object.assign(mask.style, { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.35)' });
   const popup = document.createElement('div');
   popup.id = 'note-preview-popup';
-  Object.assign(popup.style, { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', background: 'var(--background-primary)', borderRadius: '12px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)', zIndex: '10061', maxWidth: '680px', width: '92%', maxHeight: '82vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' });
+  Object.assign(popup.style, { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', background: 'var(--background-primary)', borderRadius: '12px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)', maxWidth: '680px', width: '92%', maxHeight: '82vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' });
+  topifyZ(mask, popup); // ADR-0067：显示即发号，永远盖过已显示的做题弹窗/确认框
 
   const head = document.createElement('div');
   head.style.cssText = 'padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px solid var(--background-modifier-border);';
