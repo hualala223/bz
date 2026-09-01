@@ -1,10 +1,12 @@
 /**
- * 设置页测试（覆盖 main.ts BzSettingTab，ADR-0009）：单页两区块（🤖 AI / 📂 数据存储路径）渲染 +
- * 控件交互保存持久化 + storagePath 迁移（旧 7 字段 → 共享路径）。
+ * 设置页测试（覆盖 main.ts BzSettingTab，ADR-0009）：单页三区块（🤖 AI / 📂 数据存储路径 /
+ * 🐱 小橘电力电源）渲染 + 控件交互保存持久化 + storagePath 迁移（旧 7 字段 → 共享路径）。
  * ticket 128：数据存储路径行改为统一路径选择器（chips + 选择…按钮，无手输文本框），
  * 交互经选择器录入；onCommit 提示语义（有变更才提示、同一次会话至多一次、改回原值复位）保留。
  * ticket 131：两区块 schema 化（ADR-0064 渲染器）；AI 服务商切换 → 密钥行显隐走 visibleWhen；
  * ticket 100 文案修正（标题收短为「DeepSeek 密钥」「OpenCode 密钥」，键名/行为不动）。
+ * ticket 103（合并回归恢复）：主设置页重新挂「🐱 小橘」电源区块（启用开关 + 关闭方式三档，
+ * 立即生效；schema 由 smartcat 域提供，main.ts 组合渲染）。
  * 依赖 mock-obsidian-entry 的 Setting 链式 mock（MockDropdown/MockText/MockToggle）。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -75,10 +77,10 @@ describe('设置页 BzSettingTab（ADR-0009 单页）', () => {
     if (plugin && plugin.unregisterGestures) plugin.unregisterGestures();
   });
 
-  it('单页平铺：无 tab，只有 🤖 AI、📂 数据存储路径 两个区块标题（小橘电源已迁 ⚙️ 弹窗）', () => {
+  it('单页平铺：无 tab，只有 🤖 AI、📂 数据存储路径、🐱 小橘 三个区块标题', () => {
     expect(tab.containerEl.querySelectorAll('.bz-tab').length).toBe(0);
     const titles = [...tab.containerEl.querySelectorAll('.bz-setting-section-title')].map((t) => t.textContent);
-    expect(titles).toEqual(['🤖 AI', '📂 数据存储路径']);
+    expect(titles).toEqual(['🤖 AI', '📂 数据存储路径', '🐱 小橘']);
   });
 
   it('AI 区块：服务商下拉 + 两个密钥行；数据存储路径区块：路径选择行（已选态 chip + ✕，无按钮/手输框）', () => {
@@ -167,6 +169,106 @@ describe('设置页 BzSettingTab（ADR-0009 单页）', () => {
     expect(getNoticeMessages().filter((m) => m.includes('重载')).length).toBe(0);
     await pickVia('CONFIG/数据');
     expect(hasNotice(/重载/)).toBe(true);
+  });
+});
+
+describe('🐱 小橘电源区块（ticket 103 回归恢复：设置页开关 + 三档关闭方式，立即生效）', () => {
+  let plugin: any;
+  let tab: BzSettingTab;
+
+  const enabledToggle = () => controlOf(findSetting(tab, '启用小橘'));
+  const offModeDd = () => controlOf(findSetting(tab, '关闭方式'));
+
+  beforeEach(async () => {
+    resetObsidianMocks();
+    delete diskData['bz'];
+    document.body.innerHTML = '';
+    plugin = await createPlugin(makeMockApp());
+    // onload 的 onLayoutReady 立即回调会触发一次空转装配（smartcatEnabled 默认开）——
+    // 先卸载清掉这趟「在途」装配（ensure 竞态守卫自动中止），本 describe 以「未装配」为起点
+    unloadSmartCat();
+    tab = new BzSettingTab(plugin.app, plugin);
+    tab.display();
+  });
+
+  afterEach(() => {
+    if (plugin && plugin.unregisterGestures) plugin.unregisterGestures();
+  });
+
+  it('渲染：启用开关默认开；关闭方式下拉 stop/hide/lazy 三选项、默认 stop；下拉行默认隐藏', () => {
+    expect(enabledToggle().value).toBe(true);
+    expect(findSetting(tab, '关闭方式').classList.contains('bz-setting-hidden')).toBe(true);
+    const dd = offModeDd();
+    expect(Object.keys(dd.options)).toEqual(['stop', 'hide', 'lazy']);
+    expect(dd.value).toBe('stop');
+  });
+
+  it('关开关（默认 stop）：立即全量停机、下拉行现身、设置持久化', async () => {
+    enabledToggle().trigger(false);
+    await vi.waitFor(() => expect(__getSmartcatInternals().initialized).toBe(false));
+    expect(document.getElementById(CAT_CONTAINER_ID)).toBeNull();
+    expect(findSetting(tab, '关闭方式').classList.contains('bz-setting-hidden')).toBe(false);
+    expect(plugin.settings.smartcatEnabled).toBe(false);
+    expect(diskData['bz'].smartcatEnabled).toBe(false);
+  });
+
+  it('开开关（停机后重开）：重新装配显示，不丢数据', async () => {
+    enabledToggle().trigger(false);
+    await vi.waitFor(() => expect(__getSmartcatInternals().initialized).toBe(false));
+    enabledToggle().trigger(true);
+    await vi.waitFor(() => expect(document.getElementById(CAT_CONTAINER_ID)).toBeTruthy());
+    expect(__getSmartcatInternals().initialized).toBe(true);
+    expect(plugin.settings.smartcatEnabled).toBe(true);
+  });
+
+  it('关开关（仅隐藏档）：未装配时隐藏启动装配——子系统在线、容器不出现', async () => {
+    offModeDd().trigger('hide');
+    await vi.waitFor(() => expect(diskData['bz'].smartcatOffMode).toBe('hide'));
+    enabledToggle().trigger(false);
+    await vi.waitFor(() => expect(__getSmartcatInternals().initialized).toBe(true));
+    expect(document.getElementById(CAT_CONTAINER_ID)).toBeNull();
+  });
+
+  it('关开关（仅隐藏档）：已装配时收起 DOM、后台仍在', async () => {
+    await ensureSmartCat(plugin.app);
+    expect(document.getElementById(CAT_CONTAINER_ID)).toBeTruthy();
+    offModeDd().trigger('hide');
+    await vi.waitFor(() => expect(diskData['bz'].smartcatOffMode).toBe('hide'));
+    enabledToggle().trigger(false);
+    await vi.waitFor(() => expect(document.getElementById(CAT_CONTAINER_ID)).toBeNull());
+    expect(__getSmartcatInternals().initialized).toBe(true);
+  });
+
+  it('关开关（仅不自动启动档）：当场零变化——未装配不装配、已装配不动（Q8 拍板）', async () => {
+    await ensureSmartCat(plugin.app);
+    expect(document.getElementById(CAT_CONTAINER_ID)).toBeTruthy();
+    offModeDd().trigger('lazy');
+    await vi.waitFor(() => expect(diskData['bz'].smartcatOffMode).toBe('lazy'));
+    enabledToggle().trigger(false);
+    await new Promise((r) => setTimeout(r, 30));
+    // 已装配：容器仍在、子系统在线（当场不动）
+    expect(__getSmartcatInternals().initialized).toBe(true);
+    expect(document.getElementById(CAT_CONTAINER_ID)).toBeTruthy();
+  });
+
+  it('关闭状态下切换关闭方式：stop→hide 立即按新档对账（隐藏启动装配）', async () => {
+    await ensureSmartCat(plugin.app);
+    enabledToggle().trigger(false);
+    await vi.waitFor(() => expect(__getSmartcatInternals().initialized).toBe(false));
+    offModeDd().trigger('hide');
+    await vi.waitFor(() => expect(__getSmartcatInternals().initialized).toBe(true));
+    expect(document.getElementById(CAT_CONTAINER_ID)).toBeNull();
+    expect(diskData['bz'].smartcatOffMode).toBe('hide');
+  });
+
+  it('关闭状态下切换关闭方式：hide→stop 立即卸载', async () => {
+    offModeDd().trigger('hide');
+    await vi.waitFor(() => expect(diskData['bz'].smartcatOffMode).toBe('hide'));
+    enabledToggle().trigger(false);
+    await vi.waitFor(() => expect(__getSmartcatInternals().initialized).toBe(true));
+    offModeDd().trigger('stop');
+    await vi.waitFor(() => expect(__getSmartcatInternals().initialized).toBe(false));
+    expect(diskData['bz'].smartcatOffMode).toBe('stop');
   });
 });
 

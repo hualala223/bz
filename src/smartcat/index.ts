@@ -20,6 +20,7 @@ import { MemorySystem, USER_CONTENT_BOUNDARY, PROMPT_SLOTS, migrateSmartcatSidec
 import { SmartCatAnimation } from './animation';
 import { InteractionManager, MobileInputAdapter } from './interaction';
 import { getSmartCatMessage } from './messages';
+import { normalizeSmartcatOffMode, type SmartcatOffMode } from './power-settings';
 import { generatePrompt } from './prompts';
 import { callChat, isAIConfigured } from './api';
 import { generateBookDescription, hasBookTag } from './content';
@@ -885,13 +886,9 @@ async function generateBookReview(): Promise<void> {
 
 // ---------------- 命令回调 ----------------
 
-/** 关闭方式（ticket 103）：stop 彻底停机 / hide 仅隐藏（后台仍感知）/ lazy 仅不自动启动 */
-export type SmartcatOffMode = 'stop' | 'hide' | 'lazy';
-
-/** 关闭方式归一（设置页与守卫共用，旧数据/未知值 → stop） */
-export function normalizeSmartcatOffMode(v: unknown): SmartcatOffMode {
-  return v === 'hide' || v === 'lazy' ? v : 'stop';
-}
+// 关闭方式类型/归一 + 主设置页「🐱 小橘」区块 schema 由 leaf 模块提供并原样转发
+// （ticket 103 回归恢复：index 守卫/对账与 main.ts 设置页共用同一归一，零迁移兼容）
+export { normalizeSmartcatOffMode, smartcatMainSettingsSchema, type SmartcatOffMode } from './power-settings';
 
 /** 停机档判定（ticket 103）：设置关闭且关闭方式为彻底停机 → 召唤类命令拒绝（不自动复活） */
 function isSmartcatStopped(): boolean {

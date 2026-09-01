@@ -63,7 +63,7 @@ import { loadAll } from './diary/store';
 import { state as diaryState } from './diary/state';
 import { applyUiSettings, init as diaryInit, showDiaryPanel, unregisterEscLayer } from './diary/ui/panel';
 // 小橘陪伴猫（smartcat 域：桌面宠物 + AI 陪伴；AI 走 bz core/ai，数据单 json smartcat.json）
-import { ensureSmartCat, unloadSmartCat, openSmartCat, openSmartCatChat, hideSmartCat, openSmartcatDashboard, normalizeSmartcatOffMode } from './smartcat';
+import { ensureSmartCat, unloadSmartCat, openSmartCat, openSmartCatChat, hideSmartCat, openSmartcatDashboard, normalizeSmartcatOffMode, applySmartcatPowerState, smartcatMainSettingsSchema } from './smartcat';
 
 /** 命令表：id/name 统一命名（spec「命令 id 全清单」第 9 轮：bz-<域>-<动作>，icon 与入口页磁贴一致） */
 const COMMANDS: { id: string; name: string; icon: string; callback: () => void }[] = [
@@ -423,8 +423,18 @@ export class BzSettingTab extends PluginSettingTab {
     containerEl.empty();
     // AI 服务商切换 → 密钥行显隐走 visibleWhen；存储路径 onCommit warning 文案逐字保留
     // （schema 定义见 core/settings-main-schema.ts）；渲染器统一完成徽标/两行式标注/初始显隐
-    // 小橘电源控制（启用/三档关闭方式）已随架构迁移进小橘 ⚙️ 设置弹窗（src/smartcat/ui.ts 电源组）
     renderSettingsInto(containerEl, mainSettingsSchema());
+    // 🐱 小橘电源区块（ticket 103 回归恢复：设置页开关 + 三档关闭方式，立即生效）——
+    // schema 由 smartcat 域提供（core 不反向依赖域，ADR-0002），此处注入对账回调；
+    // ⚙️ 设置弹窗电源组（src/smartcat/ui.ts）仍保留，双入口同键不冲突
+    renderSettingsInto(
+      containerEl,
+      smartcatMainSettingsSchema({
+        onPowerStateChange: (enabled, offMode) => {
+          void applySmartcatPowerState(this.plugin.app, enabled, normalizeSmartcatOffMode(offMode));
+        },
+      })
+    );
   }
 
 }

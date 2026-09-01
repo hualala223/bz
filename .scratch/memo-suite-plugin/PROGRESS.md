@@ -1,3 +1,12 @@
+## 2026-08-30 恢复插件设置页「🐱 小橘」电源区块（ticket 103 合并回归）
+
+**状态：b4ac289 大合并（hualala223 主线）时被整体迁入 ⚙️ 弹窗电源组、设置页区块与设置页测试一并删除；按用户报失恢复——设置页重新挂「启用小橘」开关 +「关闭方式」三档（立即生效），⚙️ 电源组保留双入口同键；tsc 0 + 全量测试全绿 + 构建部署**
+
+- 根因：合并基座主设置页已 schema 化（ticket 131/ADR-0064），smartcat 电源控制无 schema 声明即从设置页消失（注释「迁居 ⚙️ 弹窗」）；模块级对账/守卫逻辑（applySmartcatPowerState/startHidden/命令守卫）与 ⚙️ 电源组本就在，用户看到的缺口是设置页开关
+- 恢复：新增 leaf 模块 `src/smartcat/power-settings.ts`——`smartcatMainSettingsSchema`（🐱 小橘 组：启用开关 + 关闭方式下拉 + 仅关时显示 + 变更即对账）与 `SmartcatOffMode`/`normalizeSmartcatOffMode`（自 index.ts 迁出并原样转发，main.ts 启动门控/index 守卫共用同一归一）；main.ts display() 组合渲染（core 渲染器不反向依赖域，ADR-0002）；对账回调接 `applySmartcatPowerState(plugin.app, …)`
+- 测试：settings-tab 恢复「🐱 小橘电源区块」describe 8 条（渲染/三档立即生效/关闭态切档对账/持久化），单页平铺断言三区块；power-state/smoke/settings（⚙️）既有 51 条不动
+- 门禁实录：tsc 0 错；全量测试全绿（本机 3636+ 基线，恢复后新增 8 条）；pnpm run build 三件套同步仓库根 + 真实 vault 插件目录
+
 ## 2026-08-30 文献笔记补视频双链（ticket 151，用户实测「生成的文献笔记没有视频」）
 
 **状态：ADR-0066/0073 定义「正文=润色+视频双链」但 AI 回迁时实现漏掉——generateVideoNote 增 videoPath 参数、正文嵌 `![[路径]]`；note-gen/processor 测试绿 + tsc 0，构建已部署**
