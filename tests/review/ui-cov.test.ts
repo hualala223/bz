@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { MockVault, mockAppWithVault } from '../mock-vault';
-import { resetObsidianMocks, Platform as MockPlatform } from '../mock-obsidian-entry';
+import { resetObsidianMocks } from '../mock-obsidian-entry';
 import { setApp } from '../../src/core/app';
 import { setSettingsProvider } from '../../src/core/settings-provider';
 import { closeSettingsModal } from '../../src/core/settings-modal';
@@ -30,7 +30,6 @@ describe('设置弹窗（ticket 168：经篇数弹窗 ⚙️ 打开）onChange �
 
   afterEach(() => {
     closeSettingsModal();
-    MockPlatform.isMobile = false;
     document.body.innerHTML = '';
   });
 
@@ -139,14 +138,11 @@ describe('设置弹窗（ticket 168：经篇数弹窗 ⚙️ 打开）onChange �
     expect(settings.reviewCountHistoryRatio).toBe(70);
   });
 
-  it('界面组文件树标记 + 移动端组默认全屏（仅移动端渲染该行）', async () => {
+  it('界面组：文件树标记写回（ticket 168 切片 04：复习移动端全屏行已随面板删除）', async () => {
     const settings: any = { reviewTreeBadge: true };
-    MockPlatform.isMobile = true;
     await openSettings(settings);
     controlOf('文件树标记').trigger(false);
-    controlOf('移动端默认全屏').trigger(true);
     await new Promise((r) => setTimeout(r, 10));
     expect(settings.reviewTreeBadge).toBe(false);
-    expect(settings.reviewMobileDefaultFullscreen).toBe(true);
   });
 });

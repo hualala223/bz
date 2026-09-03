@@ -8,7 +8,6 @@ import { Setting, type App } from 'obsidian';
 import { notice } from '../core/notice';
 import { getSettings, saveSettings } from '../core/settings-provider';
 import { openSettingsModal } from '../core/settings-modal';
-import { mobileFullscreenGroup } from '../core/settings-common';
 import type { SettingsSchema } from '../core/settings-schema';
 import { ReviewDataManager } from './data';
 
@@ -39,11 +38,10 @@ export function reviewSettingsSchema(deps: { app: App; dataManager: ReviewDataMa
         icon: 'graduation-cap',
         name: '做题家',
         rows: [
-          { type: 'toggle', name: '用做题测难度', desc: '开始复习即做题，按正确率自动定难度', binding: { key: 'forceQuizForReview' } },
-          // 出题子项：仅「用做题测难度」开启时显示（spec 2026-08-07 用户决策，仿 AI tab 隐藏模式）
-          { type: 'toggle', name: '允许多选题', desc: '开启后 AI 可能出多选题，关闭则只出单选题', binding: { key: 'enableMultipleChoice' }, visibleWhen: (s) => s.forceQuizForReview === true },
-          { type: 'text', name: '每篇笔记出题数量', desc: '固定每篇笔记出题的数量，留空/0=自动', binding: { key: 'questionsPerNote' }, visibleWhen: (s) => s.forceQuizForReview === true },
-          { type: 'toggle', name: '打乱出题顺序', desc: '做题时随机排列题目顺序', binding: { key: 'shuffleQuestions' }, visibleWhen: (s) => s.forceQuizForReview === true },
+          // ticket 168（切片 04）：复习全面做题化——「用做题测难度」开关退役（键 forceQuizForReview 移除），出题子项常显
+          { type: 'toggle', name: '允许多选题', desc: '开启后 AI 可能出多选题，关闭则只出单选题', binding: { key: 'enableMultipleChoice' } },
+          { type: 'text', name: '每篇笔记出题数量', desc: '固定每篇笔记出题的数量，留空/0=自动', binding: { key: 'questionsPerNote' } },
+          { type: 'toggle', name: '打乱出题顺序', desc: '做题时随机排列题目顺序', binding: { key: 'shuffleQuestions' } },
           {
             type: 'select',
             name: '出题难度',
@@ -55,7 +53,6 @@ export function reviewSettingsSchema(deps: { app: App; dataManager: ReviewDataMa
               { value: 'medium', label: '中等' },
               { value: 'hard', label: '困难' },
             ],
-            visibleWhen: (s) => s.forceQuizForReview === true,
           },
         ],
       },
@@ -202,8 +199,6 @@ export function reviewSettingsSchema(deps: { app: App; dataManager: ReviewDataMa
           { type: 'toggle', name: '文件树标记', desc: '在文件树中为复习笔记着色并标到期时间', binding: { key: 'reviewTreeBadge' } },
         ],
       },
-      // 「移动端默认全屏」desc 差异覆盖（settings-common 预设支持）：复习窗口专属文案逐字对齐现状
-      mobileFullscreenGroup('reviewMobileDefaultFullscreen', { desc: '移动端打开复习窗口时默认全屏显示' }),
     ],
   };
 }

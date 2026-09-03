@@ -158,8 +158,6 @@ export default interface BzSettings {
   enableAutoNotify: boolean;
   /** 🆕 新笔记自动加入提醒（ticket 100：自动收编时弹提示，多条合并一条；关=静默收编） */
   reviewAutoAddNotice: boolean;
-  /** 🎯 用做题测难度（原「做题决定难度」，键名不动） */
-  forceQuizForReview: boolean;
   /** 🆕 每日复习上限（0=不限；一轮开始复习最多处理 N 篇逾期） */
   reviewDailyLimit: number;
   /** 🆕 复习间隔缩放（FSRS 相位出题天数 × 系数，0.1-5，默认 1；阶梯阶段不受影响）——ADR-0046 */
@@ -319,8 +317,6 @@ export default interface BzSettings {
   libraryMobileDefaultFullscreen: boolean;
   /** 影视：移动端默认全屏（默认开——主面板/影视分析/影视报告同控，原 JS 内联强制全屏） */
   movieMobileDefaultFullscreen: boolean;
-  /** 复习计划：移动端默认全屏（默认开——原 JS 内联强制全屏） */
-  reviewMobileDefaultFullscreen: boolean;
   /** 番茄钟：移动端默认全屏（默认关——原移动端 320px 居中卡） */
   pomodoroMobileDefaultFullscreen: boolean;
   /** 保险箱：移动端默认全屏（默认开——原 JS 内联强制全屏） */
@@ -496,7 +492,6 @@ export const DEFAULT_SETTINGS: BzSettings = {
   reviewStoragePath: 'CONFIG/STORAGE',
   enableAutoNotify: true,
   reviewAutoAddNotice: true,
-  forceQuizForReview: false,
   reviewDailyLimit: 0,
   reviewIntervalScale: 1,
   reviewTreeBadge: true,
@@ -579,7 +574,6 @@ export const DEFAULT_SETTINGS: BzSettings = {
   favoritesSortKey: 'created',
   libraryMobileDefaultFullscreen: true,
   movieMobileDefaultFullscreen: true,
-  reviewMobileDefaultFullscreen: true,
   pomodoroMobileDefaultFullscreen: false,
   encryptMobileDefaultFullscreen: true,
   literatureMobileDefaultFullscreen: false,
