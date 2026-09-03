@@ -1,15 +1,13 @@
 /**
- * 复习计划入口测试（覆盖率目标）：ensureReview 幂等/事件监听/命令分支/
- * 快捷标记/卸载清理。
+ * 复习入口测试（ticket 168：命令分支随 10 个旧命令退役删除）：
+ * ensureReview 幂等/事件监听/卸载清理/监听文件夹总线事件。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { MockVault, mockAppWithVault } from '../mock-vault';
 import { resetObsidianMocks, getNoticeMessages, hasNotice, clearNotices } from '../mock-obsidian-entry';
 import { emitDomainEvent, clearDomainEvents } from '../../src/core/domain-bus';
 import {
-  ensureReview, unloadReview, reviewAddCurrent, reviewRemoveCurrent,
-  reviewJumpOverdue, reviewMarkDialog, reviewMarkRating, dataManager, uiManager,
-  reviewWatcher,
+  ensureReview, unloadReview, dataManager, uiManager, reviewWatcher,
 } from '../../src/review/index';
 import { REVIEW_FILE_PATH, ReviewDataManager } from '../../src/review/data';
 import { reviewApp } from '../../src/review/app';
@@ -54,8 +52,6 @@ function makeApp(vault: MockVault) {
   app.emitWs = (ev: string, ...args: any[]) => { for (const cb of ws[ev] || []) void cb(...args); };
   return app;
 }
-
-const activeFile = { path: 'A.md', extension: 'md', basename: 'A' };
 
 beforeEach(() => {
   resetObsidianMocks();
@@ -153,73 +149,6 @@ describe('ensureReview', () => {
     vi.useRealTimers();
     unloadReview();
   }, 10000);
-});
-
-describe('命令分支', () => {
-  it('reviewAddCurrent：无活动文件 → 「请先打开一个笔记」', async () => {
-    const vault = new MockVault();
-    seed(vault);
-    const app = makeApp(vault);
-    await reviewAddCurrent(app);
-    expect(hasNotice('请先打开一个笔记')).toBe(true);
-  });
-
-  it('reviewRemoveCurrent：无文件/不在计划 → Notice', async () => {
-    const vault = new MockVault();
-    seed(vault);
-    const app = makeApp(vault);
-    await reviewRemoveCurrent(app);
-    expect(hasNotice('请先打开一个笔记')).toBe(true);
-    clearNotices();
-    app.workspace.getActiveFile = () => ({ path: 'C.md', extension: 'md', basename: 'C' });
-    await reviewRemoveCurrent(app);
-    expect(hasNotice('该笔记不在复习计划中')).toBe(true);
-  });
-
-  it('reviewMarkDialog：不在计划/completed → Notice；正常 → 难度弹窗', async () => {
-    const vault = new MockVault();
-    seed(vault);
-    const app = makeApp(vault);
-    app.workspace.getActiveFile = () => ({ path: 'C.md', extension: 'md', basename: 'C' });
-    await reviewMarkDialog(app);
-    expect(hasNotice('该笔记不在复习计划中')).toBe(true);
-
-    clearNotices();
-    app.workspace.getActiveFile = () => activeFile;
-    const showSpy = vi.spyOn(uiManager!, 'showDifficultyDialog').mockImplementation(() => {});
-    await reviewMarkDialog(app);
-    expect(showSpy).toHaveBeenCalled();
-  });
-
-  it('reviewMarkRating：无文件/不在计划/completed/正常', async () => {
-    const vault = new MockVault();
-    seed(vault);
-    const app = makeApp(vault);
-    await reviewMarkRating(app, 'good');
-    expect(hasNotice('请先打开一个笔记')).toBe(true);
-
-    clearNotices();
-    app.workspace.getActiveFile = () => ({ path: 'C.md', extension: 'md', basename: 'C' });
-    await reviewMarkRating(app, 'good');
-    expect(hasNotice('该笔记不在复习计划中')).toBe(true);
-
-    clearNotices();
-    app.workspace.getActiveFile = () => activeFile;
-    const markSpy = vi.spyOn(reviewApp, 'markReview').mockResolvedValue(undefined);
-    const styleSpy = vi.spyOn(reviewApp, 'applyReviewStyles').mockResolvedValue(undefined);
-    await reviewMarkRating(app, 'good');
-    expect(markSpy).toHaveBeenCalledWith('A.md', 'good');
-    expect(styleSpy).toHaveBeenCalled();
-  });
-
-  it('reviewJumpOverdue：调用 autoJumpOverdue', async () => {
-    const vault = new MockVault();
-    seed(vault);
-    const app = makeApp(vault);
-    const spy = vi.spyOn(reviewApp, 'autoJumpOverdue').mockResolvedValue(undefined);
-    await reviewJumpOverdue(app);
-    expect(spy).toHaveBeenCalled();
-  });
 });
 
 describe('unloadReview', () => {

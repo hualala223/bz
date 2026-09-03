@@ -142,7 +142,7 @@ describe('onunload 卸载接线补全（fix(main)）', () => {
 
     // 卸载接线不影响既有清理：裸注册命令仍全量移除
     //（removed 可能额外含 bz-diary-write：onunload 对其 try/catch 移除，与本接线无关）
-    expect(registeredCommands.length).toBeGreaterThanOrEqual(40);
+    expect(registeredCommands.length).toBeGreaterThanOrEqual(35);
     const removed = new Set(removedCommands);
     for (const c of registeredCommands) expect(removed.has(c.id), c.id).toBe(true);
   });

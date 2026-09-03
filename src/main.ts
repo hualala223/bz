@@ -31,8 +31,8 @@ import { showReadingReport, unloadReadingReport } from './reading-report';
 import { openMovieManager, addMovieItem, unloadMovie } from './movie';
 // 影视分析报告（独立域，ADR-0048）
 import { openMovieReport, unloadMovieReport } from './movie-report';
-// 复习计划（9 域内命令走 import；按数量复习入口 reviewCountStart 为本地分支独有，ticket 01-06）
-import { openReviewPanel, reviewAddCurrent, reviewRemoveCurrent, reviewJumpOverdue, reviewMarkDialog, reviewMarkRating, reviewStart, reviewCountStart, ensureReview, unloadReview } from './review';
+// 复习（ticket 168 单一入口：仅「复习（按数量）」命令；ensureReview/unloadReview 为常驻监控与卸载所需）
+import { reviewCountStart, ensureReview, unloadReview } from './review';
 // 第二大脑（ticket 103 起原闪念正名接管，ADR-0051——flash 域已删除）
 import {
   openSecondBrainPanel,
@@ -96,19 +96,8 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void }
   { id: 'bz-movie-add', name: '加影视', icon: 'clapperboard', callback: () => addMovieItem(getApp()) },
   // 影视分析报告（独立域，ADR-0048；f7 解冻：去 clapperboard 重复 → pie-chart，id/名称契约不动）
   { id: 'bz-movie-report', name: '影视分析报告', icon: 'pie-chart', callback: () => openMovieReport(getApp()) },
-  // 复习计划（9 命令）
-  { id: 'bz-review-open', name: '复习计划', icon: 'calendar', callback: () => openReviewPanel(getApp()) },
-  { id: 'bz-review-start', name: '开始复习', icon: 'play', callback: () => reviewStart(getApp()) },
+  // 复习（ticket 168 单一入口：仅保留「复习（按数量）」；原 10 命令随面板/计划管理退役）
   { id: 'bz-review-count', name: '复习（按数量）', icon: 'list', callback: () => reviewCountStart(getApp()) },
-  { id: 'bz-review-add', name: '加入复习计划', icon: 'plus', callback: () => reviewAddCurrent(getApp()) },
-  { id: 'bz-review-remove', name: '移出复习计划', icon: 'minus', callback: () => reviewRemoveCurrent(getApp()) },
-  { id: 'bz-review-overdue', name: '复习（跳转逾期）', icon: 'alarm-clock', callback: () => reviewJumpOverdue(getApp()) },
-  { id: 'bz-review-rate', name: '复习（选择难度）', icon: 'gauge', callback: () => reviewMarkDialog(getApp()) },
-  // f3：评级四命令去英文后缀并统一「复习（X）」标点（id 不动）
-  { id: 'bz-review-again', name: '复习（忘了）', icon: 'rotate-ccw', callback: () => reviewMarkRating(getApp(), 'again') },
-  { id: 'bz-review-hard', name: '复习（困难）', icon: 'trending-up', callback: () => reviewMarkRating(getApp(), 'hard') },
-  { id: 'bz-review-good', name: '复习（一般）', icon: 'check', callback: () => reviewMarkRating(getApp(), 'good') },
-  { id: 'bz-review-easy', name: '复习（简单）', icon: 'sparkles', callback: () => reviewMarkRating(getApp(), 'easy') },
   // 第二大脑（ticket 103：原闪念正名接管，主面板为统一入口）
   { id: 'bz-secondbrain-panel', name: '第二大脑面板', icon: 'brain', callback: () => openSecondBrainPanel(getApp()) },
   // f7：与「第二大脑面板」区分——本命令打开参考侧边栏（右侧窄窗/移动端抽屉参考 tab）

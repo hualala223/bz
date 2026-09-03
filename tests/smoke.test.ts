@@ -1,6 +1,6 @@
 /**
  * 骨架加载冒烟（ticket 01）：mock obsidian 环境下插件可加载、
- * 25 命令裸注册、ribbon 主入口、设置页挂载、卸载清理命令。
+ * 35 命令裸注册、ribbon 主入口、设置页挂载、卸载清理命令（ticket 168 复习命令收敛后）。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import BzPlugin, { BzSettingTab } from '../src/main';
@@ -74,8 +74,7 @@ const EXPECTED_COMMAND_IDS = [
   'bz-library-open', 'bz-book-notes-open',
   'bz-reading-report-open',
   'bz-movie-open', 'bz-movie-add', 'bz-movie-report',
-  'bz-review-open', 'bz-review-start', 'bz-review-count', 'bz-review-add', 'bz-review-remove', 'bz-review-overdue', 'bz-review-rate',
-  'bz-review-again', 'bz-review-hard', 'bz-review-good', 'bz-review-easy',
+  'bz-review-count',
   'bz-secondbrain-panel', 'bz-secondbrain-open', 'bz-secondbrain-chat', 'bz-secondbrain-rebuild-links', 'bz-secondbrain-link-all',
   'bz-pomodoro-open',
   'bz-literature-open', 'bz-literature-note-term',
@@ -139,11 +138,8 @@ describe('bz 骨架冒烟', () => {
     expect(byId('bz-movie-add').name).toBe('加影视');
     // t2：阅读分析报告 → 阅读数据分析报告
     expect(byId('bz-reading-report-open').name).toBe('阅读数据分析报告');
-    // f3：评级四命令去英文后缀、统一「复习（X）」标点
-    expect(byId('bz-review-again').name).toBe('复习（忘了）');
-    expect(byId('bz-review-hard').name).toBe('复习（困难）');
-    expect(byId('bz-review-good').name).toBe('复习（一般）');
-    expect(byId('bz-review-easy').name).toBe('复习（简单）');
+    // ticket 168：复习域单一入口——仅「复习（按数量）」命令保留，10 个旧命令已退役
+    expect(byId('bz-review-count').name).toBe('复习（按数量）');
     // f7：第二大脑面板与第二大脑参考区分（不再与功能名歧义）
     expect(byId('bz-secondbrain-panel').name).toBe('第二大脑面板');
     expect(byId('bz-secondbrain-open').name).toBe('第二大脑参考');
@@ -198,13 +194,11 @@ describe('bz 骨架冒烟', () => {
     // 已实现域：归物本命令真实打开弹窗（异步），同步调用不抛错
     const cmd1 = registeredCommands.find((c: any) => c.id === 'bz-belongings-add');
     expect(() => cmd1.callback()).not.toThrow();
-    // 已实现域：复习面板异步执行，同步调用不抛错（做题家命令已退役，ADR-0045）
-    const cmd3 = registeredCommands.find((c: any) => c.id === 'bz-review-open');
-    expect(() => cmd3.callback()).not.toThrow();
-    expect(() => registeredCommands.find((c: any) => c.id === 'bz-review-add').callback()).not.toThrow();
+    // 已实现域：复习（按数量）异步执行，同步调用不抛错（ticket 168：单一入口，其余复习命令已退役）
+    expect(() => registeredCommands.find((c: any) => c.id === 'bz-review-count').callback()).not.toThrow();
     expect(() => registeredCommands.find((c: any) => c.id === 'bz-reading-report-open').callback()).not.toThrow();
   }, 15000);
-  it('全部 31 命令回调冒烟：逐个调用覆盖各域懒加载入口（含日记本 init 两个命令）', async () => {
+  it('全部 35 命令回调冒烟：逐个调用覆盖各域懒加载入口（含日记本 init 两个命令）', async () => {
     const plugin = await createPlugin(makeMockApp());
     const failures: string[] = [];
     for (const c of registeredCommands) {
@@ -218,7 +212,7 @@ describe('bz 骨架冒烟', () => {
     }
     expect(failures, `失败命令:
 ${failures.join('\n')}`).toEqual([]);
-    expect(registeredCommands.length).toBeGreaterThanOrEqual(31);
+    expect(registeredCommands.length).toBeGreaterThanOrEqual(35);
   }, 15000);
   it('事件常驻域开关开启时 onload 注册（autoSummary/aiAgent→memo+favorites 文件同步/secondBrain 懒加载分支；旧 flashEnabled 键随 ticket 103 迁移）', async () => {
     delete diskData['bz'];
