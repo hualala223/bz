@@ -1117,12 +1117,4 @@ for (const path of paths) {
       console.error('复习计划检查出错:', e);
     }
   },
-
-  /** 刷新面板（源码 refreshPanel） */
-  async refreshPanel(): Promise<void> {
-    const { uiManager } = await import('./index');
-    if (!uiManager) return;
-    const items = await this.dataManager!.loadItems();
-    uiManager.renderEntries(items);
-  },
 };

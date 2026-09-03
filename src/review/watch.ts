@@ -243,8 +243,7 @@ export class ReviewWatcher {
   }
 
   private async refresh(): Promise<void> {
-    const { uiManager } = await import('./index');
-    await uiManager?.refreshPanel();
+    // ticket 168（切片 02）：复习面板已删除，刷新仅剩文件树染色（原 refreshPanel 职责随面板退役）
     const { reviewApp } = await import('./app');
     await reviewApp.applyReviewStyles(this.app);
   }

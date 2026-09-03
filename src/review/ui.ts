@@ -1,37 +1,24 @@
 /**
- * 复习计划 UI（ticket 16 修正版：对齐源码 UIManager + Renderer，常驻 DOM + display 切换）
- * 统一抽屉（桌面右键/移动长按）：开始复习/打开原文/移出；双击名称打开对应笔记（用户拍板保留）。
+ * 复习设置 + 按数量复习篇数弹窗（ticket 168 单一入口重构，切片 02）：
+ * 复习计划主面板及全部交互（列表/卡片/统一抽屉/难度弹窗/归档/搜索/键盘路径）随命令退役整体删除；
+ * 保留面 = 命令「复习（按数量）」的篇数弹窗 + ⚙️ 域设置弹窗入口（空候选时弹窗仍打开，设置可达）。
+ * 对外导出：reviewSettingsSchema（⚙️ 设置弹窗唯一内容入口）/ UIManager（showCountReviewModal/destroy）。
  */
 import { Setting, type App } from 'obsidian';
-import { topifyZ, allocZ } from '../core/z-order';
-import { notice, notifyUndo, notifySaveError } from '../core/notice';
-import { openFlowDialog } from '../core/flow-dialog';
-import { escManager } from '../core/esc-manager';
-import { getSettings, saveSettings, tryGetSettings } from '../core/settings-provider';
-import { escapeHtml } from '../core/utils';
-import { applyMobileWindowFullscreen } from '../core/mobile';
+import { notice } from '../core/notice';
+import { getSettings, saveSettings } from '../core/settings-provider';
 import { openSettingsModal } from '../core/settings-modal';
 import { mobileFullscreenGroup } from '../core/settings-common';
 import type { SettingsSchema } from '../core/settings-schema';
-import {
-  attachItemActions,
-  registerSheetCompanion,
-  unregisterSheetCompanion,
-  closeItemMenu,
-  type ItemAction,
-} from '../core/item-actions';
-import { FSRS, FSRS_FIRST_TEXTS, LADDER_MAX, TOTAL_STAGES } from './fsrs';
-import type { Rating } from './fsrs';
-import type { ReviewItem } from './data';
 import { ReviewDataManager } from './data';
 
 /**
- * 复习计划设置 schema（ticket 131 声明式；ADR-0064）：检查提醒/做题家/复习节奏/自动化/界面 +
- * 移动端六组卡片。做题家子项显隐（原 quizBox style.display + refreshSettingsGroupCounts）收敛为
- * visibleWhen 声明式联动；监听文件夹走通用 path 行（multi chips + 添加… 按钮，落盘外部 binding
- * 自管：新增先确认存量收编、移除连带清理排除记录）；排除名单 chips 区走 custom 插槽（DOM id/类名
- * 零变化）。置于模块顶层供文案 lint 直接引用；
+ * 复习设置 schema（ticket 131 声明式；ADR-0064）：检查提醒/做题家/复习节奏/按数量复习/自动化/界面 +
+ * 移动端六组卡片。做题家子项显隐收敛为 visibleWhen 声明式联动；监听文件夹走通用 path 行
+ * （multi chips + 添加… 按钮，落盘外部 binding 自管：新增先确认存量收编、移除连带清理排除记录）；
+ * 排除名单 chips 区走 custom 插槽（DOM id/类名零变化）。置于模块顶层供文案 lint 直接引用；
  * deps 仅在交互回调（custom/path onChange）经闭包引用，工厂构建无副作用。
+ * ticket 168 切片 02：面板删除后 schema 是 ⚙️ 设置弹窗的唯一内容入口。
  */
 export function reviewSettingsSchema(deps: { app: App; dataManager: ReviewDataManager }): SettingsSchema {
   // 排除名单 custom 行的 chips 重渲染句柄（原 renderExcludeRows；交互后调用）
@@ -224,196 +211,49 @@ export function reviewSettingsSchema(deps: { app: App; dataManager: ReviewDataMa
 export class UIManager {
   app: App;
   dataManager: ReviewDataManager;
-  mask: HTMLElement | null = null;
-  popup: HTMLElement | null = null;
-  entriesContainer: HTMLElement | null = null;
-  /** ticket 141：ESC 走 escManager 层级（原私挂 document keydown 迁移，esc-manager 立约禁私挂） */
-  private escHandle: { unregister: () => void } | null = null;
-  /** 搜索防抖句柄（ticket 141：逐键全量重渲染收敛 180ms 防抖，对齐密码域先例） */
-  private searchTimer: number | null = null;
-  searchInput: HTMLInputElement | null = null;
-  showArchived = false;
-  /** 旧式确认弹窗（保留：复习域按数量复习等轻量确认仍走 createConfirmDialog） */
-  confirmMask: HTMLElement | null = null;
-  confirmPopup: HTMLElement | null = null;
-  confirmCallback: (() => void) | null = null;
 
   constructor(app: App, dataManager: ReviewDataManager) {
     this.app = app;
     this.dataManager = dataManager;
-    this.createMainUI();
-    this.registerEscLayer();
   }
 
-  createMainUI(): void {
-    if (this.mask && document.body.contains(this.mask)) return;
-    this.mask = document.createElement('div');
-    this.mask.id = 'review-mask';
-    // 显隐为功能性内联（铁律 8 允许）；布局/配色已收敛 styles.css
-    this.mask.style.display = 'none';
-    this.mask.style.zIndex = String(allocZ()); // ADR-0067：创建即发号（显示时 topifyZ 再抬）
-    this.mask.onclick = () => this.hideMain();
-
-    this.popup = document.createElement('div');
-    this.popup.id = 'review-popup';
-    this.popup.style.display = 'none';
-    this.popup.style.zIndex = String(allocZ()); // ADR-0067：创建即发号
-    // 头行按钮统一规格由 core styles.css `.bz-win-head button` 承担（含关闭钮隐藏/全屏显示约定）
-    const header = document.createElement('div');
-    header.className = 'bz-win-head';
-    header.innerHTML = `
-      <h3 class="bz-review-title">复习计划</h3>
-      <div>
-        <button id="review-btn-add" title="加入当前笔记">➕</button>
-        <button id="review-btn-start" title="开始复习">▶️</button>
-        <button id="review-btn-count" title="按数量复习">🔢</button>
-        <button id="review-btn-search" title="搜索">🔍</button>
-        <button id="review-btn-archive" title="已完成（归档）">📁</button>
-        <button id="review-btn-settings" title="设置">⚙️</button>
-        <button id="review-btn-close" class="bz-win-close" title="关闭">❌</button>
-      </div>
-    `;
-    this.popup.appendChild(header);
-
-    const searchContainer = document.createElement('div');
-    searchContainer.id = 'review-search-wrap';
-    searchContainer.style.display = 'none';
-    const searchInput = document.createElement('input');
-    searchInput.type = 'text';
-    searchInput.className = 'review-search-input';
-    searchInput.placeholder = '搜索笔记...';
-    searchContainer.appendChild(searchInput);
-    this.popup.appendChild(searchContainer);
-    this.searchInput = searchInput;
-
-    const container = document.createElement('div');
-    container.id = 'review-entries-container';
-    this.popup.appendChild(container);
-    this.entriesContainer = container;
-    // ticket x5：列表键盘路径（方向键移动焦点 + 回车执行主操作；低频，Tab 原生可达无焦点陷阱）
-    container.addEventListener('keydown', (e: KeyboardEvent) => this.onEntriesKeydown(e));
-
-    document.body.appendChild(this.mask);
-    document.body.appendChild(this.popup);
-
-    // 头部按钮事件（拆分：_bindHeaderEvents）
-    this._bindHeaderEvents(header, searchContainer, searchInput);
-  }
-
-  /** 头部按钮与搜索框事件绑定（createMainUI 拆分） */
-  _bindHeaderEvents(header: HTMLElement, searchContainer: HTMLElement, searchInput: HTMLInputElement): void {
-    const app = this.app;
-    header.querySelector('#review-btn-add')!.addEventListener('click', async () => {
-      const file = app.workspace.getActiveFile();
-      if (!file) {
-        notice('请先打开一个笔记');
-        return;
-      }
-      try {
-        const { reviewApp } = await import('./app');
-        await reviewApp.addCurrentToReview(file);
-        await reviewApp.refreshPanel();
-        await reviewApp.applyReviewStyles(app);
-      } catch (e: any) {
-        notice('操作失败：' + e.message, 'error');
-      }
-    });
-    header.querySelector('#review-btn-start')!.addEventListener('click', async () => {
-      const { reviewApp } = await import('./app');
-      await reviewApp.autoJumpOverdue();
-    });
-    header.querySelector('#review-btn-count')!.addEventListener('click', () => {
-      this.showCountReviewModal();
-    });
-    let searchVisible = false;
-    header.querySelector('#review-btn-search')!.addEventListener('click', () => {
-      searchVisible = !searchVisible;
-      searchContainer.style.display = searchVisible ? 'block' : 'none';
-      if (searchVisible) searchInput.focus();
-      else {
-        searchInput.value = '';
-        this.refreshPanel();
-      }
-    });
-    // ticket 141：搜索防抖 180ms（原逐键 loadItems + 全量重渲染）
-    searchInput.addEventListener('input', () => {
-      if (this.searchTimer !== null) window.clearTimeout(this.searchTimer);
-      this.searchTimer = window.setTimeout(() => {
-        this.searchTimer = null;
-        void this.refreshPanel();
-      }, 180);
-    });
-    header.querySelector('#review-btn-archive')!.addEventListener('click', () => {
-      this.showArchived = !this.showArchived;
-      const btn = header.querySelector('#review-btn-archive') as HTMLElement;
-      btn.textContent = this.showArchived ? '📂' : '📁';
-      this.refreshPanel();
-    });
-
-    // 复习计划设置弹窗（ADR-0009：检查提醒/做题家/复习节奏/自动化/界面/移动端；分组卡片重设计；
-    // ticket 131 声明式 schema——六组逐一转 schema，做题家子项显隐走 visibleWhen）
-    header.querySelector('#review-btn-settings')!.addEventListener('click', () => {
-      openSettingsModal({
-        title: '复习计划设置',
-        maxWidth: 560,
-        schema: reviewSettingsSchema({ app: this.app, dataManager: this.dataManager }),
-      });
-    });
-    header.querySelector('#review-btn-close')!.addEventListener('click', () => this.hideMain());
-  }
-
-  showMain(): void {
-    this.createMainUI();
-    if (!this.mask || !this.popup) return;
-    // 移动端默认全屏：开关开=挂 .bz-win-mfs 全屏类（幂等），关=常规卡
-    applyMobileWindowFullscreen(this.popup, tryGetSettings().reviewMobileDefaultFullscreen === true);
-    topifyZ(this.mask, this.popup); // ADR-0067：显示即发号，谁后显示谁在上
-    this.mask.style.display = 'block';
-    this.popup.style.display = 'flex';
-    this.refreshPanel();
-    // 自动更新题库（做题家命令入口已退役 → 模块直调，ADR-0045；异步不阻塞界面）
-    void (async () => {
-      try {
-        const { quizUpdate } = await import('../quiz');
-        await quizUpdate(this.app);
-      } catch {
-        /* ignore */
-      }
-    })();
-  }
-
-  hideMain(): void {
-    if (this.mask) this.mask.style.display = 'none';
-    if (this.popup) this.popup.style.display = 'none';
-  }
-
-  /** 按数量复习篇数弹窗（ticket 02）：默认预填上次输入/设置默认、上限=可用候选、钳制、空态提示
-   *  确认后调用 reviewApp.startCountSession → 自动安排 → 逐篇做题。 */
+  /** 按数量复习篇数弹窗（ticket 02/168，命令「复习（按数量）」唯一入口）：默认预填上次输入/设置默认、
+   *  上限 = 可用候选、钳制；确认后调用 reviewApp.startCountSession → 自动安排 → 逐篇做题。
+   *  ticket 168（切片 02）：空候选时弹窗仍打开（空态文案 + 仅剩 ⚙️ 设置可修正候选文件夹——
+   *  设置入口必须常驻可达，否则候选为空时设置被锁死）。 */
   showCountReviewModal(): void {
     const app = this.app;
     void (async () => {
       const { reviewApp } = await import('./app');
       const stats = await reviewApp.countStats();
-      if (!stats.available) {
-        notice(`「${stats.folder}」下没有可复习的笔记`, 'warning');
-        return;
-      }
       const s = getSettings() as any;
       const def = Math.max(1, Number(s.reviewCountDefault) || 5);
       const last = Math.max(0, Number(s.reviewCountLastInput) || 0);
       const initial = Math.max(1, Math.min(last || def, stats.available));
+      const hasCandidates = stats.available > 0;
 
       const mask = document.createElement('div');
       Object.assign(mask.style, { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.3)', zIndex: '10050' });
       const popup = document.createElement('div');
       Object.assign(popup.style, { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', background: 'var(--background-primary)', borderRadius: '12px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)', zIndex: '10051', padding: '24px', maxWidth: '420px', width: '90%', display: 'flex', flexDirection: 'column', gap: '12px' });
       popup.innerHTML = `
-        <h4 style="margin:0;font-size:17px;font-weight:600;">按数量复习</h4>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+          <h4 style="margin:0;font-size:17px;font-weight:600;">按数量复习</h4>
+          <button class="review-count-settings" style="padding:4px 10px;border:none;border-radius:6px;background:var(--background-secondary);color:var(--text-normal);cursor:pointer;font-size:13px;" title="复习设置">⚙️ 设置</button>
+        </div>
         <p style="margin:0;font-size:13px;color:var(--text-muted);">候选：${stats.folder}（可用 ${stats.available} 篇）</p>
-        <input type="number" class="review-count-input" min="1" max="${stats.available}" value="${initial}" style="width:100%;padding:8px 10px;border-radius:6px;border:1px solid var(--background-modifier-border);background:var(--background-secondary);color:var(--text-normal);font-size:14px;box-sizing:border-box;" />
+        ${
+          hasCandidates
+            ? `<input type="number" class="review-count-input" min="1" max="${stats.available}" value="${initial}" style="width:100%;padding:8px 10px;border-radius:6px;border:1px solid var(--background-modifier-border);background:var(--background-secondary);color:var(--text-normal);font-size:14px;box-sizing:border-box;" />`
+            : `<p class="review-count-empty" style="margin:0;font-size:13px;color:var(--text-muted);">该文件夹下没有可复习的笔记，可在 ⚙️ 设置中调整候选文件夹</p>`
+        }
         <div style="display:flex;gap:12px;">
-          <button class="review-count-cancel" style="flex:1;padding:8px;border:none;border-radius:6px;background:var(--background-secondary);color:var(--text-normal);cursor:pointer;">取消</button>
-          <button class="review-count-ok" style="flex:1;padding:8px;border:none;border-radius:6px;background:var(--interactive-accent);color:var(--text-on-accent);cursor:pointer;font-weight:500;">开始复习</button>
+          ${
+            hasCandidates
+              ? `<button class="review-count-cancel" style="flex:1;padding:8px;border:none;border-radius:6px;background:var(--background-secondary);color:var(--text-normal);cursor:pointer;">取消</button>
+             <button class="review-count-ok" style="flex:1;padding:8px;border:none;border-radius:6px;background:var(--interactive-accent);color:var(--text-on-accent);cursor:pointer;font-weight:500;">开始复习</button>`
+              : `<button class="review-count-cancel" style="flex:1;max-width:120px;padding:8px;border:none;border-radius:6px;background:var(--background-secondary);color:var(--text-normal);cursor:pointer;">关闭</button>`
+          }
         </div>
       `;
       const close = () => {
@@ -423,6 +263,16 @@ export class UIManager {
       mask.onclick = close;
       document.body.appendChild(mask);
       document.body.appendChild(popup);
+      const settingsBtn = popup.querySelector('.review-count-settings') as HTMLElement;
+      settingsBtn.addEventListener('click', () => {
+        openSettingsModal({
+          title: '复习设置', // ticket 168：设置入口收敛到篇数弹窗，标题去「计划」
+          maxWidth: 560,
+          schema: reviewSettingsSchema({ app, dataManager: this.dataManager }),
+        });
+      });
+      popup.querySelector('.review-count-cancel')!.addEventListener('click', close);
+      if (!hasCandidates) return;
       const input = popup.querySelector('.review-count-input') as HTMLInputElement;
       input.focus();
       input.select();
@@ -433,7 +283,6 @@ export class UIManager {
         void reviewApp.startCountSession(n);
       };
       popup.querySelector('.review-count-ok')!.addEventListener('click', submit);
-      popup.querySelector('.review-count-cancel')!.addEventListener('click', close);
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') submit();
         else if (e.key === 'Escape') close();
@@ -441,421 +290,8 @@ export class UIManager {
     })();
   }
 
-  createConfirmDialog(): void {
-    if (this.confirmMask && document.body.contains(this.confirmMask)) return;
-    this.confirmMask = document.createElement('div');
-    Object.assign(this.confirmMask.style, { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.3)', zIndex: '10003', display: 'none' });
-    this.confirmMask.onclick = (e) => {
-      if (e.target === this.confirmMask) this.hideConfirm();
-    };
-    this.confirmPopup = document.createElement('div');
-    Object.assign(this.confirmPopup.style, { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', background: 'var(--background-primary)', borderRadius: '12px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)', zIndex: '10004', padding: '24px', maxWidth: '400px', width: '90%', display: 'none', flexDirection: 'column', alignItems: 'center', textAlign: 'center' });
-    this.confirmPopup.innerHTML = `
-      <h4 id="confirm-title" style="margin:0 0 12px 0;font-size:18px;font-weight:600;">确认删除</h4>
-      <p id="confirm-message" style="margin:0 0 20px 0;font-size:15px;color:var(--text-muted);"></p>
-      <div style="display:flex;gap:12px;width:100%;">
-        <button id="confirm-cancel" style="flex:1;padding:8px;border:none;border-radius:6px;background:var(--background-secondary);cursor:pointer;">取消</button>
-        <button id="confirm-ok" style="flex:1;padding:8px;border:none;border-radius:6px;background:var(--interactive-accent);color:var(--text-on-accent);cursor:pointer;font-weight:500;">确定</button>
-      </div>
-    `;
-    document.body.appendChild(this.confirmMask);
-    document.body.appendChild(this.confirmPopup);
-    this.confirmPopup.querySelector('#confirm-cancel')!.addEventListener('click', () => this.hideConfirm());
-    this.confirmPopup.querySelector('#confirm-ok')!.addEventListener('click', () => {
-      if (typeof this.confirmCallback === 'function') this.confirmCallback();
-      this.hideConfirm();
-    });
-  }
-
-  showConfirm(title: string, msg: string, onConfirm?: () => void): void {
-    this.createConfirmDialog();
-    if (!this.confirmPopup || !this.confirmMask) return;
-    this.confirmPopup.querySelector('#confirm-title')!.textContent = title || '确认';
-    this.confirmPopup.querySelector('#confirm-message')!.textContent = msg || '';
-    this.confirmCallback = onConfirm || null;
-    this.confirmMask.style.display = 'block';
-    this.confirmPopup.style.display = 'flex';
-  }
-
-  hideConfirm(): void {
-    if (this.confirmMask) this.confirmMask.style.display = 'none';
-    if (this.confirmPopup) this.confirmPopup.style.display = 'none';
-    this.confirmCallback = null;
-  }
-
-  /** 难度弹窗（源码 L312-330 逐字） */
-  showDifficultyDialog(item: ReviewItem, onSelect?: (diff: string) => void): void {
-    const old = document.querySelector('.difficulty-dialog');
-    if (old) old.remove();
-    const div = document.createElement('div');
-    div.className = 'difficulty-dialog';
-    div.style.zIndex = String(allocZ()); // ADR-0067：一次性弹窗，创建即显示即发号
-    // ticket s1：文件名经 escapeHtml 转义后拼 HTML
-    div.innerHTML = `
-      <h4>标记复习：${escapeHtml(item.name)}</h4>
-      <button class="diff-btn" data-diff="again">🟥 忘了（Again）</button>
-      <button class="diff-btn" data-diff="hard">🟧 困难（Hard）</button>
-      <button class="diff-btn" data-diff="good">🟩 一般（Good）</button>
-      <button class="diff-btn" data-diff="easy">✅ 简单（Easy）</button>
-      <button class="diff-btn diff-btn-cancel" data-diff="cancel">取消</button>
-    `;
-    document.body.appendChild(div);
-    div.style.display = 'block';
-    div.querySelectorAll('.diff-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        // 抽屉来源打开时注册过附属浮层：关闭前注销（非抽屉路径 unregister 未注册元素为 no-op）
-        unregisterSheetCompanion(div);
-        div.remove();
-        const diff = (btn as HTMLElement).dataset.diff;
-        if (diff !== 'cancel' && diff && onSelect) onSelect(diff);
-      });
-    });
-    setTimeout(() => {
-      const handler = (e: MouseEvent) => {
-        if (!div.contains(e.target as Node)) {
-          unregisterSheetCompanion(div);
-          div.remove();
-          document.removeEventListener('click', handler);
-        }
-      };
-      document.addEventListener('click', handler);
-    }, 100);
-  }
-
-  /**
-   * ticket 141：ESC 走 escManager 层级注册（原 registerEscape 私挂 document keydown 迁移）。
-   * 主面板层：确认框场景由 openFlowDialog 自带的 'q3-confirm' 层盖在其上，无需自管。
-   */
-  private registerEscLayer(): void {
-    if (this.escHandle) return;
-    this.escHandle = escManager.register('review-main', {
-      isVisible: () => !!this.mask && this.mask.style.display === 'block',
-      close: () => this.hideMain(),
-    });
-  }
-
-  /** 刷新列表（源码 App.refreshPanel → Renderer.render） */
-  async refreshPanel(): Promise<void> {
-    const items = await this.dataManager.loadItems();
-    const searchText = this.searchInput ? this.searchInput.value.trim() : '';
-    this.renderEntries(items, searchText);
-  }
-
-  renderEntries(items: ReviewItem[], searchText = ''): void {
-    const container = this.entriesContainer;
-    if (!container) return;
-    container.innerHTML = '';
-    let filtered = items;
-    // 归档开关：false=仅未完成，true=全部（源码语义）
-    if (!this.showArchived) filtered = filtered.filter((i) => !i.isCompleted);
-    if (searchText) {
-      const lower = searchText.toLowerCase();
-      filtered = filtered.filter((i) => i.name.toLowerCase().includes(lower));
-    }
-    if (!filtered.length) {
-      // ticket l6（解冻：新增空态文案）：空态补首步引导；ticket 141 样式收敛 classes
-      if (this.showArchived) {
-        container.innerHTML = `<div class="bz-review-empty">没有已完成（归档）的复习</div>`;
-      } else {
-        container.innerHTML = `
-          <div class="bz-review-empty">
-            <div>没有复习计划 🎉</div>
-            <div class="bz-review-empty-sub">打开任意笔记使用「加入复习计划」命令，或在 ⚙️ 设置中添加监听文件夹</div>
-          </div>`;
-      }
-      return;
-    }
-    filtered.sort((a, b) => {
-      if (a.isOverdue && !b.isOverdue) return -1;
-      if (!a.isOverdue && b.isOverdue) return 1;
-      return new Date(a.nextReviewDate!).getTime() - new Date(b.nextReviewDate!).getTime();
-    });
-    for (const item of filtered) container.appendChild(this.createCard(item));
-  }
-
-  createCard(item: ReviewItem): HTMLElement {
-    const app = this.app;
-    const card = document.createElement('div');
-    card.className = 'review-card';
-    // ticket x5：列表键盘路径——卡片可聚焦（Tab 原生可达），方向键在卡片间移动焦点，回车执行主操作
-    card.tabIndex = 0;
-    (card as any).__reviewItem = item;
-
-    const content = document.createElement('span');
-    content.className = 'review-content';
-    content.textContent = item.name.replace(/^《|》$/g, '');
-    content.title = item.filePath;
-    // ticket 098：挂起记录（文件不存在）→ 删除线
-    if (item.isMissing) content.classList.add('review-missing');
-    // 双击打开对应笔记（用户拍板保留双击；单击打开收敛进抽屉）
-    content.addEventListener('dblclick', () => {
-      if (item.isMissing) {
-        notice('文件已删除', 'warning');
-        return;
-      }
-      void this.openItemFile(item);
-    });
-    card.appendChild(content);
-
-    const meta = document.createElement('div');
-    meta.className = 'review-meta';
-
-    const stageTag = document.createElement('span');
-    stageTag.className = 'review-tag';
-    stageTag.textContent = this.stageLabel(item);
-    if (item.completed) stageTag.classList.add('completed');
-    else if (item.isOverdue) stageTag.classList.add('overdue');
-    // 点击评分收敛进抽屉「开始复习」（用户拍板）
-    meta.appendChild(stageTag);
-    if ((item.averageConfidence || 0) > 0 && item.phase !== 'fsrs') {
-      const conf = document.createElement('span');
-      conf.className = 'review-tag';
-      conf.textContent = `🎯 ${Math.round((item.averageConfidence || 0) * 100)}%`;
-      meta.appendChild(conf);
-    }
-
-    // FSRS 阶段显示 R(t)
-    if (item.phase === 'fsrs' && item.stability && !item.completed) {
-      const now = new Date();
-      const last = item.lastReviewed ? new Date(item.lastReviewed) : null;
-      if (last) {
-        const t = (now.getTime() - last.getTime()) / 86400000;
-        const fsrs = new FSRS();
-        const r = fsrs.R(t, item.stability);
-        const rPct = Math.round(r * 100);
-        const rTag = document.createElement('span');
-        rTag.className = 'review-tag';
-        rTag.textContent = `R=${rPct}%`;
-        if (r >= 0.9) rTag.classList.add('bz-review-r-high');
-        else if (r >= 0.7) rTag.classList.add('bz-review-r-mid');
-        else rTag.classList.add('bz-review-r-low');
-        meta.appendChild(rTag);
-      }
-    }
-
-    const timeSpan = document.createElement('span');
-    timeSpan.className = 'review-time';
-    timeSpan.textContent = this.dueLabel(item);
-    // 长按移出收敛进抽屉（用户拍板）
-    meta.appendChild(timeSpan);
-
-    card.appendChild(meta);
-
-    // 统一抽屉（桌面右键/移动长按）：开始复习 → 打开原文 → 移出
-    this.attachDrawerActions(card, item);
-    return card;
-  }
-
-  /** 阶段标签文本（卡片标签与抽屉头部共用） */
-  private stageLabel(item: ReviewItem): string {
-    if (item.isMissing) return '不存在';
-    if (item.completed) return '✅ 已完成';
-    if (item.isOverdue) {
-      return item.phase === 'fsrs' ? '⚠️ 逾期 (FSRS)' : `⚠️ 逾期 (${FSRS_FIRST_TEXTS[(item.currentStage || 1) - 1]})`;
-    }
-    if (item.phase === 'fsrs') return `FSRS Lv.${item.stage - LADDER_MAX + 1}`;
-    return `${item.currentStage}/${TOTAL_STAGES} ${FSRS_FIRST_TEXTS[(item.currentStage || 1) - 1]}`;
-  }
-
-  /** 到期时间文本（卡片时间与抽屉头部共用） */
-  private dueLabel(item: ReviewItem): string {
-    if (item.isMissing) return '文件缺失';
-    if (item.isCompleted) return '✅ 完成';
-    if (item.nextReviewDate) {
-      const diff = new Date(item.nextReviewDate).getTime() - Date.now();
-      if (diff > 0) {
-        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-        const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-        let text = '';
-        if (days > 0) text = `${days}d`;
-        else if (hours > 0) text = `${hours}h`;
-        else text = `${mins}m`;
-        return `⏳ ${text}`;
-      }
-      return '📅 逾期';
-    }
-    return '⏳ 待定';
-  }
-
-  /** 打开对应笔记文件（双击名称与抽屉「打开原文」共用）
-   *  ticket 141：文件缺失通知改 warning（原 success 红绿颠倒） */
-  private async openItemFile(item: ReviewItem): Promise<void> {
-    this.hideMain();
-    const file = this.app.vault.getAbstractFileByPath(item.filePath);
-    if (file) {
-      const leaf = this.app.workspace.getLeaf();
-      await leaf.openFile(file as any);
-    } else notice('文件已删除', 'warning');
-  }
-
-  /**
-   * ticket x5：列表键盘路径（列表级 keydown，事件委托；低频，不引入焦点陷阱——Tab 原生可达）。
-   * 方向键在卡片间移动焦点；回车执行主操作（与抽屉首动作一致：可复习 → 难度弹窗；否则打开原文）。
-   */
-  private onEntriesKeydown(e: KeyboardEvent): void {
-    const container = this.entriesContainer;
-    if (!container) return;
-    const cards = Array.from(container.querySelectorAll<HTMLElement>('.review-card'));
-    if (!cards.length) return;
-    const active = document.activeElement as HTMLElement | null;
-    const idx = active && cards.includes(active) ? cards.indexOf(active) : -1;
-
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      const dir = e.key === 'ArrowDown' ? 1 : -1;
-      const next =
-        idx === -1 ? (dir === 1 ? 0 : cards.length - 1) : Math.min(cards.length - 1, Math.max(0, idx + dir));
-      cards[next].focus();
-      return;
-    }
-    if (e.key === 'Enter' && idx !== -1) {
-      e.preventDefault();
-      this.keyboardExecute(cards[idx]);
-    }
-  }
-
-  /** 回车执行主操作（与抽屉「开始复习/打开原文」语义一致） */
-  private keyboardExecute(card: HTMLElement): void {
-    const item = (card as any).__reviewItem as ReviewItem | undefined;
-    if (!item) return;
-    if (!item.isCompleted && !item.completed && !item.isMissing) {
-      this.showDifficultyDialog(item, async (diff) => {
-        const { reviewApp } = await import('./app');
-        await reviewApp.markReview(item.filePath, diff as Rating);
-        await this.refreshPanel();
-        await reviewApp.applyReviewStyles(this.app);
-      });
-      // 难度弹窗作为附属浮层（内部点击不误关任何已开浮层；生命周期由弹窗自身注销）
-      const dlg = document.querySelector('.difficulty-dialog');
-      if (dlg) registerSheetCompanion(dlg as HTMLElement);
-    } else {
-      void this.openItemFile(item);
-    }
-  }
-
-  /** 卡片挂统一抽屉 + 头部（🔁 名称 + 阶段 · 到期） */
-  private attachDrawerActions(card: HTMLElement, item: ReviewItem): void {
-    const actions: ItemAction[] = [];
-
-    // 开始复习（未完成且文件存在；keepOpen + companion 难度弹窗，选完难度关抽屉——列表已重绘）
-    if (!item.isCompleted && !item.completed && !item.isMissing) {
-      actions.push({
-        icon: 'play',
-        label: '开始复习',
-        keepOpen: true,
-        onClick: () => {
-          this.showDifficultyDialog(item, async (diff) => {
-            const { reviewApp } = await import('./app');
-            await reviewApp.markReview(item.filePath, diff as Rating);
-            await this.refreshPanel();
-            await reviewApp.applyReviewStyles(this.app);
-            closeItemMenu(); // 复习已记录、列表重绘，抽屉数据陈旧直接关闭
-          });
-          // 难度弹窗作为附属浮层叠在抽屉上（内部点击不误关抽屉）
-          const dlg = document.querySelector('.difficulty-dialog');
-          if (dlg) registerSheetCompanion(dlg as HTMLElement);
-        },
-      });
-    }
-
-    // 打开原文（与名称双击同路径）
-    actions.push({
-      icon: 'file-text',
-      label: '打开原文',
-      onClick: () => {
-        void this.openItemFile(item);
-      },
-    });
-
-    // 移出复习计划（danger：确认走 core openFlowDialog；ticket 141 通病 1 落地后 toast 挂撤销）
-    actions.push({
-      icon: 'trash-2',
-      label: '移出复习计划',
-      kind: 'danger',
-      onClick: () => {
-        void openFlowDialog({
-          title: '移出复习计划',
-          message: `确定移出“${item.name}”？`,
-          actions: [
-            { label: '取消', value: 'cancel' },
-            { label: '确定', value: 'ok', cta: true },
-          ],
-        }).then(async (v) => {
-          if (v !== 'ok') return;
-          try {
-            await this.dataManager.removeItem(item.filePath);
-            await this.refreshPanel();
-            const { reviewApp } = await import('./app');
-            await reviewApp.applyReviewStyles(this.app);
-            // ticket 141 通病 1：原条目（含阶段/排期/历史）重新插回，进度不丢
-            notifyUndo(`已移出「${item.name}」`, () => {
-              void (async () => {
-                try {
-                  await this.dataManager.restoreItem(item);
-                  await this.refreshPanel();
-                  const { reviewApp: ra } = await import('./app');
-                  await ra.applyReviewStyles(this.app);
-                } catch (e) {
-                  notifySaveError(e, '恢复复习条目');
-                }
-              })();
-            });
-          } catch (e) {
-            notifySaveError(e, '移出复习条目');
-          }
-        });
-      },
-    });
-
-    attachItemActions(card, actions, { sheetHead: this.buildSheetHead(item) });
-  }
-
-  /** 抽屉头部：🔁 + 名称；小字=阶段 · 到期 */
-  private buildSheetHead(item: ReviewItem): HTMLElement {
-    const head = document.createElement('div');
-    head.className = 'bz-item-sheet-entry';
-    const body = document.createElement('div');
-    body.className = 'bz-review-sheet-body';
-
-    const emoji = document.createElement('span');
-    emoji.className = 'bz-item-sheet-emoji';
-    emoji.textContent = '🔁';
-    body.appendChild(emoji);
-
-    const info = document.createElement('div');
-    info.className = 'bz-review-sheet-info';
-    const title = document.createElement('div');
-    title.className = 'bz-item-sheet-title';
-    title.textContent = item.name.replace(/^《|》$/g, '');
-    info.appendChild(title);
-    const sub = document.createElement('div');
-    sub.className = 'bz-item-sheet-sub';
-    sub.textContent = `${this.stageLabel(item)} · ${this.dueLabel(item)}`;
-    info.appendChild(sub);
-
-    body.appendChild(info);
-    head.appendChild(body);
-    return head;
-  }
-
-  /** 销毁（卸载清理） */
+  /** 销毁（卸载清理）：面板已删除，无常驻 DOM/定时器；按次弹窗自销。 */
   destroy(): void {
-    this.hideMain();
-    if (this.searchTimer !== null) {
-      window.clearTimeout(this.searchTimer);
-      this.searchTimer = null;
-    }
-    // ticket 141：注销 escManager 层（原 document keydown 处理器清理迁移）
-    if (this.escHandle) {
-      this.escHandle.unregister();
-      this.escHandle = null;
-    }
-    if (this.mask) this.mask.remove();
-    if (this.popup) this.popup.remove();
-    this.mask = null;
-    this.popup = null;
-    this.entriesContainer = null;
+    /* no-op */
   }
 }
-

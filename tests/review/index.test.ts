@@ -124,7 +124,7 @@ describe('ensureReview', () => {
     const app = makeApp(vault);
     ensureReview(app);
     const updSpy = vi.spyOn(dataManager!, 'updateFilePath').mockResolvedValue(true);
-    const refreshSpy = vi.spyOn(uiManager!, 'refreshPanel').mockResolvedValue(undefined);
+    const styleSpy = vi.spyOn(reviewApp, 'applyReviewStyles').mockResolvedValue(undefined);
     // 同路径（总线载荷 oldPath === newPath）
     emitDomainEvent('vault:md-renamed', { oldPath: 'A.md', newPath: 'A.md' });
     expect(updSpy).not.toHaveBeenCalled();
@@ -133,7 +133,7 @@ describe('ensureReview', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(document.getElementById('__shared_confirm_popup__')).toBeNull();
     expect(updSpy).toHaveBeenCalledWith('A.md', 'A-new.md', 'A-new');
-    expect(refreshSpy).toHaveBeenCalled();
+    expect(styleSpy).toHaveBeenCalled();
   });
 
   it('workspace quit → 清理周期定时器', async () => {

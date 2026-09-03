@@ -6,6 +6,7 @@ import { MockVault, mockAppWithVault } from '../mock-vault';
 import { resetObsidianMocks, getNoticeMessages, clearNotices } from '../mock-obsidian-entry';
 import { setApp } from '../../src/core/app';
 import { setSettingsProvider } from '../../src/core/settings-provider';
+import { closeSettingsModal } from '../../src/core/settings-modal';
 import { reviewApp } from '../../src/review/app';
 import { REVIEW_FILE_PATH, ReviewDataManager } from '../../src/review/data';
 import { UIManager } from '../../src/review/ui';
@@ -630,7 +631,7 @@ describe('汇总页与重做本篇（ticket 05）', () => {
   });
 });
 
-describe('入口与篇数弹窗（ticket 02 UI）', () => {
+describe('篇数弹窗入口（ticket 02/168 UI：面板删除后唯一入口）', () => {
   beforeEach(() => {
     resetObsidianMocks();
     clearNotices();
@@ -640,7 +641,7 @@ describe('入口与篇数弹窗（ticket 02 UI）', () => {
     (reviewApp as any)._quizOverride = null;
   });
 
-  it('复习主窗口头部含「按数量复习」按钮；点击弹出篇数弹窗（默认值与上限正确），确定后启动会话', async () => {
+  it('有候选：默认值与上限正确（上次 0 → 默认 5 → 钳制到可用数），确定后启动会话', async () => {
     const vault = new MockVault();
     vault.files.set('卡片盒/笔记盒/A.md', '正文');
     vault.files.set('卡片盒/笔记盒/B.md', '正文');
@@ -648,13 +649,8 @@ describe('入口与篇数弹窗（ticket 02 UI）', () => {
     const app = makeApp(vault);
     setApp(app);
     const ui = new UIManager(app, new ReviewDataManager(app));
-    ui.showMain();
-    const btn = document.querySelector('#review-btn-count') as HTMLElement;
-    expect(btn).toBeTruthy();
-    const quiz = makeQuizMock();
-    (reviewApp as any)._quizOverride = quiz;
-    vi.spyOn(reviewApp, 'regenerateQuestions').mockResolvedValue(Q);
-    btn.click();
+    const startSpy = vi.spyOn(reviewApp, 'startCountSession').mockResolvedValue(undefined);
+    ui.showCountReviewModal();
     await new Promise((r) => setTimeout(r, 50));
     const input = document.querySelector('.review-count-input') as HTMLInputElement;
     expect(input).toBeTruthy();
@@ -662,21 +658,25 @@ describe('入口与篇数弹窗（ticket 02 UI）', () => {
     expect(input.value).toBe('3'); // 上次 0 → 默认 5 → 钳制到 3
     (document.querySelector('.review-count-ok') as HTMLElement).click();
     await new Promise((r) => setTimeout(r, 50));
-    expect(quiz.startCalls).toBeGreaterThan(0);
+    expect(startSpy).toHaveBeenCalledWith(3);
     ui.destroy();
   });
 
-  it('空候选：弹窗不开，提示无文件可复习', async () => {
+  it('空候选：弹窗仍打开（空态文案，无输入/开始），⚙️ 设置入口可达并打开「复习设置」', async () => {
     const vault = new MockVault();
     vault.files.set('别处.md', '正文');
     const app = makeApp(vault);
     setApp(app);
     const ui = new UIManager(app, new ReviewDataManager(app));
-    ui.showMain();
-    (document.querySelector('#review-btn-count') as HTMLElement).click();
+    ui.showCountReviewModal();
     await new Promise((r) => setTimeout(r, 50));
     expect(document.querySelector('.review-count-input')).toBeNull();
-    expect(getNoticeMessages().join('|')).toContain('没有可复习的笔记');
+    expect((document.querySelector('.review-count-empty') as HTMLElement).textContent).toContain('没有可复习的笔记');
+    expect(document.querySelector('.review-count-ok')).toBeNull();
+    (document.querySelector('.review-count-settings') as HTMLElement).click();
+    const popup = document.getElementById('bz-settings-modal-popup')!;
+    expect(popup.querySelector('.bz-settings-title')!.textContent).toBe('复习设置');
+    closeSettingsModal();
     ui.destroy();
   });
 });
