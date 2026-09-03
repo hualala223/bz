@@ -1,5 +1,5 @@
 /* ==================== 复习计划域样式（src/review/styles.css） ==================== */
-/* ==================== 复习设置（ticket 168 切片 02/04：主面板与卡片样式随面板删除，仅剩设置弹窗排除名单 chips） ==================== */
+/* ==================== 复习设置（ticket 168 切片 02/04/05：主面板与卡片样式随面板删除，仅剩设置弹窗内名单区） ==================== */
       /* ticket 57：排除名单 chip（名字 + 解除标签）——⚙️ 设置弹窗 custom 行内使用 */
       #review-excluded-list { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:4px 0; }
       .bz-review-exclude-empty { font-size:12px; color:var(--text-faint); padding:4px 0; }
@@ -7,3 +7,11 @@
       .bz-review-exclude-name { font-size:12px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       .bz-review-exclude-remove { background:none; border:none; cursor:pointer; color:var(--text-faint); font-size:11px; line-height:1; padding:2px; border-radius:50%; display:flex; align-items:center; justify-content:center; box-shadow:none !important; }
       .bz-review-exclude-remove:hover { color:var(--text-error, #ff4757); background:var(--background-modifier-hover); }
+      /* ticket 168 切片 05：复习条目管理列表（⚙️ 设置弹窗 custom 行） */
+      .bz-review-manage-list { display:flex; flex-direction:column; gap:4px; padding:4px 0; max-height:220px; overflow-y:auto; }
+      .bz-review-manage-empty { font-size:12px; color:var(--text-faint); padding:4px 0; }
+      .bz-review-manage-item { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:4px 8px; border-radius:6px; background:var(--background-secondary); border:1px solid var(--background-modifier-border); }
+      .bz-review-manage-item.is-missing { opacity:0.55; text-decoration:line-through; }
+      .bz-review-manage-name { font-size:12px; color:var(--text-normal); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .bz-review-manage-remove { background:none; border:none; cursor:pointer; color:var(--text-faint); font-size:12px; padding:2px 6px; border-radius:4px; box-shadow:none !important; flex-shrink:0; }
+      .bz-review-manage-remove:hover { color:var(--text-error, #ff4757); background:var(--background-modifier-hover); }

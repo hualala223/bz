@@ -1,11 +1,13 @@
 /**
- * 复习设置 + 按数量复习篇数弹窗（ticket 168 单一入口重构，切片 02）：
+ * 复习设置 + 按数量复习篇数弹窗（ticket 168 单一入口重构，切片 02/05）：
  * 复习计划主面板及全部交互（列表/卡片/统一抽屉/难度弹窗/归档/搜索/键盘路径）随命令退役整体删除；
- * 保留面 = 命令「复习（按数量）」的篇数弹窗 + ⚙️ 域设置弹窗入口（空候选时弹窗仍打开，设置可达）。
+ * 保留面 = 命令「复习（按数量）」的篇数弹窗 + ⚙️ 域设置弹窗入口（空候选时弹窗仍打开，设置可达）；
+ * 切片 05：设置弹窗新增「复习条目管理」组——面板删除后清理 review.json 条目的唯一入口。
  * 对外导出：reviewSettingsSchema（⚙️ 设置弹窗唯一内容入口）/ UIManager（showCountReviewModal/destroy）。
  */
 import { Setting, type App } from 'obsidian';
-import { notice } from '../core/notice';
+import { notice, notifyUndo, notifySaveError } from '../core/notice';
+import { openFlowDialog } from '../core/flow-dialog';
 import { getSettings, saveSettings } from '../core/settings-provider';
 import { openSettingsModal } from '../core/settings-modal';
 import type { SettingsSchema } from '../core/settings-schema';
@@ -188,6 +190,82 @@ export function reviewSettingsSchema(deps: { app: App; dataManager: ReviewDataMa
                 });
               };
               renderExcludeRows();
+            },
+          },
+        ],
+      },
+      {
+        icon: 'list-tree',
+        name: '复习条目管理',
+        rows: [
+          // 条目列表（ticket 168 切片 05）：面板删除后清理 review.json 条目的唯一入口。
+          // 挂起（文件缺失）条目标灰展示；逐条移出走确认弹窗 → removeItem → toast 撤销原样恢复（阶段/排期/历史零丢失，
+          // ticket 141 通病 1 机制，与旧面板抽屉「移出复习计划」同构）。
+          {
+            type: 'custom',
+            render: (body) => {
+              const setting = new Setting(body).setName('条目列表').setDesc('复习计划内全部条目；挂起（文件缺失）标灰，移出可撤销');
+              setting.settingEl.classList.add('bz-review-manage-row');
+              const listBox = document.createElement('div');
+              listBox.className = 'bz-review-manage-list';
+              setting.controlEl.appendChild(listBox);
+              const renderList = async () => {
+                listBox.innerHTML = '';
+                const items = await deps.dataManager.loadItems();
+                if (!items.length) {
+                  const empty = document.createElement('div');
+                  empty.className = 'bz-review-manage-empty';
+                  empty.textContent = '暂无复习条目';
+                  listBox.appendChild(empty);
+                  return;
+                }
+                for (const item of items) {
+                  const row = document.createElement('div');
+                  row.className = 'bz-review-manage-item' + (item.isMissing ? ' is-missing' : '');
+                  const name = document.createElement('span');
+                  name.className = 'bz-review-manage-name';
+                  name.textContent = item.isMissing ? `${item.name}（挂起）` : item.name;
+                  name.title = item.filePath;
+                  const remove = document.createElement('button');
+                  remove.className = 'bz-review-manage-remove';
+                  remove.textContent = '移出';
+                  remove.addEventListener('click', () => {
+                    void openFlowDialog({
+                      title: '移出复习计划',
+                      message: `确定移出“${item.name}”？`,
+                      actions: [
+                        { label: '取消', value: 'cancel' },
+                        { label: '确定', value: 'ok', cta: true },
+                      ],
+                    }).then(async (v) => {
+                      if (v !== 'ok') return;
+                      try {
+                        await deps.dataManager.removeItem(item.filePath);
+                        await renderList();
+                        const { reviewApp } = await import('./app');
+                        await reviewApp.applyReviewStyles(deps.app);
+                        // ticket 141 通病 1：原条目（含阶段/排期/历史）重新插回，进度不丢
+                        notifyUndo(`已移出「${item.name}」`, () => {
+                          void (async () => {
+                            try {
+                              await deps.dataManager.restoreItem(item);
+                              await renderList();
+                            } catch (e) {
+                              notifySaveError(e, '移出复习条目');
+                            }
+                          })();
+                        });
+                      } catch (e) {
+                        notifySaveError(e, '移出复习条目');
+                      }
+                    });
+                  });
+                  row.appendChild(name);
+                  row.appendChild(remove);
+                  listBox.appendChild(row);
+                }
+              };
+              void renderList();
             },
           },
         ],

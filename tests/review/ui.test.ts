@@ -88,7 +88,7 @@ describe('UIManager（ticket 168：面板删除后的残留面）', () => {
     (document.querySelector('.review-count-settings') as HTMLElement).click();
     const popup = document.getElementById('bz-settings-modal-popup')!;
     expect(popup.querySelector('.bz-settings-title')!.textContent).toBe('复习设置');
-    expect(popup.textContent).toContain('按数量复习'); // 声明式六组渲染有果
+    expect(popup.textContent).toContain('按数量复习'); // 声明式七组渲染有果（切片 05 起含复习条目管理）
     ui.destroy();
   });
 });
