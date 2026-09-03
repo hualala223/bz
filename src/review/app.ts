@@ -11,7 +11,7 @@ import { FSRS, FSRS_FIRST_INTERVALS, FSRS_FIRST_TEXTS, LADDER_MAX } from './fsrs
 import type { Rating } from './fsrs';
 import type { ReviewItem } from './data';
 import { ReviewDataManager, getReviewFilePath } from './data';
-import { collectFolderFiles, eligibleCount, selectCountReview, type CountPick, type CountPickKind } from './count';
+import { collectFolderFiles, eligibleCount, selectCountReview, selectOverduePicks, type CountPick, type CountPickKind } from './count';
 import { showNotePreview } from './preview';
 
 /** 按数量复习单篇结果（汇总页数据源） */
@@ -503,23 +503,53 @@ export const reviewApp = {
       s.reviewCountLastInput = n;
       await saveSettings();
     }
+    const quiz = await this.ensureQuizReady();
+    if (!quiz) {
+      notice('AI 服务未配置，无法按数量复习', 'warning');
+      return;
+    }
+    await this.countReviewLoop(picks, 0);
+  },
+
+  /** 做题家懒加载（统一出口，ticket 168）：设置里配了 AI 但本会话还没初始化过做题家时 quiz.ai 为 null
+   *  （ensureQuiz 幂等：AI 注入）；失败/未配置返回 null。手动按数量与「去复习」会话共用。 */
+  async ensureQuizReady(): Promise<any | null> {
     let quiz: any = null;
     try {
       quiz = await this.getQuiz();
     } catch {
       /* ignore */
     }
-    // 做题家域懒加载：设置里配了 AI 但本会话还没初始化过做题家时 quiz.ai 为 null（ensureQuiz 幂等：AI 注入）
     if (quiz && !quiz.ai) {
       try {
         const { ensureQuiz } = await import('../quiz');
-        ensureQuiz(app);
+        ensureQuiz(getApp());
         quiz = await this.getQuiz();
       } catch {
         /* ignore */
       }
     }
-    if (!quiz || !quiz.ai) {
+    return quiz && quiz.ai ? quiz : null;
+  },
+
+  /** 去复习会话（ticket 168/切片 03）：逾期常驻通知「去复习」→ 直接进入按数量复习会话。
+   *  选择 = 全 vault 逾期（任意目录，见 count.ts selectOverduePicks），
+   *  篇数 = min(逾期数, 每日复习上限||∞)，超限提示剩余留到下次；复用 countReviewLoop 与汇总页。 */
+  async startOverdueCountSession(): Promise<void> {
+    const app = getApp();
+    this.ensure(app);
+    const items = await this.dataManager!.loadItems();
+    const overdueCount = items.filter((i) => i.isOverdue && !i.isCompleted && !i.isMissing).length;
+    const picks = selectOverduePicks(items, new Date(), Number((getSettings() as any).reviewDailyLimit) || 0);
+    if (!picks.length) {
+      notice('没有逾期笔记', 'success');
+      return;
+    }
+    if (picks.length < overdueCount) {
+      notice(`本轮复习 ${picks.length} 篇，剩余 ${overdueCount - picks.length} 篇留到下次`, 'info');
+    }
+    const quiz = await this.ensureQuizReady();
+    if (!quiz) {
       notice('AI 服务未配置，无法按数量复习', 'warning');
       return;
     }
@@ -1039,7 +1069,7 @@ for (const path of paths) {
    * 启动首查把存量逾期当新产生 → 汇总篇数（Q1 拍板接受）。
    * ticket 48 收敛：与本轮 loadItems 共用结果，不再二次读盘；
    * ticket 58：通知挂「去复习」action → 打开最早逾期笔记；
-   * ticket 153：「去复习」升级为走 autoJumpOverdue 完整流程（做题决定难度分流）。
+   * ticket 153/168：「去复习」升级为走复习应用统一流程；ticket 168 起 = 全 vault 逾期按数量会话。
    */
   async checkOverdueAndNotify(): Promise<void> {
     try {
@@ -1060,8 +1090,8 @@ for (const path of paths) {
       if (newly.length) {
         for (const [p] of newly) this._notifiedOverdue.add(p);
         // 通知只报当前逾期篇数，不列具体题目（用户拍板 2026-08-29）；duration 0 = 常驻（通知系统语义）
-        // ticket 153：「去复习」不再只打开单篇（旧 ticket 58/修 #1 语义），
-        // 而是走 autoJumpOverdue 完整复习流程（按 forceQuizForReview 分流做题/普通复习），
+        // ticket 153/168：「去复习」不再只打开单篇（旧 ticket 58/修 #1 语义），
+        // ticket 168 起走「全 vault 逾期按数量会话」（startOverdueCountSession，见该节），
         // 通知名单仍只报 newly（diff 记忆语义保留，见上方过滤）。
         const handle = notify(`有 ${overdueMap.size} 篇笔记逾期`, {
           type: 'info',
@@ -1070,9 +1100,8 @@ for (const path of paths) {
           action: {
             label: '去复习', // action 文案不带 emoji（通知规范）
             onClick: () => {
-              // ticket 153：走统一开始复习流程（autoJumpOverdue 内按 forceQuizForReview 分流：
-              // 开启 → 批量出题做题；关闭 → 普通复习跳转笔记），不再裸开最早逾期笔记
-              void reviewApp.autoJumpOverdue();
+              // ticket 168：走统一按数量复习会话（全 vault 逾期、每日上限截断），不再裸开最早逾期笔记
+              void reviewApp.startOverdueCountSession();
             },
           },
         });

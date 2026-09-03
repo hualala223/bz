@@ -11,6 +11,7 @@ import {
   endOfLocalDay,
   eligibleCount,
   selectCountReview,
+  selectOverduePicks,
   type CountPick,
 } from '../../src/review/count';
 import type { ReviewItem } from '../../src/review/data';
@@ -193,5 +194,49 @@ describe('selectCountReview：7:3 配比与阶段分桶', () => {
     // 1 逾期 + 剩余 9：历史 70% ≈ 6（含采样 4 后不足 → 新补 2）+ 新 30% ≈ 3
     expect(kinds(picks)[0]).toBe('overdue');
     expect(picks.length).toBe(10);
+  });
+});
+
+describe('selectOverduePicks（ticket 168 去复习会话选择）', () => {
+  const T168 = new Date('2026-08-01T10:00:00');
+
+  it('只取逾期：nextReviewDate 早于 now 且未完成；挂起（isMissing）/completed/未到期/无排期排除', () => {
+    const items = [
+      makeItem('A.md', { nextReviewDate: '2026-07-31T10:00:00' }),
+      makeItem('B.md', { nextReviewDate: '2026-08-01T09:59:59' }),
+      makeItem('C.md', { nextReviewDate: '2026-08-01T10:00:01' }), // 未到期
+      makeItem('D.md', { nextReviewDate: '2026-07-01T10:00:00', completed: true }),
+      makeItem('E.md', { nextReviewDate: '2026-07-01T10:00:00', isMissing: true }), // 挂起
+      makeItem('F.md', { nextReviewDate: null }),
+    ];
+    const picks = selectOverduePicks(items, T168);
+    expect(picks.map((p) => p.filePath)).toEqual(['A.md', 'B.md']);
+  });
+
+  it('任意目录（不依赖候选文件夹）且按 nextReviewDate 升序；kind/stage/bucket 正确', () => {
+    const items = [
+      makeItem('卡片盒/笔记盒/X.md', { nextReviewDate: '2026-07-20T10:00:00', stage: 8 }),
+      makeItem('别处/A.md', { nextReviewDate: '2026-07-30T10:00:00', stage: 0 }),
+      makeItem('子/深/B.md', { nextReviewDate: '2026-07-25T10:00:00', stage: 12 }),
+    ];
+    const picks = selectOverduePicks(items, T168);
+    expect(picks.map((p) => p.filePath)).toEqual(['卡片盒/笔记盒/X.md', '子/深/B.md', '别处/A.md']);
+    expect(picks[0].kind).toBe('overdue');
+    expect(picks[0].stage).toBe(8);
+    expect(picks[0].bucket).toBe('中期');
+    expect(picks[2].bucket).toBe('刚学');
+  });
+
+  it('dailyLimit 截断（>0 取前 N；0/非法=不限）；空输入/无逾期返回空', () => {
+    const items = [
+      makeItem('A.md', { nextReviewDate: '2026-07-30T10:00:00' }),
+      makeItem('B.md', { nextReviewDate: '2026-07-31T10:00:00' }),
+      makeItem('C.md', { nextReviewDate: '2026-07-29T10:00:00' }),
+    ];
+    expect(selectOverduePicks(items, T168, 2).map((p) => p.filePath)).toEqual(['C.md', 'A.md']);
+    expect(selectOverduePicks(items, T168, 0).length).toBe(3);
+    expect(selectOverduePicks(items, T168, -1).length).toBe(3);
+    expect(selectOverduePicks([], T168)).toEqual([]);
+    expect(selectOverduePicks([makeItem('N.md', { nextReviewDate: '2026-09-01T10:00:00' })], T168)).toEqual([]);
   });
 });

@@ -7,7 +7,7 @@ import { resetObsidianMocks, getNoticeMessages, clearNotices } from '../mock-obs
 import { setApp } from '../../src/core/app';
 import { setSettingsProvider } from '../../src/core/settings-provider';
 import { reviewApp } from '../../src/review/app';
-import { ReviewDataManager } from '../../src/review/data';
+import { REVIEW_FILE_PATH, ReviewDataManager } from '../../src/review/data';
 import { UIManager } from '../../src/review/ui';
 import type { CountPick } from '../../src/review/count';
 
@@ -678,5 +678,112 @@ describe('入口与篇数弹窗（ticket 02 UI）', () => {
     expect(document.querySelector('.review-count-input')).toBeNull();
     expect(getNoticeMessages().join('|')).toContain('没有可复习的笔记');
     ui.destroy();
+  });
+});
+
+describe('去复习会话（ticket 168：全 vault 逾期按数量复习）', () => {
+  beforeEach(() => {
+    resetObsidianMocks();
+    clearNotices();
+    setSettingsProvider(() => ({}) as any);
+    (reviewApp as any).dataManager = null;
+    (reviewApp as any)._quizOverride = null;
+    vi.restoreAllMocks();
+  });
+
+  it('无逾期 → 「没有逾期笔记」，不启动做题会话', async () => {
+    const vault = new MockVault();
+    vault.files.set('A.md', '正文');
+    const app = makeApp(vault);
+    setApp(app);
+    const quiz = makeQuizMock();
+    (reviewApp as any)._quizOverride = quiz;
+    await reviewApp.startOverdueCountSession();
+    expect(quiz.startCalls).toBe(0);
+    expect(getNoticeMessages().join('|')).toContain('没有逾期笔记');
+  });
+
+  it('全 vault 逾期（含候选文件夹外）→ 按 nextReviewDate 升序逐篇做题并写排期，末篇进汇总', async () => {
+    const vault = new MockVault();
+    vault.files.set('卡片盒/笔记盒/A.md', '正文'); // 2 天前到期（文件夹内）
+    vault.files.set('别处/X.md', '正文'); // 1 天前到期（文件夹外）
+    vault.files.set('别处/Y.md', '正文'); // 3 天前到期（文件夹外，最紧迫）
+    const now = new Date();
+    const row = (id: string, filePath: string, name: string, daysAgo: number, stage: number) => ({
+      id, filePath, name, reviewStart: now.toISOString(), stage, phase: 'ladder', stability: 1, difficulty: 0.3,
+      reviewHistory: [], totalReviews: 0, averageConfidence: 0,
+      nextReviewDate: new Date(now.getTime() - daysAgo * 86400000).toISOString(),
+      lastReviewed: null, lastDifficulty: null, completed: false,
+    });
+    vault.files.set(REVIEW_FILE_PATH, JSON.stringify([
+      row('1', '别处/Y.md', 'Y', 3, 5),
+      row('2', '卡片盒/笔记盒/A.md', 'A', 2, 2),
+      row('3', '别处/X.md', 'X', 1, 0),
+    ]));
+    const app = makeApp(vault);
+    setApp(app);
+    const quiz = makeQuizMock();
+    (reviewApp as any)._quizOverride = quiz;
+    vi.spyOn(reviewApp, 'regenerateQuestions').mockResolvedValue(Q);
+
+    const schedSpy = vi.spyOn(reviewApp, 'applyCountScheduling'); // 透传记录调用顺序
+    const p = reviewApp.startOverdueCountSession();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(quiz.startCalls).toBe(1);
+    expect(quiz.lastStartOpts.hideOptionCount).toBe(true);
+    void quiz._cb({ correct: 2, wrong: 0, total: 2, accuracy: 100 });
+    await new Promise((r) => setTimeout(r, 30));
+    quiz.popup.querySelector('#quiz-next-note')!.click();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(quiz.startCalls).toBe(2); // 文件夹内逾期也覆盖
+    void quiz._cb({ correct: 2, wrong: 0, total: 2, accuracy: 100 });
+    await new Promise((r) => setTimeout(r, 30));
+    quiz.popup.querySelector('#quiz-next-note')!.click();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(quiz.startCalls).toBe(3);
+    void quiz._cb({ correct: 2, wrong: 0, total: 2, accuracy: 100 });
+    await new Promise((r) => setTimeout(r, 30));
+    quiz.popup.querySelector('#quiz-next-note')!.click(); // 末篇 → 汇总
+    await p;
+    expect(quiz.popup.innerHTML).toContain('总正确率');
+    // 顺序 = 最紧迫优先（Y 3 天前 → A 2 天前 → X 1 天前），任意目录全覆盖
+    expect(schedSpy.mock.calls.map((c) => (c[0] as CountPick).filePath)).toEqual(['别处/Y.md', '卡片盒/笔记盒/A.md', '别处/X.md']);
+    // 三篇排期写入（nextReviewDate 推到未来）
+    const dm = new ReviewDataManager(app);
+    for (const path of ['别处/Y.md', '卡片盒/笔记盒/A.md', '别处/X.md']) {
+      const item = (await dm.loadItems()).find((i) => i.filePath === path)!;
+      expect(new Date(item.nextReviewDate!).getTime()).toBeGreaterThan(now.getTime());
+    }
+    quiz.popup.querySelector('#quiz-end-summary')!.click();
+  });
+
+  it('每日复习上限截断：只复习前 N 篇并提示剩余留到下次', async () => {
+    const vault = new MockVault();
+    for (const p of ['A.md', 'B.md', 'C.md']) vault.files.set(p, '正文');
+    const now = new Date();
+    vault.files.set(REVIEW_FILE_PATH, JSON.stringify([
+      { id: '1', filePath: 'A.md', name: 'A', reviewStart: now.toISOString(), stage: 0, phase: 'ladder', stability: 1, difficulty: 0.3, reviewHistory: [], totalReviews: 0, averageConfidence: 0, nextReviewDate: new Date(now.getTime() - 86400000).toISOString(), lastReviewed: null, lastDifficulty: null, completed: false },
+      { id: '2', filePath: 'B.md', name: 'B', reviewStart: now.toISOString(), stage: 0, phase: 'ladder', stability: 1, difficulty: 0.3, reviewHistory: [], totalReviews: 0, averageConfidence: 0, nextReviewDate: new Date(now.getTime() - 2 * 86400000).toISOString(), lastReviewed: null, lastDifficulty: null, completed: false },
+      { id: '3', filePath: 'C.md', name: 'C', reviewStart: now.toISOString(), stage: 0, phase: 'ladder', stability: 1, difficulty: 0.3, reviewHistory: [], totalReviews: 0, averageConfidence: 0, nextReviewDate: new Date(now.getTime() - 3 * 86400000).toISOString(), lastReviewed: null, lastDifficulty: null, completed: false },
+    ]));
+    const app = makeApp(vault);
+    setApp(app);
+    setSettingsProvider(() => ({ reviewDailyLimit: 1 }) as any);
+    const quiz = makeQuizMock();
+    (reviewApp as any)._quizOverride = quiz;
+    vi.spyOn(reviewApp, 'regenerateQuestions').mockResolvedValue(Q);
+
+    const schedSpy = vi.spyOn(reviewApp, 'applyCountScheduling'); // 透传记录调用
+    const p = reviewApp.startOverdueCountSession();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(getNoticeMessages().join('|')).toContain('本轮复习 1 篇，剩余 2 篇留到下次');
+    expect(quiz.startCalls).toBe(1);
+    void quiz._cb({ correct: 2, wrong: 0, total: 2, accuracy: 100 });
+    await new Promise((r) => setTimeout(r, 30));
+    quiz.popup.querySelector('#quiz-next-note')!.click();
+    await p;
+    expect(quiz.endCalls).toBe(0); // 汇总页未点结束前不调 endReviewSession
+    expect(quiz.popup.innerHTML).toContain('总正确率');
+    expect(schedSpy.mock.calls.map((c) => (c[0] as CountPick).filePath)).toEqual(['C.md']); // 上限 1 → 只排最紧迫 C
   });
 });

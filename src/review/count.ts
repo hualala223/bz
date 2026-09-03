@@ -209,3 +209,29 @@ export function selectCountReview(
 
   return picks;
 }
+
+/** 全 vault 逾期选择（ticket 168「去复习」会话）：逾期（nextReviewDate 早于 now 且未完成）条目
+ *  按 nextReviewDate 升序；挂起记录（isMissing）不计逾期（CONTEXT.md 挂起语义）；
+ *  dailyLimit>0 截断（对齐「每日复习上限」语义，0/非法 = 不限）。kind 恒为 'overdue'。 */
+export function selectOverduePicks(items: ReviewItem[], now: Date, dailyLimit: number = 0): CountPick[] {
+  if (!items.length) return [];
+  const overdue = items
+    .filter(
+      (i) =>
+        !i.isMissing &&
+        !(i.completed || i.isCompleted) &&
+        !!i.nextReviewDate &&
+        new Date(i.nextReviewDate).getTime() < now.getTime()
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.nextReviewDate as string).getTime() - new Date(b.nextReviewDate as string).getTime()
+    );
+  const limit = Number(dailyLimit) > 0 ? Math.floor(Number(dailyLimit)) : overdue.length;
+  return overdue.slice(0, limit).map((it) => ({
+    filePath: it.filePath,
+    kind: 'overdue' as const,
+    stage: it.stage ?? 0,
+    bucket: stageBucket(it.stage ?? 0),
+  }));
+}
