@@ -1,6 +1,6 @@
 # Ticket 168 — 复习域「单一入口合并」重构（review single-count entry）
 
-> 状态：`ready-for-agent`（设计已 grill 三轮拍板、seam 已确认；等「开工」命令后按 ADR-0077 实施）
+> 状态：`已交付`（2026-08-31，六切片全部合并 master @ f1ff36d，测试 225 文件 3587 用例全绿 + 构建部署）
 > 分支：`worktree/168` ｜ ADR：0077 ｜ spec：本文件 + spec.md「复习域单一入口合并」节
 
 ## Problem Statement
