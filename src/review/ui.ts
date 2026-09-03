@@ -14,8 +14,8 @@ import type { SettingsSchema } from '../core/settings-schema';
 import { ReviewDataManager } from './data';
 
 /**
- * 复习设置 schema（ticket 131 声明式；ADR-0064）：检查提醒/做题家/复习节奏/按数量复习/自动化/界面 +
- * 移动端六组卡片。做题家子项显隐收敛为 visibleWhen 声明式联动；监听文件夹走通用 path 行
+ * 复习设置 schema（ticket 131 声明式；ADR-0064）：检查提醒/做题家/复习节奏/按数量复习/自动化/复习条目管理/界面
+ * 七组卡片（ticket 168：复习主窗口退役，移动端全屏组删除；做题全面化，出题子项常显）。监听文件夹走通用 path 行
  * （multi chips + 添加… 按钮，落盘外部 binding 自管：新增先确认存量收编、移除连带清理排除记录）；
  * 排除名单 chips 区走 custom 插槽（DOM id/类名零变化）。置于模块顶层供文案 lint 直接引用；
  * deps 仅在交互回调（custom/path onChange）经闭包引用，工厂构建无副作用。
