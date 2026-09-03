@@ -127,9 +127,9 @@ _Avoid_: 引用同步单独成域（AI Agent 已解散）；跨域 import 他域
 
 **剪藏归档 (Clip Archive)**: memo 域功能——剪藏落盘（订 `'clipping:file-created'` 语义通道）→ 读 frontmatter url 在 memo.json 剪藏场景待办中 **URL 精确匹配**；命中即归档（写入 linkedNote 并置完成）；未命中且 enableAIClipMatch 开启时 AI 匹配候选条目并**弹窗征求批准**，确认后才写入。「URL 精确优先 / AI 弹窗批准」权限模型冻结（ADR-0048）。
 
-**复习计划 (Review Plan)**: FSRS v4 算法驱动的复习管理，数据 `CONFIG/STORAGE/review.json`。可配置多个「监听文件夹」自动收编笔记；做题会话自动评级未通过（忘了/困难）时结果卡变唯一按钮「复习此笔记」并置「待重做」，重做到通过才进下篇（首次评级=唯一排期来源，ADR-0044）；「做题家」命令入口已退役（ADR-0045），仅作复习引擎。ticket 100 起：**到期提醒**（enableAutoNotify，开启时插件启动即常驻轮询，有逾期笔记即弹聚合通知；ticket 153 起通知「去复习」按钮走 `autoJumpOverdue` 完整流程——按「用做题测难度」分流做题/普通复习，不再单篇跳转）；**每日复习上限**（reviewDailyLimit，一轮复习最多处理 N 篇逾期）；**复习间隔缩放**（reviewIntervalScale，FSRS 相位间隔乘系数，ADR-0046）；**文件树标记**（reviewTreeBadge，关闭则文件树不染色不挂徽章）；**自动加入提醒**（reviewAutoAddNotice，新笔记自动收编时 3 秒窗口合并一条通知）。
+**复习计划 (Review Plan)**: FSRS v4 算法驱动的复习管理，数据 `CONFIG/STORAGE/review.json`——**ticket 168 起收敛为纯数据层（ADR-0077）**：数据文件 + 监听收编 + 到期提醒，交互入口全部收敛到「复习（按数量）」篇数弹窗 + ⚙️ 设置（「开始复习/复习计划/加入复习计划」等命令与复习主面板整体退役，注册命令 39 → 35）。可配置多个「监听文件夹」自动收编笔记；做题会话自动评级未通过（忘了/困难）时结果卡变唯一按钮「复习此笔记」并置「待重做」，按数量复习会话内重做篇通过才清标记（首次评级=唯一排期来源，ADR-0044）；「做题家」命令入口已退役（ADR-0045），仅作复习引擎。ticket 100 起：**到期提醒**（enableAutoNotify，开启时插件启动即常驻轮询，有逾期笔记即弹聚合通知；通知「去复习」action——ticket 168 起直接进全 vault 逾期按数量会话，不再单篇跳转）；**每日复习上限**（reviewDailyLimit，一轮复习最多处理 N 篇逾期）；**复习间隔缩放**（reviewIntervalScale，FSRS 相位间隔乘系数，ADR-0046）；**文件树标记**（reviewTreeBadge，关闭则文件树不染色不挂徽章）；**自动加入提醒**（reviewAutoAddNotice，新笔记自动收编时 3 秒窗口合并一条通知）。⚙️ 设置弹窗（唯一设置入口）含「复习条目管理」组：挂起条目标灰、逐条移出确认 → 撤销原样恢复（阶段/排期/历史零丢失，清理 review.json 的唯一入口，ADR-0077）。
 
-**做题家 (Quiz Master)**: 统一题库 `CONFIG/STORAGE/quiz.json`，多选支持，完成状态记录，自动替换全完成的笔记。命令入口 `bz-quiz-open`/`bz-quiz-update` 已删除注册（ADR-0045），仅经复习计划「用做题测难度」驱动（startReviewSession/endReviewSession 契约）；多选答对计数已修复（ADR-0044 唯一解冻项）。ticket 153：作答节奏拍板——**答对自动进入下一题**（持久化成功后直达，不出现「下一题」按钮），**答错才显示「下一题」按钮**（点按或 Enter）。
+**做题家 (Quiz Master)**: 统一题库 `CONFIG/STORAGE/quiz.json`，多选支持，完成状态记录，自动替换全完成的笔记。命令入口 `bz-quiz-open`/`bz-quiz-update` 已删除注册（ADR-0045），仅经复习计划按数量复习会话驱动（startReviewSession/endReviewSession 契约）；多选答对计数已修复（ADR-0044 唯一解冻项）。ticket 153：作答节奏拍板——**答对自动进入下一题**（持久化成功后直达，不出现「下一题」按钮），**答错才显示「下一题」按钮**（点按或 Enter）。ticket 168：复习全面做题化，「用做题测难度」开关退役（forceQuizForReview 键删），4 出题子项常显。
 
 **做题会话 (Quiz Session)**: 做题家对复习计划暴露的联动契约（`startReviewSession`/`endReviewSession` + `QuizReviewResults` 回调）。复习计划只经做题会话驱动做题家，禁止直接改写其内部状态（_reviewMode/currentQuestions 等）。
 
@@ -139,10 +139,10 @@ _Avoid_: 复习目录、自动加入文件夹
 **排除笔记 (Excluded Note)**: 不参与监听自动加入的笔记（data.json `reviewExcludedNotes` 路径数组）——手动移出（监听目录内）、删除确认「移除」，两类表态落此名单（新增目录取消不写名单、改名自动跟随，均不再产生）；移除所属监听文件夹时其下记录一并清除。手动 ➕/命令加入不受限。
 _Avoid_: 黑名单、忽略列表
 
-**待重做 (Pending Redo)**: 做题会话首次评级 ∈ {忘了, 困难} 后 ReviewItem 上的可选标记（`pendingRedo`，旧数据零迁移）——置位即需重做到通过；重做队列 FIFO 优先于逾期队列；通过只清标记不写排期（ADR-0044）。
+**待重做 (Pending Redo)**: 做题会话首次评级 ∈ {忘了, 困难} 后 ReviewItem 上的可选标记（`pendingRedo`，旧数据零迁移）——置位即需按数量复习会话内以重做语义处理（通过只清标记不写排期、未通过保持待重做，ADR-0044）；旧「重做队列 FIFO 优先于逾期队列」随 autoJumpOverdue 删除（ADR-0077），逾期条目按统一排序进会话、命中标记即走重做语义。
 _Avoid_: 困难标记、待复习
 
-**按数量复习 (Review by Count)**: 复习计划入口之一（命令 `bz-review-count`，面板 ▶️ 旁的 🔢）——弹窗输入篇数后，自动从「候选文件夹」（`reviewCountFolder`，默认 `卡片盒/笔记盒`，含子文件夹）按优先级安排：待重做 FIFO → 逾期 → 今天到期 → 其余按「历史配比」（`reviewCountHistoryRatio`，默认 70%）在已复习笔记（复习阶段采样）与新笔记之间拆分，一侧不足由另一侧补足；然后逐篇自动出题做题，每篇结算正确率并写排期（新文件先加入计划，首次评级=唯一排期来源），可查看原文档，结束后进汇总页（总正确率 + 每篇行），未通过篇可「重做本篇」（重做语义，见待重做）。当天已复习的笔记自动排除；默认篇数（`reviewCountDefault`）与上次输入（`reviewCountLastInput`）作为弹窗初值。
+**按数量复习 (Review by Count)**: 复习域唯一命令入口（`bz-review-count`；ticket 168 起「复习计划/主面板」退役，篇数弹窗 + ⚙️ 设置为仅剩交互，ADR-0077）——弹窗输入篇数后，自动从「候选文件夹」（`reviewCountFolder`，默认 `卡片盒/笔记盒`，含子文件夹）按优先级安排：待重做 FIFO → 逾期 → 今天到期 → 其余按「历史配比」（`reviewCountHistoryRatio`，默认 70%）在已复习笔记（复习阶段采样）与新笔记之间拆分，一侧不足由另一侧补足；然后逐篇自动出题做题，每篇结算正确率并写排期（新文件先加入计划，首次评级=唯一排期来源），可查看原文档，结束后进汇总页（总正确率 + 每篇行），未通过篇可「重做本篇」（重做语义，见待重做）。当天已复习的笔记自动排除；默认篇数（`reviewCountDefault`）与上次输入（`reviewCountLastInput`）作为弹窗初值。
 _Avoid_: 批量复习、自定义复习
 
 **当天已复习 (Reviewed Today)**: 按数量复习的排除语义——`lastReviewed` 落在本地日历日当天（`sameLocalDay`）即视为当天已复习，本次安排直接排除，保证一天内同一篇不重复安排。
@@ -152,7 +152,7 @@ _Avoid_: 批量复习、自定义复习
 **首次评级 (First Rating)**: 做题会话第一次结束的自动评级——本轮复习唯一的 FSRS 排期来源（ADR-0044）；后续重做的评级仅判定通过/未通过，不写任何 FSRS 数据。
 _Avoid_: 预期难度、期望评级
 
-**挂起记录 (Parked Record)**: 复习条目文件在 vault 中找不到（删除后保留、改名/移动后未更新路径）的保留态——列表以删除线展示，不计逾期、不进复习队列，文件恢复（同路径重建/路径更新）即复活；抽屉可手动移出清理。
+**挂起记录 (Parked Record)**: 复习条目文件在 vault 中找不到（删除后保留、改名/移动后未更新路径）的保留态——条目列表以删除线标灰展示（ticket 168 起移至 ⚙️ 设置「复习条目管理」组），不计逾期、不进复习队列，文件恢复（同路径重建/路径更新）即复活；可手动移出清理（撤销恢复，ADR-0077）。
 _Avoid_: 幽灵条目、孤儿记录
 
 **第二大脑 (Second Brain)**: 笔记向量库的管理与检索功能（ticket 103 正名，前名「闪念」——QuickAdd《闪念.js》完整原型）：主面板统一入口（统计总览/来源分布/趋势/最近向量化/AI 一键概括）· 右侧窄窗（吸附缩起/悬停展开/参考卡拖出浮卡）· 向量检索增强（Ollama bge-m3，meta v9 段 + secondbrain.vec；ticket 110 起切块剥离 frontmatter、标题并入首块；ticket 120 起数据整合为**两文件**：`secondbrain.json`（meta/panel/link 三段 JSON）+ `secondbrain.vec`（向量二进制，原 secondbrain_vectors.vec 改名））· AI 对话（经主设置页 core AI 服务商，ticket 108 起统一；不再回退 Ollama 对话模型）。常驻监听光标移动与笔记变更。**引导态**（ticket 107）：本地无向量数据时三命令统一进主面板，首次向量化须用户点击按钮触发；**增量索引**（ticket 108）：打开面板时如有待处理变更，先以进度视图展示索引推进再进统计；**重新索引**（ticket 108）：设置弹窗确认后清空全库重嵌（区别于增量索引的 mtime 差异刷新）。**自动双链 link agent**（ticket 111 + 115 + 116 + 118 + 120）：**关联范围（`linkAgentScopes`）只决定"哪些笔记会被关联"（目标/触发侧：落盘监听 + 存量补链目标 + 死链扫描），候选来源 = 白名单索引库（`secondBrainAllowPaths`）中的全部笔记**（ticket 116，任一已索引笔记都可就近作候选）；建链检索**查询端用笔记全文嵌入**（ticket 118：剥 frontmatter 去空白，超长 8000 字安全截尾）→ 本地语义近邻召回候选 → 在线 AI 裁判择优（"只链实质关联，存疑不链"）→ 单侧幂等写 `related`（Obsidian 图谱双向呈现）；待处理队列与基准哈希并入 `secondbrain.json` 的 link 段（queue/state，原 secondbrain_link_queue.json / secondbrain_link_state.json 已由 store-file 一次性迁移合并，ticket 120）跨设备自动消费、死链自动清理；**存量补链**（ticket 115）：每次启动自动对范围内缺 `related` 的存量笔记批量建链（`related` 即进度检查点），命令 `bz-secondbrain-link-all` 手动兜底，批次与监听共用串行锁；**正文大改自动重跑**（ticket 119/v1.4）：每次成功建链后把全文内容哈希记入 link.state 基准，范围内笔记被修改时按基准哈希过滤——**内容实质变化才重跑该篇建链**（Obsidian 高频保存/自写 related 触发 → 哈希相同 → 不空转；无基准的升级前存量首次修改视为变化重跑并重建基准）。**白名单目录 / 关联范围两字段默认均空，空 = 什么也不录（不索引 / 不自动关联），不是"全库"**（ticket 116；`LINK_AGENT_DEFAULT_SCOPE`「文献盒」回退已移除）。**Syncthing 冲突自愈**（ticket 152）：多设备各自 refresh 索引不同新笔记 → 两端真实分叉，Syncthing 必然保留 `secondbrain.sync-conflict-*` 副本（写前比对止血后仍发生）；store-file **每次读取时**扫描并自动收敛——JSON 段级 union（meta.notes 键并集取 mtime 大者 / panel 取 generatedAt 大者 / queue-state-chatHistory 并集去重）写回主文件、.vec 按合并后 meta 键序行级重排（行序不变式 = 键序 × chunks 数，meta 未变则主 .vec 直接复用），随后删除冲突文件；无同批 meta/维度不符/行不足 → 删向量走既有 indexIncomplete 全量重建（ticket 107 兜底，元数据仍在数据不丢）；损坏冲突 JSON 保留待人工处置。
@@ -316,7 +316,7 @@ _Avoid_: 记忆文件、memories 目录、四层（已废弃）；迁移（已�
 
 ### 移动端窗口（ticket 68，跨域）
 
-**移动端默认全屏 (Mobile Default Fullscreen)**: bz 的跨域设置（ticket 68，ADR-0019）——12 个有主窗口的域各一项布尔开关（键 `<域前缀>MobileDefaultFullscreen`，落 data.json），**仅移动端（`Platform.isMobile`）显示与生效**，桌面端不显示不受影响。语义：≤768px 时 **开=真全屏**（主窗口覆盖整个视口 100vw×100vh、去圆角、头部避让安全区、底部 env(safe-area-inset-bottom)，统一类 `.bz-win-mfs`），**关=常规卡**（95%/90vh 圆角卡）；只决定每次打开的**初始形态**，窗口内无手动切换按钮。多窗口域（影视主面板+影视分析+影视报告、书库主面板+读书笔记+阅读报告）一并对控制，筛选/批注等小弹窗不纳入。**聚合讯跟随剪藏本键、阅读报告跟随书库键（2026-08 用户拍板：两域不设独立开关、窗口无 ⚙️ 设置入口）**。默认值=行为保持（原移动端即全屏的域默认开——日记/归物本/剪藏本/密码本/收藏本/书库/影视/复习/保险箱；原居中卡的 3 域默认关——备忘录/番茄钟/文献盒）。做题家、入口页不设此开关（用户拍板）。
+**移动端默认全屏 (Mobile Default Fullscreen)**: bz 的跨域设置（ticket 68，ADR-0019）——11 个有主窗口的域各一项布尔开关（键 `<域前缀>MobileDefaultFullscreen`，落 data.json；ticket 168 复习主窗口退役、`reviewMobileDefaultFullscreen` 键删除），**仅移动端（`Platform.isMobile`）显示与生效**，桌面端不显示不受影响。语义：≤768px 时 **开=真全屏**（主窗口覆盖整个视口 100vw×100vh、去圆角、头部避让安全区、底部 env(safe-area-inset-bottom)，统一类 `.bz-win-mfs`），**关=常规卡**（95%/90vh 圆角卡）；只决定每次打开的**初始形态**，窗口内无手动切换按钮。多窗口域（影视主面板+影视分析+影视报告、书库主面板+读书笔记+阅读报告）一并对控制，筛选/批注等小弹窗不纳入。**聚合讯跟随剪藏本键、阅读报告跟随书库键（2026-08 用户拍板：两域不设独立开关、窗口无 ⚙️ 设置入口）**。默认值=行为保持（原移动端即全屏的域默认开——日记/归物本/剪藏本/密码本/收藏本/书库/影视/保险箱；原居中卡的 3 域默认关——备忘录/番茄钟/文献盒）。做题家、入口页不设此开关（用户拍板）。
 _Avoid_: 窗口最大化、自动全屏（注意区别于闪念 FloatWindow 双击标题栏最大化——那是未接线的桌面窄窗机制，与本设置无关）
 
 ### 加密日记条目（日记加密，ticket 67）
@@ -338,7 +338,7 @@ _Avoid_: 整文件覆盖还原（日记条目是日期文件里的一个块，�
 **样式按域拆分 (Domain-split Styles)**: bz 的样式组织方式（ticket 70，ADR-0020，取代 ticket 60「全收敛根 styles.css」）——视觉样式源文件按域拆分：各域样式写 `src/<域>/styles.css`（diary/launcher/memo/news/clipping/password/favorites/review/quiz/pomodoro/library/attach/encrypt/movie），共享层/跨域样式（设置页分页、主窗口头部行统一规范、core 层、移动端主窗口默认全屏、统一右键菜单/长按抽屉）写 `src/core/styles.css`；构建由 `scripts/build-css.mjs` 按 SOURCES 清单顺序聚合生成根 `styles.css`（Obsidian 每插件只加载一个 styles.css；**聚合产物勿手改**），`npm run dev` 监听 src/**/*.css 自动重新聚合。类名仍守 `bz-` 前缀；运行时注入 `<style>` 与内联视觉样式依旧禁止。
 _Avoid_: 手改根 styles.css、往根 styles.css 直接追加样式、styles/&lt;域&gt;.css 注入模式
 
-**统一行操作 (Unified Item Actions)**: 跨域列表卡片统一手势组件（`src/core/item-actions.ts`）——列表**不注入任何常驻或 hover 图标排**；桌面端=**右键**弹跟手菜单（preventDefault 拦原生菜单，鼠标长按不触发），移动/触屏端=**长按**弹底部抽屉（遮罩+顶部条目信息+动作逐行）。能力：keepOpen（动作后抽屉保持+refreshItemSheet 原地重建动作与头部）、附属浮层（companion，抽屉之上的域内弹窗点击不误关抽屉）、危险项红色、强调色整行。动作项布局统一：图标左对齐 → 文案 → 小字右对齐。已接入域：备忘录、日记本、剪藏本、影视、收藏本、归物本（含 4 状态流转+数据文件监听自动刷新）、密码本（保留平台链接点击与 👁 显隐）、书库（保留双击转跳书籍，md/EPUB 通用）、复习计划（保留双击打开笔记；开始复习难度弹窗为 companion）、保险箱（双击预览保留）；聚合讯（Dataview 外部渲染阅读流）等无卡片网格域不接入。
+**统一行操作 (Unified Item Actions)**: 跨域列表卡片统一手势组件（`src/core/item-actions.ts`）——列表**不注入任何常驻或 hover 图标排**；桌面端=**右键**弹跟手菜单（preventDefault 拦原生菜单，鼠标长按不触发），移动/触屏端=**长按**弹底部抽屉（遮罩+顶部条目信息+动作逐行）。能力：keepOpen（动作后抽屉保持+refreshItemSheet 原地重建动作与头部）、附属浮层（companion，抽屉之上的域内弹窗点击不误关抽屉）、危险项红色、强调色整行。动作项布局统一：图标左对齐 → 文案 → 小字右对齐。已接入域：备忘录、日记本、剪藏本、影视、收藏本、归物本（含 4 状态流转+数据文件监听自动刷新）、密码本（保留平台链接点击与 👁 显隐）、书库（保留双击转跳书籍，md/EPUB 通用）、保险箱（双击预览保留）（ticket 168：复习计划面板退役，移出条目改到 ⚙️ 设置「复习条目管理」组，ADR-0077）；聚合讯（Dataview 外部渲染阅读流）等无卡片网格域不接入。
 _Avoid_: hover 操作条、行内图标排、行内按钮组（指列表卡片时）
 
 **Q3 / __utils**: QuickAdd 共享脚本（`CONFIG/SCRIPTS/Quickadd/Q/Q3.js`，1034 行），挂载 `window.__utils`，21 个导出：escManager、confirm、notice、generateId、jsonStore、longPress、injectStyles、createSiteIcon、createIconBtn、formatRelativeTime、formatFileSize、displayChangelog、checkAndShowChangelog、AIService、createAI、extractUrlAndDisplay、getPlatformName、getCurrentNoteInfo、getCurrentCursorPosition、fetchPageTitle、createOverlay。**新插件移植后为内部共享层（core），不再挂 window**。

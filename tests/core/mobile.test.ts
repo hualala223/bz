@@ -49,8 +49,9 @@ describe('isMobileEnv / applyMobileWindowFullscreen（ticket 68）', () => {
 });
 
 describe('DEFAULT_SETTINGS 移动端默认全屏默认值（行为保持映射，ticket 68）', () => {
-  it('11 键存在且默认值 = 原移动端行为（9 开 2 关）；聚合讯/阅读报告不设独立键', () => {
-    const ON = ['diary', 'belongings', 'clipping', 'password', 'favorites', 'library', 'movie', 'review', 'encrypt'];
+  it('10 键存在且默认值 = 原移动端行为（8 开 2 关）；聚合讯/阅读报告不设独立键', () => {
+    // ticket 168：复习主窗口退役，reviewMobileDefaultFullscreen 键删除（ADR-0077）
+    const ON = ['diary', 'belongings', 'clipping', 'password', 'favorites', 'library', 'movie', 'encrypt'];
     const OFF = ['memo', 'pomodoro'];
     for (const k of ON) {
       expect(DEFAULT_SETTINGS[`${k}MobileDefaultFullscreen`]).toBe(true);
@@ -64,9 +65,9 @@ describe('DEFAULT_SETTINGS 移动端默认全屏默认值（行为保持映射�
     // （旧 data.json 残留值由接口收窄后自然忽略，不影响行为）
     expect('newsMobileDefaultFullscreen' in DEFAULT_SETTINGS).toBe(false);
     expect('readingReportMobileDefaultFullscreen' in DEFAULT_SETTINGS).toBe(false);
-    // 11 键一个不少（与已排除的做题家/入口页区分）
+    // 10 键一个不少（与已排除的做题家/入口页区分）
     const all = [...ON, ...OFF];
-    expect(all).toHaveLength(11);
+    expect(all).toHaveLength(10);
     for (const k of all) {
       expect(`${k}MobileDefaultFullscreen` in DEFAULT_SETTINGS).toBe(true);
     }

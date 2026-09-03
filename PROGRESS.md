@@ -262,3 +262,16 @@
 - [x] 设置：巩固参数 11 → 2（反思观察阈值 + 引用摘录字数）；「移动端默认全屏」组挪面板最下；6 个退役设置键 data.json 残留值忽略
 - [x] 测试：memory.test「睡前巩固」describe 整体重写为「行为小结」+ routedFetch 路由 mock；insight-version/emotion-recall/adr0069-core/trait-attribution/index-cov/behavior-wording/settings 同步
 - [x] 门禁：tsc 0 错 + 全量 221 文件 3553 用例绿 + 构建部署 E 盘
+
+## Ticket 168 — 复习单一入口：命令与面板退役，交互收敛到「复习（按数量）」
+
+**状态：已交付**（2026-08-31）
+
+- [x] 规格：`issues/168-review-single-count-entry.md`（grill 三轮全推荐 + 设计确认书；六切片发布）
+- [x] 切片 01：命令收敛——10 个旧复习命令退役注册，仅留 `bz-review-count`（注册命令 39 → 35；命令 id 外部契约破坏接受）
+- [x] 切片 02：主面板整体删除——列表/卡片/统一抽屉/难度弹窗等随删；⚙️ 设置入口收敛到篇数弹窗（空候选仍打开，设置可达）；「复习设置」标题去「计划」
+- [x] 切片 03：「去复习」改走全 vault 逾期按数量会话（min(逾期数,每日上限) 截断 + 剩余留到下次提示）
+- [x] 切片 04：死代码全清——autoJumpOverdue/redoReviewLoop/quizReviewLoop/reviewLoop/batchGenerateQuestions/结果卡函数；forceQuizForReview/reviewMobileDefaultFullscreen 两键删；做题家子项常显；styles 死类清理
+- [x] 切片 05：⚙️ 设置弹窗「复习条目管理」组——全部条目列出、挂起标灰、逐条移出确认 → 撤销原样恢复（数据零丢失）
+- [x] 切片 06：ADR-0077 + CONTEXT 术语修订 + PROGRESS 记票 + AGENTS 命令数同步
+- [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署 + worktree 合并 master 并清理
