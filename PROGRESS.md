@@ -294,3 +294,13 @@
 - [x] 切片 02（issues/172）：`bz-review-add-current-with-links`「批量加入复习计划」注册（双入口）；smoke 命令 36 → 37 + 名称/editorCallback 断言；AGENTS/CONTEXT 同步
 - [x] 测试：tests/review/links.test.ts（纯函数三用例）+ tests/review/app-add-with-links.test.ts（六用例：全新增/部分跳过/全部已存在/断链忽略/非 .md 拒绝/命令入口）
 - [x] 门禁：tsc 0 错 + 全量测试绿 + 构建验证
+
+## Ticket 173 — 第二大脑正文指纹索引：挪动/改 YAML 不重嵌
+
+**状态：已交付**（2026-09-08）
+
+- [x] 规格：`issues/173-secondbrain-body-fingerprint.md`（grill-with-docs 四轮对齐，ADR-0078）
+- [x] 实现：`chunk.ts` hashChunks（chunks 拼接 FNV-1a，口径与向量输入严格一致）；`vector-store.ts` 三层判定（mtime 未变跳过 / 指纹同仅更新登记 / 指纹变重嵌）+ 孤儿池指纹迁移（继承向量、迁移登记键，单轮内存活）+ meta v9→v10 load 就地补指纹（零读盘零重嵌）
+- [x] 文档：ADR-0078 + CONTEXT.md「正文指纹」词条 + 第二大脑词条 v10 修订
+- [x] 测试：vector-store.test 新增五用例（v10 迁移/挪动继承/YAML-only/正文编辑重嵌/重复孤儿）+ cov 迁移断言；全量 3604 绿
+- [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署
