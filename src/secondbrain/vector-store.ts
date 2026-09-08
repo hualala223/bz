@@ -1,6 +1,6 @@
 /**
  * 第二大脑 VectorStore（ticket 103；对齐 QA 闪念.js L442-745）
- * meta v9 段 + secondbrain.vec（ticket 120：原 secondbrain_vectors.vec 改名；uint32LE dim 头 + float32 平铺；
+ * meta v10 段 + secondbrain.vec（ticket 120：原 secondbrain_vectors.vec 改名；uint32LE dim 头 + float32 平铺；
  * 行序 = meta.notes 键序 × chunks）。meta 段随 JSON 并入 secondbrain.json（store-file 单文件三段）。
  *
  * 对齐要点：
@@ -23,12 +23,15 @@
  * 文件合并落盘（mergeWrite 与最终写回同一实现，行序布局不变式不破坏），中断（关面板/重启
  * Obsidian/Ollama 中途失联）后重开自动从已暂存进度增量续嵌，不再整库从零重来；
  * isRefreshing() 暴露进行中状态供主面板恢复进度视图。
+ * ticket 173/ADR-0078：正文指纹三层判定——mtime 未变跳过；mtime 变指纹同（改 YAML）只更新登记；
+ * 指纹变才重嵌。挪动 = 孤儿池指纹命中 → 继承向量迁移登记键（单轮 refresh 内存活）；
+ * v9→v10 迁移在 load() 从已存 chunks 现算指纹就地升级，零读盘零重嵌。
  */
 import type { App, TFile } from 'obsidian';
 import { buildConfig, IS_MOBILE } from './config';
 import { loadStore, mutateStore } from './store-file';
 import { MobileBuffer } from './binary';
-import { embedChunks, noteTitleFromPath } from './chunk';
+import { embedChunks, hashChunks, noteTitleFromPath } from './chunk';
 import { euclideanSq, normalizeVec, vptree_build, vptree_search, VPNode, Vec } from './vptree';
 import { parallelMap } from './parallel';
 import { TFIDF } from './tfidf';
@@ -37,7 +40,9 @@ import { checkRemoteOllama, EMBED_BATCH_SIZE, getEmbedding, getEmbeddingsBatch, 
 import { bytesEqual } from '../core/utils';
 
 // v8→v9（ticket 110）：切块剥离 frontmatter + 标题入首块——旧库版本不符走 load() 自动重建
-const VECTOR_STORE_VERSION = 9;
+// v9→v10（ticket 173/ADR-0078）：NoteEntry 新增正文指纹 hash——v9 存量 load 时从已存 chunks
+// 现算指纹就地升级（零读盘零重嵌），.vec 格式不变直接复用；仅 version<9 才走整库清空重建
+const VECTOR_STORE_VERSION = 10;
 
 /**
  * 断点暂存阈值（ticket 114）：距上次暂存 ≥minIntervalMs 且新完成块数 ≥minNewChunks 才落盘一次。
@@ -48,6 +53,8 @@ export const CHECKPOINT_POLICY = { minIntervalMs: 5000, minNewChunks: 200 };
 export interface NoteEntry {
   mtime: number;
   chunks: { text: string }[];
+  /** 正文指纹（ticket 173/ADR-0078）：chunks 文本拼接的 FNV-1a；v9 存量经 load() 迁移补齐 */
+  hash?: string;
 }
 
 export interface SecondBrainMeta {
@@ -104,6 +111,19 @@ export class VectorStore {
       this.meta = parsed;
       this.dim = parsed._dim || 0;
       await this.loadVectors();
+      return;
+    }
+    if (parsed && typeof parsed === 'object' && parsed.version === VECTOR_STORE_VERSION - 1) {
+      // v9→v10 迁移（ticket 173/ADR-0078）：指纹从已存 chunks 现算，零读盘零重嵌，.vec 直接复用
+      console.log('[secondbrain] 向量库 v9→v10：就地补正文指纹（不重嵌）');
+      this.meta = parsed;
+      this.meta.version = VECTOR_STORE_VERSION;
+      for (const entry of Object.values(this.meta.notes)) {
+        entry.hash = hashChunks(entry.chunks.map((c) => c.text));
+      }
+      this.dim = parsed._dim || 0;
+      await this.loadVectors();
+      await this.saveStore();
       return;
     }
     if (parsed && typeof parsed === 'object') {
@@ -338,11 +358,17 @@ export class VectorStore {
       return;
     }
 
-    // 删除已不存在文件的 meta 条目
+    // 删除已不存在文件的 meta 条目；孤儿先进指纹池等迁移匹配（ticket 173/ADR-0078：
+    // 池只在单轮 refresh 内存活，未命中的照常清理——删除仍是删除，仅「删+同指纹重建」
+    // 恰好构成挪动时才继承）。重复文本孤儿任取其一（向量相同，结果等价）。
     const filePaths = new Set(files.map((f) => f.path));
     let deleted = 0;
+    const orphans = new Map<string, { entry: NoteEntry; srcPath: string }>();
     for (const path of Object.keys(this.meta.notes)) {
       if (!filePaths.has(path)) {
+        const entry = this.meta.notes[path];
+        const hash = entry.hash ?? hashChunks(entry.chunks.map((c) => c.text));
+        if (!orphans.has(hash)) orphans.set(hash, { entry, srcPath: path });
         delete this.meta.notes[path];
         deleted++;
       }
@@ -377,15 +403,40 @@ export class VectorStore {
       return;
     }
 
-    // 读取 + 分块
+    // 读取 + 分块；指纹三层判定（ticket 173/ADR-0078，自愈态除外——indexIncomplete 必须整库重嵌）
     const minChunk = CONFIG.CHUNK_MIN_LENGTH || 50;
     const fileChunksMap = new Map<string, (ChunkTask | null)[]>();
+    const fileHashes = new Map<string, string>();
     const globalTasks: ChunkTask[] = [];
+    let keptUnchanged = 0; // mtime 变但指纹同（仅改 YAML/纯触碰）→ 只更新登记不重嵌
+    let migrated = 0; // 挪动后指纹命中孤儿 → 继承向量、迁移登记键，不调嵌入
     for (const file of toProcess) {
       try {
         const content = await this.app.vault.read(file);
         // ticket 110：frontmatter 剥离后切块、标题并入首块（空正文兜底截断收口在 embedChunks 内）
         const chunks = embedChunks(content, noteTitleFromPath(file.path), minChunk);
+        const hash = hashChunks(chunks);
+        const entry = this.meta.notes[file.path];
+        if (!indexIncomplete) {
+          if (entry && entry.hash !== undefined && entry.hash === hash) {
+            // 内容指纹一致 → 刷新 mtime 登记，旧向量经源偏移原样拷贝
+            entry.mtime = (file.stat as any).mtime;
+            keptUnchanged++;
+            continue;
+          }
+          if (!entry) {
+            const orphan = orphans.get(hash);
+            if (orphan) {
+              orphans.delete(hash);
+              this.meta.notes[file.path] = { mtime: (file.stat as any).mtime, chunks: orphan.entry.chunks, hash };
+              // 向量继承：新路径按孤儿旧路径的源偏移拷贝（mergeWrite/compactAndSave 同一寻址口径）
+              srcOffsets.set(file.path, srcOffsets.get(orphan.srcPath)!);
+              migrated++;
+              continue;
+            }
+          }
+        }
+        fileHashes.set(file.path, hash);
         fileChunksMap.set(file.path, chunks.map(() => null));
         chunks.forEach((text, idx) => globalTasks.push({ filePath: file.path, chunkIdx: idx, text }));
       } catch (err) {
@@ -394,7 +445,16 @@ export class VectorStore {
       }
     }
     if (globalTasks.length === 0) {
-      this.updateProgress('✅ 向量化完成（无新内容）');
+      if (deleted > 0 || keptUnchanged > 0 || migrated > 0) {
+        await this.compactAndSave(srcOffsets);
+        const parts: string[] = [];
+        if (migrated > 0) parts.push(`迁移 ${migrated} 篇挪动笔记（未重嵌）`);
+        if (keptUnchanged > 0) parts.push(`${keptUnchanged} 篇正文未变跳过`);
+        if (deleted > 0) parts.push(`清理 ${deleted} 个失效条目`);
+        this.updateProgress(`✅ 向量库已最新（${parts.join('，')}）`);
+      } else {
+        this.updateProgress('✅ 向量化完成（无新内容）');
+      }
       return;
     }
 
@@ -440,7 +500,7 @@ export class VectorStore {
             ckptDoneFiles.add(file.path);
             newly++;
             const tasks = slots as ChunkTask[];
-            this.meta.notes[file.path] = { mtime: (file.stat as any).mtime, chunks: tasks.map((c) => ({ text: c.text })) };
+            this.meta.notes[file.path] = { mtime: (file.stat as any).mtime, chunks: tasks.map((c) => ({ text: c.text })), hash: fileHashes.get(file.path) };
             const vecs = tasks.map((t) => t.embedding!);
             ckptEmbedded.set(file.path, vecs);
           }
@@ -503,7 +563,7 @@ export class VectorStore {
       const vecs = slots.map((s) => s!.embedding!);
       if (dim === 0) dim = vecs[0].length;
       const keptTexts = slots.map((c) => ({ text: c!.text }));
-      this.meta.notes[file.path] = { mtime: (file.stat as any).mtime, chunks: keptTexts };
+      this.meta.notes[file.path] = { mtime: (file.stat as any).mtime, chunks: keptTexts, hash: fileHashes.get(file.path) };
       newChunksPerFile.set(file.path, vecs);
     }
 
@@ -513,7 +573,8 @@ export class VectorStore {
     // ticket 3 假成功修复：全部成功才发「✅ 向量化完成」；有失败段 → 提示失败数（失败段不登记，
     // 下轮按 mtime 差异自动重试，断点续传契约不变）
     if (failed === 0) {
-      this.updateProgress(`✅ 向量化完成：${total} 篇文件，${globalTasks.length} 个段落`);
+      const extra = migrated > 0 ? `（另有 ${migrated} 篇挪动笔记继承向量未重嵌）` : '';
+      this.updateProgress(`✅ 向量化完成：${total} 篇文件，${globalTasks.length} 个段落${extra}`);
     } else {
       this.updateProgress(`⚠️ ${failed} 段向量化失败，请检查 Ollama 服务`);
     }

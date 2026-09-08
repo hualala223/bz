@@ -36,6 +36,21 @@ export function embedChunks(content: string, title: string, minChunk = 50): stri
   return chunks;
 }
 
+/**
+ * 正文指纹（ticket 173/ADR-0078）：对 chunks 文本拼接做 FNV-1a 哈希。
+ * 口径与向量输入严格一致（frontmatter 已剥、标题已并入首块）——指纹同 ⇒ 向量可原样继承；
+ * v9 存量迁移可直接从 meta 已存 chunks 现算，无需读文件。
+ */
+export function hashChunks(texts: string[]): string {
+  const s = texts.join('\u0000');
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h = (h ^ s.charCodeAt(i)) * 0x01000193;
+    h >>>= 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
 export function smartChunk(text: string, minChunk = 50): string[] {
   const blocks = text.split(/\n\s*\n/);
   const chunks: string[] = [];

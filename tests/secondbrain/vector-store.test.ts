@@ -1,9 +1,10 @@
 // @vitest-environment node
 /**
  * 第二大脑 VectorStore 测试（ticket 103 重写对齐；ticket 110 起 meta v9；ticket 120 起 meta 并入
- * secondbrain.json 单文件）：
- * 数据文件路径换代（storagePath/secondbrain.json+vec）、版本不符自动重建（v8→v9）、白名单过滤、
- * 增量刷新与删除后合并写回（非末尾删除不错位回归）、批量嵌入降级、检索公式 cos=max(0,1−d²/2)。
+ * secondbrain.json 单文件；ticket 173 起 meta v10 正文指纹）：
+ * 数据文件路径换代（storagePath/secondbrain.json+vec）、版本不符自动重建（<v9 清库）、
+ * v9→v10 就地补指纹迁移、白名单过滤、增量刷新与删除后合并写回（非末尾删除不错位回归）、
+ * 挪动继承孤儿向量、YAML-only 修改不重嵌、批量嵌入降级、检索公式 cos=max(0,1−d²/2)。
  * ollama 模块经 vi.mock 替身（不碰网络），vault.adapter 用内存 Map 假体。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -12,6 +13,7 @@ import { resetObsidianMocks } from '../mock-obsidian-entry';
 import { setApp } from '../../src/core/app';
 import { setSettingsProvider } from '../../src/core/settings-provider';
 import { VectorStore, CHECKPOINT_POLICY } from '../../src/secondbrain/vector-store';
+import { hashChunks } from '../../src/secondbrain/chunk';
 import { searchTextIndex } from '../../src/secondbrain/text-search';
 import { getEmbedding, getEmbeddingsBatch, SEARCH_TIMEOUT_MS } from '../../src/secondbrain/ollama';
 
@@ -152,7 +154,7 @@ describe('VectorStore（v8 元数据与增量刷新）', () => {
     const vs = new VectorStore(app as any);
 
     await vs.load(); // 文件不存在 → 空库
-    expect(vs.meta.version).toBe(9);
+    expect(vs.meta.version).toBe(10);
     mockBatchEmbed({});
     await vs.refresh();
 
@@ -160,9 +162,10 @@ describe('VectorStore（v8 元数据与增量刷新）', () => {
     expect(vault.files.has(STORE_PATH)).toBe(true);
     expect(binary.has(VEC_PATH)).toBe(true);
     const meta = readMeta(vault);
-    expect(meta.version).toBe(9);
+    expect(meta.version).toBe(10);
     expect(meta._dim).toBe(2);
     expect(Object.keys(meta.notes)).toEqual(['我的/A.md']);
+    expect(meta.notes['我的/A.md'].hash).toBe(hashChunks(meta.notes['我的/A.md'].chunks.map((c: any) => c.text)));
 
     // 往返：重新 load 能恢复 meta 与 .vec 向量
     const vs2 = new VectorStore(app as any);
@@ -172,7 +175,7 @@ describe('VectorStore（v8 元数据与增量刷新）', () => {
     expect(vs2.vectors.length).toBe(2);
   });
 
-  it('load：version≠9 → 重置为空库且不读 .vec；下次 refresh 全量重建且新块无 YAML 头、首块带标题（v8→v9，ticket 110）', async () => {
+  it('load：version<9 → 重置为空库且不读 .vec；下次 refresh 全量重建且新块无 YAML 头、首块带标题（ticket 110）', async () => {
     const vault = new MockVault();
     const fm = '---\nreviewStart: 2026-08-01\nreviewStage: 2\n---\n';
     const body = '记忆依据图式构建的正文内容足够长可以成块入库使用。';
@@ -187,7 +190,7 @@ describe('VectorStore（v8 元数据与增量刷新）', () => {
     setApp(app as any);
     const vs = new VectorStore(app as any);
     await vs.load();
-    expect(vs.meta.version).toBe(9);
+    expect(vs.meta.version).toBe(10);
     expect(vs.meta.notes).toEqual({}); // v8 旧条目不复活
     expect(vs.dim).toBe(0);
     expect(vs.vectors.length).toBe(0); // 提前 return，loadVectors 未执行
@@ -513,7 +516,9 @@ describe('VectorStore（v8 元数据与增量刷新）', () => {
     vi.mocked(getEmbedding).mockRejectedValue(new Error('单条也失败'));
     await vs.refresh();
     let meta = readMeta(vault);
-    expect(meta.notes['我的/A.md']).toEqual({ mtime: 5, chunks: [{ text: '旧' }] }); // 旧条目原样保留
+    expect(meta.notes['我的/A.md'].mtime).toBe(5); // 旧条目原样保留
+    expect(meta.notes['我的/A.md'].chunks).toEqual([{ text: '旧' }]); // v9 种子经迁移已补指纹
+    expect(meta.notes['我的/A.md'].hash).toBe(hashChunks(['旧']));
     expect(parseVec(binary).rows).toEqual([1, 0]); // 旧向量未动
 
     // 下轮全部成功 → 整篇重嵌登记两段
@@ -577,6 +582,150 @@ describe('VectorStore（v8 元数据与增量刷新）', () => {
 
     vi.mocked(Date.now).mockRestore();
     Object.assign(CHECKPOINT_POLICY, origPolicy);
+  });
+
+  it('v9→v10 迁移：load 从已存 chunks 现算指纹就地升级，.vec 不动、不触发任何嵌入（ticket 173）', async () => {
+    const vault = new MockVault();
+    vault.files.set('我的/A.md', '正文不重要，迁移不读文件。');
+    vault.files.set(
+      STORE_PATH,
+      storeJSON({
+        version: 9,
+        notes: {
+          '我的/A.md': { mtime: 1, chunks: [{ text: '块一' }, { text: '块二' }] },
+          '我的/Ghost.md': { mtime: 1, chunks: [{ text: '孤儿' }] },
+        },
+        _dim: 2,
+      })
+    );
+    const { adapter, binary } = makeAdapter(vault);
+    binary.set(VEC_PATH, vecBuffer([[1, 0], [0, 1], [0.5, 0.5]], 2));
+    const app = makeApp(vault, adapter, { '我的/A.md': 1 });
+    setApp(app as any);
+    const vs = new VectorStore(app as any);
+    await vs.load();
+
+    expect(vs.meta.version).toBe(10);
+    expect(vs.meta.notes['我的/A.md'].hash).toBe(hashChunks(['块一', '块二']));
+    expect(parseVec(binary).rows).toEqual([1, 0, 0, 1, 0.5, 0.5]); // .vec 原样复用
+    expect(getEmbeddingsBatch).not.toHaveBeenCalled();
+    expect(getEmbedding).not.toHaveBeenCalled();
+  });
+
+  it('挪动继承：A 挪到子目录（同名同内容）→ 新条目继承旧向量与 chunks，零嵌入调用（ticket 173）', async () => {
+    const vault = new MockVault();
+    const BODY = '这段正文挪动文件夹后不该重新向量化，内容足够长可以成块。';
+    vault.files.set('我的/A.md', BODY);
+    const { adapter, binary } = makeAdapter(vault);
+    const mtimes: Record<string, number> = { '我的/A.md': 1 };
+    const app = makeApp(vault, adapter, mtimes);
+    setApp(app as any);
+    const vs = new VectorStore(app as any);
+    await vs.load();
+    const embedded: string[] = [];
+    mockBatchEmbed({}, embedded);
+    await vs.refresh();
+    const oldChunks = readMeta(vault).notes['我的/A.md'].chunks;
+    expect(oldChunks.length).toBeGreaterThan(0);
+
+    // 挪动：删 A 在子目录重建同名 A.md（内容不变），mtime 变化；改名（basename 变）会因首块含标题而重嵌——Q1 拍板
+    vault.files.delete('我的/A.md');
+    vault.files.set('我的/子/A.md', BODY);
+    mtimes['我的/子/A.md'] = 99;
+    embedded.length = 0;
+    const progress: string[] = [];
+    await vs.refresh((m) => progress.push(m));
+
+    expect(embedded).toEqual([]); // 全程未调嵌入
+    const meta = readMeta(vault);
+    expect(Object.keys(meta.notes)).toEqual(['我的/子/A.md']);
+    expect(meta.notes['我的/子/A.md'].chunks).toEqual(oldChunks); // chunks 原样继承
+    expect(meta.notes['我的/子/A.md'].hash).toBe(hashChunks(oldChunks.map((c: any) => c.text)));
+    expectClose(parseVec(binary).rows, [0.5, 0.5]); // 向量按旧偏移拷贝，数值不变
+    expect(progress.some((m) => m.includes('向量库已最新') && m.includes('迁移 1 篇'))).toBe(true);
+  });
+
+  it('YAML-only 修改：frontmatter 变 mtime 变但指纹同 → 只更新登记不重嵌（ticket 173）', async () => {
+    const vault = new MockVault();
+    const BODY = '正文一个字不动，只改 YAML 区的标签字段内容足够长可以成块。';
+    vault.files.set('我的/A.md', '---\ntags: 旧标签\n---\n' + BODY);
+    const { adapter, binary } = makeAdapter(vault);
+    const mtimes: Record<string, number> = { '我的/A.md': 1 };
+    const app = makeApp(vault, adapter, mtimes);
+    setApp(app as any);
+    const vs = new VectorStore(app as any);
+    await vs.load();
+    const embedded: string[] = [];
+    mockBatchEmbed({}, embedded);
+    await vs.refresh();
+
+    vault.files.set('我的/A.md', '---\ntags: 新标签\ndate: 2026-09-08\n---\n' + BODY);
+    mtimes['我的/A.md'] = 2;
+    embedded.length = 0;
+    const progress: string[] = [];
+    await vs.refresh((m) => progress.push(m));
+
+    expect(embedded).toEqual([]); // 未重嵌
+    const meta = readMeta(vault);
+    expect(meta.notes['我的/A.md'].mtime).toBe(2); // mtime 登记已刷新
+    expectClose(parseVec(binary).rows, [0.5, 0.5]); // 向量未动
+    expect(progress.some((m) => m.includes('1 篇正文未变跳过'))).toBe(true);
+  });
+
+  it('正文编辑：指纹变 → 整篇重嵌（既有契约不变）；挪动+改正文组合 = 删旧建新不继承', async () => {
+    const vault = new MockVault();
+    const OLD = '旧正文内容足够长可以成块入库使用吧哈哈。';
+    vault.files.set('我的/A.md', OLD);
+    const { adapter, binary } = makeAdapter(vault);
+    const mtimes: Record<string, number> = { '我的/A.md': 1 };
+    const app = makeApp(vault, adapter, mtimes);
+    setApp(app as any);
+    const vs = new VectorStore(app as any);
+    await vs.load();
+    const embedded: string[] = [];
+    mockBatchEmbed({}, embedded);
+    await vs.refresh();
+
+    const NEW = '新正文完全不同了，必须重新向量化才行啊哈哈。';
+    vault.files.set('我的/A.md', NEW);
+    mtimes['我的/A.md'] = 2;
+    embedded.length = 0;
+    await vs.refresh();
+    expect(embedded).toHaveLength(1); // 重嵌发生
+    expect(embedded[0]).toContain(NEW);
+    expect(readMeta(vault).notes['我的/A.md'].hash).toBe(
+      hashChunks(readMeta(vault).notes['我的/A.md'].chunks.map((c: any) => c.text))
+    );
+  });
+
+  it('重复孤儿：多个同指纹孤儿时迁移其一、其余照常清理（ADR-0078 拍板）', async () => {
+    const vault = new MockVault();
+    const BODY = '重复粘贴的两篇笔记内容完全相同足够长可以成块。';
+    vault.files.set('我的/A.md', BODY);
+    vault.files.set('我的/子/A.md', BODY);
+    const { adapter, binary } = makeAdapter(vault);
+    const mtimes: Record<string, number> = { '我的/A.md': 1, '我的/B.md': 1 };
+    const app = makeApp(vault, adapter, mtimes);
+    setApp(app as any);
+    const vs = new VectorStore(app as any);
+    await vs.load();
+    const embedded: string[] = [];
+    mockBatchEmbed({}, embedded);
+    await vs.refresh();
+    expect(Object.keys(readMeta(vault).notes).sort()).toEqual(['我的/A.md', '我的/子/A.md']);
+
+    // 两篇都挪走，只剩一篇同内容新文件：命中一个孤儿，另一个清理
+    vault.files.delete('我的/A.md');
+    vault.files.delete('我的/子/A.md');
+    vault.files.set('我的/子2/A.md', BODY); // 同名（指纹含标题，basename 必须一致）
+    mtimes['我的/子2/A.md'] = 99;
+    embedded.length = 0;
+    await vs.refresh();
+
+    expect(embedded).toEqual([]);
+    const meta = readMeta(vault);
+    expect(Object.keys(meta.notes)).toEqual(['我的/子2/A.md']); // 迁移其一，另一孤儿条目清理
+    expectClose(parseVec(binary).rows, [0.5, 0.5]);
   });
 });
 

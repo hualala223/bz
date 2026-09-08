@@ -11,6 +11,7 @@ import { resetObsidianMocks } from '../mock-obsidian-entry';
 import { setApp } from '../../src/core/app';
 import { setSettingsProvider } from '../../src/core/settings-provider';
 import { VectorStore } from '../../src/secondbrain/vector-store';
+import { hashChunks } from '../../src/secondbrain/chunk';
 import { TFIDF } from '../../src/secondbrain/tfidf';
 import { getEmbedding, getEmbeddingsBatch, checkRemoteOllama } from '../../src/secondbrain/ollama';
 
@@ -121,7 +122,7 @@ describe('VectorStore 补测（load 异常分支）', () => {
     setApp(app as any);
     const vs = new VectorStore(app as any);
     await vs.load();
-    expect(vs.meta.version).toBe(9);
+    expect(vs.meta.version).toBe(10);
     expect(vs.meta.notes).toEqual({});
     expect(vs.dim).toBe(0);
   });
@@ -143,7 +144,7 @@ describe('VectorStore 补测（load 异常分支）', () => {
     expect(vs.dim).toBe(0);
   });
 
-  it('version=9 正常载入：meta 条目与 .vec 行恢复', async () => {
+  it('version=9 存量载入：就地迁移 v10 补指纹，meta 条目与 .vec 行恢复（ticket 173）', async () => {
     const vault = new MockVault();
     vault.files.set(
       STORE_PATH,
@@ -155,9 +156,11 @@ describe('VectorStore 补测（load 异常分支）', () => {
     setApp(app as any);
     const vs = new VectorStore(app as any);
     await vs.load();
+    expect(vs.meta.version).toBe(10); // v9→v10 就地迁移
+    expect(vs.meta.notes['a.md'].hash).toBe(hashChunks(['t1', 't2']));
     expect(Object.keys(vs.meta.notes)).toEqual(['a.md']);
     expect(vs.dim).toBe(2);
-    expect(Array.from(vs.vectors)).toEqual([1, 0, 0, 1]);
+    expect(Array.from(vs.vectors)).toEqual([1, 0, 0, 1]); // .vec 原样复用
   });
 });
 
