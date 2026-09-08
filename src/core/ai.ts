@@ -292,19 +292,29 @@ export class AIService {
     }
     const signal = mergedOptions.signal instanceof AbortSignal ? (mergedOptions.signal as AbortSignal) : undefined;
     const onDelta = typeof mergedOptions.onDelta === 'function' ? (mergedOptions.onDelta as (delta: string) => void) : undefined;
+    const stream = (reqBody: Record<string, any>) => streamChatCompletions(provider, reqBody, signal, onDelta);
+    const nonStream = (reqBody: Record<string, any>) => chatCompletionsNonStream(provider, reqBody, signal);
+    // 主路：无 CORS 头的服务（如 opencode.ai）跳过注定失败的 fetch 直接 requestUrl；兜底恒为非流式
+    const main = provider.noCors ? nonStream : stream;
     try {
-      // 无 CORS 头的服务（如 opencode.ai）直接走 requestUrl，跳过注定失败的 fetch
-      const content = provider.noCors
-        ? await chatCompletionsNonStream(provider, body, signal)
-        : await streamChatCompletions(provider, body, signal, onDelta);
-      return content;
+      return await main(body);
     } catch (streamError: any) {
       if (signal?.aborted) throw streamError; // 用户取消：不再走 requestUrl 兜底
       // fetch 失败（CORS/网络）→ requestUrl 非流式兜底
       try {
-        const content = await chatCompletionsNonStream(provider, body, signal);
-        return content;
+        return await nonStream(body);
       } catch (e: any) {
+        // response_format 降级（ticket 176）：部分服务商/模型不认该字段直接 400（两路同 body 必双双失败）
+        // → 按主路去掉该字段重试一次，非纯 JSON 输出由调用方 extractJSON 兜底
+        if (body.response_format && /response_format/i.test(`${streamError.message || ''}${e.message || ''}`)) {
+          try {
+            const bodyNoRf: any = { ...body };
+            delete bodyNoRf.response_format;
+            return await main(bodyNoRf);
+          } catch (e2: any) {
+            e = e2; // 降级也失败：报最终一次的错误
+          }
+        }
         throw new Error(`AI 请求失败: ${streamError.message}（fallback: ${e.message}）`);
       }
     }

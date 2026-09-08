@@ -8,7 +8,7 @@ import { openFlowDialog } from '../core/flow-dialog';
 import { escManager } from '../core/esc-manager';
 import { allocZ } from '../core/z-order';
 import { getApp } from '../core/app';
-import { QuizManager, loadActiveItems } from './manager';
+import { QuizManager } from './manager';
 import { QuestionGenerator } from './generator';
 import { escapeHtml } from '../core/utils';
 import type { QuizQuestion } from './manager';
@@ -24,6 +24,13 @@ export interface QuizReviewResults {
 
 /** ticket 156：答对后亮绿反馈到自动进入下一题的延时（用户拍板 0.8 秒） */
 const CORRECT_JUMP_DELAY_MS = 800;
+
+/** 每篇题数解析（ticket 176：钳制 1~20——自由文本输入无界会撑爆 max_tokens 整篇失败；0/无效 = 自动） */
+function parseQuestionsPerNote(raw: unknown): number {
+  const n = parseInt(String(raw ?? ''), 10);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(n, 20);
+}
 
 /** 清理选项文本，去除可能的前缀如 "A." "A、" "A)" "(A)" 等（renderModal 拆分） */
 function cleanOptionText(text: string): string {
@@ -83,43 +90,18 @@ export class QuizMasterUI {
     return arr;
   }
 
-  /** 更新题库（基于活跃笔记，空题目则生成；失败 Notice 逐字） */
-  async updateQuiz(): Promise<void> {
-    const app = getApp();
-    try {
-      const activeItems = await loadActiveItems(app);
-      if (!activeItems.length) {
-        await this.manager.saveQuiz(getApp(), { notes: {} });
-        return;
-      }
-
-      const quiz = await this.manager.loadQuiz(app);
-      const activePaths = new Set(activeItems.map((i: any) => i.filePath));
-
-      // 1. 删除已不在活跃列表中的笔记条目
-      for (const notePath of Object.keys(quiz.notes)) {
-        if (!activePaths.has(notePath)) {
-          delete quiz.notes[notePath];
-        }
-      }
-      await this.manager.saveQuiz(app, quiz);
-
-      // 2. 为缺少题目的笔记批量生成
-      const notePaths = activeItems.map((i: any) => i.filePath);
-      await this.ensureQuestions(notePaths);
-    } catch (e: any) {
-      notice('更新题库失败：' + e.message, 'error');
-      console.error(e);
-    }
-  }
-
-  /** 确保指定笔记都有题目（源码 L346-398 逐字） */
+  /**
+   * 确保指定笔记都有题目（ticket 176 单篇化重构）：逐篇生成 + 每篇即时落盘。
+   * 原「批量一次 AI 调用 + 逐篇降级」随「更新题库」入口退役删除——批量协议要求模型按
+   * 笔记路径回显 JSON 键，极易错键且错键被当成功（静默回退旧题）；现行唯一调用方
+   * （复习域 regenerateQuestions）只传单篇，逐篇口径简单可靠。
+   */
   async ensureQuestions(notePaths: string[]): Promise<void> {
     const app = getApp();
     const quiz = await this.manager.loadQuiz(app);
     const settings = QuizMasterUI.settings || {};
     const enableMultipleChoice = settings.enableMultipleChoice !== false;
-    const questionsPerNote = parseInt(settings.questionsPerNote) || 0;
+    const questionsPerNote = parseQuestionsPerNote(settings.questionsPerNote);
     const difficulty = settings.difficulty || 'random';
 
     // 找出缺少题目的笔记
@@ -136,29 +118,7 @@ export class QuizMasterUI {
 
     if (!missing.length) return;
 
-    // 批量生成（一次 AI 调用）：常驻单框动态更新
-    if (QuizMasterUI.ai) {
-      try {
-        const h = notify(`正在为 ${missing.length} 篇笔记批量生成题目…`, { type: 'progress', dedupeKey: 'quiz-generate' });
-        const batchResult = await this.generator.generateBatch(missing, QuizMasterUI.ai, enableMultipleChoice, questionsPerNote, difficulty);
-        let batchOk = 0;
-        for (const [path, qs] of Object.entries(batchResult)) {
-          if (qs.length) {
-            quiz.notes[path] = qs;
-            batchOk++;
-          }
-        }
-        await this.manager.saveQuiz(app, quiz);
-        h.setType('success');
-        h.setMessage(`已为 ${batchOk} 篇笔记生成题目`);
-        return;
-      } catch (e: any) {
-        console.warn('批量出题失败，降级为逐篇:', e.message);
-        notify('批量出题失败，已改为逐篇生成', { type: 'warning', dedupeKey: 'quiz-generate' });
-      }
-    }
-
-    // fallback：逐篇生成
+    const h = notify(`正在为 ${missing.length} 篇笔记生成题目…`, { type: 'progress', dedupeKey: 'quiz-generate' });
     let okCount = 0;
     let failCount = 0;
     let firstError = '';
@@ -166,21 +126,23 @@ export class QuizMasterUI {
       try {
         if (!QuizMasterUI.ai) throw new Error('AI 未初始化');
         const qs = await this.generator.generate(note.content, QuizMasterUI.ai, enableMultipleChoice, questionsPerNote, difficulty);
-        if (qs.length) {
-          quiz.notes[note.id] = qs;
-          okCount++;
-          await this.manager.saveQuiz(app, quiz);
-        } else {
-          failCount++;
-        }
+        quiz.notes[note.id] = qs;
+        okCount++;
+        await this.manager.saveQuiz(app, quiz);
       } catch (e: any) {
         console.warn(`出题失败 ${note.id}:`, e.message);
         if (!firstError) firstError = e.message || '未知错误';
         failCount++;
       }
     }
-    if (okCount > 0) notify(`已为 ${okCount} 篇笔记生成题目`, { type: 'success' });
-    if (failCount > 0) notify(`${failCount} 篇笔记出题失败${firstError ? `（${firstError}）` : ''}`, { type: 'warning', dedupeKey: 'quiz-generate' });
+    if (okCount > 0) {
+      h.setType('success');
+      h.setMessage(`已为 ${okCount} 篇笔记生成题目`);
+      if (failCount > 0) notify(`${failCount} 篇笔记出题失败（${firstError}）`, { type: 'warning' });
+    } else {
+      h.setType('warning');
+      h.setMessage(`${failCount} 篇笔记出题失败（${firstError}）`);
+    }
   }
 
   /** ticket 141：普通做题模式（startQuiz/showLoadingPopup）删除——独立入口 ticket 098 退役后

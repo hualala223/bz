@@ -705,3 +705,62 @@ describe('多选徽标：按数量复习（hideOptionCount）不提示正确选�
     ui.close();
   });
 });
+
+describe('ensureQuestions（ticket 176 单篇化）', () => {
+  beforeEach(() => {
+    resetObsidianMocks();
+    setApp(null as any);
+    document.body.innerHTML = '';
+    QuizMasterUI.ai = { json: vi.fn() } as any;
+    QuizMasterUI.settings = { enableMultipleChoice: true, questionsPerNote: '0', shuffleQuestions: false, difficulty: 'random' };
+  });
+
+  it('单篇生成成功：读笔记 → generate → 落盘 quiz.json + 成功通知', async () => {
+    const vault = new MockVault();
+    vault.files.set('A.md', '正文内容');
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
+    const gen = vi.spyOn(ui.generator, 'generate').mockResolvedValue([Q('Q1?', [0])]);
+    await ui.ensureQuestions(['A.md']);
+    expect(gen).toHaveBeenCalledTimes(1);
+    const saved = JSON.parse(vault.files.get(QUIZ_FILE_PATH)!);
+    expect(saved.notes['A.md']).toHaveLength(1);
+    expect(getNoticeMessages().join('|')).toContain('已为 1 篇笔记生成题目');
+  });
+
+  it('已有题目不再生成；questionsPerNote 100 钳制为 20、负数归 0（ticket 176 B7）', async () => {
+    const vault = new MockVault();
+    vault.files.set('A.md', '正文内容');
+    seedQuiz(vault, { 'A.md': [Q('已有?', [0])] });
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
+    const gen = vi.spyOn(ui.generator, 'generate').mockResolvedValue([Q('Q1?', [0])]);
+    await ui.ensureQuestions(['A.md']);
+    expect(gen).not.toHaveBeenCalled();
+
+    QuizMasterUI.settings = { ...QuizMasterUI.settings, questionsPerNote: '100' };
+    vault.files.set('B.md', 'B 正文');
+    await ui.ensureQuestions(['B.md']);
+    expect(gen).toHaveBeenCalledWith('B 正文', QuizMasterUI.ai, true, 20, 'random');
+
+    QuizMasterUI.settings = { ...QuizMasterUI.settings, questionsPerNote: '-3' };
+    vault.files.set('C.md', 'C 正文');
+    await ui.ensureQuestions(['C.md']);
+    expect(gen).toHaveBeenLastCalledWith('C 正文', QuizMasterUI.ai, true, 0, 'random');
+  });
+
+  it('生成失败：透出「N 篇笔记出题失败（原因）」警告，且不落盘', async () => {
+    const vault = new MockVault();
+    vault.files.set('A.md', '正文内容');
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
+    vi.spyOn(ui.generator, 'generate').mockRejectedValue(new Error('API 429: rate limited'));
+    await ui.ensureQuestions(['A.md']);
+    expect(getNoticeMessages().join('|')).toContain('1 篇笔记出题失败（API 429: rate limited）');
+    const saved = JSON.parse(vault.files.get(QUIZ_FILE_PATH)!);
+    expect(saved.notes['A.md']).toBeUndefined();
+  });
+});

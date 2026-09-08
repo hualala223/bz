@@ -209,6 +209,48 @@ describe('AIService', () => {
     await expect(ai.prompt('x')).rejects.toThrow('AI 请求失败: fetch 崩（fallback: requestUrl 崩）');
   });
 
+  it('response_format 400 降级：两路同 body 双双 400 且报文提及该字段 → 去字段重试一次（ticket 176 B4）', async () => {
+    // 第 1 次 fetch（带 response_format）→ 400；requestUrl 兜底同 body → 400；第 2 次 fetch（去掉 response_format）→ 成功
+    fetchMock
+      .mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({ error: { message: 'response_format is not supported by this model' } }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: sseBody(['data: {"choices":[{"delta":{"content":"降级成功"}}]}\n', 'data: [DONE]\n']),
+      });
+    vi.mocked(requestUrl).mockResolvedValue({
+      status: 400,
+      text: JSON.stringify({ error: { message: 'response_format is not supported by this model' } }),
+    });
+
+    const ai = new AIService({}, 'deepseek-v4-flash');
+    const result = await ai.json('q');
+    expect(result).toBe('降级成功');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(requestUrl)).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).response_format).toEqual({ type: 'json_object' });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).response_format).toBeUndefined();
+  });
+
+  it('response_format 降级也失败 → 抛组合错误；非该字段的 400 不触发降级（ticket 176 B4）', async () => {
+    // 场景一：降级请求同样 400 → 组合错误透出
+    const rfErr = { ok: false, status: 400, json: async () => ({ error: { message: 'response_format unsupported' } }) };
+    fetchMock.mockResolvedValue(rfErr);
+    vi.mocked(requestUrl).mockResolvedValue({ status: 400, text: JSON.stringify({ error: { message: 'response_format unsupported' } }) });
+    const ai = new AIService({}, 'deepseek-v4-flash');
+    await expect(ai.json('q')).rejects.toThrow('AI 请求失败');
+    expect(fetchMock).toHaveBeenCalledTimes(2); // 首次 + 降级，无更多尝试
+
+    // 场景二：报文与 response_format 无关 → 只走「fetch + requestUrl 兜底」两路，不加试
+    fetchMock.mockClear();
+    vi.mocked(requestUrl).mockClear();
+    fetchMock.mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: { message: '鉴权失败' } }) });
+    vi.mocked(requestUrl).mockResolvedValue({ status: 401, text: JSON.stringify({ error: { message: '鉴权失败' } }) });
+    await expect(ai.json('q')).rejects.toThrow('AI 请求失败');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(requestUrl)).toHaveBeenCalledTimes(1);
+  });
+
   it('override 对象直接使用（脚本内指定第三方端点，未显式指定模型时用 provider.model）', async () => {
     fetchMock.mockResolvedValue({
       ok: true,

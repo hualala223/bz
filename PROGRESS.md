@@ -323,3 +323,13 @@
 - [x] 测试：ai.test 七新用例（三家解析/报错/方言翻译/模型覆盖）+ settings-schema 五家十行断言 + copy-lint 行清单更新 + favorites 门控 it.each 三家；全量 3619 绿
 - [x] 文档：CONTEXT.md「AIService / createAI」词条五家枚举；无新 ADR（决策可逆）
 - [x] 门禁：tsc 0 错 + 全量测试绿（含 174 rebase 后重跑）+ 构建部署
+
+## Ticket 176 — 复习出题 AI 调用链加固：单篇化、超时/重试、提示词修订
+
+**状态：已交付**（2026-09-08）
+
+- [x] 取证核查：批量键回显协议错键被当成功（静默回退旧题）/ quizUpdate・updateQuiz 死代码 / AI 请求无超时无重试 / 单篇校验过严与批量不对称 / 提示词多选矛盾 / 截断 3000・2000 过狠 / 未关思考 / 选项不打乱 / questionsPerNote 无界 / response_format 无降级（详见 issues/176）
+- [x] 实现：quiz/generator.ts 重构（90s 超时 + 瞬时失败退避重试 ≤2 次 + enable_thinking:false 关思考 + 逐题过滤校验 + 选项 Fisher-Yates 打乱重映射 correctIndices + 提示词修矛盾/截断统一 10000/选项卫生与内容依据约束 + 批量协议删除）；quiz/ui.ts ensureQuestions 单篇化 + questionsPerNote 钳制 1~20 + updateQuiz 删；quiz/index.ts quizUpdate 删 + 注释修正；core/ai.ts prompt() 增 response_format 400 去字段降级重试（唯一五域共享改动，已回归）
+- [x] ADR-0079（出题链路单篇化）+ CONTEXT.md「做题家」词条 + issues/176-quiz-ai-call-hardening.md
+- [x] 测试：generator.test 重写 16 用例（提示词/extractJSON/过滤/打乱/重试/超时/关思考）+ ui.test 新增 ensureQuestions 三用例（成功落盘/钳制/失败透出）+ ai.test 增 B4 两用例；全量 3630 绿
+- [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署
