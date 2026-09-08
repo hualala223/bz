@@ -313,3 +313,13 @@
 - [x] 实现：core/ai.ts AIProvider 增 headers（两路请求合并）；opencode-go 挂进程内稳定 UUID；chatCompletionsNonStream 改 throw:false 自判状态码，400+ 透出服务端错误报文
 - [x] 测试：tests/core/ai.test.ts 新增三用例（session 头稳定复用 / 400 报文透传 + throw:false / 非 JSON 错误体）；全量 3608 绿
 - [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署；真实端点回归带头后 HTTP 200
+
+## Ticket 175 — AI 服务商扩充：智谱 / 硅基流动 / 火山方舟
+
+**状态：已交付**（2026-09-08）
+
+- [x] 规格：`issues/175-ai-providers-zhipu-siliconflow-volcark.md`（grill-with-docs 两轮对齐 + to-spec 发布；与 174 并行开发，合并前 rebase）
+- [x] 实现：core/ai.ts 三家 provider 解析（内置 endpoint + 够用低价默认模型 glm-4.7-flash / deepseek-ai/DeepSeek-V3 / doubao-seed-1-6-flash-250828；CORS 实测放行走流式 fetch）+ thinking 方言翻译（智谱/方舟 thinking:{type}，硅基原生透传）+ 五家模型行经 provider.model 覆盖；settings.ts 八新键；主设置页下拉五项、五家统一「密钥行 + 可选模型行」（opencode 行显隐收窄为 === opencode-go）；favorites 门控按所选服务商查各自密钥
+- [x] 测试：ai.test 七新用例（三家解析/报错/方言翻译/模型覆盖）+ settings-schema 五家十行断言 + copy-lint 行清单更新 + favorites 门控 it.each 三家；全量 3619 绿
+- [x] 文档：CONTEXT.md「AIService / createAI」词条五家枚举；无新 ADR（决策可逆）
+- [x] 门禁：tsc 0 错 + 全量测试绿（含 174 rebase 后重跑）+ 构建部署
