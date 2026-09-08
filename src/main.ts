@@ -32,7 +32,7 @@ import { openMovieManager, addMovieItem, unloadMovie } from './movie';
 // 影视分析报告（独立域，ADR-0048）
 import { openMovieReport, unloadMovieReport } from './movie-report';
 // 复习（ticket 168 单一入口：仅「复习（按数量）」命令；ticket 169 加回「加入复习计划」；ensureReview/unloadReview 为常驻监控与卸载所需）
-import { reviewCountStart, reviewAddCurrent, ensureReview, unloadReview } from './review';
+import { reviewCountStart, reviewAddCurrent, reviewAddCurrentWithLinks, ensureReview, unloadReview } from './review';
 // 第二大脑（ticket 103 起原闪念正名接管，ADR-0051——flash 域已删除）
 import {
   openSecondBrainPanel,
@@ -97,12 +97,17 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-movie-add', name: '加影视', icon: 'clapperboard', callback: () => addMovieItem(getApp()) },
   // 影视分析报告（独立域，ADR-0048；f7 解冻：去 clapperboard 重复 → pie-chart，id/名称契约不动）
   { id: 'bz-movie-report', name: '影视分析报告', icon: 'pie-chart', callback: () => openMovieReport(getApp()) },
-  // 复习（ticket 168 单一入口：仅保留「复习（按数量）」；ticket 169 加回「加入复习计划」，editorCallback 进文档右键待选）
+  // 复习（ticket 168 单一入口：仅保留「复习（按数量）」；ticket 169 加回「加入复习计划」、ticket 170 加「批量加入」，editorCallback 进文档右键待选）
   { id: 'bz-review-count', name: '复习（按数量）', icon: 'list', callback: () => reviewCountStart(getApp()) },
   {
     id: 'bz-review-add-current', name: '将当前文档加入复习计划', icon: 'list-plus',
     callback: () => reviewAddCurrent(getApp()),
     editorCallback: (_editor, ctx) => reviewAddCurrent(getApp(), ctx.file),
+  },
+  {
+    id: 'bz-review-add-current-with-links', name: '批量加入复习计划', icon: 'list-tree',
+    callback: () => reviewAddCurrentWithLinks(getApp()),
+    editorCallback: (_editor, ctx) => reviewAddCurrentWithLinks(getApp(), ctx.file),
   },
   // 第二大脑（ticket 103：原闪念正名接管，主面板为统一入口）
   { id: 'bz-secondbrain-panel', name: '第二大脑面板', icon: 'brain', callback: () => openSecondBrainPanel(getApp()) },

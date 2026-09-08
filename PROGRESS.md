@@ -284,3 +284,13 @@
 - [x] 实现：`bz-review-add-current`「将当前文档加入复习计划」——COMMANDS 表新增可选 editorCallback 通道（命令面板/快捷键/文档内右键待选三表面）；复用 `ReviewApp.addCurrentToReview`，补 .md 守卫与重复提示（原抛错语义改通知，不动既有排期）
 - [x] 测试：新增 tests/review/app-add-current.test.ts（成功/重复/非 .md/命令入口四用例）；app.test 重复用例改新语义；smoke 命令数 35 → 36 + editorCallback 断言
 - [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署 + worktree 合并 master 并清理
+
+## Ticket 170 — 「批量加入复习计划」命令（review add with links）
+
+**状态：已交付**（2026-09-08）
+
+- [x] 规格：`issues/170-review-add-with-links-command.md`（grill 两轮对齐 + to-spec 发布；切片工单 171/172）
+- [x] 切片 01（issues/171）：`src/review/links.ts` 出链收集纯函数（正文 links + frontmatterLinks，getFirstLinkpathDest 解析，断链/非 .md 丢弃、路径去重）+ `ReviewApp.addCurrentWithLinksToReview`（逐篇查重加入、跳过不动排期、汇总通知 success/info、目标集合整体去重）+ 入口 `reviewAddCurrentWithLinks`
+- [x] 切片 02（issues/172）：`bz-review-add-current-with-links`「批量加入复习计划」注册（双入口）；smoke 命令 36 → 37 + 名称/editorCallback 断言；AGENTS/CONTEXT 同步
+- [x] 测试：tests/review/links.test.ts（纯函数三用例）+ tests/review/app-add-with-links.test.ts（六用例：全新增/部分跳过/全部已存在/断链忽略/非 .md 拒绝/命令入口）
+- [x] 门禁：tsc 0 错 + 全量测试绿 + 构建验证

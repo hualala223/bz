@@ -11,6 +11,7 @@ import { FSRS, FSRS_FIRST_INTERVALS, FSRS_FIRST_TEXTS, LADDER_MAX } from './fsrs
 import type { Rating } from './fsrs';
 import type { ReviewItem } from './data';
 import { ReviewDataManager, getReviewFilePath } from './data';
+import { collectOutgoingLinks } from './links';
 import { collectFolderFiles, eligibleCount, selectCountReview, selectOverduePicks, type CountPick, type CountPickKind } from './count';
 import { showNotePreview } from './preview';
 
@@ -513,6 +514,43 @@ export const reviewApp = {
     }
     await dm.addItem(file.path, file.basename);
     notice('已加入复习计划，首次复习：1分钟后', 'success');
+  },
+
+  /** 批量加入当前笔记及其一级出链（ticket 170）：正文 + frontmatter 链接逐篇查重加入，
+   *  已在计划中的跳过不动排期；当前文档已在计划中不中止（计入跳过）、出链照常处理；
+   *  非 .md 整单拒绝；结束给一条汇总通知（有新增 success、无新增 info）。 */
+  async addCurrentWithLinksToReview(file: { path: string; basename: string; extension: string }): Promise<void> {
+    if (file.extension !== 'md') {
+      notice('仅支持 Markdown 笔记加入复习计划', 'error');
+      return;
+    }
+    const app = getApp();
+    this.ensure(app);
+    const dm = this.dataManager!;
+    const items = await dm.loadItems();
+    const existing = new Set(items.map((i) => i.filePath));
+    const cache = app.metadataCache?.getFileCache?.(file as any) ?? null;
+    const outgoing = collectOutgoingLinks(cache as any, file.path, (lp, from) =>
+      app.metadataCache.getFirstLinkpathDest(lp, from) as any
+    );
+    // 目标集合整体按路径去重（出链指回当前文档/互相重复时不重复计数）
+    const seenTargets = new Set<string>();
+    const targets = [file, ...outgoing].filter((t) => !seenTargets.has(t.path) && seenTargets.add(t.path));
+    let added = 0;
+    let skipped = 0;
+    for (const target of targets) {
+      if (existing.has(target.path)) {
+        skipped++;
+        continue;
+      }
+      await dm.addItem(target.path, target.basename);
+      existing.add(target.path);
+      added++;
+    }
+    notice(
+      added > 0 ? `已加入 ${added} 篇${skipped > 0 ? `，${skipped} 篇已在计划中跳过` : ''}` : `共 ${skipped} 篇，均已在复习计划中`,
+      added > 0 ? 'success' : 'info'
+    );
   },
 
 /** 文件树变更即染色：Obsidian 文件树懒渲染（折叠时节点不存在），且无展开事件可监听——

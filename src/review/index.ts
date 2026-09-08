@@ -100,6 +100,16 @@ export function reviewAddCurrent(app: App, file?: { path: string; basename: stri
   void reviewApp.addCurrentToReview(target);
 }
 
+/** 批量加入复习计划（ticket 170）：当前文档及其一级出链一起加入；编辑器右键路径传入右键所在文件 */
+export function reviewAddCurrentWithLinks(app: App, file?: { path: string; basename: string; extension: string } | null): void {
+  const target = file ?? app.workspace.getActiveFile();
+  if (!target) {
+    notice('没有打开的笔记', 'info');
+    return;
+  }
+  void reviewApp.addCurrentWithLinksToReview(target);
+}
+
 /** 卸载清理 */
 export function unloadReview(): void {
   initialized = false;

@@ -1,6 +1,6 @@
 /**
  * 骨架加载冒烟（ticket 01）：mock obsidian 环境下插件可加载、
- * 36 命令裸注册、ribbon 主入口、设置页挂载、卸载清理命令（ticket 169 加回「加入复习计划」后）。
+ * 37 命令裸注册、ribbon 主入口、设置页挂载、卸载清理命令（ticket 170 加「批量加入复习计划」后）。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import BzPlugin, { BzSettingTab } from '../src/main';
@@ -74,7 +74,7 @@ const EXPECTED_COMMAND_IDS = [
   'bz-library-open', 'bz-book-notes-open',
   'bz-reading-report-open',
   'bz-movie-open', 'bz-movie-add', 'bz-movie-report',
-  'bz-review-count', 'bz-review-add-current',
+  'bz-review-count', 'bz-review-add-current', 'bz-review-add-current-with-links',
   'bz-secondbrain-panel', 'bz-secondbrain-open', 'bz-secondbrain-chat', 'bz-secondbrain-rebuild-links', 'bz-secondbrain-link-all',
   'bz-pomodoro-open',
   'bz-literature-open', 'bz-literature-note-term',
@@ -143,6 +143,9 @@ describe('bz 骨架冒烟', () => {
     // ticket 169：「加入复习计划」加回——editorCallback 注册（命令面板 + 快捷键 + 文档右键待选）
     expect(byId('bz-review-add-current').name).toBe('将当前文档加入复习计划');
     expect(typeof byId('bz-review-add-current').editorCallback).toBe('function');
+    // ticket 170：「批量加入复习计划」——当前文档及一级出链一起加入
+    expect(byId('bz-review-add-current-with-links').name).toBe('批量加入复习计划');
+    expect(typeof byId('bz-review-add-current-with-links').editorCallback).toBe('function');
     // f7：第二大脑面板与第二大脑参考区分（不再与功能名歧义）
     expect(byId('bz-secondbrain-panel').name).toBe('第二大脑面板');
     expect(byId('bz-secondbrain-open').name).toBe('第二大脑参考');
@@ -201,7 +204,7 @@ describe('bz 骨架冒烟', () => {
     expect(() => registeredCommands.find((c: any) => c.id === 'bz-review-count').callback()).not.toThrow();
     expect(() => registeredCommands.find((c: any) => c.id === 'bz-reading-report-open').callback()).not.toThrow();
   }, 15000);
-  it('全部 35 命令回调冒烟：逐个调用覆盖各域懒加载入口（含日记本 init 两个命令）', async () => {
+  it('全部 37 命令回调冒烟：逐个调用覆盖各域懒加载入口（含日记本 init 两个命令）', async () => {
     const plugin = await createPlugin(makeMockApp());
     const failures: string[] = [];
     for (const c of registeredCommands) {
@@ -215,7 +218,7 @@ describe('bz 骨架冒烟', () => {
     }
     expect(failures, `失败命令:
 ${failures.join('\n')}`).toEqual([]);
-    expect(registeredCommands.length).toBeGreaterThanOrEqual(35);
+    expect(registeredCommands.length).toBeGreaterThanOrEqual(37);
   }, 15000);
   it('事件常驻域开关开启时 onload 注册（autoSummary/aiAgent→memo+favorites 文件同步/secondBrain 懒加载分支；旧 flashEnabled 键随 ticket 103 迁移）', async () => {
     delete diskData['bz'];
