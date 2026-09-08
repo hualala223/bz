@@ -236,6 +236,115 @@ describe('AIService', () => {
     const ai = new AIService({}, 'deepseek-v4-flash');
     await expect(ai.prompt('x')).rejects.toThrow('未配置 OpenCode Go API Key');
   });
+
+  // ---------- ticket 175：智谱 / 硅基流动 / 火山方舟 ----------
+
+  const sseOk = () => ({
+    ok: true,
+    status: 200,
+    body: sseBody(['data: {"choices":[{"delta":{"content":"ok"}}]}\n', 'data: [DONE]\n']),
+  });
+
+  it('智谱：内置 endpoint + 免费默认模型，走流式 fetch，reason 翻译 thinking 方言', async () => {
+    setAISettingsProvider(() => ({ ...DEFAULT_SETTINGS, aiProvider: 'zhipu', zhipuApiKey: 'sk-zhipu-test' }));
+    resetAIProviderCache();
+    fetchMock.mockImplementation(() => Promise.resolve(sseOk()));
+    const ai = new AIService({}, 'deepseek-v4-flash');
+    await ai.prompt('x');
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://open.bigmodel.cn/api/paas/v4/chat/completions');
+    expect(opts.headers.Authorization).toBe('Bearer sk-zhipu-test');
+    let body = JSON.parse(opts.body);
+    expect(body.model).toBe('glm-4.7-flash'); // 内置默认
+    await ai.reason('x');
+    body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(body.thinking).toEqual({ type: 'enabled' }); // 方言翻译
+    expect(body.enable_thinking).toBeUndefined(); // 原字段不残留
+  });
+
+  it('硅基流动：内置 endpoint + 默认模型，enable_thinking 原生透传不翻译', async () => {
+    setAISettingsProvider(() => ({ ...DEFAULT_SETTINGS, aiProvider: 'siliconflow', siliconflowApiKey: 'sk-sf-test' }));
+    resetAIProviderCache();
+    fetchMock.mockResolvedValue(sseOk());
+    const ai = new AIService({}, 'deepseek-v4-flash');
+    await ai.reason('x');
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(fetchMock.mock.calls[0][0]).toBe('https://api.siliconflow.cn/v1/chat/completions');
+    expect(body.model).toBe('deepseek-ai/DeepSeek-V3');
+    expect(body.enable_thinking).toBe(true);
+    expect(body.thinking).toBeUndefined();
+  });
+
+  it('火山方舟：内置 endpoint + 带日期后缀默认模型，reason 同样翻译 thinking 方言', async () => {
+    setAISettingsProvider(() => ({ ...DEFAULT_SETTINGS, aiProvider: 'volcano-ark', volcanoArkApiKey: 'sk-ark-test' }));
+    resetAIProviderCache();
+    fetchMock.mockResolvedValue(sseOk());
+    const ai = new AIService({}, 'deepseek-v4-flash');
+    await ai.reason('x');
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://ark.cn-beijing.volces.com/api/v3/chat/completions');
+    expect(opts.headers.Authorization).toBe('Bearer sk-ark-test');
+    const body = JSON.parse(opts.body);
+    expect(body.model).toBe('doubao-seed-1-6-flash-250828');
+    expect(body.thinking).toEqual({ type: 'enabled' });
+    expect(body.enable_thinking).toBeUndefined();
+  });
+
+  it('智谱/硅基/方舟未配置各自密钥 → 报错指明设置位置', async () => {
+    setAISettingsProvider(() => ({ aiProvider: 'zhipu' }));
+    resetAIProviderCache();
+    await expect(getAIProvider()).rejects.toThrow('未配置智谱 API Key');
+    setAISettingsProvider(() => ({ aiProvider: 'siliconflow' }));
+    resetAIProviderCache();
+    await expect(getAIProvider()).rejects.toThrow('未配置硅基流动 API Key');
+    setAISettingsProvider(() => ({ aiProvider: 'volcano-ark' }));
+    resetAIProviderCache();
+    await expect(getAIProvider()).rejects.toThrow('未配置火山方舟 API Key');
+  });
+
+  it('用户显式 enable_thinking: false → 方言翻译为 disabled', async () => {
+    setAISettingsProvider(() => ({ ...DEFAULT_SETTINGS, aiProvider: 'zhipu', zhipuApiKey: 'sk-zhipu-test' }));
+    resetAIProviderCache();
+    fetchMock.mockResolvedValue(sseOk());
+    const ai = new AIService({}, 'deepseek-v4-flash');
+    await ai.reason('x', { modelOptions: { enable_thinking: false } });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.thinking).toEqual({ type: 'disabled' });
+    expect(body.enable_thinking).toBeUndefined();
+  });
+
+  it('模型行覆盖：zhipuModel / deepseekModel 生效，留空维持内置默认', async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(sseOk()));
+    // zhipuModel 覆盖内置默认
+    setAISettingsProvider(() => ({ ...DEFAULT_SETTINGS, aiProvider: 'zhipu', zhipuApiKey: 'k', zhipuModel: 'glm-5.3' }));
+    resetAIProviderCache();
+    const ai = new AIService({}, 'deepseek-v4-flash');
+    await ai.prompt('x');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).model).toBe('glm-5.3');
+    // deepseek 模型行留空 → 默认模型不变
+    setAISettingsProvider(() => ({ ...DEFAULT_SETTINGS }));
+    resetAIProviderCache();
+    await ai.prompt('x');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).model).toBe('deepseek-v4-flash');
+    // deepseek 模型行填值 → 覆盖
+    setAISettingsProvider(() => ({ ...DEFAULT_SETTINGS, deepseekModel: 'deepseek-reasoner' }));
+    resetAIProviderCache();
+    await ai.prompt('x');
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body).model).toBe('deepseek-reasoner');
+  });
+
+  it('opencode-go 模型行覆盖固定默认', async () => {
+    setAISettingsProvider(() => ({ ...DEFAULT_SETTINGS, aiProvider: 'opencode-go', opencodeGoModel: 'deepseek-v4-pro' }));
+    resetAIProviderCache();
+    vi.mocked(requestUrl).mockResolvedValue({
+      status: 200,
+      text: JSON.stringify({ choices: [{ message: { content: 'ok' } }] }),
+    });
+    const ai = new AIService({}, 'deepseek-v4-flash');
+    await ai.prompt('x');
+    const reqOpts: any = vi.mocked(requestUrl).mock.calls[0][0];
+    expect(JSON.parse(reqOpts.body).model).toBe('deepseek-v4-pro');
+  });
 });
 
 describe('createAI', () => {

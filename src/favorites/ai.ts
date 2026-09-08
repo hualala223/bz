@@ -18,7 +18,7 @@ export class FavoritesAIService {
   /**
    * AI 是否已配置（ticket 23 + 审查建议 C：真实读取插件 AI 配置，替代恒真的 !!this.ai）。
    * 判定口径与 core/ai.ts getAIProvider 一致：provider = aiProvider || 'opencode-go'；
-   * - opencode-go 无 legacy 兜底：缺 opencodeGoApiKey 即拦截；
+   * - opencode-go / 智谱 / 硅基流动 / 火山方舟 无 legacy 兜底：缺各自密钥即拦截（ticket 175 扩容）；
    * - deepseek 的 quickadd data.json 兜底是异步文件读取（core/ai getAIProvider 运行时判定），
    *   插件设置缺 key 不判死——交给运行时兜底，避免误拦仅 QuickAdd data.json 配置的老用户。
    */
@@ -26,7 +26,11 @@ export class FavoritesAIService {
     if (!this.ai) return false;
     const s = getSettings();
     const provider = s.aiProvider || 'opencode-go';
-    return provider === 'opencode-go' ? !!s.opencodeGoApiKey : true;
+    if (provider === 'opencode-go') return !!s.opencodeGoApiKey;
+    if (provider === 'zhipu') return !!s.zhipuApiKey;
+    if (provider === 'siliconflow') return !!s.siliconflowApiKey;
+    if (provider === 'volcano-ark') return !!s.volcanoArkApiKey;
+    return true; // deepseek 及未知值：插件设置或 QuickAdd 兜底，运行时判定
   }
 
   /**

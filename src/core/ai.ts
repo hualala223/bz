@@ -1,10 +1,11 @@
 /**
  * AIService / createAI（Q3.js window.__utils 移植，ticket 03）
- * provider：deepseek / opencode-go（插件设置注入，取代 Q3 的 QuickAdd 宏设置）；
- * override 字符串 'deepseek'/'opencode-go' 或对象 {endpoint, apiKey, model}。
+ * provider：deepseek / opencode-go / zhipu / siliconflow / volcano-ark（插件设置注入，取代 Q3 的 QuickAdd 宏设置）；
+ * override 字符串（五家 id 或历史遗留值走 deepseek 兜底）或对象 {endpoint, apiKey, model}。
  * prompt：fetch 流式（stream:true），失败自动 fallback requestUrl 非流式；noCors 直接走 requestUrl。
  * opencode-go 须带 x-opencode-session 头（ticket 174：官方端点强制，缺失一律 400 MissingSessionID）；
  * requestUrl 传 throw:false 自判状态码，400+ 报错透出服务端报文（默认 throw 只抛一句 "Request failed, status N"）。
+ * thinking 方言（ticket 175）：智谱/方舟要 thinking 对象，其余原生 enable_thinking，prompt 内统一翻译。
  */
 import { requestUrl } from 'obsidian';
 import { getApp } from './app';
@@ -13,6 +14,15 @@ export interface AISettingsLike {
   aiProvider?: string;
   deepseekApiKey?: string;
   opencodeGoApiKey?: string;
+  /** 各服务商可选模型（ticket 175，留空 = 内置默认） */
+  deepseekModel?: string;
+  opencodeGoModel?: string;
+  zhipuApiKey?: string;
+  zhipuModel?: string;
+  siliconflowApiKey?: string;
+  siliconflowModel?: string;
+  volcanoArkApiKey?: string;
+  volcanoArkModel?: string;
 }
 
 let _settingsProvider: (() => AISettingsLike) | null = null;
@@ -35,6 +45,8 @@ interface AIProvider {
   noCors?: boolean;
   /** 附加请求头（如 opencode-go 的 x-opencode-session），fetch 与 requestUrl 两路都合并 */
   headers?: Record<string, string>;
+  /** 思考模式参数方言（ticket 175）：'thinking' = 翻译为 thinking:{type}（智谱/方舟）；缺省 = 原生 enable_thinking */
+  thinkingParam?: 'enable_thinking' | 'thinking';
 }
 
 let _aiProviderCache: AIProvider | null = null;
@@ -82,15 +94,56 @@ export async function getAIProvider(override?: string | { endpoint?: string; api
     _aiProviderCache = {
       endpoint: 'https://opencode.ai/zen/go/v1',
       apiKey: s.opencodeGoApiKey,
-      model: 'deepseek-v4-flash',
+      model: s.opencodeGoModel || 'deepseek-v4-flash',
       noCors: true, // opencode.ai 无 CORS 头，fetch 必败 → 直接走 requestUrl
       headers: { 'x-opencode-session': opencodeSessionId() }, // ticket 174：端点强制，缺失 400
     };
     return _aiProviderCache;
   }
-  // deepseek：settings 里配的 key 优先，其次 QuickAdd data.json
+  // 智谱 / 硅基流动 / 火山方舟（ticket 175）：均 OpenAI 兼容 + CORS 放行 Obsidian，走流式 fetch；
+  // 默认模型内置（ticket 175 对齐：够用低价档），设置里可选模型行留空即用内置
+  if (name === 'zhipu') {
+    if (!s.zhipuApiKey) {
+      throw new Error('未配置智谱 API Key：插件设置 → AI 配置 → 智谱密钥');
+    }
+    _aiProviderCache = {
+      endpoint: 'https://open.bigmodel.cn/api/paas/v4',
+      apiKey: s.zhipuApiKey,
+      model: s.zhipuModel || 'glm-4.7-flash',
+      thinkingParam: 'thinking', // 智谱 thinking:{type} 方言
+    };
+    return _aiProviderCache;
+  }
+  if (name === 'siliconflow') {
+    if (!s.siliconflowApiKey) {
+      throw new Error('未配置硅基流动 API Key：插件设置 → AI 配置 → 硅基流动密钥');
+    }
+    _aiProviderCache = {
+      endpoint: 'https://api.siliconflow.cn/v1',
+      apiKey: s.siliconflowApiKey,
+      model: s.siliconflowModel || 'deepseek-ai/DeepSeek-V3', // 平台对 V3 系列升级不换 ID
+    };
+    return _aiProviderCache;
+  }
+  if (name === 'volcano-ark') {
+    if (!s.volcanoArkApiKey) {
+      throw new Error('未配置火山方舟 API Key：插件设置 → AI 配置 → 火山方舟密钥');
+    }
+    _aiProviderCache = {
+      endpoint: 'https://ark.cn-beijing.volces.com/api/v3',
+      apiKey: s.volcanoArkApiKey,
+      model: s.volcanoArkModel || 'doubao-seed-1-6-flash-250828', // 方舟 Model ID 带日期后缀
+      thinkingParam: 'thinking', // 豆包 thinking:{type} 方言
+    };
+    return _aiProviderCache;
+  }
+  // deepseek：settings 里配的 key 优先，其次 QuickAdd data.json（未知 provider 名也落到此处，历史行为）
   if (s.deepseekApiKey) {
-    _aiProviderCache = { endpoint: 'https://api.deepseek.com', apiKey: s.deepseekApiKey };
+    _aiProviderCache = {
+      endpoint: 'https://api.deepseek.com',
+      apiKey: s.deepseekApiKey,
+      model: s.deepseekModel || undefined,
+    };
     return _aiProviderCache;
   }
   try {
@@ -102,7 +155,7 @@ export async function getAIProvider(override?: string | { endpoint?: string; api
       return _aiProviderCache;
     }
   } catch (e) { /* 读取失败由调用方提示 */ }
-  throw new Error('未找到 AI 配置：请在插件设置中配置 API Key（DeepSeek 或 OpenCode Go）');
+  throw new Error('未找到 AI 配置：请在插件设置中配置 API Key（DeepSeek / OpenCode Go / 智谱 / 硅基流动 / 火山方舟）');
 }
 
 // ---------------- 请求实现 ----------------
@@ -231,6 +284,11 @@ export class AIService {
     for (const k of Object.keys(mo)) {
       if (k === 'max_tokens') continue;
       body[k] = mo[k];
+    }
+    // 思考模式方言翻译（ticket 175）：智谱/豆包收 thinking:{type} 对象，不认 enable_thinking 字段
+    if (provider.thinkingParam === 'thinking' && body.enable_thinking !== undefined) {
+      body.thinking = { type: body.enable_thinking ? 'enabled' : 'disabled' };
+      delete body.enable_thinking;
     }
     const signal = mergedOptions.signal instanceof AbortSignal ? (mergedOptions.signal as AbortSignal) : undefined;
     const onDelta = typeof mergedOptions.onDelta === 'function' ? (mergedOptions.onDelta as (delta: string) => void) : undefined;

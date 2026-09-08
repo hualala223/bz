@@ -350,7 +350,7 @@ _Avoid_: hover 操作条、行内图标排、行内按钮组（指列表卡片�
 **条目抽屉 (Item Sheet)**: 跨域统一的条目操作浮层（`core/item-actions.ts`）——移动端长按卡片滑出底部抽屉（遮罩 + 顶部条目信息 + 功能项逐行；顶部精简两行（标题+简介，两行省略号截断）），桌面端右键弹跟手菜单（fbf7830 全局方案，preventDefault 拦原生右键、longPressFilter 让位区放行）。动作随域定义；keepOpen 动作执行后抽屉保持并由域动态刷新；附属浮层（评分/影评等小弹窗）叠于抽屉之上。已接入域：备忘录、日记本、影视、收藏本、剪藏本。两种特例：剪藏本是唯一「单击整卡直接打开」的域（ticket 69，Q7a）；且其桌面端浮层关闭（`desktopActions=false`，右键菜单统一方案落地前接受空窗）。
 _Avoid_: 长按菜单、底部菜单（泛指时）、右键菜单（桌面端尚未实现的形态）
 
-**AIService / createAI**: Q3 的 AI 服务抽象——provider 可选 deepseek / opencode-go，key 存于 QuickAdd 宏设置（`aiProvider`、`opencodeGoApiKey`），支持 override 对象（endpoint/apiKey/model）；插件化后迁移至插件设置。
+**AIService / createAI**: Q3 的 AI 服务抽象——**AI 服务商**五家（ticket 175）：deepseek / opencode-go / 智谱（zhipu）/ 硅基流动（siliconflow）/ 火山方舟（volcano-ark），支持 override 对象（endpoint/apiKey/model）；插件化后配置迁移至插件设置，每家统一「密钥行 + 可选模型行」模式，模型留空 = 该家内置默认模型；服务商用谁的密钥谁负责，互不顶替。
 
 **域事件总线 (Domain Event Bus)**: bz 的进程内发布订阅设施（ticket 101，ADR-0047，`src/core/domain-bus.ts`）——通道命名 `<域名>:<事件>`（如 `vault:md-modified`、`diary:file-renamed`），fire-and-forget 同步扇出、单 handler 抛错隔离、总线不做去重/防抖。vault 原生四事件由 `core/obsidian-adapter.ts` 全插件唯一订阅点收编并**双通道派发**：恒发通用兜底 `vault:md-*`（任意文件夹监听需求在此接），命中域目录另发语义 `<域>:file-*`；目录归类由 `core/path-classify.ts` 按 settings 实时动态构建（smartcat/context-source 硬编码副本的单源替代）。订阅端两条纪律：回环抑制只能在订阅端做（总线禁全局去环）；同源双订必须自带防双记录。跨域事件类型 type-only 导入，零运行时边。
 _Avoid_: 总线层全局去环、在 obsidian-adapter 之外直接 app.vault.on 订阅 md 四事件、预铺无消费者的通道

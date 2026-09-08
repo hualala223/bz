@@ -28,25 +28,46 @@ describe('mainSettingsSchema：主设置页两区块', () => {
     expect(schema.groups.every((g) => g.icon === undefined)).toBe(true);
   });
 
-  it('AI 区块：服务商下拉（键直绑）+ 两个密钥行（visibleWhen 互斥显隐）', () => {
+  it('AI 区块：服务商下拉五项 + 五家统一「密钥行 + 可选模型行」（visibleWhen 按所选服务商显隐，ticket 175）', () => {
     const rows = schema.groups[0].rows;
-    expect(rows.map((r) => r.type)).toEqual(['select', 'text', 'text']);
-    expect(rows.map((r) => (r as { name: string }).name)).toEqual(['AI 服务商', 'DeepSeek 密钥', 'OpenCode 密钥']);
-    const [provider, deepseek, opencode] = rows as Array<{
+    expect(rows.map((r) => (r as { name: string }).name)).toEqual([
+      'AI 服务商',
+      'DeepSeek 密钥', 'DeepSeek 模型',
+      'OpenCode 密钥', 'OpenCode 模型',
+      '智谱密钥', '智谱模型',
+      '硅基流动密钥', '硅基流动模型',
+      '火山方舟密钥', '火山方舟模型',
+    ]);
+    const [provider] = rows as Array<{
+      options?: Array<{ value: string; label: string }>;
       binding?: { key: string };
       visibleWhen?: (s: SettingsSnapshot) => boolean;
     }>;
     expect(provider.binding).toEqual({ key: 'aiProvider' });
-    expect(deepseek.binding).toEqual({ key: 'deepseekApiKey' });
-    expect(opencode.binding).toEqual({ key: 'opencodeGoApiKey' });
-    // 与原 main.ts refreshKeys 口径等价：deepseek 显示 DeepSeek 行，其余显示 OpenCode 行
-    const dv = deepseek.visibleWhen!;
-    const ov = opencode.visibleWhen!;
-    expect(dv(snapOf({ aiProvider: 'deepseek' }))).toBe(true);
-    expect(ov(snapOf({ aiProvider: 'deepseek' }))).toBe(false);
-    expect(dv(snapOf({ aiProvider: 'opencode-go' }))).toBe(false);
-    expect(ov(snapOf({ aiProvider: 'opencode-go' }))).toBe(true);
-    expect(ov(snapOf({ aiProvider: '其他值' }))).toBe(true); // 非 deepseek 一律 OpenCode 行（原口径）
+    expect(provider.options!.map((o) => o.value)).toEqual([
+      'deepseek', 'opencode-go', 'zhipu', 'siliconflow', 'volcano-ark',
+    ]);
+    expect(provider.options!.map((o) => o.label)).toEqual([
+      'DeepSeek', 'OpenCode Go', '智谱', '硅基流动', '火山方舟',
+    ]);
+    // 五家统一模式：每家一行密钥 + 一行可选模型，绑定键一一对应，visibleWhen 只认自家 id
+    const keyBindings = [
+      'deepseekApiKey', 'deepseekModel',
+      'opencodeGoApiKey', 'opencodeGoModel',
+      'zhipuApiKey', 'zhipuModel',
+      'siliconflowApiKey', 'siliconflowModel',
+      'volcanoArkApiKey', 'volcanoArkModel',
+    ];
+    const textRows = rows.slice(1) as Array<{ binding?: { key: string }; visibleWhen?: (s: SettingsSnapshot) => boolean }>;
+    expect(textRows.map((r) => r.binding!.key)).toEqual(keyBindings);
+    const providerIds = ['deepseek', 'opencode-go', 'zhipu', 'siliconflow', 'volcano-ark'];
+    textRows.forEach((row, i) => {
+      const mine = providerIds[Math.floor(i / 2)];
+      for (const id of providerIds) {
+        expect(row.visibleWhen!(snapOf({ aiProvider: id }))).toBe(id === mine);
+      }
+      expect(row.visibleWhen!(snapOf({ aiProvider: '其他值' }))).toBe(false); // 未知值不显任何行（175 收窄口径）
+    });
   });
 
   it('数据存储路径区块：path 单选行（键直绑）+ onCommit 提示文案逐字冻结', () => {

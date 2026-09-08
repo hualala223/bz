@@ -104,4 +104,22 @@ describe('isAvailable（ticket 23：真实读取插件 AI 配置，替代恒真 
     setSettingsProvider(() => ({ aiProvider: 'opencode-go', opencodeGoApiKey: '', deepseekApiKey: 'sk-d' }) as any);
     expect(new FavoritesAIService().isAvailable()).toBe(false);
   });
+
+  // ---------- ticket 175：新三家门控按各自密钥独立判定 ----------
+
+  it.each([
+    ['zhipu', 'zhipuApiKey'],
+    ['siliconflow', 'siliconflowApiKey'],
+    ['volcano-ark', 'volcanoArkApiKey'],
+  ] as const)('%s 缺 key → false，配 key → true（新家无 legacy 兜底）', (provider, key) => {
+    setSettingsProvider(() => ({ aiProvider: provider }) as any);
+    expect(new FavoritesAIService().isAvailable()).toBe(false);
+    setSettingsProvider(() => ({ aiProvider: provider, [key]: 'sk-new' }) as any);
+    expect(new FavoritesAIService().isAvailable()).toBe(true);
+  });
+
+  it('新三家缺 key 时别家 key 不顶替（provider 独立判定）', () => {
+    setSettingsProvider(() => ({ aiProvider: 'zhipu', opencodeGoApiKey: 'sk-o', deepseekApiKey: 'sk-d' }) as any);
+    expect(new FavoritesAIService().isAvailable()).toBe(false);
+  });
 });

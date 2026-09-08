@@ -7,12 +7,29 @@
 
 export default interface BzSettings {
   // ===== 🤖 AI 全局（Q3 语义，spec「AI 全局」）=====
-  /** AI 服务商：deepseek / opencode-go */
+  /** AI 服务商：deepseek / opencode-go / zhipu / siliconflow / volcano-ark */
   aiProvider: string;
   /** 🔑 DeepSeek API Key（留空则回退读取 QuickAdd data.json） */
   deepseekApiKey: string;
   /** 🔑 OpenCode Go API Key */
   opencodeGoApiKey: string;
+  // —— 五家统一「密钥行 + 可选模型行」（ticket 175）：模型留空 = 内置默认 ——
+  /** DeepSeek 可选模型（留空用插件默认模型） */
+  deepseekModel: string;
+  /** OpenCode Go 可选模型（留空 deepseek-v4-flash） */
+  opencodeGoModel: string;
+  /** 🔑 智谱 API Key（open.bigmodel.cn） */
+  zhipuApiKey: string;
+  /** 智谱可选模型（留空 glm-4.7-flash） */
+  zhipuModel: string;
+  /** 🔑 硅基流动 API Key（api.siliconflow.cn） */
+  siliconflowApiKey: string;
+  /** 硅基流动可选模型（留空 deepseek-ai/DeepSeek-V3） */
+  siliconflowModel: string;
+  /** 🔑 火山方舟 API Key（ark.cn-beijing.volces.com） */
+  volcanoArkApiKey: string;
+  /** 火山方舟可选模型（留空 doubao-seed-1-6-flash-250828；ep-xxx 接入点 ID 也填这里） */
+  volcanoArkModel: string;
 
   // ===== 📂 数据存储路径（ADR-0009 共享数据路径）=====
   /** 共享 JSON 数据目录（memo/belongings/passwords/favorites/review/quiz/闪念 meta+vec 统一存放） */
@@ -406,6 +423,14 @@ export const DEFAULT_SETTINGS: BzSettings = {
   aiProvider: 'opencode-go',
   deepseekApiKey: '',
   opencodeGoApiKey: '',
+  deepseekModel: '',
+  opencodeGoModel: '',
+  zhipuApiKey: '',
+  zhipuModel: '',
+  siliconflowApiKey: '',
+  siliconflowModel: '',
+  volcanoArkApiKey: '',
+  volcanoArkModel: '',
 
   // 共享数据路径（ADR-0009）
   storagePath: 'CONFIG/STORAGE',
