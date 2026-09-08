@@ -106,6 +106,42 @@ describe('AIService', () => {
     expect(reqOpts.headers.Authorization).toBe('Bearer sk-opencode-test');
   });
 
+  it('noCors provider（opencode-go）带 x-opencode-session 头，进程内稳定复用（ticket 174）', async () => {
+    setAISettingsProvider(() => ({ ...DEFAULT_SETTINGS, aiProvider: 'opencode-go' }));
+    resetAIProviderCache();
+    vi.mocked(requestUrl).mockResolvedValue({
+      status: 200,
+      text: JSON.stringify({ choices: [{ message: { content: 'opencode 结果' } }] }),
+    });
+
+    const ai = new AIService({}, 'deepseek-v4-flash');
+    await ai.prompt('x');
+    await ai.prompt('y');
+    const [o1, o2] = vi.mocked(requestUrl).mock.calls.map((c) => c[0] as any);
+    expect(o1.headers['x-opencode-session']).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(o2.headers['x-opencode-session']).toBe(o1.headers['x-opencode-session']);
+  });
+
+  it('非流式 400：错误透出服务端报文，且 requestUrl 收到 throw:false（ticket 174）', async () => {
+    // deepseek provider：fetch 挂 → fallback requestUrl 返回 400 + opencode 风格错误体
+    fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+    vi.mocked(requestUrl).mockResolvedValue({
+      status: 400,
+      text: JSON.stringify({ type: 'error', error: { type: 'MissingSessionID', message: 'missing x-opencode-session' } }),
+    });
+    const ai = new AIService({}, 'deepseek-v4-flash');
+    await expect(ai.prompt('x')).rejects.toThrow('API 400: missing x-opencode-session');
+    const reqOpts: any = vi.mocked(requestUrl).mock.calls[0][0];
+    expect(reqOpts.throw).toBe(false);
+  });
+
+  it('非流式 400 且错误体非 JSON：报错含状态码与原文截断（ticket 174）', async () => {
+    fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+    vi.mocked(requestUrl).mockResolvedValue({ status: 502, text: '<html>bad gateway</html>' });
+    const ai = new AIService({}, 'deepseek-v4-flash');
+    await expect(ai.prompt('x')).rejects.toThrow('API 502: <html>bad gateway</html>');
+  });
+
   it('provider.model 覆盖默认模型（OpenCode Go 设置模型）', async () => {
     setAISettingsProvider(() => ({ ...DEFAULT_SETTINGS, aiProvider: 'opencode-go' }));
     resetAIProviderCache();

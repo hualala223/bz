@@ -3,6 +3,8 @@
  * provider：deepseek / opencode-go（插件设置注入，取代 Q3 的 QuickAdd 宏设置）；
  * override 字符串 'deepseek'/'opencode-go' 或对象 {endpoint, apiKey, model}。
  * prompt：fetch 流式（stream:true），失败自动 fallback requestUrl 非流式；noCors 直接走 requestUrl。
+ * opencode-go 须带 x-opencode-session 头（ticket 174：官方端点强制，缺失一律 400 MissingSessionID）；
+ * requestUrl 传 throw:false 自判状态码，400+ 报错透出服务端报文（默认 throw 只抛一句 "Request failed, status N"）。
  */
 import { requestUrl } from 'obsidian';
 import { getApp } from './app';
@@ -31,9 +33,29 @@ interface AIProvider {
   apiKey: string;
   model?: string;
   noCors?: boolean;
+  /** 附加请求头（如 opencode-go 的 x-opencode-session），fetch 与 requestUrl 两路都合并 */
+  headers?: Record<string, string>;
 }
 
 let _aiProviderCache: AIProvider | null = null;
+
+/** opencode-go 会话标识：进程内懒生成一个 UUID 全程复用（ticket 174：端点强制 x-opencode-session，
+ *  缺失一律 400 MissingSessionID；官方要求每会话一个稳定 ID 用于路由/prompt 缓存优化） */
+let _opencodeSessionId: string | null = null;
+function opencodeSessionId(): string {
+  let id = _opencodeSessionId;
+  if (!id) {
+    const c = (globalThis as any).crypto;
+    id = (c && typeof c.randomUUID === 'function')
+      ? c.randomUUID() as string
+      : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
+          const r = (Math.random() * 16) | 0;
+          return (ch === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+        });
+    _opencodeSessionId = id;
+  }
+  return id;
+}
 
 /** 重置 provider 缓存（设置变更后调用） */
 export function resetAIProviderCache(): void {
@@ -62,6 +84,7 @@ export async function getAIProvider(override?: string | { endpoint?: string; api
       apiKey: s.opencodeGoApiKey,
       model: 'deepseek-v4-flash',
       noCors: true, // opencode.ai 无 CORS 头，fetch 必败 → 直接走 requestUrl
+      headers: { 'x-opencode-session': opencodeSessionId() }, // ticket 174：端点强制，缺失 400
     };
     return _aiProviderCache;
   }
@@ -95,7 +118,7 @@ function abortError(): Error {
 async function streamChatCompletions(provider: AIProvider, body: any, signal?: AbortSignal, onDelta?: (delta: string) => void): Promise<string> {
   const resp = await fetch(`${provider.endpoint}/chat/completions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${provider.apiKey}` },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${provider.apiKey}`, ...(provider.headers || {}) },
     body: JSON.stringify(body),
     signal,
   });
@@ -141,16 +164,28 @@ async function streamChatCompletions(provider: AIProvider, body: any, signal?: A
   return full;
 }
 
-/** 非流式（requestUrl：Obsidian 官方 API，无 CORS 限制）；requestUrl 不支持中止 → 前后查 signal，已取消按丢弃处理 */
+/** 非流式（requestUrl：Obsidian 官方 API，无 CORS 限制）；requestUrl 不支持中止 → 前后查 signal，已取消按丢弃处理。
+ *  throw:false 自判状态码：默认 throw 在 400+ 直接抛 "Request failed, status N"，服务端报文被吞（ticket 174 排查即栽在这） */
 async function chatCompletionsNonStream(provider: AIProvider, body: any, signal?: AbortSignal): Promise<string> {
   if (signal?.aborted) throw abortError();
   const resp: any = await requestUrl({
     url: `${provider.endpoint}/chat/completions`,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${provider.apiKey}` },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${provider.apiKey}`, ...(provider.headers || {}) },
     body: JSON.stringify({ ...body, stream: false }),
+    throw: false,
   });
   if (signal?.aborted) throw abortError();
+  // 400+：透出服务端错误报文（OpenAI {error:{message}} / opencode {type,error:{type,message}}），非 JSON 用原文截断
+  if (resp.status >= 400) {
+    let detail = '';
+    try {
+      const errData = JSON.parse(resp.text);
+      detail = (errData.error && (errData.error.message || errData.error.type)) || (errData.message && errData.message) || '';
+    } catch (e) { /* 非 JSON 报文，用原文 */ }
+    if (!detail && resp.text) detail = String(resp.text).slice(0, 300);
+    throw new Error(detail ? `API ${resp.status}: ${detail}` : `API ${resp.status}`);
+  }
   const data = JSON.parse(resp.text);
   // 兼容 OpenAI 与 opencode 的错误格式（opencode: {type, error:{type,message}}）
   const errMsg = (data.error && (data.error.message || data.error.type)) || (data.message && data.message);

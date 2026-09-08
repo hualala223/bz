@@ -304,3 +304,12 @@
 - [x] 文档：ADR-0078 + CONTEXT.md「正文指纹」词条 + 第二大脑词条 v10 修订
 - [x] 测试：vector-store.test 新增五用例（v10 迁移/挪动继承/YAML-only/正文编辑重嵌/重复孤儿）+ cov 迁移断言；全量 3604 绿
 - [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署
+
+## Ticket 174 — opencode-go 请求带 x-opencode-session 头 + AI 报错透出服务端报文
+
+**状态：已交付**（2026-09-08）
+
+- [x] 背景：opencode Go 端点策略变更，强制 x-opencode-session 头，缺失一律 400 MissingSessionID——出题/对话/摘要等所有 opencode-go AI 功能全挂；requestUrl 默认 throw 吞掉服务端报文导致排查困难
+- [x] 实现：core/ai.ts AIProvider 增 headers（两路请求合并）；opencode-go 挂进程内稳定 UUID；chatCompletionsNonStream 改 throw:false 自判状态码，400+ 透出服务端错误报文
+- [x] 测试：tests/core/ai.test.ts 新增三用例（session 头稳定复用 / 400 报文透传 + throw:false / 非 JSON 错误体）；全量 3608 绿
+- [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署；真实端点回归带头后 HTTP 200
