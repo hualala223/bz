@@ -58,7 +58,7 @@ describe('mainSettingsSchema：主设置页两区块', () => {
       'siliconflowApiKey', 'siliconflowModel',
       'volcanoArkApiKey', 'volcanoArkModel',
     ];
-    const textRows = rows.slice(1) as Array<{ binding?: { key: string }; visibleWhen?: (s: SettingsSnapshot) => boolean }>;
+    const textRows = rows.slice(1) as Array<{ binding?: { key: string }; placeholder?: string; visibleWhen?: (s: SettingsSnapshot) => boolean }>;
     expect(textRows.map((r) => r.binding!.key)).toEqual(keyBindings);
     const providerIds = ['deepseek', 'opencode-go', 'zhipu', 'siliconflow', 'volcano-ark'];
     textRows.forEach((row, i) => {
@@ -68,6 +68,19 @@ describe('mainSettingsSchema：主设置页两区块', () => {
       }
       expect(row.visibleWhen!(snapOf({ aiProvider: '其他值' }))).toBe(false); // 未知值不显任何行（175 收窄口径）
     });
+    // 模型行 placeholder 显出内置默认模型（175 追加：默认在 UI 可见，密钥行不设 placeholder）
+    expect(textRows.map((r) => r.placeholder)).toEqual([
+      undefined,
+      '默认 deepseek-v4-flash',
+      undefined,
+      '默认 deepseek-v4-flash',
+      undefined,
+      '默认 glm-4.7-flash',
+      undefined,
+      '默认 deepseek-ai/DeepSeek-V3',
+      undefined,
+      '默认 doubao-seed-1-6-flash-250828',
+    ]);
   });
 
   it('数据存储路径区块：path 单选行（键直绑）+ onCommit 提示文案逐字冻结', () => {

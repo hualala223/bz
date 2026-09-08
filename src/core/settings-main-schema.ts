@@ -51,6 +51,7 @@ export function mainSettingsSchema(): SettingsSchema {
             name: 'DeepSeek 模型',
             desc: '留空使用默认模型，可填其他模型名',
             binding: { key: 'deepseekModel' },
+            placeholder: '默认 deepseek-v4-flash',
             visibleWhen: (snapshot) => snapshot.aiProvider === 'deepseek',
           },
           {
@@ -65,6 +66,7 @@ export function mainSettingsSchema(): SettingsSchema {
             name: 'OpenCode 模型',
             desc: '留空使用默认模型，可填其他模型名',
             binding: { key: 'opencodeGoModel' },
+            placeholder: '默认 deepseek-v4-flash',
             visibleWhen: (snapshot) => snapshot.aiProvider === 'opencode-go',
           },
           {
@@ -79,6 +81,7 @@ export function mainSettingsSchema(): SettingsSchema {
             name: '智谱模型',
             desc: '留空使用内置免费模型，可填其他模型',
             binding: { key: 'zhipuModel' },
+            placeholder: '默认 glm-4.7-flash',
             visibleWhen: (snapshot) => snapshot.aiProvider === 'zhipu',
           },
           {
@@ -93,6 +96,7 @@ export function mainSettingsSchema(): SettingsSchema {
             name: '硅基流动模型',
             desc: '留空使用内置模型，可填平台模型名',
             binding: { key: 'siliconflowModel' },
+            placeholder: '默认 deepseek-ai/DeepSeek-V3',
             visibleWhen: (snapshot) => snapshot.aiProvider === 'siliconflow',
           },
           {
@@ -107,6 +111,7 @@ export function mainSettingsSchema(): SettingsSchema {
             name: '火山方舟模型',
             desc: '留空用内置模型，接入点 ID 也填这里',
             binding: { key: 'volcanoArkModel' },
+            placeholder: '默认 doubao-seed-1-6-flash-250828',
             visibleWhen: (snapshot) => snapshot.aiProvider === 'volcano-ark',
           },
         ],
