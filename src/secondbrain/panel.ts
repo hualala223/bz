@@ -276,6 +276,12 @@ export class SecondBrainPanel {
    *  就绪 + 待处理 → 增量进度；就绪无变更 → 统计（ticket 114 补「空库但 refresh 在途」分支） */
   private async render(): Promise<void> {
     if (this.store.initialLoad) {
+      // ticket 173 修复：就绪库的 initialLoad 内含 ensureSecondBrain 的启动自动增量，
+      // 大积压（如整文件夹挪入白名单）时可达分钟级——先亮进度视图并接上进度消息，不留白面板
+      if (this.store.isRefreshing() && this.store.isIndexReady()) {
+        this.enterProgressView('正在同步索引');
+        this.store.updateProgress = this.progressObserver();
+      }
       try {
         await this.store.initialLoad;
       } catch {

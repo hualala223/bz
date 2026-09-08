@@ -19,6 +19,7 @@ import {
 } from '../../src/secondbrain/index';
 import { SecondBrainPanel } from '../../src/secondbrain/panel';
 import { VectorStore } from '../../src/secondbrain/vector-store';
+import { hashChunks } from '../../src/secondbrain/chunk';
 import { getEmbedding, getEmbeddingsBatch } from '../../src/secondbrain/ollama';
 
 vi.mock('../../src/secondbrain/ollama', () => ({
@@ -221,6 +222,51 @@ describe('第二大脑首用引导（ticket 107）', () => {
     expect(document.getElementById('bz-sb-onboard')!.style.display).toBe('none');
     const funcBtn = document.querySelector('.bz-sb-panel-func') as HTMLElement;
     expect(funcBtn.classList.contains('bz-sb-btn-hidden')).toBe(false);
+    panel.destroy();
+  });
+
+  it('就绪库 initialLoad 在途（启动自动增量大积压）→ 先亮「正在同步索引」进度再自动进统计，不留白面板（ticket 173）', async () => {
+    const vault = new MockVault();
+    vault.files.set('我的/A.md', '正文内容因挪动积压需要重嵌，足够长可以成块。');
+    const { adapter, binary } = makeAdapter(vault);
+    const header = new Uint8Array(4);
+    new DataView(header.buffer).setUint32(0, 2, true);
+    const row = new Float32Array([1, 0]);
+    const out = new Uint8Array(4 + row.byteLength);
+    out.set(header, 0);
+    out.set(new Uint8Array(row.buffer, row.byteOffset, row.byteLength), 4);
+    binary.set(VEC_PATH, out.buffer);
+    const app = makeApp(vault, adapter, { '我的/A.md': 99 }); // mtime 差异 → refresh 有真实工作
+    setApp(app as any);
+    vi.mocked(getEmbeddingsBatch).mockImplementation(async (texts) => texts.map(() => [0.5, 0.5]));
+
+    const store = new VectorStore(app as any);
+    store.meta.notes['我的/A.md'] = { mtime: 5, chunks: [{ text: '旧' }], hash: hashChunks(['旧']) };
+    store.meta._dim = 2;
+    store.dim = 2;
+    await store.loadVectors();
+    expect(store.isIndexReady()).toBe(true);
+
+    // 模拟 ensureSecondBrain 的 initialLoad：内含启动自动增量 refresh（在途不立即结算）
+    let settle!: () => void;
+    const gate = new Promise<void>((r) => (settle = r));
+    store.initialLoad = (async () => {
+      const run = store.refresh();
+      await gate;
+      await run;
+    })();
+
+    const panel = new SecondBrainPanel(app as any, store, { onOpenReference: () => {}, onOpenChat: () => {} });
+    const opening = panel.open();
+    // 等待期间不得留白：进度视图先亮出来
+    await until(() => document.getElementById('bz-sb-onboard')?.style.display === 'flex');
+    expect(document.getElementById('bz-sb-content')!.style.display).toBe('none');
+    expect(document.getElementById('bz-sb-progress-title')!.textContent).toBe('正在同步索引');
+
+    settle(); // 放行 initialLoad → render 继续 → 统计内容态
+    await opening;
+    await until(() => document.getElementById('bz-sb-content')!.style.display === 'flex');
+    expect(document.getElementById('bz-sb-onboard')!.style.display).toBe('none');
     panel.destroy();
   });
 
