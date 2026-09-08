@@ -31,8 +31,8 @@ import { showReadingReport, unloadReadingReport } from './reading-report';
 import { openMovieManager, addMovieItem, unloadMovie } from './movie';
 // 影视分析报告（独立域，ADR-0048）
 import { openMovieReport, unloadMovieReport } from './movie-report';
-// 复习（ticket 168 单一入口：仅「复习（按数量）」命令；ensureReview/unloadReview 为常驻监控与卸载所需）
-import { reviewCountStart, ensureReview, unloadReview } from './review';
+// 复习（ticket 168 单一入口：仅「复习（按数量）」命令；ticket 169 加回「加入复习计划」；ensureReview/unloadReview 为常驻监控与卸载所需）
+import { reviewCountStart, reviewAddCurrent, ensureReview, unloadReview } from './review';
 // 第二大脑（ticket 103 起原闪念正名接管，ADR-0051——flash 域已删除）
 import {
   openSecondBrainPanel,
@@ -65,8 +65,9 @@ import { applyUiSettings, init as diaryInit, showDiaryPanel, unregisterEscLayer 
 // 小橘陪伴猫（smartcat 域：桌面宠物 + AI 陪伴；AI 走 bz core/ai，数据单 json smartcat.json）
 import { ensureSmartCat, unloadSmartCat, openSmartCat, openSmartCatChat, hideSmartCat, openSmartcatDashboard, normalizeSmartcatOffMode, applySmartcatPowerState, smartcatMainSettingsSchema } from './smartcat';
 
-/** 命令表：id/name 统一命名（spec「命令 id 全清单」第 9 轮：bz-<域>-<动作>，icon 与入口页磁贴一致） */
-const COMMANDS: { id: string; name: string; icon: string; callback: () => void }[] = [
+/** 命令表：id/name 统一命名（spec「命令 id 全清单」第 9 轮：bz-<域>-<动作>，icon 与入口页磁贴一致）；
+ *  editorCallback 可选（ticket 169）：提供后注册为编辑器命令，自动进入文档内右键待选命令 */
+const COMMANDS: { id: string; name: string; icon: string; callback: () => void; editorCallback?: (editor: unknown, ctx: { file?: { path: string; basename: string; extension: string } | null }) => void }[] = [
   // 入口页（t1：主页 → 入口页，术语随 CONTEXT.md；id bz-home 不变）
   { id: 'bz-home', name: '入口页', icon: 'home', callback: () => openLauncherPanel(getApp()) },
   // 备忘录
@@ -96,8 +97,13 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void }
   { id: 'bz-movie-add', name: '加影视', icon: 'clapperboard', callback: () => addMovieItem(getApp()) },
   // 影视分析报告（独立域，ADR-0048；f7 解冻：去 clapperboard 重复 → pie-chart，id/名称契约不动）
   { id: 'bz-movie-report', name: '影视分析报告', icon: 'pie-chart', callback: () => openMovieReport(getApp()) },
-  // 复习（ticket 168 单一入口：仅保留「复习（按数量）」；原 10 命令随面板/计划管理退役）
+  // 复习（ticket 168 单一入口：仅保留「复习（按数量）」；ticket 169 加回「加入复习计划」，editorCallback 进文档右键待选）
   { id: 'bz-review-count', name: '复习（按数量）', icon: 'list', callback: () => reviewCountStart(getApp()) },
+  {
+    id: 'bz-review-add-current', name: '将当前文档加入复习计划', icon: 'list-plus',
+    callback: () => reviewAddCurrent(getApp()),
+    editorCallback: (_editor, ctx) => reviewAddCurrent(getApp(), ctx.file),
+  },
   // 第二大脑（ticket 103：原闪念正名接管，主面板为统一入口）
   { id: 'bz-secondbrain-panel', name: '第二大脑面板', icon: 'brain', callback: () => openSecondBrainPanel(getApp()) },
   // f7：与「第二大脑面板」区分——本命令打开参考侧边栏（右侧窄窗/移动端抽屉参考 tab）
@@ -201,7 +207,9 @@ export default class BzPlugin extends Plugin {
 
     // 命令裸注册（ADR-0004：app.commands.addCommand 原样 id 注册——plugin.addCommand 会被 Obsidian 自动加插件前缀，主页.js 等外部裸 id 调用会失效）
     for (const c of COMMANDS) {
-      (this.app as any).commands.addCommand({ id: c.id, name: c.name, icon: c.icon, callback: c.callback });
+      const cmd: Record<string, unknown> = { id: c.id, name: c.name, icon: c.icon, callback: c.callback };
+      if (c.editorCallback) cmd.editorCallback = c.editorCallback;
+      (this.app as any).commands.addCommand(cmd);
       this.registeredCommandIds.push(c.id);
     }
 

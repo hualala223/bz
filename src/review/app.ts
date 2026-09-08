@@ -498,12 +498,19 @@ export const reviewApp = {
     `;
   },
 
-  /** 加入当前笔记到复习计划 */
-  async addCurrentToReview(file: TFile): Promise<void> {
+  /** 加入当前笔记到复习计划（ticket 169：非 .md 拒绝；已在计划中提示且不动既有排期；参数取结构最小面） */
+  async addCurrentToReview(file: { path: string; basename: string; extension: string }): Promise<void> {
+    if (file.extension !== 'md') {
+      notice('仅支持 Markdown 笔记加入复习计划', 'error');
+      return;
+    }
     this.ensure(getApp());
     const dm = this.dataManager!;
     const items = await dm.loadItems();
-    if (items.some((i) => i.filePath === file.path)) throw new Error('该笔记已在复习计划中');
+    if (items.some((i) => i.filePath === file.path)) {
+      notice('已在复习计划中', 'info');
+      return;
+    }
     await dm.addItem(file.path, file.basename);
     notice('已加入复习计划，首次复习：1分钟后', 'success');
   },

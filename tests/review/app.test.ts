@@ -172,14 +172,7 @@ describe('accuracyToRating / addCurrentToReview', () => {
     expect(reviewApp.accuracyToRating(30)).toBe('again');
   });
 
-  it('addCurrentToReview：重复 → 抛错', async () => {
-    const vault = new MockVault();
-    vault.files.set('A.md', '正文');
-    const app = makeApp(vault);
-    setApp(app);
-    await reviewApp.addCurrentToReview(vault.file('A.md') as any);
-    await expect(reviewApp.addCurrentToReview(vault.file('A.md') as any)).rejects.toThrow('该笔记已在复习计划中');
-  });
+  // ticket 169：重复加入语义随旧入口退役（原「重复 → 抛错」），用例收敛至 app-add-current.test.ts
 });
 
 describe('applyReviewStyles', () => {

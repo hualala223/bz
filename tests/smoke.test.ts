@@ -1,6 +1,6 @@
 /**
  * 骨架加载冒烟（ticket 01）：mock obsidian 环境下插件可加载、
- * 35 命令裸注册、ribbon 主入口、设置页挂载、卸载清理命令（ticket 168 复习命令收敛后）。
+ * 36 命令裸注册、ribbon 主入口、设置页挂载、卸载清理命令（ticket 169 加回「加入复习计划」后）。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import BzPlugin, { BzSettingTab } from '../src/main';
@@ -74,7 +74,7 @@ const EXPECTED_COMMAND_IDS = [
   'bz-library-open', 'bz-book-notes-open',
   'bz-reading-report-open',
   'bz-movie-open', 'bz-movie-add', 'bz-movie-report',
-  'bz-review-count',
+  'bz-review-count', 'bz-review-add-current',
   'bz-secondbrain-panel', 'bz-secondbrain-open', 'bz-secondbrain-chat', 'bz-secondbrain-rebuild-links', 'bz-secondbrain-link-all',
   'bz-pomodoro-open',
   'bz-literature-open', 'bz-literature-note-term',
@@ -140,6 +140,9 @@ describe('bz 骨架冒烟', () => {
     expect(byId('bz-reading-report-open').name).toBe('阅读数据分析报告');
     // ticket 168：复习域单一入口——仅「复习（按数量）」命令保留，10 个旧命令已退役
     expect(byId('bz-review-count').name).toBe('复习（按数量）');
+    // ticket 169：「加入复习计划」加回——editorCallback 注册（命令面板 + 快捷键 + 文档右键待选）
+    expect(byId('bz-review-add-current').name).toBe('将当前文档加入复习计划');
+    expect(typeof byId('bz-review-add-current').editorCallback).toBe('function');
     // f7：第二大脑面板与第二大脑参考区分（不再与功能名歧义）
     expect(byId('bz-secondbrain-panel').name).toBe('第二大脑面板');
     expect(byId('bz-secondbrain-open').name).toBe('第二大脑参考');

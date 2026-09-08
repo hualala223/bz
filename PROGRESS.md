@@ -275,3 +275,12 @@
 - [x] 切片 05：⚙️ 设置弹窗「复习条目管理」组——全部条目列出、挂起标灰、逐条移出确认 → 撤销原样恢复（数据零丢失）
 - [x] 切片 06：ADR-0077 + CONTEXT 术语修订 + PROGRESS 记票 + AGENTS 命令数同步
 - [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署 + worktree 合并 master 并清理
+
+## Ticket 169 — 「将当前文档加入复习计划」命令加回（review add current）
+
+**状态：已交付**（2026-09-08）
+
+- [x] 规格：`issues/169-review-add-current-command.md`（grill 四轮对齐 + to-spec 发布 + 单切片）
+- [x] 实现：`bz-review-add-current`「将当前文档加入复习计划」——COMMANDS 表新增可选 editorCallback 通道（命令面板/快捷键/文档内右键待选三表面）；复用 `ReviewApp.addCurrentToReview`，补 .md 守卫与重复提示（原抛错语义改通知，不动既有排期）
+- [x] 测试：新增 tests/review/app-add-current.test.ts（成功/重复/非 .md/命令入口四用例）；app.test 重复用例改新语义；smoke 命令数 35 → 36 + editorCallback 断言
+- [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署 + worktree 合并 master 并清理

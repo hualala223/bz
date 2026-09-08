@@ -1,8 +1,10 @@
 /**
- * 复习入口（ticket 168 单一入口重构：仅保留按数量复习命令 reviewCountStart；
+ * 复习入口（ticket 168 单一入口重构；ticket 169 加回「加入复习计划」命令入口）：
+ * 按数量复习命令 reviewCountStart、加入复习计划 reviewAddCurrent、
  * ensureReview 常驻监控（逾期轮询 + 监听文件夹）与 unloadReview 卸载清理。命令由 main.ts 裸注册。
  */
 import type { App } from 'obsidian';
+import { notice } from '../core/notice';
 import { onDomainEvent } from '../core/domain-bus';
 import { ReviewDataManager } from './data';
 import { ReviewWatcher } from './watch';
@@ -86,6 +88,16 @@ export function ensureReview(app: App): void {
 export function reviewCountStart(app: App): void {
   ensureReview(app);
   uiManager?.showCountReviewModal();
+}
+
+/** 加入复习计划（ticket 169）：默认取当前打开笔记；编辑器右键路径传入右键所在文件 */
+export function reviewAddCurrent(app: App, file?: { path: string; basename: string; extension: string } | null): void {
+  const target = file ?? app.workspace.getActiveFile();
+  if (!target) {
+    notice('没有打开的笔记', 'info');
+    return;
+  }
+  void reviewApp.addCurrentToReview(target);
 }
 
 /** 卸载清理 */
