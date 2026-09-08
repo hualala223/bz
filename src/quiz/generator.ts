@@ -46,6 +46,16 @@ function shuffleOptions(q: QuizQuestion): QuizQuestion {
 }
 
 export class QuestionGenerator {
+  /** 按篇幅自适应出题数量（ticket 176 追加，出题数量留空时生效；显式设置优先）：
+   *  四档——<500 字 2~3 / <2000 字 3~5 / <5000 字 5~8 / 其余（截断上限 10000 内）8~12。
+   *  上限 12 × 每题约 200 token ≈ 3000 输出，远低于 max_tokens 钳制，token 可控。 */
+  static countRangeForLength(chars: number): [number, number] {
+    if (chars < 500) return [2, 3];
+    if (chars < 2000) return [3, 5];
+    if (chars < 5000) return [5, 8];
+    return [8, 12];
+  }
+
   /** 构建提示词（ticket 176：开头随题型变化不再与多选矛盾；追加选项卫生与内容依据约束） */
   buildPrompt(content: string, enableMultipleChoice: boolean, questionsPerNote: number, difficulty: string): string {
     const truncated = content.slice(0, NOTE_CONTENT_LIMIT);
@@ -59,7 +69,8 @@ export class QuestionGenerator {
     if (questionsPerNote > 0) {
       countHint = `请生成恰好 ${questionsPerNote} 道题目。`;
     } else {
-      countHint = '生成若干道题目（数量适中，建议 3~6 道）。';
+      const [lo, hi] = QuestionGenerator.countRangeForLength(truncated.length);
+      countHint = `请生成数量与笔记篇幅相称的题目（本篇约 ${truncated.length} 字，建议 ${lo}~${hi} 道）。`;
     }
 
     let difficultyHint = '';

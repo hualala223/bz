@@ -28,8 +28,27 @@ describe('buildPrompt', () => {
     expect(p).toContain('根据以下笔记内容，生成若干道选择题，以便复习。');
     expect(p).not.toContain('每题一个正确答案');
     expect(p).toContain('可以是单选题或多选题（正确选项数量不限）');
-    expect(p).toContain('生成若干道题目（数量适中，建议 3~6 道）。');
     expect(p).toContain('"correctIndices": [0, 2] }（数组内为正确选项的索引）');
+  });
+
+  it('按篇幅自适应出题数量（ticket 176 追加）：四档区间 + 提示词分档 + 显式数量优先', () => {
+    expect(QuestionGenerator.countRangeForLength(0)).toEqual([2, 3]);
+    expect(QuestionGenerator.countRangeForLength(499)).toEqual([2, 3]);
+    expect(QuestionGenerator.countRangeForLength(500)).toEqual([3, 5]);
+    expect(QuestionGenerator.countRangeForLength(1999)).toEqual([3, 5]);
+    expect(QuestionGenerator.countRangeForLength(2000)).toEqual([5, 8]);
+    expect(QuestionGenerator.countRangeForLength(4999)).toEqual([5, 8]);
+    expect(QuestionGenerator.countRangeForLength(5000)).toEqual([8, 12]);
+    expect(QuestionGenerator.countRangeForLength(NOTE_CONTENT_LIMIT)).toEqual([8, 12]);
+
+    const g = mkGen();
+    // 留空（0）：按截断后篇幅分档提示
+    expect(g.buildPrompt('短内容', false, 0, 'random')).toContain('建议 2~3 道');
+    expect(g.buildPrompt('x'.repeat(6000), false, 0, 'random')).toContain('约 6000 字，建议 8~12 道');
+    // 显式数量：恰好 N 道，无分档建议
+    const fixed = g.buildPrompt('x'.repeat(6000), false, 7, 'random');
+    expect(fixed).toContain('请生成恰好 7 道题目');
+    expect(fixed).not.toContain('建议');
   });
 
   it('三难度提示逐字', () => {
@@ -110,7 +129,9 @@ describe('generate', () => {
     const ai = { json: vi.fn().mockResolvedValue(raw) };
     const r = await g.generate('x', ai as any, false, 1, 'random');
     expect(r.map((q) => q.question)).toEqual(['OK', '坏索引']);
-    expect(r[1].correctIndices).toEqual([2]);
+    // 选项打乱后索引数值随机，按「索引 → 原正确文本」映射断言（OK 原正确项 'b'，坏索引剔除越界后原正确项 'c'）
+    expect(r[0].options[r[0].correctIndices[0]]).toBe('b');
+    expect(r[1].options[r[1].correctIndices[0]]).toBe('c');
 
     const aiBad = { json: vi.fn().mockResolvedValue('{"questions":[{"question":"Q","options":["a"],"correctIndices":[0]}]}') };
     await expect(g.generate('x', aiBad as any, false, 1, 'random')).rejects.toThrow('AI 未返回有效题目数组。');
