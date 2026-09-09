@@ -18,8 +18,8 @@
 import type { App, TFile } from 'obsidian';
 import { tryGetSettings } from '../core/settings-provider';
 import { storageFile } from '../core/storage';
-import { rebuildItems } from '../movie/data';
-import { STATUS_WATCHED } from '../movie/constants';
+import { parseMovieFile } from '../cinema/data';
+import { STATUS_WATCHED } from '../cinema/constants';
 import { scanMarkdownBooks } from '../bookshelf/data';
 import { PomodoroDataManager } from '../pomodoro/data';
 
@@ -189,10 +189,14 @@ export async function collectWeeklyStat(app: App, now: number = Date.now()): Pro
   const range = currentWeekRange(now);
   const out: WeeklyStat = { ...EMPTY_WEEKLY };
 
-  // 影视：影视目录已看条目（观影日期落本周；无日期回退笔记创建时间；本地 movie 域口径）
+  // 影视：影院目录已看条目（观影日期落本周；无日期回退笔记创建时间）
   try {
+    const folder = settingDir(['cinemaFolderPath'], '我的/影视');
     const items: Array<{ watchDate: string | null; ctime: number; watched: boolean }> = [];
-    for (const item of rebuildItems(app)) {
+    for (const f of app.vault.getMarkdownFiles()) {
+      if (!f.path.startsWith(folder + '/')) continue;
+      const item = parseMovieFile(f as TFile, app);
+      if (!item) continue;
       const st = (item.file as { stat?: { ctime?: unknown } } | null)?.stat;
       items.push({
         watchDate: item.watchDate,

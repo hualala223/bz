@@ -14,7 +14,7 @@ import type { App } from 'obsidian';
 import type { CheckIssue, CheckOpts, CheckResult, CheckSection } from './types';
 import { fileExists, readRawJson, jsonScanTargets } from './files';
 import { tryGetSettings } from '../core/settings-provider';
-import { rebuildItems } from '../movie/data';
+import { parseMovieFile } from '../cinema/data';
 import { scanMarkdownBooks, loadEpubItems } from '../bookshelf/data';
 
 /** 默认剪藏目录（clipbook 域 clipDir 同默认：articleDirectory 设置可改） */
@@ -41,20 +41,25 @@ export async function checkOrphans(app: App, opts: CheckOpts = {}): Promise<Chec
   const issues: CheckIssue[] = [];
   let scanned = 0;
 
-  // 1) 影视：影视条目海报缺失（frontmatter「海报」路径指向的文件不存在；本地 movie 域口径）
+  // 1) 影院：影视条目海报缺失（frontmatter「海报」路径指向的文件不存在）
   {
-    for (const item of rebuildItems(app)) {
+    const s = tryGetSettings() as any;
+    const folder = (s && s.cinemaFolderPath) || '我的/影视';
+    const files = app.vault.getMarkdownFiles().filter((f: any) => f.path.startsWith(folder + '/'));
+    for (const f of files) {
       if (opts.isCancelled?.()) return null;
+      const item = parseMovieFile(f as any, app);
+      if (!item) continue;
       scanned += 1;
       const poster = (item.poster || '').trim();
       if (poster && !fileExists(app, poster)) {
         issues.push({
           severity: 'warn',
           title: `影视《${item.name}》的海报文件不存在`,
-          detail: `笔记：${item.file.path}\n海报路径：${poster}\n详情页会显示占位图；请补回文件或清空笔记的「海报」字段。`,
+          detail: `笔记：${f.path}\n海报路径：${poster}\n详情页会显示占位图；请补回文件或清空笔记的「海报」字段。`,
         });
       }
-      await opts.tick?.(`影视 · ${item.name}`);
+      await opts.tick?.(`影院 · ${item.name}`);
     }
   }
 

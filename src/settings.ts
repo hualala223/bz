@@ -147,17 +147,11 @@ export default interface BzSettings {
 
   // ===== 🎬 影视（5 项）=====
   /** 📁 影视文件夹 */
-  movieFolderPath: string;
   /** 📄 每页加载数量（列表初始加载及每次滚动加载的条数） */
-  moviePageSize: string;
   /** 🔀 默认排序：date-desc / date-asc / rating-desc / rating-asc / name-asc / name-desc */
-  movieDefaultSort: string;
   /** 🏷️ 默认类型筛选（空=全部；填 ALL_TAGS 中类型名则打开即筛选） */
-  movieDefaultTypeFilter: string;
   /** 📊 默认状态筛选：全部 / 想看 / 在看 / 已看 */
-  movieDefaultStatusFilter: string;
   /** ⭐ 已看卡片评分显示：stars（星星串）/ number（⭐数字） */
-  movieRatingDisplay: string;
 
 
   // ===== 🧠 做题家（4 项，含 shuffleQuestions；设置并入复习计划 tab）=====
@@ -343,7 +337,13 @@ export default interface BzSettings {
   favoritesSortKey: string;
   /** 书库：移动端默认全屏（默认开——原 CSS ≤768 全屏主面板与读书笔记；阅读报告跟随此键） */
   /** 影视：移动端默认全屏（默认开——主面板/影视分析/影视报告同控，原 JS 内联强制全屏） */
-  movieMobileDefaultFullscreen: boolean;
+  // ===== 🎬 影院（cinema 域；上游 ADR-0087 起接管旧影视域）=====
+  cinemaFolderPath: string;
+  cinemaSortMode: string;
+  cinemaStatusFilter: string;
+  cinemaGridColumns: string;
+  cinemaStyle: string;
+  cinemaMobileDefaultFullscreen: boolean;
   /** 番茄钟：移动端默认全屏（默认关——原移动端 320px 居中卡） */
   pomodoroMobileDefaultFullscreen: boolean;
   /** 保险箱：移动端默认全屏（默认开——原 JS 内联强制全屏） */
@@ -523,13 +523,12 @@ export const DEFAULT_SETTINGS: BzSettings = {
   showThinks: true,
   showReview: true,
 
-  // 影视
-  movieFolderPath: '我的/影视',
-  moviePageSize: '20',
-  movieDefaultSort: 'date-desc',
-  movieDefaultTypeFilter: '',
-  movieDefaultStatusFilter: '全部',
-  movieRatingDisplay: 'stars',
+  // 影院（cinema；上游 ADR-0087 起接管影视；缺省回落默认目录，旧 movieFolderPath 键已退役）
+  cinemaFolderPath: '我的/影视',
+  cinemaSortMode: 'date',
+  cinemaStatusFilter: '',
+  cinemaGridColumns: '5',
+  cinemaStyle: 'midnight',
 
 
   // 做题家（设置并入复习计划 tab）
@@ -629,7 +628,7 @@ export const DEFAULT_SETTINGS: BzSettings = {
   passwordMobileDefaultFullscreen: true,
   favoritesMobileDefaultFullscreen: true,
   favoritesSortKey: 'created',
-  movieMobileDefaultFullscreen: true,
+  cinemaMobileDefaultFullscreen: true,
   pomodoroMobileDefaultFullscreen: false,
   encryptMobileDefaultFullscreen: true,
   literatureMobileDefaultFullscreen: false,

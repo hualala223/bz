@@ -30,9 +30,8 @@ import { openFavoritesPanel, addFavoriteItem, unloadFavorites } from './favorite
 import { openBookshelf, openBookshelfReport, unloadBookshelf } from './bookshelf';
 // 阅读数据分析报告（读书报告内嵌化 ADR-0091：独立弹窗退役，报告为书架墙面板内视图）
 import { unloadReadingReport } from './reading-report';
-import { openMovieManager, addMovieItem, unloadMovie } from './movie';
-// 影视分析报告（独立域，ADR-0048）
-import { openMovieReport, unloadMovieReport } from './movie-report';
+// 影院（cinema 域，上游 ADR-0087 起接管影视；旧 movie 域已退役。ADR-0090：报告窗并入影院内嵌分析页）
+import { openCinema, addCinemaItem, openCinemaAnalysis, unloadCinema } from './cinema';
 // 复习（ticket 168 单一入口：仅「复习（按数量）」命令；ticket 169 加回「加入复习计划」；ensureReview/unloadReview 为常驻监控与卸载所需）
 import { reviewCountStart, reviewAddCurrent, reviewAddCurrentWithLinks, openReviewReport, ensureReview, unloadReview } from './review';
 // 第二大脑（ticket 103 起原闪念正名接管，ADR-0051——flash 域已删除）
@@ -108,11 +107,11 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-bookshelf-open', name: '书库', icon: 'book-open', callback: () => openBookshelf(getApp()) },
   // 阅读分析报告（上游 ADR-0091 内嵌化：与书架墙面板内报告视图同一去向）
   { id: 'bz-reading-report-open', name: '阅读分析报告', icon: 'bar-chart-3', callback: () => openBookshelfReport(getApp()) },
-  // 影视
-  { id: 'bz-movie-open', name: '影视', icon: 'film', callback: () => openMovieManager(getApp()) },
-  { id: 'bz-movie-add', name: '加影视', icon: 'clapperboard', callback: () => addMovieItem(getApp()) },
-  // 影视分析报告（独立域，ADR-0048；f7 解冻：去 clapperboard 重复 → pie-chart，id/名称契约不动）
-  { id: 'bz-movie-report', name: '影视分析报告', icon: 'pie-chart', callback: () => openMovieReport(getApp()) },
+  // 影视分析报告（上游 ADR-0090 内嵌化：独立报告窗退役，命令直达影院面板分析页）
+  { id: 'bz-cinema-analysis', name: '影视分析报告', icon: 'pie-chart', callback: () => openCinemaAnalysis(getApp()) },
+  // 影院（cinema 域，上游 ADR-0087）
+  { id: 'bz-cinema-open', name: '影院', icon: 'clapperboard', callback: () => openCinema(getApp()) },
+  { id: 'bz-cinema-add', name: '加影视', icon: 'plus-circle', callback: () => addCinemaItem(getApp()) },
   // 复习（ticket 168 单一入口：仅保留「复习（按数量）」；ticket 169 加回「加入复习计划」、ticket 170 加「批量加入」，editorCallback 进文档右键待选）
   { id: 'bz-review-count', name: '复习（按数量）', icon: 'list', callback: () => reviewCountStart(getApp()) },
   {
@@ -319,8 +318,7 @@ export default class BzPlugin extends Plugin {
     unloadBelongings();
     unloadFavorites();
     unloadReview();
-    unloadMovie();
-    unloadMovieReport();
+    unloadCinema();
     unloadBookshelf();
     unloadReadingReport();
     unloadNewsReader();

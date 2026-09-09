@@ -1,6 +1,6 @@
 # AGENTS.md — 包仔（bz）Obsidian 插件
 
-独立 Obsidian 插件，25 功能域（详见领域清单；2026-09 自上游线 yeshimei/bz 并入 home/recap/checkup/diary-wall/settings-panel 五域，memo 域由 todo 待办域换血接替，见 PROGRESS）。数据沿用既有格式（`CONFIG/STORAGE/*.json`、`我的/*.md`、frontmatter），旧数据直接可读。**项目语言：中文**。
+独立 Obsidian 插件，25 功能域（详见领域清单；2026-09 自上游线 yeshimei/bz 并入 home/recap/checkup/diary-wall/settings-panel 五域，memo 域由 todo 待办域换血接替、movie 域由 cinema 影院域换血接替，见 PROGRESS）。数据沿用既有格式（`CONFIG/STORAGE/*.json`、`我的/*.md`、frontmatter），旧数据直接可读。**项目语言：中文**。
 
 ## 交互约定
 
@@ -57,7 +57,7 @@
 | favorites | favorites.json |
 | bookshelf（书架墙，上游换血接替 library） | `书库/*.md`、EPUB（weave-data.json）、读书报告内嵌面板（ADR-0091） |
 | reading-report | metadataCache 统计 |
-| movie | `我的/影视/*.md` |
+| cinema（影院，上游换血接替 movie，ADR-0087） | `我的/影视/*.md`（AI 分析页内嵌，ADR-0090） |
 | review | review.json |
 | quiz | quiz.json |
 | secondbrain（第二大脑） | secondbrain.json（meta/panel/link 三段）+ secondbrain.vec |

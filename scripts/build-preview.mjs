@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-export const PREVIEW_DOMAINS = ["belongings", "favorites", "home", "settings-panel"]; // 本地口径：bookshelf/cinema 为上游线域，未并入（ticket 上游合并裁剪）
+export const PREVIEW_DOMAINS = ["belongings", "bookshelf", "cinema", "favorites", "home", "settings-panel"]; // 本地口径：bookshelf/cinema 为上游线域，未并入（ticket 上游合并裁剪）
 
 export async function buildPreview(domains = PREVIEW_DOMAINS) {
   for (const d of domains) {

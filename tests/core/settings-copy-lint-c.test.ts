@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { lintTargets } from './settings-copy-lint-engine';
-import { movieSettingsSchema } from '../../src/movie/ui';
+import { cinemaSettingsSchema } from '../../src/cinema/settings';
 import { reviewSettingsSchema } from '../../src/review/ui';
 import { pomodoroSettingsSchema } from '../../src/pomodoro/ui';
 import { encryptSettingsSchema } from '../../src/encrypt/ui';
@@ -24,7 +24,7 @@ const WHITELIST = new Set<string>([
 ]);
 
 const TARGETS = [
-  { source: 'movie', schema: movieSettingsSchema() },
+  { source: 'cinema', schema: cinemaSettingsSchema() },
   { source: 'review', schema: reviewSettingsSchema({ app: {} as any, dataManager: {} as any }) },
   { source: 'pomodoro', schema: pomodoroSettingsSchema() },
   { source: 'encrypt', schema: encryptSettingsSchema() },

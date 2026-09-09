@@ -87,7 +87,7 @@ describe('home 活动河 UI（issue 232）', () => {
     await new Promise((r) => setTimeout(r, 20));
     (document.querySelector('[data-home-go="cinema"]') as HTMLElement).click();
     await new Promise((r) => setTimeout(r, 0));
-    expect(app.__executed).toEqual(['bz-movie-open']);
+    expect(app.__executed).toEqual(['bz-cinema-open']);
     expect(document.querySelector('.bz-home-overlay')).toBeNull();
     expect(H.river).toBeNull(); // 关闭清采集态
   });

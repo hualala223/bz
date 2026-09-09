@@ -64,13 +64,11 @@ const WHITELIST: Array<{ file: RegExp; reason: string; /** 防回归哨兵：预
     reason: '剪藏 md 用户文档写（归档/网页剪藏/*.md，建条/另存为笔记）；news.json 数据写已 D2 收编',
   },
   {
-    // 本地口径：上游 cinema/ui.ts 对应本地 movie/ui.ts
-    file: /^src\/movie\/ui\.ts$/,
+    file: /^src\/cinema\/ui\.ts$/,
     reason: '影视笔记 md 用户文档写（建《片名》.md + fileManager.processFrontMatter 写 frontmatter，Obsidian 内建语义）',
   },
   {
-    // 本地口径：上游 cinema/recommend.ts 对应本地 movie/recommend.ts
-    file: /^src\/movie\/recommend\.ts$/,
+    file: /^src\/cinema\/recommend\.ts$/,
     reason: '影视笔记 md 用户文档写（AI 推荐一键想看建条，含防重名前置拦截）',
   },
   {
@@ -144,7 +142,7 @@ describe('D3 直写守门引擎自检（白名单命中/未命中）', () => {
   });
 
   it('命中白名单：同一内容落在白名单文件 → 扫描器报命中、清单可豁免', () => {
-    const hits = scanOne('src/movie/ui.ts', 'await app.vault.create(filePath, content);');
+    const hits = scanOne('src/cinema/ui.ts', 'await app.vault.create(filePath, content);');
     expect(hits).toHaveLength(1);
     expect(WHITELIST.some((w) => w.file.test(hits[0].path))).toBe(true);
   });

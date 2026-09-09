@@ -173,6 +173,9 @@ _Avoid_: 错题本（无独立收藏视图）
 
 **获取模型名 (Fetch Models)**: 上游线 P5 移植（AI 设置组尾按钮，ticket 173）——按当前 AI 服务商拉取 OpenAI 兼容 `/models` 列表弹选择器回填该服务商模型行；`core/ai-models.ts`（本地五家静态端点表，与 getAIProvider 逐字对齐）+ `core/settings-model-picker.ts`。上游的 per-provider 覆盖 registry（issue 170/171）未并入。
 
+**影院 (Cinema)**: 上游线 C4 裁决整体换血的新域（ADR-0087/0090/0103）——原影视（movie）域与影视分析报告（movie-report）域退役删除，cinema 接管 `我的/影视/*.md`（评分推断状态语义同源，零迁移）。书脊化风格框架（ADR-0103 三风格，默认午夜场）、分类头排序、AI 页（`bz-cinema-analysis` 影视分析报告内嵌面板分析页，ADR-0090）、AI 推荐一键想看（recommend）、海报监听（poster-watch）。设置键 `cinemaFolderPath/cinemaSortMode/cinemaStatusFilter/cinemaGridColumns/cinemaStyle/cinemaMobileDefaultFullscreen`；`movieDirectory`（日记侧归类）保留独立。命令 `bz-cinema-open`/`bz-cinema-add`/`bz-cinema-analysis`。仍向 smartcat 派发 'movie' 通道事件（行为感知兼容）。
+_Avoid_: 影视面板（指旧 movie 网格，已退役）
+
 **待办 (Todo)**: 上游线 C2 裁决整体换血的新域（ADR-0092）——原备忘录（memo）域退役删除，todo 为 `memo.json` **唯一属主**（UI/交互/写盘/引用同步/被动捕获全归本域；数据与字段同源零迁移）。UI 为「场景工作台」：左场景栏（全部/今日/重要+自定义场景）+ 条目列表 + 搜索排序 + 面板拖拽缩放（尺寸记忆）+ 皮肤系统（`todoSkin`）。命令 `bz-todo-open`/`bz-todo-add`；ribbon「待办」。被动捕获：启动自动弹出/打开笔记提醒（`autoPopupOnStart`/`openNoteReminder` 与旧 memo 共键）。引用同步 `todo/file-sync.ts` 只管 memo.json（收藏本同步仍走 favorites 域本地保留）。设置键：`todoPanelWidth/Height`（尺寸记忆）、`todoSkin`、`todoMobileDefaultFullscreen`（默认关）+ 原 memo 场景/默认值键沿用。
 _Avoid_: 备忘录（域已退役；历史文档中「备忘录面板/加备忘」均指本域旧形态）
 

@@ -100,8 +100,7 @@ var BZR_home = (() => {
   };
   var DOMAINS = [
     { id: "diary", commandId: "bz-diary-open", name: "日记本", sub: "写今天的闪念", icon: iconOf("diary") },
-    // 本地口径：影视/剪藏/书库走既有域命令（cinema/clipbook/bookshelf 为上游线命名，内部 id 保持稳定以兼容 home.json 钉选）
-    { id: "cinema", commandId: "bz-movie-open", name: "影视", sub: "影视想看与在看", icon: iconOf("cinema") },
+    { id: "cinema", commandId: "bz-cinema-open", name: "影院", sub: "影视想看与在看", icon: iconOf("cinema") },
     { id: "review", commandId: "bz-review-open", name: "复习计划", sub: "到期卡片队列", icon: iconOf("review") },
     { id: "pomodoro", commandId: "bz-pomodoro-open", name: "番茄钟", sub: "专注计时", icon: iconOf("pomodoro") },
     { id: "favorites", commandId: "bz-favorites-open", name: "收藏本", sub: "收藏条目", icon: iconOf("favorites") },

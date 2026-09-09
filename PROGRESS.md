@@ -419,3 +419,16 @@
 - [x] 根因：换血合并只换了域条目，样式聚合清单（build-css SOURCES）缺上游新增的 `core/ui/tokens.css` + `core/ui/components.css` 两层——书架墙/待办/快速取密等全部新 UI 的壳与控件样式基座
 - [x] 修复：SOURCES 补两项（styles.css 275→360KB，.bz-panel-overlay/.bz-input/.bz-bs-wall 全部就位）；真实 Obsidian 重载验证书脊墙正常弹出（23 本全馆藏书统计/分类/搜索排序/书脊均正常）
 - [x] 波及面排查：待办面板（todo）、快速取密（pw-picker）同样依赖组件库样式——本次修复一并恢复
+
+## 上游线 C4 裁决落地 — cinema 影院域整体换血，movie + movie-report 域退役（ADR-0087/0090）
+
+**状态：已交付**（2026-09-09，用户裁决：C4/C5/C6 直接完整替换）
+
+- [x] 数据同源验证：评分推断状态语义（-1/0/其他）与字段（观影日期/评分/海报/影评）逐字一致，零迁移
+- [x] 换血：src/cinema（18 文件：书脊化风格框架/analysis AI 页/recommend AI 推荐/poster-watch/layouts 布局层）+ tests/cinema（6）并入；src/movie + src/movie-report + tests/movie + tests/movie-report 退役删除
+- [x] main.ts：命令 bz-movie-open/add/report → bz-cinema-open/bz-cinema-add/bz-cinema-analysis（ADR-0090 报告内嵌影院分析页）；onunload unloadCinema
+- [x] settings.ts：删 movieFolderPath/PageSize/DefaultSort/DefaultTypeFilter/DefaultStatusFilter/RatingDisplay/MobileDefaultFullscreen；加 cinemaFolderPath('我的/影视')/cinemaSortMode('date')/cinemaStatusFilter/cinemaGridColumns('5')/cinemaStyle('midnight')/cinemaMobileDefaultFullscreen；movieDirectory（日记侧）保留
+- [x] 消费点回接上游：home/river+weekly、recap/aggregate、checkup/orphans 影视读取改回 cinema/data parseMovieFile + cinema/constants（含 getStarString）；path-classify 恢复 cinemaFolderPath+'cinema' 标签
+- [x] settings-panel/home 磁贴/build-css/d3 白名单/render-purity 预览域（6 域）/lint-c/main-lifecycle/mobile/smoke 全部同步
+- [x] smartcat 行为感知兼容：cinema 沿用 'movie' 通道派发；movie-source 直读数据不变
+- [x] 门禁：tsc 0 错 + 全量 4198 测试绿 + 构建部署

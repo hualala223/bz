@@ -79,7 +79,7 @@ const schemaLoaders: Record<string, () => Promise<SettingsSchema>> = {
   favorites: async () => (await import('../favorites/ui')).favoritesSettingsSchema(),
   password: async () => (await import('../password/ui')).passwordSettingsSchema(),
   bookshelf: async () => (await import('../bookshelf/settings')).bookshelfSettingsSchema(),
-  movie: async () => (await import('../movie/ui')).movieSettingsSchema(),
+  cinema: async () => (await import('../cinema/settings')).cinemaSettingsSchema(),
   review: async () => {
     const { reviewApp } = await import('../review/app');
     const { reviewSettingsSchema } = await import('../review/ui');
@@ -133,7 +133,7 @@ export const DOMAINS: DomainDef[] = [
   { id: 'favorites', name: '收藏本', icon: DOMAIN_ICONS.favorites, desc: '收藏条目', schemaLoader: schemaLoaders.favorites },
   { id: 'reading-report', name: '阅读报告', icon: DOMAIN_ICONS['reading-report'], desc: '阅读统计', noSettings: true },
 
-  { id: 'movie', name: '影视', icon: 'film', desc: '影视目录与海报', schemaLoader: schemaLoaders.movie },
+  { id: 'cinema', name: '影院', icon: DOMAIN_ICONS.cinema, desc: '影视目录与海报', schemaLoader: schemaLoaders.cinema },
   { id: 'bookshelf', name: '书库', icon: 'book-open', desc: '藏书与读书笔记', schemaLoader: schemaLoaders.bookshelf },
   { id: 'review', name: '复习计划', icon: DOMAIN_ICONS.review, desc: '间隔重复与做题', schemaLoader: schemaLoaders.review },
   { id: 'quiz', name: '做题家', icon: 'graduation-cap', desc: '复习出题与做题', noSettings: true },
@@ -154,7 +154,7 @@ export const DOMAINS: DomainDef[] = [
 export const NAV_SECS: Array<{ title: string; ids: string[] }> = [
   { title: '基础', ids: ['global', 'appearance', 'ai'] },
   { title: '记录', ids: ['diary', 'diary-wall', 'todo', 'belongings', 'clipping', 'favorites'] },
-  { title: '媒体与知识', ids: ['movie', 'bookshelf', 'review', 'secondbrain', 'literature'] },
+  { title: '媒体与知识', ids: ['cinema', 'bookshelf', 'review', 'secondbrain', 'literature'] },
   { title: '工具', ids: ['pomodoro', 'password', 'encrypt', 'smartcat'] },
 ];
 
