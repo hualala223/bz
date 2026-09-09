@@ -173,6 +173,9 @@ _Avoid_: 错题本（无独立收藏视图）
 
 **获取模型名 (Fetch Models)**: 上游线 P5 移植（AI 设置组尾按钮，ticket 173）——按当前 AI 服务商拉取 OpenAI 兼容 `/models` 列表弹选择器回填该服务商模型行；`core/ai-models.ts`（本地五家静态端点表，与 getAIProvider 逐字对齐）+ `core/settings-model-picker.ts`。上游的 per-provider 覆盖 registry（issue 170/171）未并入。
 
+**剪藏本 (Clipbook)**: 上游线 C5 裁决整体换血的融合域（ADR-0082/0086，issue 177）——原聚合讯（news）与剪藏（clipping）两域退役删除，clipbook 一体化承担：未读流（news.json 四段双写者，磁盘为基底各自保留非本域段）+ 剪藏笔记工作台 + `clipbook.json` 侧写（articleOverrides/savedArchive/order）。阅读右栏编辑部排版、保存为正式剪藏流水线、B 站源设置组（news-sources-group）、写队列（write-queue）。命令 `bz-clipbook-open`（替代旧 `bz-news-open`/`bz-clipping-open`）。设置键 `clipbookMobileDefaultFullscreen/clipbookReaderFontSize/clipbookPanelWidth/Height/clipbookMidWidth` + `newsRetentionUnsavedDays`（原 Saved/Skipped 两键合一）。auto-summary 域保留并随上游对接 clipbook。
+_Avoid_: 聚合讯面板（指旧 news 阅读器，已退役）
+
 **影院 (Cinema)**: 上游线 C4 裁决整体换血的新域（ADR-0087/0090/0103）——原影视（movie）域与影视分析报告（movie-report）域退役删除，cinema 接管 `我的/影视/*.md`（评分推断状态语义同源，零迁移）。书脊化风格框架（ADR-0103 三风格，默认午夜场）、分类头排序、AI 页（`bz-cinema-analysis` 影视分析报告内嵌面板分析页，ADR-0090）、AI 推荐一键想看（recommend）、海报监听（poster-watch）。设置键 `cinemaFolderPath/cinemaSortMode/cinemaStatusFilter/cinemaGridColumns/cinemaStyle/cinemaMobileDefaultFullscreen`；`movieDirectory`（日记侧归类）保留独立。命令 `bz-cinema-open`/`bz-cinema-add`/`bz-cinema-analysis`。仍向 smartcat 派发 'movie' 通道事件（行为感知兼容）。
 _Avoid_: 影视面板（指旧 movie 网格，已退役）
 

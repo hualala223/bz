@@ -105,9 +105,8 @@ export default interface BzSettings {
   /** ⏱️ 自动摘要时机：immediate（保存后立刻，create+file-open 双监听）/ lazy（仅打开文件时补全）——ticket 124 详设 */
   autoSummaryTiming: string;
   /** 🗑️ 聚合讯保留策略：已保存骨架（state=saved，正文已清空）保留天数——ticket 124 数据源组 */
-  newsRetentionSavedDays: string;
   /** 🗑️ 聚合讯保留策略：已跳过骨架（state=skipped）保留天数——ticket 124 数据源组 */
-  newsRetentionSkippedDays: string;
+  newsRetentionUnsavedDays: string;
 
   // ===== 🔐 密码本（4 项）=====
   /** 📂 数据存储路径——ADR-0009 废弃，统一走 storagePath，仅兼容保留 */
@@ -325,7 +324,12 @@ export default interface BzSettings {
   /** 归物本：移动端默认全屏（默认开——原 JS 内联强制全屏） */
   belongingsMobileDefaultFullscreen: boolean;
   /** 剪藏本：移动端默认全屏（默认开——原 CSS !important 强制全屏；聚合讯跟随此键） */
-  clippingMobileDefaultFullscreen: boolean;
+  // ===== 📚 剪藏本（clipbook 融合域，上游 ADR-0082；与旧 clipping/news 并存）=====
+  clipbookMobileDefaultFullscreen: boolean;
+  clipbookReaderFontSize: string;
+  clipbookPanelWidth: number;
+  clipbookPanelHeight: number;
+  clipbookMidWidth: number;
   /** 密码本：移动端默认全屏（默认开——原 JS 内联强制全屏） */
   passwordMobileDefaultFullscreen: boolean;
   /** 收藏本：移动端默认全屏（默认开——原 JS 内联强制全屏） */
@@ -496,8 +500,7 @@ export const DEFAULT_SETTINGS: BzSettings = {
   autoSummaryTagsEnabled: true,
   autoSummaryTagCount: '3-6',
   autoSummaryTiming: 'immediate',
-  newsRetentionSavedDays: '3',
-  newsRetentionSkippedDays: '7',
+  newsRetentionUnsavedDays: '7',
 
   // 密码本
   pwStoragePath: 'CONFIG/STORAGE',
@@ -624,7 +627,12 @@ export const DEFAULT_SETTINGS: BzSettings = {
   todoSkin: 'paper',
   todoMobileDefaultFullscreen: false,
   belongingsMobileDefaultFullscreen: true,
-  clippingMobileDefaultFullscreen: true,
+  // clipbook（上游 ADR-0082）：移动端默认全屏对齐 clipping 默认开
+  clipbookMobileDefaultFullscreen: true,
+  clipbookReaderFontSize: 'medium',
+  clipbookPanelWidth: 0,
+  clipbookPanelHeight: 0,
+  clipbookMidWidth: 0,
   passwordMobileDefaultFullscreen: true,
   favoritesMobileDefaultFullscreen: true,
   favoritesSortKey: 'created',

@@ -31,13 +31,9 @@ vi.mock('../../src/bookshelf', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   unloadBookshelf: vi.fn(),
 }));
-vi.mock('../../src/news', async (importOriginal) => ({
+vi.mock('../../src/clipbook', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  unloadNewsReader: vi.fn(),
-}));
-vi.mock('../../src/clipping', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  unloadArticleView: vi.fn(),
+  unloadClipbook: vi.fn(),
 }));
 vi.mock('../../src/auto-summary', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -57,8 +53,7 @@ import { unloadFavorites } from '../../src/favorites';
 import { unloadReview } from '../../src/review';
 import { unloadCinema } from '../../src/cinema';
 import { unloadBookshelf } from '../../src/bookshelf';
-import { unloadNewsReader } from '../../src/news';
-import { unloadArticleView } from '../../src/clipping';
+import { unloadClipbook } from '../../src/clipbook';
 import { unloadAutoSummary } from '../../src/auto-summary';
 
 const removedCommands: string[] = [];
@@ -109,8 +104,7 @@ function clearSpies(): void {
     unloadReview,
     unloadCinema,
     unloadBookshelf,
-    unloadNewsReader,
-    unloadArticleView,
+    unloadClipbook,
     unloadAutoSummary,
   ].forEach((fn) => vi.mocked(fn).mockClear());
 }
@@ -136,8 +130,7 @@ describe('onunload 卸载接线补全（fix(main)）', () => {
     expect(unloadReview).toHaveBeenCalledTimes(1);
     expect(unloadCinema).toHaveBeenCalledTimes(1);
     expect(unloadBookshelf).toHaveBeenCalledTimes(1);
-    expect(unloadNewsReader).toHaveBeenCalledTimes(1);
-    expect(unloadArticleView).toHaveBeenCalledTimes(1);
+    expect(unloadClipbook).toHaveBeenCalledTimes(1);
     expect(unloadAutoSummary).toHaveBeenCalledTimes(1);
 
     // 卸载接线不影响既有清理：裸注册命令仍全量移除

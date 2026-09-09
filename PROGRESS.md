@@ -432,3 +432,15 @@
 - [x] settings-panel/home 磁贴/build-css/d3 白名单/render-purity 预览域（6 域）/lint-c/main-lifecycle/mobile/smoke 全部同步
 - [x] smartcat 行为感知兼容：cinema 沿用 'movie' 通道派发；movie-source 直读数据不变
 - [x] 门禁：tsc 0 错 + 全量 4198 测试绿 + 构建部署
+
+## 上游线 C5 裁决落地 — clipbook 剪藏本融合域整体换血，news + clipping 域退役（ADR-0082/0086）
+
+**状态：已交付**（2026-09-09，用户裁决：C4/C5/C6 直接完整替换）
+
+- [x] 数据契约：news.json 四段「磁盘为基底、双写者各自保留非本域段」；clipbook.json 新增侧写；剪藏 md 不动——零迁移
+- [x] 换血：src/clipbook（17 文件：未读流+剪藏一体化工作台/保存流水线/B 站源组/write-queue/news-data）+ tests/clipbook（11）并入；src/news + src/clipping + tests/news + tests/clipping 退役删除
+- [x] auto-summary 随上游对接 clipbook（3 src + 3 测试恢复上游版）
+- [x] main.ts：命令 bz-clipping-open/bz-news-open → bz-clipbook-open；onunload unloadClipbook
+- [x] settings.ts：删 clippingMobileDefaultFullscreen/newsRetentionSavedDays+SkippedDays；加 clipbookMobileDefaultFullscreen/ReaderFontSize/PanelWidth/Height/MidWidth/newsRetentionUnsavedDays；articleDirectory 保留
+- [x] settings-panel/home 磁贴/build-css/d3 白名单（news/reader → clipbook/save+ui）/lint-b（恢复上游 clipbook+up-manager 目标）/mobile（clipping 键退役，9 键）/smoke 同步
+- [x] 门禁：tsc 0 错 + 全量 4191 测试绿 + 构建部署

@@ -44,7 +44,7 @@ export const DOMAINS: HomeDomain[] = [
   { id: 'review', commandId: 'bz-review-open', name: '复习计划', sub: '到期卡片队列', icon: iconOf('review') },
   { id: 'pomodoro', commandId: 'bz-pomodoro-open', name: '番茄钟', sub: '专注计时', icon: iconOf('pomodoro') },
   { id: 'favorites', commandId: 'bz-favorites-open', name: '收藏本', sub: '收藏条目', icon: iconOf('favorites') },
-  { id: 'clipping', commandId: 'bz-clipping-open', name: '剪藏本', sub: '未读流与剪藏', icon: iconOf('clipping') },
+  { id: 'clipping', commandId: 'bz-clipbook-open', name: '剪藏本', sub: '未读流与剪藏', icon: iconOf('clipping') },
   // 文献盒（literature 域，ADR-0072）：文献笔记列表 + 视频/术语录入（补内容域曝光位）
   { id: 'literature', commandId: 'bz-literature-open', name: '文献盒', sub: '文献笔记与录入', icon: iconOf('literature') },
   // 书库（bookshelf 域换血接替 library；内部 id 保持兼容 home.json 钉选）

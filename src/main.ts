@@ -22,8 +22,8 @@ import BzSettings, { DEFAULT_SETTINGS, migrateSecondBrainSettings } from './sett
 // 待办（todo 域，上游 ADR-0092：memo.json 唯一属主——UI/交互/写盘/引用同步/被动捕获全归本域）
 import { openTodoPanel, addTodoItem, unloadTodo, ensureTodoReminders, ensureFileSync, unloadFileSync } from './todo';
 import { addBelongingsItem, openBelongings, unloadBelongings } from './belongings';
-import { openArticleView, unloadArticleView } from './clipping';
-import { openNewsReader, unloadNewsReader } from './news';
+// 剪藏本融合域（clipbook，上游 ADR-0082/issue 177）：聚合讯未读流 + 剪藏笔记一体化工作台
+import { openClipbook, unloadClipbook } from './clipbook';
 import { openPasswordManager, addPasswordEntry, generatePassword, quickCopyPassword, unloadPassword } from './password';
 import { openFavoritesPanel, addFavoriteItem, unloadFavorites } from './favorites';
 // 书架墙（bookshelf 域，上游并存式新域终局换血：数据同源，旧 library 退役）
@@ -92,10 +92,8 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   // 归物本
   { id: 'bz-belongings-add', name: '加物品', icon: 'archive', callback: () => addBelongingsItem(getApp()) },
   { id: 'bz-belongings-open', name: '归物本', icon: 'package', callback: () => openBelongings(getApp()) },
-  // 剪藏本
-  { id: 'bz-clipping-open', name: '剪藏本', icon: 'scissors', callback: () => openArticleView(getApp()) },
-  // 聚合讯
-  { id: 'bz-news-open', name: '聚合讯', icon: 'rss', callback: () => openNewsReader(getApp()) },
+  // 剪藏本（clipbook 融合域，上游 ADR-0082：聚合讯未读流 + 剪藏笔记一体化工作台）
+  { id: 'bz-clipbook-open', name: '剪藏本', icon: 'scissors', callback: () => openClipbook(getApp()) },
   // 密码本
   { id: 'bz-pw-open', name: '密码本', icon: 'key', callback: () => openPasswordManager(getApp()) },
   { id: 'bz-pw-add', name: '加密码', icon: 'key-round', callback: () => addPasswordEntry(getApp()) },
@@ -321,8 +319,7 @@ export default class BzPlugin extends Plugin {
     unloadCinema();
     unloadBookshelf();
     unloadReadingReport();
-    unloadNewsReader();
-    unloadArticleView();
+    unloadClipbook();
     unloadAutoSummary();
     // 文献盒（ADR-0072 迁出：面板 DOM + 模块单例复位）
     unloadLiterature();

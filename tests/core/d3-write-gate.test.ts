@@ -59,9 +59,12 @@ const WHITELIST: Array<{ file: RegExp; reason: string; /** 防回归哨兵：预
     reason: '日记修复工具的 md 结构修复写（旧域冻结区 UI 不投资；修复流自带守卫与用户确认）',
   },
   {
-    // 本地口径：上游 clipbook/save.ts+clipbook/ui.ts 对应本地 news/reader.ts（剪藏归档 md 写）
-    file: /^src\/news\/reader\.ts$/,
-    reason: '剪藏 md 用户文档写（归档/网页剪藏/*.md，建条/另存为笔记）；news.json 数据写已 D2 收编',
+    file: /^src\/clipbook\/save\.ts$/,
+    reason: '剪藏 md 用户文档写（归档/网页剪藏/*.md）；news.json/clipbook.json 数据写已 D2 收编',
+  },
+  {
+    file: /^src\/clipbook\/ui\.ts$/,
+    reason: '剪藏条目「另存为笔记」md 用户文档写（一次性建条，无读改写竞态面）',
   },
   {
     file: /^src\/cinema\/ui\.ts$/,
