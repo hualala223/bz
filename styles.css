@@ -3490,6 +3490,23 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
     border-color: var(--interactive-accent);
 }
 
+/* 写日记弹窗正文输入框：弹窗内直写正文，保存即落盘（不再保存后跳文件编辑） */
+.bz-diary-add-content {
+    width: 100%;
+    min-height: 88px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: inherit;
+    line-height: 1.5;
+    box-sizing: border-box;
+    padding: 8px 12px;
+    margin-bottom: 20px;
+    resize: vertical;
+    background: var(--background-primary);
+    color: var(--text-normal);
+}
+
 /* 移动端优化 */
 @media (max-width: 768px) {
     .add-diary-popup {

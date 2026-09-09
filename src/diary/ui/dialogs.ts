@@ -527,6 +527,17 @@ export function createAddDialog() {
   }
 
 
+  const contentLabel = document.createElement('label');
+  contentLabel.textContent = '内容';
+  contentLabel.style.cssText = 'display:block;margin-bottom:6px;font-size:14px;color:var(--text-muted);font-weight:500;';
+
+  // 正文输入框：弹窗内直写正文，保存即落盘，不再保存后跳进日记文件编辑
+  const contentInput = document.createElement('textarea');
+  contentInput.id = 'add-diary-content';
+  contentInput.className = 'bz-diary-add-content';
+  contentInput.placeholder = '写点什么…（留空则保存后进入编辑）';
+  contentInput.rows = 4;
+
   const buttonsContainer = document.createElement('div');
   buttonsContainer.style.cssText = 'display:flex;gap:12px;justify-content:flex-end;';
 
@@ -541,6 +552,8 @@ export function createAddDialog() {
   popup.appendChild(dateTimePicker);
   popup.appendChild(typeLabel);
   popup.appendChild(typeContainer);
+  popup.appendChild(contentLabel);
+  popup.appendChild(contentInput);
   popup.appendChild(buttonsContainer);
   mask.appendChild(popup);
   document.body.appendChild(mask);
@@ -596,6 +609,12 @@ export function openAddDialog() {
   const datetimeInput = document.getElementById('add-diary-datetime') as HTMLInputElement | null;
   if (datetimeInput) {
     datetimeInput.value = defaultDateTime;
+  }
+
+  // 正文每次打开清空（上一条的正文不应带进下一条）
+  const contentInput = document.getElementById('add-diary-content') as HTMLTextAreaElement | null;
+  if (contentInput) {
+    contentInput.value = '';
   }
 
   topifyZ(mask, popup); // ADR-0067：显示即发号
@@ -658,17 +677,22 @@ export async function saveNewEntry() {
   const dateStr = targetMoment.format('YYYY-MM-DD');
   const timeStr = targetMoment.format('HH:mm');
 
+  // 弹窗正文：非空即随条目直接落盘（保存后不跳文件编辑）
+  const contentInput = document.getElementById('add-diary-content') as HTMLTextAreaElement | null;
+  const content = contentInput ? contentInput.value.trim() : '';
+
   try {
-    const newEntry = await addEntry(dateStr, timeStr, selTagNames, '');
+    const newEntry = await addEntry(dateStr, timeStr, selTagNames, content);
     // 动作埋点：新增保存成功（本期无消费者，emit 即可）
-    emitDomainEvent('diary:entry-added', { date: dateStr, time: timeStr, tags: selTagNames, content: '' });
+    emitDomainEvent('diary:entry-added', { date: dateStr, time: timeStr, tags: selTagNames, content });
     // UX-7：保存成功确认（正文不带 emoji，类型图标即视觉前缀）
     notice('已保存日记', 'success');
     mask.style.display = 'none';
     popup.style.display = 'none';
 
-    // 保存后立即进入编辑（设置项 diaryJumpToEditAfterSave，关=仅关闭弹窗）
-    if (getJumpToEditAfterSaveSetting() && newEntry) {
+    // 保存后立即进入编辑（设置项 diaryJumpToEditAfterSave，关=仅关闭弹窗）；
+    // 弹窗里已写正文时跳转失去意义——正文已落盘，保持不打开日记文件
+    if (getJumpToEditAfterSaveSetting() && newEntry && !content) {
       jumpToEntry(newEntry, 'edit');
     }
 
