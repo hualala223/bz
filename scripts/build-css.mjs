@@ -26,6 +26,8 @@ const PLUGIN_DIR = VAULT_PLUGIN_DIR;
 // 聚合顺序清单（勿随意调整；新增域样式文件时在对应位置插入）
 const SOURCES = [
   "src/core/styles.css",
+  "src/core/ui/tokens.css",
+  "src/core/ui/components.css",
   "src/diary/styles.css",
   "src/launcher/styles.css",
   "src/todo/styles.css",

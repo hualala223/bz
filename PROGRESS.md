@@ -410,3 +410,12 @@
 - [x] 工程同步：build-css SOURCES library→bookshelf；d3-write-gate 白名单回 bookshelf/notes；render-purity PREVIEW_DOMAINS 加回 bookshelf（5 域）
 - [x] 测试同步：smoke（白名单/命令名/默认抽查）、mobile（ON library→bookshelf）、lint-b（目标 library→bookshelf）、settings-panel（域清单）
 - [x] 门禁：tsc 0 错 + 全量 4218 测试绿 + 构建部署
+
+## 缺陷修复 — 样式聚合清单缺 core/ui 两层，书架墙/待办面板不可见
+
+**状态：已交付**（2026-09-09，真实 Obsidian 控制台定位）
+
+- [x] 症状：点击「书库」无反应；DevTools 实测 `.bz-panel-overlay` 计算样式 position=static（壳样式缺失），DOM 已挂载但流式渲染不可见
+- [x] 根因：换血合并只换了域条目，样式聚合清单（build-css SOURCES）缺上游新增的 `core/ui/tokens.css` + `core/ui/components.css` 两层——书架墙/待办/快速取密等全部新 UI 的壳与控件样式基座
+- [x] 修复：SOURCES 补两项（styles.css 275→360KB，.bz-panel-overlay/.bz-input/.bz-bs-wall 全部就位）；真实 Obsidian 重载验证书脊墙正常弹出（23 本全馆藏书统计/分类/搜索排序/书脊均正常）
+- [x] 波及面排查：待办面板（todo）、快速取密（pw-picker）同样依赖组件库样式——本次修复一并恢复
