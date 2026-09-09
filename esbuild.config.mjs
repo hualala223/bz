@@ -3,6 +3,7 @@ import process from "process";
 import fs from "fs";
 import path from "path";
 import { buildStyles, watchStyles } from "./scripts/build-css.mjs";
+import { buildPreview } from "./scripts/build-preview.mjs";
 import { VAULT_PLUGIN_DIR } from "./scripts/vault-dir.mjs";
 
 const prod = process.argv[2] === "production";
@@ -38,6 +39,7 @@ function copyStatic() {
 
 if (prod) {
   await context.rebuild();
+  await buildPreview(); // ADR-0104：域渲染纯层 → prototype-render.js（评审壳预览包，提交入 git）
   buildStyles(); // 铁律 9：聚合 src/**/styles.css → 根 styles.css（并同步插件目录）
   copyStatic();
   // 发布版：main.js 由 vault 产物复制到仓库根目录（styles.css 已被 buildStyles 写到根目录）

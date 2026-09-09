@@ -85,6 +85,7 @@ var BZR_home = (() => {
     pomodoro: "timer",
     attach: "folder-down",
     encrypt: "lock",
+    password: "key-round",
     smartcat: "cat",
     literature: "list-video",
     // 命令专属域
@@ -99,19 +100,22 @@ var BZR_home = (() => {
   };
   var DOMAINS = [
     { id: "diary", commandId: "bz-diary-open", name: "日记本", sub: "写今天的闪念", icon: iconOf("diary") },
-    { id: "cinema", commandId: "bz-cinema-open", name: "影院", sub: "影视想看与在看", icon: iconOf("cinema") },
+    // 本地口径：影视/剪藏/书库走既有域命令（cinema/clipbook/bookshelf 为上游线命名，内部 id 保持稳定以兼容 home.json 钉选）
+    { id: "cinema", commandId: "bz-movie-open", name: "影视", sub: "影视想看与在看", icon: iconOf("cinema") },
     { id: "review", commandId: "bz-review-open", name: "复习计划", sub: "到期卡片队列", icon: iconOf("review") },
     { id: "pomodoro", commandId: "bz-pomodoro-open", name: "番茄钟", sub: "专注计时", icon: iconOf("pomodoro") },
     { id: "favorites", commandId: "bz-favorites-open", name: "收藏本", sub: "收藏条目", icon: iconOf("favorites") },
-    { id: "clipping", commandId: "bz-clipbook-open", name: "剪藏本", sub: "未读流与剪藏", icon: iconOf("clipping") },
+    { id: "clipping", commandId: "bz-clipping-open", name: "剪藏本", sub: "未读流与剪藏", icon: iconOf("clipping") },
     // 文献盒（literature 域，ADR-0072）：文献笔记列表 + 视频/术语录入（补内容域曝光位）
     { id: "literature", commandId: "bz-literature-open", name: "文献盒", sub: "文献笔记与录入", icon: iconOf("literature") },
-    // 旧书库（library）域退役：本卡由书架墙（bookshelf）承接（id 变更后旧 home.json 里钉选的 library 自动失效，可在编辑模式重钉）
-    { id: "bookshelf", commandId: "bz-bookshelf-open", name: "书库", sub: "藏书与读书笔记", icon: iconOf("bookshelf") },
+    // 书库（library 域）：藏书与读书笔记入口
+    { id: "bookshelf", commandId: "bz-library-open", name: "书库", sub: "藏书与读书笔记", icon: iconOf("bookshelf") },
     { id: "wall", commandId: "bz-diary-wall-open", name: "回忆墙", sub: "相片墙浏览日记", icon: iconOf("wall") },
     { id: "belongings", commandId: "bz-belongings-open", name: "归物本", sub: "物品登记", icon: iconOf("belongings") },
     { id: "attach", commandId: "bz-attach-move", name: "移动附件", sub: "附件归位", icon: iconOf("attach") },
-    { id: "encrypt", commandId: "bz-encrypt-open", name: "保险库", sub: "密码·加密笔记·日记", icon: iconOf("encrypt") },
+    // 本地口径：保险库未合并（ADR-0085 为上游线决策），保险箱与密码本仍为两域
+    { id: "encrypt", commandId: "bz-encrypt-open", name: "保险箱", sub: "加密笔记与日记", icon: iconOf("encrypt") },
+    { id: "password", commandId: "bz-pw-open", name: "密码本", sub: "密码条目与生成", icon: iconOf("password") },
     { id: "settings", commandId: "bz-settings-panel-open", name: "设置", sub: "全域设置", icon: iconOf("settings") }
   ];
   var DOMAIN_MAP = new Map(DOMAINS.map((d) => [d.id, d]));

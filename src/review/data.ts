@@ -3,7 +3,7 @@
  * review.json：CONFIG/STORAGE/review.json，jsonStore 读写。
  */
 import type { App, TFile } from 'obsidian';
-import { jsonFileStore, storageFile } from '../core/storage';
+import { enqueueFileTask, jsonFileStore, storageFile } from '../core/storage';
 import { tryGetSettings } from '../core/settings-provider';
 import { FSRS_FIRST_INTERVALS, LADDER_MAX, TOTAL_STAGES } from './fsrs';
 
@@ -166,4 +166,33 @@ export class ReviewDataManager {
     await this.saveItems(items);
     return true;
   }
+}
+
+// ===== 拟合参数落盘（上游线 P1 移植，ADR-0077：独立存储 review-fit.json，不覆盖 DEFAULT_W、不破坏 review.json 数组结构） =====
+
+export interface FittedParams {
+  /** 拟合出的 19 权重（首版只填前 8 个，其余为 DEFAULT_W） */
+  w: number[];
+  /** 拟合时间戳 ISO */
+  fitAt: string;
+  /** 参与拟合的样本数 */
+  fitCount: number;
+  /** 全参(true)还是子集(false)拟合 */
+  full: boolean;
+}
+
+export function getReviewFitFilePath(): string {
+  const s = tryGetSettings() as any;
+  return storageFile('review-fit.json', (s && s.storagePath) || 'CONFIG/STORAGE');
+}
+
+export async function loadFittedParams(app: App): Promise<FittedParams | null> {
+  const data = (await jsonFileStore<any>(getReviewFitFilePath()).read()) as any;
+  if (!data || !Array.isArray(data.w) || data.w.length < 8) return null;
+  return data as FittedParams;
+}
+
+export async function saveFittedParams(app: App, fit: FittedParams): Promise<void> {
+  // D3 原语 1 收编：review-fit.json 拟合写同样入 per-path 串行队列（防多端/多入口并发拟合写互踩）
+  await enqueueFileTask(getReviewFitFilePath(), () => jsonFileStore<FittedParams>(getReviewFitFilePath()).write(fit));
 }

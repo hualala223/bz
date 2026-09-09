@@ -7,10 +7,11 @@ import type { NoticeHandle } from '../core/notice';
 import { getApp } from '../core/app';
 import { getSettings, saveSettings } from '../core/settings-provider';
 import { escapeHtml } from '../core/utils';
-import { FSRS, FSRS_FIRST_INTERVALS, FSRS_FIRST_TEXTS, LADDER_MAX } from './fsrs';
+import { FSRS, FSRS_FIRST_INTERVALS, FSRS_FIRST_TEXTS, LADDER_MAX, DEFAULT_W } from './fsrs';
 import type { Rating } from './fsrs';
 import type { ReviewItem } from './data';
-import { ReviewDataManager, getReviewFilePath } from './data';
+import { ReviewDataManager, getReviewFilePath, loadFittedParams, saveFittedParams } from './data';
+import { fitFromItems, mergeFittedW } from './fit';
 import { collectOutgoingLinks } from './links';
 import { collectFolderFiles, eligibleCount, selectCountReview, selectOverduePicks, type CountPick, type CountPickKind } from './count';
 import { showNotePreview } from './preview';
@@ -37,6 +38,11 @@ function doneCount(results: CountSessionResult[]): number {
 export const reviewApp = {
   checkInterval: null as ReturnType<typeof setInterval> | null,
   dataManager: null as ReviewDataManager | null,
+  /** 上游线 P1：拟合后的生效权重（无拟合产物 = null 回退 DEFAULT_W） */
+  _fittedW: null as number[] | null,
+  /** 上游线 P1：距上次拟合的评级累计（达 reviewFitEveryN 触发后台重拟合） */
+  _reviewCountSinceFit: 0,
+  _fitRunning: false,
   /** 测试注入：对齐源码 window.__quiz 语义 */
   _quizOverride: null as any | null,
   /** 已通知逾期的笔记路径（ticket 100：diff 记忆集合，避免重复刷屏） */
@@ -55,6 +61,63 @@ export const reviewApp = {
 
   ensure(app: App): void {
     if (!this.dataManager) this.dataManager = new ReviewDataManager(app);
+    // 上游线 P1：启动加载拟合参数（无产物回退默认；fire-and-forget）
+    void this.loadFitParams(app).catch(() => {});
+  },
+
+  /** 上游线 P1：加载拟合参数到 _fittedW（无则 null 回退默认） */
+  async loadFitParams(app: App): Promise<void> {
+    try {
+      const fit = await loadFittedParams(app);
+      this._fittedW = fit ? mergeFittedW(fit.w) : null;
+    } catch (e) {
+      this._fittedW = null;
+    }
+  },
+
+  /** 上游线 P1：每 N 次复习自动重拟合（全自动定期重算，样本门槛与开关在实现内）。
+   *  markReview 每次评级后调用（count+1）；达阈值且开关开 → 异步后台跑，完成后轻提示。
+   *  样本不足 → 静默保留默认（不提示）。 */
+  async maybeRunFit(app: App): Promise<void> {
+    const s = getSettings() as any;
+    if (s.reviewEnableFit === false) return;
+    const n = Number(s.reviewFitEveryN) || 10;
+    this._reviewCountSinceFit++;
+    if (this._reviewCountSinceFit < n || this._fitRunning) return;
+    this._fitRunning = true;
+    this._reviewCountSinceFit = 0;
+    try {
+      const dm = this.dataManager!;
+      const items = await dm.loadItems();
+      const result = fitFromItems(items);
+      if (result) {
+        await saveFittedParams(app, {
+          w: result.fit.w,
+          fitAt: new Date().toISOString(),
+          fitCount: result.count,
+          full: result.fit.w.length >= 19,
+        });
+        this._fittedW = mergeFittedW(result.fit.w);
+        notice(`已根据 ${result.count} 条复习记录拟合记忆参数`, 'success');
+      }
+    } catch (e) {
+      console.warn('复习参数拟合失败，回退默认:', e);
+    } finally {
+      this._fitRunning = false;
+    }
+  },
+
+  /** 上游线 P1：获取当前生效权重（拟合参数优先，回退默认） */
+  currentW(): number[] {
+    return this._fittedW || DEFAULT_W;
+  },
+
+  /** 上游线 P1：某条目当前记忆保留度 R（FSRS 相位且已复习过才可算；否则 null） */
+  currentR(item: ReviewItem): number | null {
+    if (item.phase !== 'fsrs' || !item.stability || !item.lastReviewed) return null;
+    const t = (new Date().getTime() - new Date(item.lastReviewed).getTime()) / 86400000;
+    if (!(t > 0)) return null;
+    return new FSRS(this.currentW()).R(t, item.stability);
   },
 
   async markReview(filePath: string, selectedDifficulty: Rating, opts?: { autoPending?: boolean; force?: boolean }): Promise<void> {
@@ -84,7 +147,7 @@ export const reviewApp = {
 
     const rating = selectedDifficulty;
     const currentStage = item.stage;
-    const fsrs = new FSRS();
+    const fsrs = new FSRS(this.currentW()); // 上游线 P1：拟合权重优先（无产物=DEFAULT_W，行为等同）
 
     // ===== 阶段 0-9：固定阶梯 =====
     if (currentStage <= LADDER_MAX) {
@@ -118,6 +181,8 @@ export const reviewApp = {
         else if (rating === 'good' || rating === 'easy') it.pendingRedo = false;
       });
       notice(enteringFsrs ? `进入深度复习，${FSRS_FIRST_TEXTS[targetStage]}后复习` : `${FSRS_FIRST_TEXTS[targetStage]}后复习`, 'success');
+      // 上游线 P1：评级也累计拟合计数（含阶梯阶段；样本过滤在 fit.ts 内做）。fire-and-forget 防卡评级路径
+      void this.maybeRunFit(getApp());
       return;
     }
 
@@ -150,6 +215,8 @@ export const reviewApp = {
     const days = Math.round(scaledDays);
     const rPct = Math.round(R * 100);
     notice(`R=${rPct}% → 下次复习：${days > 0 ? days + '天' : '1天'}后`, 'success');
+    // 上游线 P1：fire-and-forget 后台拟合（不 await，避免大历史时卡评级路径）
+    void this.maybeRunFit(getApp());
   },
 
   /** 准确率 → 难度评级 */
@@ -608,7 +675,7 @@ export const reviewApp = {
       const p = el.getAttribute('data-path');
       if (p && !els.has(p)) els.set(p, el);
     }
-    const fsrs = new FSRS();
+    const fsrs = new FSRS(this.currentW()); // 上游线 P1：拟合权重优先（无产物=DEFAULT_W，行为等同）
     const planPaths = new Set(allItems.map((i) => i.filePath));
     let stainedCount = 0;
 

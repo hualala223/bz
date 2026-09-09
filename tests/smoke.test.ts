@@ -77,6 +77,8 @@ const EXPECTED_COMMAND_IDS = [
   'bz-reading-report-open',
   'bz-movie-open', 'bz-movie-add', 'bz-movie-report',
   'bz-review-count', 'bz-review-add-current', 'bz-review-add-current-with-links',
+  // 上游线 P2/P3：复习统计报告 + 快速复制密码
+  'bz-review-report', 'bz-encrypt-copy-password',
   'bz-secondbrain-panel', 'bz-secondbrain-open', 'bz-secondbrain-chat', 'bz-secondbrain-rebuild-links', 'bz-secondbrain-link-all',
   'bz-pomodoro-open',
   'bz-literature-open', 'bz-literature-note-term',

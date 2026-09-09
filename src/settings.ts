@@ -177,6 +177,10 @@ export default interface BzSettings {
   reviewAutoAddNotice: boolean;
   /** 🆕 每日复习上限（0=不限；一轮开始复习最多处理 N 篇逾期） */
   reviewDailyLimit: number;
+  /** 上游线 P1（ADR-0077）：自动拟合 FSRS 记忆参数——每 reviewFitEveryN 次评级后台拟合一次（false 关闭） */
+  reviewEnableFit: boolean;
+  /** 拟合间隔：累计多少次评级触发一次重拟合 */
+  reviewFitEveryN: number;
   /** 🆕 复习间隔缩放（FSRS 相位出题天数 × 系数，0.1-5，默认 1；阶梯阶段不受影响）——ADR-0046 */
   reviewIntervalScale: number;
   /** 🆕 文件树标记（ticket 100：为复习笔记着色并标到期时间；关=清爽文件树） */
@@ -530,6 +534,9 @@ export const DEFAULT_SETTINGS: BzSettings = {
   enableAutoNotify: true,
   reviewAutoAddNotice: true,
   reviewDailyLimit: 0,
+  // 上游线 P1：自动拟合记忆参数（默认开；样本 <100 时拟合器自动跳过，零感知）
+  reviewEnableFit: true,
+  reviewFitEveryN: 10,
   reviewIntervalScale: 1,
   reviewTreeBadge: true,
   reviewWatchedFolders: [],

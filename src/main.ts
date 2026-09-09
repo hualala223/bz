@@ -24,7 +24,7 @@ import { openBzPanel, createMemoItem } from './memo';
 import { addBelongingsItem, openBelongings, unloadBelongings } from './belongings';
 import { openArticleView, unloadArticleView } from './clipping';
 import { openNewsReader, unloadNewsReader } from './news';
-import { openPasswordManager, addPasswordEntry, generatePassword, unloadPassword } from './password';
+import { openPasswordManager, addPasswordEntry, generatePassword, quickCopyPassword, unloadPassword } from './password';
 import { openFavoritesPanel, addFavoriteItem, unloadFavorites } from './favorites';
 import { openLibrary, openBookNotes, unloadLibrary } from './library';
 import { showReadingReport, unloadReadingReport } from './reading-report';
@@ -32,7 +32,7 @@ import { openMovieManager, addMovieItem, unloadMovie } from './movie';
 // 影视分析报告（独立域，ADR-0048）
 import { openMovieReport, unloadMovieReport } from './movie-report';
 // 复习（ticket 168 单一入口：仅「复习（按数量）」命令；ticket 169 加回「加入复习计划」；ensureReview/unloadReview 为常驻监控与卸载所需）
-import { reviewCountStart, reviewAddCurrent, reviewAddCurrentWithLinks, ensureReview, unloadReview } from './review';
+import { reviewCountStart, reviewAddCurrent, reviewAddCurrentWithLinks, openReviewReport, ensureReview, unloadReview } from './review';
 // 第二大脑（ticket 103 起原闪念正名接管，ADR-0051——flash 域已删除）
 import {
   openSecondBrainPanel,
@@ -125,6 +125,8 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
     callback: () => reviewAddCurrentWithLinks(getApp()),
     editorCallback: (_editor, ctx) => reviewAddCurrentWithLinks(getApp(), ctx.file),
   },
+  // 复习计划分析报告（上游线 P2 移植：统计弹窗——streak/负载热力图/单条时间线，只读 review.json）
+  { id: 'bz-review-report', name: '复习计划分析报告', icon: 'calendar-check', callback: () => openReviewReport(getApp()) },
   // 第二大脑（ticket 103：原闪念正名接管，主面板为统一入口）
   { id: 'bz-secondbrain-panel', name: '第二大脑面板', icon: 'brain', callback: () => openSecondBrainPanel(getApp()) },
   // f7：与「第二大脑面板」区分——本命令打开参考侧边栏（右侧窄窗/移动端抽屉参考 tab）
@@ -144,6 +146,8 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   // 保险箱（encrypt 域：移出式清单容器加密；原名「加密保险箱」，ticket 68 更名仅文案）
   { id: 'bz-encrypt-open', name: '保险箱', icon: 'lock', callback: () => openEncrypt(getApp()) },
   { id: 'bz-encrypt-lock', name: '加密当前笔记', icon: 'lock-keyhole', callback: () => encryptCurrentNote(getApp()) },
+  // 快速复制密码（上游线 P3 移植：不打开密码本面板，fuzzy 选择即复制，60s 自动清空剪贴板）
+  { id: 'bz-encrypt-copy-password', name: '快速复制密码', icon: 'key-round', callback: () => quickCopyPassword() },
   // 小橘陪伴猫（smartcat 域）
   { id: 'bz-smartcat-open', name: '小橘', icon: 'cat', callback: () => openSmartCat(getApp()) },
   // f7：去 message-circle 重复（第二大脑对话保留）→ messages-square

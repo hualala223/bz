@@ -14,6 +14,7 @@
  * - ticket 175：新增智谱/硅基流动/火山方舟三家（默认模型内置，模型行留空即内置默认）。
  */
 import { notice } from './notice';
+import { getSettings, saveSettings, tryGetSettings } from './settings-provider';
 import type { SettingsSchema } from './settings-schema';
 
 /** 存储路径改动防错提示（f1；正文不带 emoji，铁律 7）——文案逐字冻结，勿改 */
@@ -113,6 +114,38 @@ export function mainSettingsSchema(): SettingsSchema {
             binding: { key: 'volcanoArkModel' },
             placeholder: '默认 doubao-seed-1-6-flash-250828',
             visibleWhen: (snapshot) => snapshot.aiProvider === 'volcano-ark',
+          },
+          // 上游线 P5（ticket 173「获取模型名」本地适配）：按当前服务商拉取 /models 列表，
+          // 弹选择器回填该服务商的模型行。端点/密钥键名与 core/ai.ts getAIProvider 逐字对齐。
+          {
+            type: 'button',
+            name: '获取模型名',
+            buttonText: '获取当前服务商模型',
+            desc: '拉取当前 AI 服务商的可用模型列表，选择后写入上方该服务商的模型行',
+            onClick: () => {
+              void (async () => {
+                const { fetchProviderModels, providerDescriptorOf } = await import('./ai-models');
+                const { openModelPicker } = await import('./settings-model-picker');
+                try {
+                  const providerId = String((tryGetSettings() as any).aiProvider || 'opencode-go');
+                  const desc = providerDescriptorOf(providerId);
+                  const models = await fetchProviderModels(providerId);
+                  const modelKey = `${providerId === 'opencode-go' ? 'opencodeGo' : providerId}Model`;
+                  openModelPicker({
+                    providerLabel: desc.label,
+                    current: String((tryGetSettings() as any)[modelKey] || ''),
+                    models,
+                    onPick: (m) => {
+                      (getSettings() as any)[modelKey] = m.id;
+                      void saveSettings();
+                      notice(`模型已设为 ${m.id}`, 'success');
+                    },
+                  });
+                } catch (e) {
+                  notice(e instanceof Error ? e.message : String(e), 'error');
+                }
+              })();
+            },
           },
         ],
       },

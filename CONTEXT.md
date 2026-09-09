@@ -164,6 +164,12 @@ _Avoid_: 闪念（旧功能名，仅存于「闪念笔记」文档类型语义�
 
 **闪念笔记 (Flash Note)**: 卡片盒目录下的快速笔记**文档类型**（path-classify 分类 `'flash'`；smartcat 观察来源标签与 credibility 0.9 档位沿用此词汇）。注意与「第二大脑」功能相区分：前者是笔记类型，后者是管理/检索它们的功能模块。
 
+**复习计划分析报告 (Review Report)**: 上游线 P2 移植的统计弹窗（命令 `bz-review-report`，ADR-0077/ticket 174）——streak/评级分布/逾期率/未来负载热力图 + 单条复习时间线，只读 review.json；数据模块 `review/stats.ts`、UI `review/stats-ui.ts`。**记忆拟合 (FSRS Fit)**: 配套的 P1 能力（`review/fit.ts`）——每 `reviewFitEveryN` 次评级后台按复习历史拟合 FSRS 19 权重（样本 ≥100 才拟合），产物落 `review-fit.json`，经 `reviewApp.currentW()` 注入调度（无产物回退默认，行为等同）；开关 `reviewEnableFit`（⚙️ 复习设置「记忆拟合」组）。
+
+**快速复制密码 (Quick Copy Password)**: 上游线 P3 移植（命令 `bz-encrypt-copy-password`）——不打开密码本面板，fuzzy 搜索条目选中即复制，60 秒自动清空剪贴板；未解锁先弹主密码。选择器 `encrypt/pw-picker.ts`（条目类型对齐本地 PasswordEntry），数据走 password 域 DataManager（.safe.enc 密码镜像）。
+
+**获取模型名 (Fetch Models)**: 上游线 P5 移植（AI 设置组尾按钮，ticket 173）——按当前 AI 服务商拉取 OpenAI 兼容 `/models` 列表弹选择器回填该服务商模型行；`core/ai-models.ts`（本地五家静态端点表，与 getAIProvider 逐字对齐）+ `core/settings-model-picker.ts`。上游的 per-provider 覆盖 registry（issue 170/171）未并入。
+
 **内容首页 (Home)**: 上游线（yeshimei/bz）并入的新只读聚合域（命令 `bz-home-open`）——各域数据快照的活动河/周历/域卡统计与磁贴入口；数据偏好落 `CONFIG/STORAGE/home.json`（钉选）。域卡/活动河消费本地域数据层（movie rebuildItems / library getBookItems+loadEpubBookItems / review reviewApp）。磁贴命令 id 映射本地域（影视=bz-movie-open、剪藏本=bz-clipping-open、书库=bz-library-open），内部 id（cinema/bookshelf/clipping）保持上游以兼容 home.json 钉选。
 _Avoid_: 主页（与入口页混淆）、homepage
 

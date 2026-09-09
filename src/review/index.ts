@@ -132,3 +132,9 @@ export function unloadReview(): void {
   reviewWatcher?.destroy();
   reviewWatcher = null;
 }
+/** 复习计划分析报告（上游线 P2 移植，bz-review-report）：独立命令，直接打开统计弹窗 */
+export async function openReviewReport(app: App): Promise<void> {
+  ensureReview(app);
+  const { showStatsModal } = await import('./stats-ui');
+  await showStatsModal(app, dataManager!);
+}

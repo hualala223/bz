@@ -84,7 +84,7 @@ describe('全量 schema 文案 lint（注册表：LINT_TARGETS）', () => {
       'OpenCode 密钥', 'OpenCode 模型',
       '智谱密钥', '智谱模型',
       '硅基流动密钥', '硅基流动模型',
-      '火山方舟密钥', '火山方舟模型',
+      '火山方舟密钥', '火山方舟模型', '获取模型名',
     ]);
     expect(rows[1].desc).toBe('留空则自动回退读取外部配置密钥'); // ticket 100 冻结文案
     expect(rows[3].desc).toBe('在订阅官网获取后填入这里'); // ticket 100 冻结文案

@@ -357,3 +357,18 @@
 - [x] main.ts 接线：5 新命令（bz-home-open/bz-recap-today/bz-diary-wall-open/bz-data-checkup-open/bz-settings-panel-open）+ applyWallDirectories + 5 unload；attach/index 重植 ensureAttachSeed（本地 launcher 播种）；favorites/index 重植 file-sync 出口
 - [x] reading-report 保持本地版（上游改版与未并入的 bookshelf 深度耦合）；review/encrypt/todo/clipbook/cinema/bookshelf/memo/launcher 全部保持本地
 - [x] 门禁：tsc 0 错 + 全量 4192 测试绿 + 构建部署
+
+## 上游线移植（P1~P7）— 纯增量功能五项 + 文档归档 + 构建挂接
+
+**状态：已交付**（2026-09-09，继 tier1+2 合并后按用户裁决逐项落地）
+
+- [x] P1 FSRS 拟合：`review/fit.ts` + data.ts FittedParams 存取（review-fit.json，D3 串行队列）+ reviewApp loadFitParams/maybeRunFit/currentW/currentR（两处评级尾部触发、两处 FSRS 构造改拟合权重优先，无产物行为等同）+ 设置键 reviewEnableFit/reviewFitEveryN（⚙️「记忆拟合」组，默认开、样本 <100 自动跳过）+ checkup 扫描目标恢复 review-fit 行
+- [x] P2 复习统计：`review/stats.ts + stats-ui.ts`（streak/评级分布/负载热力图/单条时间线）+ 命令 `bz-review-report`（icon calendar-check）
+- [x] P3 快速取密：`encrypt/pw-picker.ts`（条目类型对齐本地 PasswordEntry，不引上游 vault-data）+ password 域 `quick-copy.ts`（ensureSafeUnlocked → DataManager → 选择即复制，60s 清空复用本地 copySensitiveText）+ 命令 `bz-encrypt-copy-password` + pwqp 样式段落域
+- [x] P5 获取模型名：`core/ai-models.ts` 本地适配版（registry 换五家静态端点表，与 getAIProvider 逐字对齐；opencode-go noCors 直走 requestUrl）+ `core/settings-model-picker.ts`（依赖仅 ModelOption 类型）+ main-schema AI 组尾「获取模型名」按钮行（拉取→弹选→回填当前服务商模型键）
+- [x] P4 fav 字段随 C6 延后（pw-picker 无消费点，唯一消费方是未并入的三栏面板）
+- [x] P6 上游碰撞 issues（168~176 共 7 篇）归档 `issues/upstream-yeshimei/`，本地工单号语义保持唯一
+- [x] P7 esbuild production 段挂 buildPreview（评审壳预览包，ADR-0104；部署目标保持本地真实 vault 不动）
+- [x] smoke 白名单 +2；AGENTS 命令数 44；CONTEXT 增补四词条
+- [x] 拒绝项维持：C1 review 面板/冲刺/quiz-core、C7 AI registry 全套、C9 main-schema 拆分、C10 esbuild 上游部署目标
+- [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署

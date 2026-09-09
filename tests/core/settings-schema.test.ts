@@ -36,7 +36,7 @@ describe('mainSettingsSchema：主设置页两区块', () => {
       'OpenCode 密钥', 'OpenCode 模型',
       '智谱密钥', '智谱模型',
       '硅基流动密钥', '硅基流动模型',
-      '火山方舟密钥', '火山方舟模型',
+      '火山方舟密钥', '火山方舟模型', '获取模型名',
     ]);
     const [provider] = rows as Array<{
       options?: Array<{ value: string; label: string }>;
@@ -58,7 +58,8 @@ describe('mainSettingsSchema：主设置页两区块', () => {
       'siliconflowApiKey', 'siliconflowModel',
       'volcanoArkApiKey', 'volcanoArkModel',
     ];
-    const textRows = rows.slice(1) as Array<{ binding?: { key: string }; placeholder?: string; visibleWhen?: (s: SettingsSnapshot) => boolean }>;
+    // 上游线 P5：尾行是「获取模型名」按钮行（无 binding），键绑定断言只覆盖五家十行
+    const textRows = rows.slice(1).filter((r) => (r as { binding?: { key: string } }).binding) as Array<{ binding?: { key: string }; placeholder?: string; visibleWhen?: (s: SettingsSnapshot) => boolean }>;
     expect(textRows.map((r) => r.binding!.key)).toEqual(keyBindings);
     const providerIds = ['deepseek', 'opencode-go', 'zhipu', 'siliconflow', 'volcano-ark'];
     textRows.forEach((row, i) => {

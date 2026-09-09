@@ -49,3 +49,6 @@ export function unloadPassword(): void {
   controller = null;
   initialized = false;
 }
+
+/** 快速复制密码（命令 bz-encrypt-copy-password，上游线 P3 移植；实现见 ./quick-copy） */
+export { quickCopyPassword } from './quick-copy';

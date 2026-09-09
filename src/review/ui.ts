@@ -37,6 +37,15 @@ export function reviewSettingsSchema(deps: { app: App; dataManager: ReviewDataMa
         ],
       },
       {
+        icon: 'trending-up',
+        name: '记忆拟合',
+        rows: [
+          // 上游线 P1（ADR-0077）：个人化记忆曲线——按复习历史自动拟合 FSRS 权重
+          { type: 'toggle', name: '自动拟合记忆参数', desc: '按复习历史后台拟合 FSRS 参数，样本不足自动跳过', binding: { key: 'reviewEnableFit' } },
+          { type: 'number', name: '拟合间隔次数', desc: '累计多少次评级后重新拟合一次，最小 1', binding: { key: 'reviewFitEveryN' }, min: 1, step: 1 },
+        ],
+      },
+      {
         icon: 'graduation-cap',
         name: '做题家',
         rows: [
