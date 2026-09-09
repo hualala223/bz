@@ -416,6 +416,18 @@ export default interface BzSettings {
   // ===== 🧠 第二大脑 =====
   /** 第二大脑主面板：移动端默认全屏（默认开——总览信息密度高；ticket 103） */
   secondBrainMobileDefaultFullscreen: boolean;
+
+  // ===== 上游线（yeshimei/bz）并入新域设置键（第一档加法） =====
+  /** 📦 归物本：默认状态筛选（空串=全部，其余 using/idle/sold/discard；非法值回落全部。上游 issue 194） */
+  belongingsDefaultStatus: string;
+  /** 设置面板主窗口：移动端默认全屏（默认开；主面板全屏 + 关闭按钮，子面板一律弹窗。ADR-0080） */
+  settingsPanelMobileDefaultFullscreen: boolean;
+  /** 设置面板布局：'jingwei' = 经纬（当前唯一布局，ADR-0080） */
+  settingsPanelLayout: string;
+  /** 设置面板主题：'chenhun' = 晨昏（跟随 Obsidian 亮暗，ADR-0080） */
+  settingsPanelSkin: string;
+  /** 回忆墙：移动端默认全屏（默认开——媒体优先瀑布流真全屏，ADR-0081） */
+  diaryWallMobileDefaultFullscreen: boolean;
 }
 
 export const DEFAULT_SETTINGS: BzSettings = {
@@ -619,6 +631,16 @@ export const DEFAULT_SETTINGS: BzSettings = {
   literatureCacheDir: '',
   literatureCacheRetentionDays: 7,
   secondBrainMobileDefaultFullscreen: true,
+
+  // 上游线（yeshimei/bz）并入新域设置键默认值（第一档加法）
+  // 归物本默认状态筛选（空串=全部，上游 issue 194）
+  belongingsDefaultStatus: '',
+  // 设置面板（ADR-0080）：移动端默认全屏（默认开）；布局默认经纬；主题默认晨昏（跟随亮暗）
+  settingsPanelMobileDefaultFullscreen: true,
+  settingsPanelLayout: 'jingwei',
+  settingsPanelSkin: 'chenhun',
+  // 回忆墙（diary-wall 域，ADR-0081）：移动端默认全屏（默认开——媒体优先瀑布流真全屏）
+  diaryWallMobileDefaultFullscreen: true,
 
   // 小橘陪伴猫（smartcat 域；移动端默认全屏键聊天/设置/数据面板共用，2026-08-23 合并一套）
   smartcatEnabled: true,

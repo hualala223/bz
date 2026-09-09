@@ -43,7 +43,7 @@
  * title hover）：空闲「▶️」，运行中该按钮即「⏹」（仅失败项续跑时 title 提示「中止整批」），
  * 处理完成有失败仍可再点续跑，移动端整钮隐藏。
  */
-import type { App } from 'obsidian';
+import { setIcon, type App } from 'obsidian';
 import type { SettingsSchema } from '../core/settings-schema';
 import { applyMobileWindowFullscreen, isMobileEnv } from '../core/mobile';
 import { tryGetSettings } from '../core/settings-provider';
@@ -217,12 +217,12 @@ export function literatureSettingsSchema(opts?: { onClearHistory?: () => void | 
           { type: 'select', name: '下载清晰度', desc: '以视频源可用档位为准，低档优先命中缓存', binding: { key: 'literatureQuality' }, options: [{ value: 'highest', label: '最高' }, { value: '1080', label: '1080P' }, { value: '720', label: '720P' }] },
           { type: 'toggle', name: '遇错即停', desc: '单条失败后停止处理剩余任务；关闭则失败后继续', binding: { key: 'literatureStopOnFailure' } },
           { type: 'text', name: '输出目录', desc: '视频文件落地目录；留空跟随工具配置', binding: { key: 'literatureOutputDir' }, placeholder: '如 D:/videos' },
-          { type: 'toggle', name: '压缩', desc: '转文字前压缩视频；默认开启（用户拍板）', binding: { key: 'literatureCompress' } },
+          { type: 'toggle', name: '压缩', desc: '转文字前压缩视频，默认开启', binding: { key: 'literatureCompress' } },
           { type: 'number', name: '压缩质量（CRF）', desc: '数值越小画质越高；范围 18-28', binding: { key: 'literatureCrf' }, min: 18, max: 28, step: 1 },
         ],
       },
       {
-        icon: 'wrench', name: '工具',
+        icon: 'terminal', name: '工具',
         rows: [
           { type: 'text', name: 'ffmpeg 路径', desc: '视频处理用；留空跟随工具配置', binding: { key: 'literatureFfmpegPath' }, placeholder: '如 ffmpeg 或 D:/tools/ffmpeg.exe' },
           { type: 'text', name: 'ffprobe 路径', desc: '探测视频元数据用；留空跟随工具配置', binding: { key: 'literatureFfprobePath' }, placeholder: '如 ffprobe 或 D:/tools/ffprobe.exe' },
@@ -232,7 +232,7 @@ export function literatureSettingsSchema(opts?: { onClearHistory?: () => void | 
           { type: 'number', name: '缓存保留天数', desc: '超过该天数的缓存自动清理', binding: { key: 'literatureCacheRetentionDays' }, min: 1, step: 1 },
         ],
       },
-      mobileFullscreenGroup('literatureMobileDefaultFullscreen'),
+      mobileFullscreenGroup('literatureMobileDefaultFullscreen', { desc: '' }),
       {
         icon: 'wrench', name: '维护',
         rows: [
@@ -592,6 +592,11 @@ export class UIManager {
     const allBtn = document.createElement('button');
     allBtn.className = 'bz-lit-filter-btn' + (this.selectedDomain ? '' : ' active');
     allBtn.textContent = `全部 (${this.allNotes.length})`;
+    // 行头图标（issue 208 全域统一：「全部」行带图标，对齐待办/收藏本范式）
+    const allIc = document.createElement('span');
+    allIc.className = 'bz-lit-filter-ic';
+    setIcon(allIc, 'layout-grid');
+    allBtn.prepend(allIc);
     allBtn.onclick = () => { this.selectedDomain = null; this.applyFilter(); };
     container.appendChild(allBtn);
     for (const d of sorted) {
@@ -780,8 +785,8 @@ export class UIManager {
 
   private async confirmDeleteNote(n: LiteratureNoteEntry): Promise<void> {
     const v = await openFlowDialog({
-      title: '删除这篇文献笔记？',
-      message: `将从 vault 删除「${n.title}」；视频转文献历史中指向该笔记的记录会同步移除。\n此操作不可撤销。`,
+      title: '删除文献笔记',
+      message: `将删除「${n.title}」；视频转文献历史中指向该笔记的记录会同步移除。\n此操作不可撤销。`,
       actions: [
         { label: '取消', value: 'cancel' },
         { label: '删除', value: 'ok', danger: true },
@@ -1194,7 +1199,7 @@ export class UIManager {
 
   private async confirmDelete(task: LiteratureTask): Promise<void> {
     const v = await openFlowDialog({
-      title: '删除这条转文献任务？',
+      title: '删除转文献任务',
       message: '仅从列表移除记录，已生成的文献笔记与视频不受影响。',
       actions: [
         { label: '取消', value: 'cancel' },
@@ -1210,8 +1215,8 @@ export class UIManager {
   /** 清空历史（⚙️ 设置面板入口，ADR-0070）：确认后移除全部归档记录 */
   private async confirmClearHistory(): Promise<void> {
     const v = await openFlowDialog({
-      title: '清空历史？',
-      message: '将移除全部「成功」归档记录；文献笔记与视频文件保留在 vault 中。',
+      title: '清空历史',
+      message: '将移除全部「成功」归档记录；文献笔记与视频文件保留在原处。',
       actions: [
         { label: '取消', value: 'cancel' },
         { label: '清空', value: 'ok', danger: true },
@@ -1619,7 +1624,7 @@ export class UIManager {
   private noticeTermError(e: unknown): void {
     const msg = String((e && (e as any).message) || e || '未知错误');
     if (/API Key|AI 配置|未配置/.test(msg)) {
-      notice('未配置 AI：请在插件设置 → AI 配置里填 API Key 后再生成', 'error');
+      notice('未配置 AI：请到插件设置「AI 配置」页填 API Key 后再生成', 'error');
     } else {
       notice('生成失败：' + msg, 'error');
     }

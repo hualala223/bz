@@ -164,6 +164,18 @@ _Avoid_: 闪念（旧功能名，仅存于「闪念笔记」文档类型语义�
 
 **闪念笔记 (Flash Note)**: 卡片盒目录下的快速笔记**文档类型**（path-classify 分类 `'flash'`；smartcat 观察来源标签与 credibility 0.9 档位沿用此词汇）。注意与「第二大脑」功能相区分：前者是笔记类型，后者是管理/检索它们的功能模块。
 
+**内容首页 (Home)**: 上游线（yeshimei/bz）并入的新只读聚合域（命令 `bz-home-open`）——各域数据快照的活动河/周历/域卡统计与磁贴入口；数据偏好落 `CONFIG/STORAGE/home.json`（钉选）。域卡/活动河消费本地域数据层（movie rebuildItems / library getBookItems+loadEpubBookItems / review reviewApp）。磁贴命令 id 映射本地域（影视=bz-movie-open、剪藏本=bz-clipping-open、书库=bz-library-open），内部 id（cinema/bookshelf/clipping）保持上游以兼容 home.json 钉选。
+_Avoid_: 主页（与入口页混淆）、homepage
+
+**今日回顾 (Recap)**: 上游线并入的新只读聚合域（命令 `bz-recap-today`）——五域（日记/影视/书库/待办(memo.json)/番茄钟）当天痕迹的时间轴聚合；`anchor` 参数支持昨天回看，`collectRecap` 被 home 活动河复用。
+
+**数据体检 (Data Checkup)**: 上游线并入的新只读巡检域（命令 `bz-data-checkup-open`，D4）——四检查：json 可解析（含 CONFIG/.CORRUPT 留档对账）/字段漂移/孤儿条目（影视海报、书库封面、收藏关联可修复）/memo.json 结构一致性（本地单视角）。体检禁走 jsonFileStore 读路径（防坏文件被原地重建）。
+
+**回忆墙 (Diary Wall)**: 上游线并入的新只读媒体视图域（命令 `bz-diary-wall-open`，ADR-0081）——日记 `我的/日记/*.md` 的图片/视频/音频瀑布流；目录常量经 diary-wall/config 随 `applyDiarySettingsToRuntime` 同步；设置键 `diaryWallMobileDefaultFullscreen`。
+
+**设置面板 (Settings Panel)**: 上游线并入的全域设置聚合入口（命令 `bz-settings-panel-open`，ADR-0080）——桌面 B 侧栏工作台/移动 M1 命令面板；**并存不替换**既有设置架构（Obsidian 设置页 + 域 ⚙️ 弹窗），读写仍走既有声明式 schema 与 settings-provider。域清单映射本地域（备忘录/影视/书库/密码本…），通用/AI 组自本地 mainSettingsSchema 按组名拆分；设置键 `settingsPanelLayout`（经纬）/`settingsPanelSkin`（晨昏）/`settingsPanelMobileDefaultFullscreen`。
+_Avoid_: 设置页（指 Obsidian 设置页单页）
+
 **入口页 (Launcher)**: 全局唯一的命令入口弹窗，网格化展示命令磁贴；单击磁贴执行对应命令并关闭入口页。范围不限 bz- 命令，其他插件命令亦可上墙。
 _Avoid_: 主页、启动台、dashboard、控制台
 

@@ -1,458 +1,251 @@
-/* ==================== 收藏本域样式（src/favorites/styles.css） ==================== */
-/* ==================== 收藏本（favorites，ticket 60 收敛：原 fav-mobile 注入，逐字搬运；后续优化：header 按钮去 box-shadow、标题栏去下边框、类型栏单行横滑；移动端列表卡片已恢复桌面样式（边框/圆角/间距随 ui.ts 内联样式），不再通栏平铺） ==================== */
-      /* #fav-popup .fav-header .bz-icon-btn 去阴影已并入「主窗口头部行统一规范」（ticket 68 后续） */
-      @media (max-width: 768px) {
-        #fav-entries-container { scrollbar-width: none; -ms-overflow-style: none; overflow-x: hidden; }
-        #fav-entries-container::-webkit-scrollbar { display: none; }
-        /* 类型栏：单行平铺 + 左右拖拽（overflow-x 触屏原生滑动），隐藏滚动条；flex-shrink:0 防 80vh 挤压出纵向滚动条 */
-        .fav-tagbar {
-          flex-shrink: 0 !important;
-          flex-wrap: nowrap !important;
-          overflow-x: auto !important;
-          overflow-y: hidden !important;
-          scrollbar-width: none !important;
-          -ms-overflow-style: none !important;
-          -webkit-overflow-scrolling: touch;
-        }
-        .fav-tagbar::-webkit-scrollbar { display: none !important; }
-        .fav-tagbar .fav-tag-btn { flex-shrink: 0; white-space: nowrap; }
-        /* 添加/编辑弹窗去纵向滚动条（滚动保持） */
-        #fav-add-popup {
-          scrollbar-width: none;
-          -ms-overflow-style: none;
-        }
-        #fav-add-popup::-webkit-scrollbar { display: none; }
-      }
-    
+/* ==================== 收藏本域样式（src/favorites/styles.css，issue 227「C5 终版」1:1 换血） ====================
+ * 原型 .zcode/ui-prototypes/favorites-cork-5/c5-linen-full.html 逐字照搬（ADR-0101，用户拍板豁免铁律 6：
+ * 面板 UI 不使用样式库/组件库，全部域内自带）。类名映射：.tags→.bz-fav-tags、.card→.bz-fav-card、
+ * .ctx→.bz-fav-ctx、.sheet→.bz-fav-sheet、.form→.bz-fav-form、.dlg/.toast/.mask 走 core（不照搬）。
+ * 主题：原型 body.dark 手动切换 → .theme-dark 变量组（跟随 Obsidian 亮暗）。
+ * 所有浮层（菜单/抽屉/表单）与面板同挂 .bz-fav-scope 携带变量。
+ */
 
-/* ==================== 收藏本抽屉头部（统一手势组件接入） ==================== */
-/* 分类 emoji（与日记抽屉 emoji 同级放大） */
-.bz-item-sheet .bz-fav-sheet-emoji {
-  font-size: 20px;
-  line-height: 1.2;
-  flex-shrink: 0;
+/* —— 变量（原型 :root / body.dark 两组逐字） —— */
+.bz-fav-scope {
+  --bg: #fffcf6; --bg-weave1: rgba(255,255,255,.5); --bg-weave2: rgba(160,150,130,.1);
+  --frame-bd: #d8d1c0; --frame-bg: rgba(255,255,255,.45);
+  --ink: #4a443a; --ink-strong: #3c362c; --ink-title: #5a5244; --ink-mut: #9a917d; --ink-faint: #a89e8a;
+  --card: #fff; --card-shadow: rgba(120,110,90,.18); --card-shadow-hi: rgba(120,110,90,.26);
+  --chip: #fff; --chip-ink: #6d6455; --chip-grey: #ece7db; --chip-grey-ink: #9a917d; --chip-add-bd: #b9b2a2; --chip-add-ink: #8a8171;
+  --acc: #5a8f6d; --acc-deep: #3d6b4d; --on-acc: #fff;
+  --ft-bd: #f0ece2; --menu: #fffdf8; --menu-bd: #e3dccb; --menu-hover: #f2eee0; --menu-ink: #55503f;
+  --fld-bd: #ddd5c2; --fld-bg: #fff; --fld-ink: #4a443a; --danger: #b3564d; --gold: #e0b73a; --gold-ink: #c9a227;
+  --mask: rgba(74,68,58,.38); --pop: #fffdf8; --pop-ink: #4a443a; --pop-mut: #9a917d; --pop-faint: #b3a98f;
 }
-/* 标题：加粗主行，置顶 📌 前缀随文本 */
-.bz-item-sheet .bz-fav-sheet-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-normal);
-  word-break: break-word;
-}
-/* 第二行小字：标签徽章 + 余额，可换行 */
-.bz-item-sheet .bz-fav-sheet-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 6px;
-}
-.bz-item-sheet .bz-fav-sheet-tag {
-  font-size: 11px;
-  padding: 1px 8px;
-  border-radius: 10px;
-  background: var(--background-secondary);
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.bz-item-sheet .bz-fav-sheet-balance {
-  font-size: 11px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.bz-item-sheet .bz-fav-sheet-balance--error {
-  color: var(--text-error);
-}
-/* 抽屉头部内部布局（ticket 141 收敛：原 _buildSheetHead 内联） */
-.bz-item-sheet .bz-fav-sheet-body {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-}
-.bz-item-sheet .bz-fav-sheet-info {
-  flex: 1;
-  min-width: 0;
+.theme-dark .bz-fav-scope {
+  --bg: #262320; --bg-weave1: rgba(255,255,255,.045); --bg-weave2: rgba(0,0,0,.22);
+  --frame-bd: #3a352d; --frame-bg: rgba(58,53,45,.55);
+  --ink: #cfc7b4; --ink-strong: #e8e2d2; --ink-title: #e0d8c4; --ink-mut: #9a917d; --ink-faint: #847c6a;
+  --card: #35312a; --card-shadow: rgba(0,0,0,.35); --card-shadow-hi: rgba(0,0,0,.5);
+  --chip: #35312a; --chip-ink: #cfc7b4; --chip-grey: #3a352d; --chip-grey-ink: #9a917d; --chip-add-bd: #6d6455; --chip-add-ink: #a89e8a;
+  --acc: #6da37f; --acc-deep: #4c7a5d; --on-acc: #fff;
+  --ft-bd: #454036; --menu: #35312a; --menu-bd: #4a443a; --menu-hover: #454036; --menu-ink: #d8d0bc;
+  --fld-bd: #55503f; --fld-bg: #2c2823; --fld-ink: #e0d8c4; --danger: #d0705f; --gold: #e0b73a; --gold-ink: #e0b73a;
+  --mask: rgba(0,0,0,.55); --pop: #35312a; --pop-ink: #e0d8c4; --pop-mut: #9a917d; --pop-faint: #847c6a;
 }
 
-/* ==================== 主面板（ticket 141 样式收敛：原 ui.ts 内联逐字搬运；display 显隐/动态 z/余额档位色留运行时） ==================== */
-#fav-mask {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: var(--background-modifier-cover);
-  display: none;
-  align-items: center;
-  justify-content: center;
+/* —— 面板（原型 body + .frame） —— */
+.bz-fav-panel {
+  padding: 26px 30px 0;
+  background:
+    repeating-linear-gradient(45deg, var(--bg-weave1) 0 2px, transparent 2px 4px),
+    repeating-linear-gradient(-45deg, var(--bg-weave2) 0 2px, transparent 2px 4px),
+    var(--bg);
+  color: var(--ink);
+  font-family: var(--font-interface, system-ui);
+  /* 头行/磁贴行固定，仅卡墙滚动（原型 .frame 结构） */
+  display: flex; flex-direction: column; overflow: hidden;
 }
-#fav-popup {
-  background: var(--background-primary);
-  border-radius: 12px;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-  width: 90%;
-  max-width: 700px;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  position: relative;
+/* 桌面端固定 900×620 面板（原型 .frame；移动全屏态走 .bz-fav-mob 分支不受限） */
+.bz-fav-panel:not(.bz-fav-mob) {
+  width: 900px; height: 620px; flex: none;
+  max-width: calc(100vw - 48px); max-height: calc(100vh - 48px);
+  border: 1px solid var(--frame-bd); border-radius: 18px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.14);
 }
-#fav-entries-container {
-  flex: 1;
-  overflow-y: auto;
-  padding: 12px 20px 20px 20px;
-}
-/* 头部标题（行布局/按钮规格由「主窗口头部行统一规范」的 .fav-header 规则承担） */
-.fav-header h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-normal);
-}
-/* 搜索切换钮：未开搜索半透明、开启恢复（原内联 opacity 0.5/1） */
-.bz-fav-search-toggle { opacity: 0.5; }
-.bz-fav-search-toggle--on { opacity: 1; }
+.bz-fav-panel .bz-fav-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 20px; flex: none; position: relative; }
+.bz-fav-panel .bz-fav-head h1 { font-size: 14px; letter-spacing: 3px; color: var(--ink-title); font-weight: 700; margin: 0; }
+/* 移动端：面板即原型 .phone 内容（全屏；边框圆角交给全屏态，留内边距） */
+/* 移动端：面板即原型 .phone 内容（全屏；显式视口宽高——overlay 弹性子项不定宽会被卡墙 max-content 撑爆） */
+.bz-fav-panel.bz-fav-mob { width: 100vw; height: 100vh; max-width: 100vw; padding: 16px 14px 0; }
 
-/* ---- 标签栏 ---- */
-.fav-tagbar {
-  padding: 8px 20px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+/* —— 磁贴标签（原型 .tags 逐字） —— */
+/* 选择器带 .bz-fav-scope 前缀（(0,2,1)）：脱离与 core reset button:not(.clickable-icon) (0,1,1)
+   的同分顺序对抗，聚合顺序变化不再翻车（C1） */
+.bz-fav-tags { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; flex: none; }
+.bz-fav-scope .bz-fav-tags button {
+  border: none; cursor: pointer; font: 12px/1 var(--font-interface, system-ui); padding: 8px 14px;
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--chip); color: var(--chip-ink); border-radius: 99px;
+  box-shadow: 0 2px 6px var(--card-shadow); position: relative;
 }
-.fav-tag-btn {
-  display: inline-flex;
-  border-radius: 10px;
-  background: var(--background-secondary);
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--text-normal);
-  padding: 4px 12px;
-  border: none;
-  box-shadow: none;
-  transition: all 0.2s;
+.bz-fav-tags button .bz-ic, .bz-fav-tags button svg { color: inherit; flex: none; }
+.bz-fav-tags button::before {
+  content: ''; position: absolute; top: -4px; left: 50%; transform: translateX(-50%);
+  width: 10px; height: 10px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff, #b9b2a2 75%); box-shadow: 0 1px 2px rgba(0,0,0,.25);
 }
-.fav-tag-btn.bz-fav-tag-btn--active {
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
+.bz-fav-tags button.bz-fav-on { background: var(--acc); color: var(--on-acc); }
+.bz-fav-tags button.bz-fav-on::before { background: radial-gradient(circle at 35% 30%, #fff, var(--acc-deep) 75%); }
+.bz-fav-tags button.bz-fav-chip--grey { background: var(--chip-grey); color: var(--chip-grey-ink); }
+.bz-fav-tags button.bz-fav-chip--grey.bz-fav-on { background: #8a8171; color: #fff; }
+.bz-fav-tags button.bz-fav-chip--grey.bz-fav-on::before { background: radial-gradient(circle at 35% 30%, #fff, #6d6455 75%); }
+.bz-fav-tags button.bz-fav-chip-add {
+  background: transparent; border: 1.5px dashed var(--chip-add-bd); color: var(--chip-add-ink); box-shadow: none;
+  display: inline-flex; align-items: center; gap: 5px;
 }
-.bz-fav-tag-count {
-  margin-left: 4px;
-  font-size: 10px;
-  opacity: 0.8;
-}
+.bz-fav-tags button.bz-fav-chip-add::before { display: none; }
+.bz-fav-tags button.bz-fav-chip-add:hover { border-color: var(--acc); color: var(--acc); }
 
-/* ---- 搜索框 ---- */
-.bz-fav-search-wrapper {
-  padding: 8px 20px;
-  flex-shrink: 0;
+/* —— 卡片（原型 .card 逐字） —— */
+/* 卡墙：auto-fill 网格——列宽均分剩余空间（184 起步），行缘严格贴合内容区，左右只余对称内边距 */
+.bz-fav-board {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(184px, 1fr)); gap: 22px 20px;
+  align-items: start; padding-top: 6px; flex: 1; min-height: 0; overflow: auto;
 }
-.bz-fav-search-input {
-  width: 100%;
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--background-modifier-border);
-  background: var(--background-primary);
-  color: var(--text-normal);
-  font-size: 14px;
-  box-sizing: border-box;
-  outline: none;
+.bz-fav-board .bz-fav-card { width: auto; }
+.bz-fav-board .bz-fav-empty { grid-column: 1 / -1; }
+.bz-fav-card {
+  width: 184px; min-width: 0; background: var(--card); border-radius: 10px; padding: 24px 16px 13px; cursor: pointer; position: relative;
+  box-shadow: 0 4px 12px var(--card-shadow); transition: transform .15s, box-shadow .15s;
 }
+.bz-fav-card:hover { transform: translateY(-4px); box-shadow: 0 10px 22px var(--card-shadow-hi); }
+.bz-fav-card .bz-fav-tape {
+  position: absolute; top: -9px; left: 50%; transform: translateX(-50%) rotate(-2deg);
+  width: 66px; height: 18px; border-radius: 2px; background: rgba(150,190,220,.55); box-shadow: 0 1px 2px rgba(0,0,0,.1);
+}
+.bz-fav-card .bz-fav-tape--r { transform: translateX(-50%) rotate(2deg); background: rgba(235,180,170,.5); }
+.bz-fav-card .bz-fav-tape--g { transform: translateX(-50%) rotate(-1deg); background: rgba(170,210,170,.5); }
+.bz-fav-card .bz-fav-dot {
+  position: absolute; top: 10px; right: 10px; width: 12px; height: 12px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff 0 20%, var(--c) 75%); box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+.bz-fav-card h3 { font-size: 14px; margin: 0 0 6px; color: var(--ink-strong); }
+.bz-fav-card p {
+  font-size: 12px; line-height: 1.65; color: var(--ink-mut); margin: 0;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.bz-fav-card .bz-fav-ft {
+  margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--ft-bd); font-size: 10.5px; color: var(--ink-faint);
+  display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
+}
+.bz-fav-card .bz-fav-tags-row { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; }
+.bz-fav-card .bz-fav-tagb { padding: 3px 8px; border-radius: 99px; font-size: 10.5px; line-height: 1; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+.bz-fav-card.bz-fav-pinc { box-shadow: 0 4px 12px var(--card-shadow), 0 0 0 2px var(--gold); }
+.bz-fav-card.bz-fav-arch { opacity: .5; filter: grayscale(.5); }
+.bz-fav-empty { padding: 50px 0; text-align: center; color: var(--ink-faint); font-size: 13px; width: 100%; }
+/* 移动端：双列网格（原型 .phone .m-board）；minmax(0,1fr) 防 line-clamp 卡片 max-content 撑爆轨道 */
+.bz-fav-panel.bz-fav-mob .bz-fav-board { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px 12px; align-items: start; }
+.bz-fav-panel.bz-fav-mob .bz-fav-card { width: auto; }
+/* 移动端磁贴行：平铺单行横向滑动（原型 .phone .tags；顶垫 5px 防磁点被 overflow 裁掉） */
+.bz-fav-panel.bz-fav-mob .bz-fav-tags { flex-wrap: nowrap; overflow-x: auto; padding: 5px 0 6px; }
+.bz-fav-panel.bz-fav-mob .bz-fav-tags button { white-space: nowrap; }
 
-/* ---- 空态（空库欢迎 / 搜索无结果，ticket 141 区分） ---- */
-.bz-fav-empty {
-  padding: 40px;
-  text-align: center;
-  color: var(--text-faint);
-  font-size: 16px;
+/* 移动端头行（原型 .m-head：标题居中，关闭钮绝对定位钉右缘不挤歪标题）。
+   容器前缀提 0,2,0 压过 reset 的 button:not(.clickable-icon) 0,1,1，否则背景/阴影被 unset */
+.bz-fav-panel.bz-fav-mob .bz-fav-head { align-items: center; padding-top: 4px; }
+.bz-fav-panel .bz-fav-mob-close {
+  display: none; flex: none; position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+  width: 24px; height: 24px; border-radius: 7px; border: none; background: var(--chip); color: var(--chip-ink);
+  cursor: pointer; align-items: center; justify-content: center; box-shadow: 0 2px 6px var(--card-shadow);
 }
-.bz-fav-empty-hint {
-  font-size: 13px;
-  margin-top: 6px;
-  opacity: 0.8;
-}
+.bz-fav-panel.bz-fav-mob .bz-fav-mob-close { display: flex; }
 
-/* ---- 列表卡片 ---- */
-.fav-card {
-  display: flex;
-  flex-direction: column;
-  padding: 16px;
-  margin-bottom: 12px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 10px;
-  background: var(--background-primary);
-  cursor: default;
-  transition: background 0.15s;
-  position: relative;
+/* —— 右键菜单（原型 .ctx 逐字） —— */
+.bz-fav-ctx {
+  position: fixed; z-index: 500; /* 原型兜底值，插件端以 topifyZ 为准 */
+  min-width: 168px; background: var(--menu); border: 1px solid var(--menu-bd); border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0,0,0,.28); padding: 5px;
 }
-.fav-card.bz-fav-card--link { cursor: pointer; } /* 有链接 = 可见的点击入口（ticket 61） */
-.fav-card.bz-fav-card--pinned {
-  background: var(--background-modifier-hover);
-  border-left: 3px solid var(--interactive-accent);
+/* .bz-fav-scope 前缀（(0,2,1)）：脱离与 core reset (0,1,1) 的同分顺序对抗（C1） */
+.bz-fav-scope .bz-fav-ctx button {
+  display: flex; align-items: center; justify-content: flex-start; gap: 9px; width: 100%; border: none; background: none; cursor: pointer;
+  font: 12.5px/1 var(--font-interface, 'Microsoft YaHei'); color: var(--menu-ink); padding: 8px 10px; border-radius: 7px; text-align: left;
 }
-/* hover 提亮仅未置顶卡（原 onmouseenter/onmouseleave 行为） */
-.fav-card:not(.bz-fav-card--pinned):hover {
-  background: var(--background-modifier-hover);
-}
-.bz-fav-title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-.bz-fav-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-normal);
-}
-.bz-fav-desc {
-  font-size: 14px;
-  color: var(--text-muted);
-  line-height: 1.5;
-  margin-bottom: 8px;
-  word-break: break-word;
-}
-.bz-fav-meta {
-  display: flex;
-  gap: 12px;
-  font-size: 12px;
-  color: var(--text-faint);
-}
-.bz-fav-tag-group {
-  display: flex;
-  gap: 6px;
-  margin-left: auto;
-  flex-shrink: 0;
-}
-.bz-fav-tag-badge {
-  font-size: 12px;
-  padding: 2px 10px;
-  border-radius: 12px;
-  background: var(--background-secondary);
-  color: var(--text-muted);
-  white-space: nowrap;
-  cursor: default;
-}
-.bz-fav-balance {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-left: 4px;
-  white-space: nowrap;
-}
-/* 分页加载指示（ticket 141，movie 同款文案与样式） */
-.bz-fav-load-more {
-  text-align: center;
-  padding: 8px;
-  color: var(--text-muted);
-  font-size: 0.8rem;
-}
+.bz-fav-ctx button:hover { background: var(--menu-hover); }
+.bz-fav-ctx button .bz-ic { color: var(--ink-mut); }
+.bz-fav-ctx button.bz-fav-danger { color: var(--danger); }
+.bz-fav-ctx button.bz-fav-danger .bz-ic { color: var(--danger); }
+.bz-fav-ctx .bz-fav-ctx-sep { height: 1px; background: var(--ft-bd); margin: 4px 6px; }
 
-/* ==================== 添加/编辑弹窗（ticket 141 收敛：原 _buildAddDialog/_buildLLMConfigSection 内联逐字搬运） ==================== */
-#fav-add-mask {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0,0,0,0.3);
-  display: none;
-  align-items: center;
-  justify-content: center;
+/* —— 移动端底部抽屉（原型 .sheet 逐字） —— */
+.bz-fav-sheet-mask {
+  position: fixed; inset: 0; z-index: 400; /* 原型兜底值，插件端以 topifyZ 为准 */
+  background: var(--mask); display: none; align-items: flex-end;
 }
-#fav-add-popup {
-  background: var(--background-primary);
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-  padding: 24px;
-  max-width: 450px;
-  width: 90%;
-  max-height: 80vh;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.bz-fav-sheet-mask.bz-fav-show { display: flex; }
+.bz-fav-sheet {
+  width: 100%; background: var(--pop); border-radius: 18px 18px 0 0; padding: 16px 18px 20px;
+  box-shadow: 0 -10px 30px rgba(0,0,0,.3);
 }
-#fav-add-popup h4 {
-  margin: 0 0 4px 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-normal);
+.bz-fav-sheet .bz-fav-sh-head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 12px; }
+.bz-fav-sheet .bz-fav-sh-dot {
+  flex: none; width: 12px; height: 12px; border-radius: 50%; margin-top: 4px;
+  background: radial-gradient(circle at 35% 30%, #fff 0 20%, var(--c) 75%); box-shadow: 0 1px 3px rgba(0,0,0,.2);
 }
-.bz-fav-input {
-  width: 100%;
-  padding: 8px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--background-modifier-border);
-  background: var(--background-primary);
-  color: var(--text-normal);
-  font-size: 14px;
-  box-sizing: border-box;
+.bz-fav-sheet .bz-fav-sh-title { font-size: 14px; color: var(--ink-strong); }
+.bz-fav-sheet .bz-fav-sh-meta { font-size: 11px; color: var(--ink-faint); margin-top: 3px; }
+.bz-fav-sheet .bz-fav-sh-acts { display: flex; flex-direction: column; }
+.bz-fav-sheet .bz-fav-sh-acts button {
+  display: flex; align-items: center; justify-content: flex-start; gap: 10px; border: none; background: none; cursor: pointer;
+  font: 13px/1 var(--font-interface, 'Microsoft YaHei'); color: var(--menu-ink);
+  padding: 11px 6px; text-align: left; border-bottom: 1px solid var(--ft-bd);
 }
-.bz-fav-input--area {
-  resize: vertical;
-  min-height: 60px;
-  font-family: inherit;
+.bz-fav-sheet .bz-fav-sh-acts button:last-child { border-bottom: none; }
+.bz-fav-sheet .bz-fav-sh-acts button .bz-ic { color: var(--ink-mut); }
+.bz-fav-sheet .bz-fav-sh-acts button.bz-fav-danger { color: var(--danger); }
+.bz-fav-sheet .bz-fav-sh-acts button.bz-fav-danger .bz-ic { color: var(--danger); }
+
+/* —— 图标尺寸对齐 c5 基准（ADR-0101 1:1，恢复基准非改视觉） ——
+   抽屉动作行 15px（c5-linen-full.html 动作按钮 icon(a.ic, 15)）；卡片标签徽记 11px
+   （域内原型 icon(ic, 11)；c5 该处为 emoji，lucide 化后以域内原型为准）。
+   插件端 .bz-ic 默认 1em（动作行 13px 字号=13px）、tagb 挂 --xs 12px（!important），
+   故 tagb 覆盖须同带 !important；原型端 svg 直出本就同值，不受此块影响。 */
+.bz-fav-sheet .bz-ic { width: 15px; height: 15px; }
+.bz-fav-card .bz-fav-tagb .bz-ic { width: 11px !important; height: 11px !important; }
+
+/* —— 表单（原型 .mask + .form 逐字） —— */
+.bz-fav-form-mask {
+  position: fixed; inset: 0; z-index: 600; /* 原型兜底值，插件端以 topifyZ 为准 */
+  background: var(--mask); display: flex; align-items: center; justify-content: center;
 }
-.bz-fav-chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 4px;
+.bz-fav-form {
+  width: min(430px, calc(100vw - 32px)); max-height: 86vh; overflow: auto; background: var(--pop); border-radius: 14px; padding: 20px 22px 18px;
+  box-shadow: 0 16px 44px rgba(0,0,0,.32);
 }
-/* 类型/置顶选择钮：同风格 chip，选中态走 .active */
-.fav-type-btn,
-.bz-fav-pin-btn {
-  padding: 6px 14px;
-  border-radius: 20px;
-  background: var(--background-secondary);
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 14px;
-  border: none;
-  box-shadow: none;
-  transition: all 0.2s;
+.bz-fav-form h2 { font-size: 15px; color: var(--pop-ink); margin: 0 0 14px; letter-spacing: 2px; }
+.bz-fav-form .bz-fav-fld { margin-bottom: 12px; }
+.bz-fav-form .bz-fav-fld label { display: block; font-size: 11.5px; color: var(--pop-mut); margin-bottom: 5px; }
+.bz-fav-form input, .bz-fav-form textarea {
+  width: 100%; border: 1px solid var(--fld-bd); border-radius: 8px; background: var(--fld-bg); color: var(--fld-ink);
+  font: 12.5px/1.6 var(--font-interface, 'Microsoft YaHei'); padding: 7px 10px; outline: none;
 }
-.fav-type-btn.active,
-.bz-fav-pin-btn.active {
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
+.bz-fav-form textarea { resize: vertical; min-height: 52px; }
+.bz-fav-form input:focus, .bz-fav-form textarea:focus { border-color: var(--acc); }
+.bz-fav-form .bz-fav-pick { display: flex; flex-wrap: wrap; gap: 7px; }
+.bz-fav-form .bz-fav-pick button {
+  border: 1px solid var(--fld-bd); background: var(--fld-bg); color: var(--chip-ink); border-radius: 99px; cursor: pointer;
+  font: 11.5px/1 var(--font-interface, 'Microsoft YaHei'); padding: 6px 11px;
+  display: inline-flex; align-items: center; gap: 5px;
 }
-.bz-fav-llm-section {
-  margin-top: 12px;
-  padding: 12px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  background: var(--background-secondary);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.bz-fav-form .bz-fav-pick button.bz-fav-on { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.bz-fav-form .bz-fav-inline { display: flex; align-items: center; gap: 8px; }
+.bz-fav-form .bz-fav-fld-desc { font-size: 11px; color: var(--pop-faint); }
+.bz-fav-form .bz-fav-sw {
+  position: relative; width: 32px; height: 18px; border-radius: 99px; background: #b9b2a2; cursor: pointer;
+  transition: background .15s; flex: none; display: inline-block;
 }
-.bz-fav-llm-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-normal);
-  margin-bottom: 4px;
+.bz-fav-form .bz-fav-sw::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: left .15s;
 }
-.bz-fav-llm-label {
-  font-size: 12px;
-  color: var(--text-muted);
+.bz-fav-form .bz-fav-sw.bz-fav-on { background: var(--acc); }
+.bz-fav-form .bz-fav-sw.bz-fav-on::after { left: 16px; }
+.bz-fav-form .bz-fav-err { color: var(--danger); font-size: 12px; min-height: 16px; margin-bottom: 6px; }
+.bz-fav-form .bz-fav-btns { display: flex; justify-content: flex-end; gap: 9px; }
+.bz-fav-form .bz-fav-btns button {
+  cursor: pointer; font: 12.5px/1 var(--font-interface, 'Microsoft YaHei'); padding: 8px 16px; border-radius: 8px;
+  border: 1px solid var(--fld-bd); background: var(--fld-bg); color: var(--chip-ink);
 }
-.bz-fav-llm-input {
-  width: 100%;
-  padding: 8px;
-  border-radius: 6px;
-  border: 1px solid var(--background-modifier-border);
-  background: var(--background-primary);
-  color: var(--text-normal);
-  font-size: 13px;
-  box-sizing: border-box;
-}
-.bz-fav-llm-input--area {
-  min-height: 60px;
-  font-family: monospace;
-  resize: vertical;
-}
-.bz-fav-llm-hint {
-  font-size: 11px;
-  color: var(--text-faint);
-  margin-top: 4px;
-}
-.bz-fav-btn-group {
-  display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-  margin-top: 8px;
-}
-.bz-fav-btn-secondary {
-  padding: 8px 16px;
-  border-radius: 6px;
-  border: none;
-  background: var(--background-secondary);
-  cursor: pointer;
-  font-size: 14px;
-  color: var(--text-normal);
-  box-shadow: none;
-}
-.bz-fav-btn-primary {
-  padding: 8px 16px;
-  border-radius: 6px;
-  border: none;
-  background: var(--interactive-accent);
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-on-accent);
-  box-shadow: none;
-}
-.bz-fav-btn-primary:disabled {
-  opacity: 0.6;
-  cursor: default;
+.bz-fav-form .bz-fav-btns button.bz-fav-pri { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.bz-fav-form .bz-fav-btns button:hover { filter: brightness(.97); }
+.bz-fav-form .bz-fav-btns button:disabled { opacity: .55; cursor: default; }
+.bz-fav-form .bz-fav-btns .bz-fav-ai-btn { display: inline-flex; align-items: center; gap: 5px; color: var(--acc); border-color: var(--acc); }
+
+/* —— 触屏 44px 触控档（磁贴行按钮；延续 issue 219 系列守护口径） —— */
+@media (pointer: coarse) {
+  .bz-fav-scope .bz-fav-tags button { min-height: 44px; }
 }
 
-/* ==================== 排序弹窗（ticket 141：movie 筛选排序弹窗同款交互与视觉） ==================== */
-.bz-fav-sort-mask {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0,0,0,0.3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.bz-fav-sort-popup {
-  background: var(--background-primary);
-  color: var(--text-normal);
-  border-radius: 12px;
-  width: 90%;
-  max-width: 500px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow: 0 8px 30px rgba(0,0,0,0.3);
-  border: 1px solid var(--background-modifier-border);
-}
-.bz-fav-sort-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--background-modifier-border);
-}
-.bz-fav-sort-head h3 {
-  margin: 0;
-}
-.bz-fav-sort-close {
-  background: none;
-  border: none;
-  font-size: 1.3rem;
-  cursor: pointer;
-  color: var(--text-muted);
-}
-.bz-fav-sort-body {
-  padding: 16px;
-  max-height: 70vh;
-  overflow-y: auto;
-}
-.bz-fav-sort-group {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.bz-fav-sort-option {
-  padding: 6px 12px;
-  border-radius: 16px;
-  box-shadow: none;
-  background: var(--background-secondary);
-  color: var(--text-normal);
-  cursor: pointer;
-  font-size: 0.85rem;
-  border: 1px solid var(--background-modifier-border);
-}
-.bz-fav-sort-option--active {
-  background: var(--interactive-accent);
-  color: var(--text-on-accent, white);
-  border-color: var(--interactive-accent);
+/* —— 窄面板兜底：桌面窄窗下面板宽 <520px 时卡墙退化为移动同款双列平摊（容器查询，Obsidian Chromium 支持） —— */
+.bz-fav-panel { container-type: inline-size; }
+@container (max-width: 520px) {
+  .bz-fav-panel .bz-fav-board { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px 12px; align-items: start; }
+  .bz-fav-panel .bz-fav-card { width: auto; }
 }

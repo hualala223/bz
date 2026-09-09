@@ -78,12 +78,20 @@ export class MockVault {
 
   getAbstractFileByPath(path: string): any {
     if (this.files.has(path) || this.binaryFiles.has(path)) return this.file(path);
-    // 目录：收集以 path/ 开头的直接子文件
+    // 目录：收集以 path/ 开头的直接子文件 + 子文件夹对象（递归构造；对齐真实 TFolder.children）
     const prefix = path.endsWith('/') ? path : path + '/';
-    const children = [
-      ...[...this.files.keys(), ...this.binaryFiles.keys()]
-        .filter((p) => p.startsWith(prefix) && !p.slice(prefix.length).includes('/')),
-    ].map((p) => this.file(p));
+    const all = [...this.files.keys(), ...this.binaryFiles.keys()];
+    const children = all
+      .filter((p) => p.startsWith(prefix) && !p.slice(prefix.length).includes('/'))
+      .map((p) => this.file(p));
+    const subDirs = new Set(
+      all.filter((p) => p.startsWith(prefix) && p.slice(prefix.length).includes('/'))
+        .map((p) => prefix + p.slice(prefix.length).split('/')[0]),
+    );
+    for (const d of subDirs) {
+      const sub = this.getAbstractFileByPath(d);
+      if (sub) children.push(sub);
+    }
     if (children.length || this.dirs.has(path)) {
       return { path, children, isFolder: true };
     }
@@ -155,6 +163,42 @@ export class MockVault {
     this.files.delete(file.path);
     this.binaryFiles.delete(file.path);
     this.modifiedPaths.push(file.path);
+  }
+
+  /** Obsidian vault.trash 语义：system=true 移入库内 .trash/ 目录（可在回收站恢复），否则永久删除；记录路径供测试断言 */
+  trashed: Array<{ path: string; system: boolean }> = [];
+  async trash(file: any, system: boolean = true): Promise<void> {
+    this.trashed.push({ path: file.path, system });
+    if (system) {
+      const name = file.path.split('/').pop()!;
+      if (this.files.has(file.path)) {
+        const content = this.files.get(file.path)!;
+        this.files.delete(file.path);
+        this.files.set(`.trash/${name}`, content);
+      } else if (this.binaryFiles.has(file.path)) {
+        const bytes = this.binaryFiles.get(file.path)!;
+        this.binaryFiles.delete(file.path);
+        this.binaryFiles.set(`.trash/${name}`, bytes);
+      }
+    } else {
+      this.files.delete(file.path);
+      this.binaryFiles.delete(file.path);
+    }
+    this.modifiedPaths.push(file.path);
+  }
+
+  /** Obsidian vault.cachedRead 语义（内存 mock 缓存读取等价直读） */
+  async cachedRead(file: any): Promise<string> {
+    return this.files.get(file.path) ?? '';
+  }
+
+  /** Obsidian vault.process 语义：原子读改写（读-改-写单步完成，防并发窗口互吞） */
+  async process(file: any, fn: (content: string) => string): Promise<string> {
+    const content = this.files.get(file.path) ?? '';
+    const next = fn(content);
+    this.files.set(file.path, next);
+    this.modifiedPaths.push(file.path);
+    return next;
   }
 
   async createFolder(path: string): Promise<void> {
@@ -293,6 +337,10 @@ export function mockAppWithVault(vault: MockVault) {
         }
         lines.push('---');
         vault.files.set(path, lines.join('\n') + (body ? '\n' + body : ''));
+      },
+      /** renameFile：Obsidian 内建改名（真实环境还会更新全库双链，mock 只移动文件） */
+      renameFile: async (file: any, newPath: string) => {
+        await vault.rename(file, newPath);
       },
     },
     commands: (() => {

@@ -64,12 +64,28 @@ import { state as diaryState } from './diary/state';
 import { applyUiSettings, init as diaryInit, showDiaryPanel, unregisterEscLayer } from './diary/ui/panel';
 // 小橘陪伴猫（smartcat 域：桌面宠物 + AI 陪伴；AI 走 bz core/ai，数据单 json smartcat.json）
 import { ensureSmartCat, unloadSmartCat, openSmartCat, openSmartCatChat, hideSmartCat, openSmartcatDashboard, normalizeSmartcatOffMode, applySmartcatPowerState, smartcatMainSettingsSchema } from './smartcat';
+// 上游线（yeshimei/bz）并入新域（第一档加法）：内容首页/今日回顾/回忆墙/数据体检/设置面板
+import { openHome, unloadHome } from './home';
+import { openRecap, unloadRecap } from './recap';
+import { openDiaryWall, unloadDiaryWall } from './diary-wall';
+import { applyDirectories as applyWallDirectories } from './diary-wall/config';
+import { openSettingsPanel, unloadSettingsPanel } from './settings-panel';
+import { openDataCheckup, unloadDataCheckup } from './checkup';
 
 /** 命令表：id/name 统一命名（spec「命令 id 全清单」第 9 轮：bz-<域>-<动作>，icon 与入口页磁贴一致）；
  *  editorCallback 可选（ticket 169）：提供后注册为编辑器命令，自动进入文档内右键待选命令 */
 const COMMANDS: { id: string; name: string; icon: string; callback: () => void; editorCallback?: (editor: unknown, ctx: { file?: { path: string; basename: string; extension: string } | null }) => void }[] = [
   // 入口页（t1：主页 → 入口页，术语随 CONTEXT.md；id bz-home 不变）
   { id: 'bz-home', name: '入口页', icon: 'home', callback: () => openLauncherPanel(getApp()) },
+  // 上游线并入新域（第一档加法，均为只读聚合或聚合入口）
+  { id: 'bz-home-open', name: '内容首页', icon: 'layout-grid', callback: () => openHome(getApp()) },
+  { id: 'bz-recap-today', name: '今日回顾', icon: 'calendar-heart', callback: () => openRecap(getApp()) },
+  // 回忆墙（diary-wall 域，ADR-0081：日记的媒体优先只读视图）
+  { id: 'bz-diary-wall-open', name: '回忆墙', icon: 'images', callback: () => openDiaryWall(getApp()) },
+  // 数据体检（checkup 域，D4：全插件数据只读巡检）
+  { id: 'bz-data-checkup-open', name: '数据体检', icon: 'stethoscope', callback: () => void openDataCheckup(getApp()) },
+  // 设置面板（settings-panel 域，ADR-0080：全域设置聚合入口，与既有设置架构并存不替换）
+  { id: 'bz-settings-panel-open', name: '设置面板', icon: 'settings-2', callback: () => openSettingsPanel(getApp()) },
   // 备忘录
   { id: 'bz-memo-open', name: '备忘录', icon: 'sticky-note', callback: () => openBzPanel(getApp()) },
   { id: 'bz-memo-add', name: '加备忘', icon: 'pencil', callback: () => createMemoItem(getApp()) },
@@ -137,9 +153,11 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
 ];
 
 /** 应用日记本设置到运行时常量（diary-notebook 原 applySettingsToRuntime） */
-function applyDiarySettingsToRuntime(s: BzSettings) {
+export function applyDiarySettingsToRuntime(s: BzSettings) {
   applyDirectories(s);
   applyUiSettings(s);
+  // 回忆墙目录常量同步（上游 diary-wall/config：读改日记/影视/信目录后跟随）
+  applyWallDirectories(s);
 }
 
 export default class BzPlugin extends Plugin {
@@ -307,6 +325,12 @@ export default class BzPlugin extends Plugin {
     unloadAutoSummary();
     // 文献盒（ADR-0072 迁出：面板 DOM + 模块单例复位）
     unloadLiterature();
+    // 上游线并入新域卸载（均幂等空清理，未初始化时不引起无谓装载）
+    unloadHome();
+    unloadRecap();
+    unloadDiaryWall();
+    unloadSettingsPanel();
+    unloadDataCheckup();
     // 域事件总线收口：摘除 vault 订阅点 + 清空全部域事件订阅（总线为进程内单例，随插件卸载全量清空）
     detachObsidianAdapter();
     clearDomainEvents();

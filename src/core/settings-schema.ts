@@ -19,6 +19,7 @@ import type BzSettings from '../settings';
 import { getSettings, saveSettings, tryGetSettings } from './settings-provider';
 import { renderPathSettingRow } from './path-picker';
 import { createSettingsGroup, markSettingSplitRows, refreshSettingsGroupCounts } from './settings-modal';
+import { uiCardChoice } from './ui';
 
 /** 设置快照：visibleWhen 条件函数的入参（键直绑行的当前值；外部数据行请自行闭包捕获）。 */
 export type SettingsSnapshot = Readonly<BzSettings>;
@@ -33,7 +34,7 @@ export type SettingsKeyOfType<V> = {
 }[keyof BzSettings];
 
 /** 行值绑定二选一：键直绑（自动读值 + saveSettings 落盘）或外部数据三函数逃生口。 */
-export type RowBinding<V> =
+type RowBinding<V> =
   | { key: SettingsKeyOfType<V> }
   | {
       /** 读当前值 */
@@ -58,6 +59,14 @@ interface RowBase {
   desc?: string;
   /** 声明式显隐条件：初始渲染与任意行变更后重求值（省略 = 恒显示） */
   visibleWhen?: (snapshot: SettingsSnapshot) => boolean;
+  /**
+   * 子项联动显隐（ticket 170）：true = 本行跟随所在组内前面最近的 toggle 父项——父项关闭时
+   * 本行隐藏、开启才显示（与行自身 visibleWhen 取与）。父项须为键直绑（外部绑定无法判定）；
+   * 父键为「缺省开」语义（键缺失视为开）的域不适用 isChild，请显式写 visibleWhen。
+   */
+  isChild?: boolean;
+  /** 行底补充提示（拍板原型：『↳』前缀灰字，渲染于描述之下——如存储路径的迁移提示） */
+  note?: string;
 }
 
 export interface ToggleRow extends RowBase {
@@ -72,18 +81,28 @@ export interface ToggleRow extends RowBase {
 interface TextualCommit {
   /** 防抖到期 / 失焦 / 回车（textarea 无回车提交）触发的落盘点回调 */
   onCommit?: () => void;
+  /**
+   * 行级联动刷新（ticket 172 延伸）：任意行变更后重求值时，重读本行输入框的显示值。
+   * 声明方式：键名（读 getSettings()[key]）或函数（从快照求值）——结果即为当前应显示值。
+   * 用途：per-provider 配置输入随「AI 服务商」切换刷新（值 = 覆盖 > 注册表默认）。
+   * 语义与 custom 行 onRefresh 一致：只刷新显示，不落盘（用户未编辑时重求值不触发保存）。
+   */
+  refreshKey?: string | ((snapshot: SettingsSnapshot) => string);
 }
 
-export interface TextRow extends RowBase, TextualCommit {
+interface TextRow extends RowBase, TextualCommit {
   type: 'text';
   name: string;
   binding: RowBinding<string>;
-  placeholder?: string;
+  /** 占位提示；函数形式 = 随快照联动（ticket 172：placeholder 跟随 aiProvider 显示注册表默认） */
+  placeholder?: string | ((snapshot: SettingsSnapshot) => string);
   /** 每键触发（写内存后；落盘走防抖/失焦/回车 commit） */
   onChange?: (value: string, ctx: SettingsRowContext) => void;
+  /** 数字型文本行修饰（issue 187 采样参数）：右对齐窄框（设置面板渲染器消费；core 渲染器忽略） */
+  num?: boolean;
 }
 
-export interface TextAreaRow extends RowBase, TextualCommit {
+interface TextAreaRow extends RowBase, TextualCommit {
   type: 'textarea';
   name: string;
   binding: RowBinding<string>;
@@ -101,7 +120,8 @@ export interface NumberRow extends RowBase, TextualCommit {
   max?: number;
   /** 输入框步进（浏览器 spinner 口径；不参与写入钳制） */
   step?: number;
-  placeholder?: string;
+  /** 占位提示；函数形式 = 随快照联动（ticket 172） */
+  placeholder?: string | ((snapshot: SettingsSnapshot) => string);
   onChange?: (value: number, ctx: SettingsRowContext) => void;
 }
 
@@ -114,7 +134,7 @@ export interface SelectRow extends RowBase {
   onChange?: (value: string, ctx: SettingsRowContext) => void;
 }
 
-export interface SliderRow extends RowBase {
+interface SliderRow extends RowBase {
   type: 'slider';
   name: string;
   binding: RowBinding<number>;
@@ -124,7 +144,7 @@ export interface SliderRow extends RowBase {
   onChange?: (value: number, ctx: SettingsRowContext) => void;
 }
 
-export interface PathRow extends RowBase {
+interface PathRow extends RowBase {
   type: 'path';
   name: string;
   /** single = 单值（绑定 string 键）；multi = 多值（绑定 string[] 键）。ADR-0061 选择器录入 */
@@ -140,6 +160,9 @@ export interface PathRow extends RowBase {
   okText?: string;
   /** chips 空态文案（缺省「未选择」） */
   emptyText?: string;
+  /** 空值回落显示（可选）：绑定值为空时 chips 区展示该函数返回的「实际生效目录」锁定 chip
+   *  （仅展示不落盘，点击重开选择器可改为显式设置。先例：bookshelfFolderPath 空 = 回落旧 library 键/「书库」） */
+  fallbackValue?: () => string;
   /** 选择确定 / chip 移除后（写内存 + 落盘后触发）。返回 string[]（或其 Promise）= 否决/改写后的
    *  最终清单（如异步收编确认被取消时回退旧值），以返回值为落盘与 chips 渲染口径；void = 以 list 为准。 */
   onChange?: (list: string[], ctx: SettingsRowContext) => void | string[] | Promise<void | string[]>;
@@ -148,7 +171,7 @@ export interface PathRow extends RowBase {
 }
 
 /** 纯操作行（如「添加监听文件夹」）：挂 .bz-setting-action-row 豁免分组徽标计数 */
-export interface ButtonRow extends RowBase {
+interface ButtonRow extends RowBase {
   type: 'button';
   name: string;
   buttonText: string;
@@ -158,18 +181,30 @@ export interface ButtonRow extends RowBase {
 }
 
 /** 纯展示行（名称 + 描述，无控件；如影视「海报抓取」指引行） */
-export interface InfoRow extends RowBase {
+interface InfoRow extends RowBase {
   type: 'info';
   name: string;
 }
 
 /** 非常规内容唯一出口：render 插槽（内容渲染进独立包装容器，visibleWhen 作用于包装容器） */
-export interface CustomRow extends RowBase {
+interface CustomRow extends RowBase {
   type: 'custom';
   render: (body: HTMLElement, ctx: SettingsRowContext) => void;
+  /** ticket 172：任意行变更后（含 aiProvider 切换）重求值时回调，供外部绑定行刷新显示值 */
+  onRefresh?: (ctx: SettingsRowContext) => void;
 }
 
-/** 十类行判别联合（Q5） */
+/** 视觉卡片单选行（issue 210）：预览卡 + 名称的「看脸选」设置项（如待办面板皮肤）。
+ *  prevClass = 预览区附加类，视觉由使用方域样式提供；无编号无描述为拍板形态。 */
+interface ChoiceCardsRow extends RowBase {
+  type: 'choiceCards';
+  name: string;
+  binding: RowBinding<string>;
+  options: Array<{ value: string; label: string; prevClass?: string }>;
+  onChange?: (value: string, ctx: SettingsRowContext) => void;
+}
+
+/** 十一类行判别联合（Q5；issue 210 增 choiceCards） */
 export type SettingsRow =
   | ToggleRow
   | TextRow
@@ -180,7 +215,8 @@ export type SettingsRow =
   | PathRow
   | ButtonRow
   | InfoRow
-  | CustomRow;
+  | CustomRow
+  | ChoiceCardsRow;
 
 /** 分组声明：有 icon = 分组卡片（createSettingsGroup）；无 icon = 区块标题 + 平铺行
  *  （主设置页 ADR-0009 单页形态，DOM 契约 .bz-setting-section-title 不破）。 */
@@ -199,7 +235,7 @@ export interface SettingsSchema {
 }
 
 /** 渲染句柄：refresh = 重求值显隐 + 徽标回填 + 两行式重标注（动态内容变更后调用） */
-export interface SettingsRenderHandle {
+interface SettingsRenderHandle {
   refresh: () => void;
 }
 
@@ -282,11 +318,16 @@ export function parseClampedNumber(raw: string, min?: number, max?: number): num
  */
 export function renderSettingsInto(container: HTMLElement, schema: SettingsSchema): SettingsRenderHandle {
   const entries: VisibilityEntry[] = [];
+  /** ticket 172：custom 行 onRefresh 回调（provider 切换等任意变更后重刷外部绑定行显示值） */
+  const customRefreshes: Array<() => void> = [];
 
   const reevaluate = (): void => {
     const snap = currentSnapshot();
     for (const e of entries) {
       e.el.classList.toggle('bz-setting-hidden', e.visibleWhen ? !e.visibleWhen(snap) : false);
+    }
+    for (const fn of customRefreshes) {
+      try { fn(); } catch { /* 单行刷新失败不影响其余 */ }
     }
     refreshSettingsGroupCounts(container);
     markSettingSplitRows(container);
@@ -308,6 +349,8 @@ export function renderSettingsInto(container: HTMLElement, schema: SettingsSchem
     const initial = String(acc.read() ?? '');
     let pending: ReturnType<typeof setTimeout> | null = null;
     let last = initial;
+    /** 用户是否实际编辑过（P2-2：refreshKey 程序化改写显示值不置脏，防 blur 假写覆盖换 provider 的值） */
+    let dirty = false;
     const warn = new CommitWarn(initial, row.onCommit);
     /** 有意的落盘点：防抖到期 / 失焦 / 回车（textarea 无回车提交）——统一落盘 */
     const commit = (): void => {
@@ -315,10 +358,13 @@ export function renderSettingsInto(container: HTMLElement, schema: SettingsSchem
         clearTimeout(pending);
         pending = null;
       }
+      if (!dirty) return; // 未编辑（仅程序化刷新显示值）不落盘、不提示、不求值
       void acc.persist();
       warn.fire(last);
       reevaluate(); // 有意变更点重求值显隐（逐键重排会闪烁，文本类行只在 commit 点联动）
     };
+    // refreshKey 联动刷新：保存输入框引用供重求值回调 setValue（声明在 addInto 外，闭包内写入）
+    let currentText: { setValue: (v: string) => unknown } | null = null;
     /** 文本/多行文本组件的最小结构面（真实 obsidian Text/TextAreaComponent 与 mock 均满足） */
     const addInto = (t: {
       setValue: (v: string) => unknown;
@@ -332,9 +378,20 @@ export function renderSettingsInto(container: HTMLElement, schema: SettingsSchem
         addEventListener: (type: string, listener: (e: { key: string }) => void) => void;
       };
     }) => {
+      currentText = t;
       t.setValue(initial);
-      if (row.placeholder && t.setPlaceholder) t.setPlaceholder(row.placeholder);
+      // placeholder：函数形式 = 随快照联动（ticket 172 提供商默认提示），字符串形式 = 静态
+      const place = (snap: SettingsSnapshot): string | undefined =>
+        typeof row.placeholder === 'function' ? row.placeholder(snap) : row.placeholder;
+      const applyPlaceholder = (): void => {
+        if (t.setPlaceholder) {
+          const p = place(currentSnapshot());
+          if (p !== undefined) t.setPlaceholder(p);
+        }
+      };
+      applyPlaceholder();
       t.onChange((v: string) => {
+        dirty = true; // 用户真实输入（程序化 setValue 不经过 onChange → 不置脏）
         if (isNumber) {
           const n = parseClampedNumber(v, (row as NumberRow).min, (row as NumberRow).max);
           if (n === null) return; // 空串/非数字不写入（防脏值落盘），已有计时照常走完
@@ -363,14 +420,48 @@ export function renderSettingsInto(container: HTMLElement, schema: SettingsSchem
           });
         }
       }
+      // 函数型 placeholder 随快照联动：任意行变更（含 aiProvider 切换）后刷新占位提示
+      if (typeof row.placeholder === 'function') {
+        const origReevaluate = ctx.refreshVisibility;
+        ctx.refreshVisibility = () => {
+          applyPlaceholder();
+          origReevaluate();
+        };
+      }
+      // refreshKey 联动刷新：任意行变更（含 aiProvider 切换）后重读显示值写回输入框（不落盘）。
+      // 程序化改写须清 dirty（P2-2）：否则后续 blur 触发 commit 会把刷新后的显示值误写落盘
+      if (row.refreshKey !== undefined) {
+        const ref = row.refreshKey;
+        customRefreshes.push(() => {
+          if (currentText) {
+            const snap = currentSnapshot();
+            const fresh = typeof ref === 'function' ? ref(snap) : String((snap as any)[ref]);
+            if (currentText.setValue) {
+              dirty = false;
+              currentText.setValue(String(fresh ?? ''));
+            }
+          }
+        });
+      }
     };
     if (row.type === 'text') setting.addText(addInto);
     else if (row.type === 'textarea') setting.addTextArea(addInto);
     else setting.addText(addInto);
   };
 
-  const renderRow = (body: HTMLElement, row: SettingsRow): void => {
+  const renderRow = (body: HTMLElement, rowArg: SettingsRow, parentToggleKey?: string | null): void => {
     const ctx: SettingsRowContext = { rowEl: body, refreshVisibility: reevaluate };
+    let row = rowArg;
+    // isChild 联动显隐（ticket 170）：跟随组内前面最近的 toggle 父项（键直绑）——父项关闭时本行
+    // 隐藏、开启才显示，与行自身 visibleWhen 取与；父项为外部绑定（无 key）时不联动，恒显示。
+    if (row.isChild && parentToggleKey) {
+      row = {
+        ...row,
+        visibleWhen: (snap: SettingsSnapshot) =>
+          (snap as unknown as Record<string, unknown>)[parentToggleKey] === true &&
+          (rowArg.visibleWhen ? rowArg.visibleWhen(snap) : true),
+      } as SettingsRow;
+    }
 
     switch (row.type) {
       case 'custom': {
@@ -379,6 +470,7 @@ export function renderSettingsInto(container: HTMLElement, schema: SettingsSchem
         body.appendChild(wrap);
         if (row.visibleWhen) entries.push({ el: wrap, visibleWhen: row.visibleWhen });
         row.render(wrap, { rowEl: wrap, refreshVisibility: reevaluate });
+        if (row.onRefresh) customRefreshes.push(() => row.onRefresh!({ rowEl: wrap, refreshVisibility: reevaluate }));
         return;
       }
       case 'path': {
@@ -460,6 +552,26 @@ export function renderSettingsInto(container: HTMLElement, schema: SettingsSchem
         });
         return;
       }
+      case 'choiceCards': {
+        // 视觉卡片单选（issue 210）：与 select 同绑定通道；空值回退首个选项（同 select 口径）
+        const acc = bindValue(row.binding);
+        const setting = new Setting(body).setName(row.name);
+        if (row.desc) setting.setDesc(row.desc);
+        if (row.visibleWhen) entries.push({ el: setting.settingEl, visibleWhen: row.visibleWhen });
+        const pick = uiCardChoice({
+          value: String(acc.read() ?? '') || row.options[0].value,
+          options: row.options,
+          label: row.name,
+          onChange: async (v) => {
+            acc.write(v);
+            reevaluate();
+            await acc.persist();
+            row.onChange?.(v, ctx);
+          },
+        });
+        setting.controlEl.appendChild(pick.el);
+        return;
+      }
       case 'slider': {
         const acc = bindValue(row.binding);
         const setting = new Setting(body).setName(row.name);
@@ -505,13 +617,22 @@ export function renderSettingsInto(container: HTMLElement, schema: SettingsSchem
     }
   };
 
+  /** 组内行渲染（ticket 170 isChild 联动）：本组首个键直绑 toggle 视为「组级父项」，
+   *  所有 isChild 行跟随它显隐——而非跟随「前面最近的 toggle」——避免组内多个 toggle 时
+   *  子项级联绑到错误父项。首个 toggle 自身的 isChild 会被忽略（无父项可跟）。 */
+  const renderGroupRows = (body: HTMLElement, rows: SettingsRow[]): void => {
+    const firstToggleKey =
+      (rows.find((r) => r.type === 'toggle' && 'key' in r.binding) as { binding: { key: string } } | undefined)?.binding.key ?? null;
+    for (const row of rows) renderRow(body, row, firstToggleKey);
+  };
+
   for (const group of schema.groups) {
     if (group.icon) {
       // 分组卡片形态（createSettingsGroup 基座收编）
       const body = createSettingsGroup(container, { icon: group.icon, name: group.name });
       const groupEl = (body.parentElement ?? container) as HTMLElement;
       if (group.visibleWhen) entries.push({ el: groupEl, visibleWhen: group.visibleWhen });
-      for (const row of group.rows) renderRow(body, row);
+      renderGroupRows(body, group.rows);
     } else {
       // 区块标题平铺形态（主设置页）：.bz-setting-section-title 契约保持
       const title = document.createElement('div');
@@ -519,7 +640,7 @@ export function renderSettingsInto(container: HTMLElement, schema: SettingsSchem
       title.textContent = group.name;
       container.appendChild(title);
       if (group.visibleWhen) entries.push({ el: title, visibleWhen: group.visibleWhen });
-      for (const row of group.rows) renderRow(container, row);
+      renderGroupRows(container, group.rows);
     }
   }
 

@@ -1,6 +1,6 @@
 # AGENTS.md — 包仔（bz）Obsidian 插件
 
-独立 Obsidian 插件，20 功能域（详见领域清单）。数据沿用既有格式（`CONFIG/STORAGE/*.json`、`我的/*.md`、frontmatter），旧数据直接可读。**项目语言：中文**。
+独立 Obsidian 插件，25 功能域（详见领域清单；2026-09 自上游线 yeshimei/bz 并入 home/recap/checkup/diary-wall/settings-panel 五域，见 PROGRESS）。数据沿用既有格式（`CONFIG/STORAGE/*.json`、`我的/*.md`、frontmatter），旧数据直接可读。**项目语言：中文**。
 
 ## 交互约定
 
@@ -18,7 +18,7 @@
 
 ## 架构
 
-- `src/main.ts`：命令裸注册表、设置页、懒加载、onunload（37 命令，ticket 170 加「批量加入复习计划」后实测数）
+- `src/main.ts`：命令裸注册表、设置页、懒加载、onunload（42 命令 = ticket 170 后 37 + 上游并入新域 5：内容首页/今日回顾/回忆墙/数据体检/设置面板）
 - `src/core/`：共享层（不挂 window）——app/settings-provider/ai/json-store/domain-bus/obsidian-adapter/path-classify/esc-manager/flow-dialog/utils/dom/changelog/notice（自绘 toast）/settings-modal/settings-schema/settings-common
 - `src/<域>/`：index.ts + data + ui + styles.css（该域样式源头，聚合进根 `styles.css`）；`src/settings.ts`；根 `styles.css`（构建聚合产物，勿手改）；`docs/adr/`；`CONTEXT.md`；`.scratch/<feature>/`
 - **依赖方向（ADR-0002）**：`core ← config/state ← parser ← store ← ui ← main`。store 无 DOM；UI 刷新靠回调订阅；禁止模块顶层互访，函数级引用环须函数体内延迟解析。
@@ -61,6 +61,11 @@
 | quiz | quiz.json |
 | secondbrain（第二大脑） | secondbrain.json（meta/panel/link 三段）+ secondbrain.vec |
 | auto-summary | 剪藏 frontmatter |
+| home（内容首页，上游并入） | home.json（钉选偏好；各域只读快照） |
+| recap（今日回顾，上游并入） | 只读聚合五域当天痕迹 |
+| checkup（数据体检，上游并入） | 全插件数据只读巡检（D4） |
+| diary-wall（回忆墙，上游并入） | `我的/日记/*.md` 只读派生媒体视图（ADR-0081） |
+| settings-panel（设置面板，上游并入） | 聚合浏览入口，读写仍走既有 schema/provider（ADR-0080，并存不替换） |
 | launcher | launcher.json |
 | pomodoro | pomodoro.json |
 | attach | —（搬当前笔记引用的 vault 附件） |

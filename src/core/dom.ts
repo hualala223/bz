@@ -70,17 +70,38 @@ export function longPress(
   el.addEventListener('click', onClick, true);
 }
 
+/** swallowNextClick()：拖拽收尾防线——吞掉紧随本次拖拽结束的终端 click（issue 222）。
+ *  拖拽中 mousedown 落在面板、mouseup 落在遮罩/列表行时，浏览器把 click 派发到两者的
+ *  公共祖先，误触发「点遮罩关闭」「行点击」等冒泡语义。capture 一次性拦截：click 触发
+ *  即自毁；若未触发（如鼠标移出窗口松开）则下次 mousedown 撤防，不吞正常点击。 */
+export function swallowNextClick(): void {
+  const swallow = (e: MouseEvent) => {
+    document.removeEventListener('click', swallow, true);
+    e.stopPropagation();
+  };
+  const disarm = () => {
+    document.removeEventListener('click', swallow, true);
+  };
+  document.addEventListener('click', swallow, true);
+  document.addEventListener('mousedown', disarm, { capture: true, once: true });
+}
+
 /** DOMAIN_MAP：favicon 域名归一映射（Q3 同款） */
 const DOMAIN_MAP: Record<string, string> = {
   'guokrapp.guokr.com': 'guokr.com',
   'daily.zhihu.com': 'zhihu.com',
 };
 
-/** createSiteIcon(domain, size=16)：网站 favicon 图标（yandex 取图 + localStorage 缓存） */
+/**
+ * createSiteIcon(domain, size=16)：网站 favicon 图标（yandex 取图 + localStorage 缓存）。
+ * 高清修复：旧接口 `favicon/<domain>` 恒返 16px 小图，放大到 32/64px 头像位发糊——
+ * 改走 v2 接口带 `size` 参数按需取高清源；缓存键升级 `favicon_v2_<domain>_<size>`，
+ * 旧 `favicon_<domain>` 糊图缓存自动失效（不迁移、不清理，留待 localStorage 淘汰）。
+ */
 export function createSiteIcon(domain: string | null | undefined, size = 16): HTMLImageElement | null {
   if (!domain) return null;
   const mappedDomain = DOMAIN_MAP[domain] || domain;
-  const cacheKey = 'favicon_' + mappedDomain;
+  const cacheKey = `favicon_v2_${mappedDomain}_${size}`;
 
   const img = document.createElement('img');
   img.className = 'bz-site-icon';
@@ -97,8 +118,8 @@ export function createSiteIcon(domain: string | null | undefined, size = 16): HT
     }
   } catch (e) { /* 忽略 */ }
 
-  // 2. 使用网络地址
-  const networkUrl = `https://favicon.yandex.net/favicon/${mappedDomain}`;
+  // 2. 使用网络地址（v2 接口 + size 参数：源图即目标尺寸，避免小图放大发糊）
+  const networkUrl = `https://favicon.yandex.net/favicon/v2/${mappedDomain}?size=${size}`;
   img.src = networkUrl;
 
   // 3. 加载完成后缓存为 Base64

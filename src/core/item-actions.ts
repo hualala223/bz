@@ -13,7 +13,9 @@
  * 防穿透机制：
  * - 触屏路径：touchstart 被动监听（不 preventDefault，滚动不受影响），长按松手的合成 click
  *   在 TOUCH_SETTLE_MS 静置窗口内吞一次，防浮层刚打开就被当成「外部点击」关闭。
- * - 桌面右键路径无补发 click，无需抑制。
+ * - 桌面右键路径无补发 click，无需抑制；但 Chromium 右键时序（mousedown → contextmenu → mouseup
+ *   落在菜单外）会让 onMouseUpCapture 误置位残余抑制、吞掉下一次左键——直调 openItemMenu(..., true)
+ *   的域在打开后跟一句 resetItemMenuClickGuard() 复位（attachItemActions 右键路径已内置同款复位）。
  *
  * 实现说明：
  * - 复用 core/dom longPress（500ms 默认、10px 移动取消，仅移动端路径使用）。
@@ -62,6 +64,8 @@ export interface ItemActionsOptions {
   sheetSub?: string;
   /** 长按触发过滤器：返回 false 的按压不弹浮层（如正文文字区——让位系统长按选字/复制） */
   longPressFilter?: (e: any) => boolean;
+  /** 桌面右键菜单附加类（issue 210：皮肤域传 bz-todo-skin-*，菜单随面板换肤） */
+  menuClass?: string;
 }
 
 /** 浮层与视口边距（px，桌面跟手菜单用） */
@@ -193,6 +197,18 @@ function armTouchSettle(): void {
   }, TOUCH_SETTLE_MS);
 }
 
+/**
+ * 复位 click 抑制（issue 198 review P1）：
+ * 直调 openItemMenu(..., true) 的域（如 diary-wall 容器右键委托）在 Chromium 右键时序下，
+ * 随后 mouseup 落在菜单外会经 onMouseUpCapture 置位残余抑制（residualClickArmed），
+ * 吞掉用户下一次左键（含点菜单项，要点两次才生效）。右键无补发 click，抑制本就不需要——
+ * 打开菜单后调用本函数把 suppressNextClick / residualClickArmed 一并复位。
+ */
+export function resetItemMenuClickGuard(): void {
+  suppressNextClick = false;
+  residualClickArmed = false;
+}
+
 /** 注册浮层通用监听（外部点击关闭 / 残余 click 抑制 / ESC） */
 function attachPopupListeners(id: string): void {
   document.addEventListener('mousedown', onMouseDownCapture, true);
@@ -255,10 +271,10 @@ function focusMenuFirst(host: HTMLElement, scope: HTMLElement): void {
 }
 
 /** 桌面跟手菜单（鼠标长按；anchored at 光标，防溢出） */
-export function openItemMenu(x: number, y: number, actions: ItemAction[], suppressResidualClick = false): void {
+export function openItemMenu(x: number, y: number, actions: ItemAction[], suppressResidualClick = false, menuClass?: string): void {
   closeItemMenu();
   const m = document.createElement('div');
-  m.className = 'bz-item-menu';
+  m.className = 'bz-item-menu' + (menuClass ? ' ' + menuClass : '');
   m.style.visibility = 'hidden';
   for (const a of actions) {
     const item = document.createElement('button');
@@ -497,7 +513,7 @@ export function attachItemActions(card: HTMLElement, actions: ItemAction[], opts
     if (isMobileEnv()) return; // 移动端走触屏长按 → 抽屉
     if (opts?.longPressFilter && !opts.longPressFilter(e)) return; // 让位系统选字/复制：不弹也不拦
     e.preventDefault();
-    openItemMenu(e.clientX, e.clientY, actions, true);
+    openItemMenu(e.clientX, e.clientY, actions, true, opts?.menuClass);
     suppressNextClick = false; // 右键无补发 click，关闭残余抑制
   });
 

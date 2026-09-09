@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>收藏本 · 原型预览（与 src/favorites/styles.css 共用同一份 CSS）</title>
+<!--
+  ┌────────────────────────────────────────────────────────────────────┐
+  │ 本文件 = 收藏本域 UI 的评审壳。组件样式零内联，全部来自（与          │
+  │ build-css SOURCES 同序的 core 链 +）同目录 ./styles.css（与插件构建  │
+  │ 同一份源文件）。改样式只改 styles.css，刷新本页即见，插件构建自动    │
+  │ 带走——不存在二次同步。                                              │
+  │ 本文件只允许写：演示壳（页面底/手机框/评审徽牌）与演示逻辑（JS）。   │
+  │ markup/口径单源（issue 242/ADR-0104）：面板/磁贴/卡片/菜单/抽屉/表单  │
+  │ 全部出自 ./prototype-render.js（由 src/favorites/render.ts 构建，     │
+  │ 挂 window.BZR_favorites，与插件 ui.ts 消费同一份）。重新生成：        │
+  │ node scripts/build-preview.mjs。                                     │
+  └────────────────────────────────────────────────────────────────────┘
+-->
+<!-- core 链与 build-css.mjs SOURCES 同序（参照 belongings 原型）：评审壳内复现
+     reset/组件基线与本域样式的级联对抗，避免「壳里看不出来」的选择器脆弱性 -->
+<link rel="stylesheet" href="../core/styles.css">
+<link rel="stylesheet" href="../core/ui/tokens.css">
+<link rel="stylesheet" href="../core/ui/components.css">
+<link rel="stylesheet" href="./styles.css">
+<style>
+  /* ===== 以下全部是演示壳，禁止放组件样式 ===== */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { min-height: 100vh; display: flex; flex-direction: column; align-items: center; gap: 56px; padding: 32px 24px;
+    background: #e3e0d8; font-family: system-ui, 'Segoe UI', 'Microsoft YaHei', sans-serif; }
+  body.theme-dark { background: #1e1b18; }
+  * { scrollbar-width: none; } *::-webkit-scrollbar { display: none; }
+
+  /* 桌面面板外景（组件本体 900×620 来自 styles.css） */
+  .demo-dt { flex: none; }
+
+  /* 移动端手机框：把全屏态（.bz-fav-mob 100vw/100vh）缩进 396×780 演示框 */
+  .demo-mob { width: 396px !important; height: 780px !important; max-width: none !important;
+    position: relative; border: 1px solid #d8d1c0; border-radius: 26px; overflow: hidden; flex: none;
+    box-shadow: 0 8px 30px rgba(0,0,0,.14); }
+  /* 抽屉遮罩插件里挂 body（fixed 全屏）；评审壳内收进手机框 */
+  .demo-mob .bz-fav-sheet-mask { position: absolute; }
+
+  /* 评审徽牌 / 主题钮（演示壳自用） */
+  .vbadge { position: fixed; right: 16px; bottom: 12px; font-size: 11px; color: #9a917d; display: flex; gap: 10px; align-items: center;
+    background: rgba(255,255,255,.9); border: 1px solid #d8d1c0; padding: 3px 8px; }
+  .vbadge button { border: none; background: none; color: #b3564d; font: 11px 'Microsoft YaHei'; cursor: pointer; }
+  .theme-toggle { position: fixed; right: 16px; top: 14px; width: 34px; height: 34px; border-radius: 50%; cursor: pointer;
+    border: 1px solid #d8d1c0; background: rgba(255,255,255,.9); color: #6d6455; display: flex; align-items: center; justify-content: center; }
+  body.theme-dark .theme-toggle { background: rgba(53,49,42,.9); border-color: #3a352d; color: #cfc7b4; }
+</style>
+</head>
+<body>
+  <button class="theme-toggle" id="themeBtn" title="亮/暗切换"></button>
+  <div id="dtHost" class="demo-dt"></div>
+  <div id="mobHost" class="demo-mob"></div>
+
+  <div class="vbadge">收藏本 · 原型预览（共用 styles.css）· 真实 51 条 <button id="reset">重置演示数据</button></div>
+
+<script src="./prototype-icons.js"></script>
+<script src="./prototype-data.js"></script>
+<script src="./prototype-render.js"></script>
+<script>
+(function () {
+  /* ==================== 渲染单源：window.BZR_favorites（构建产物，勿手改） ====================
+   * markup / 计算口径 / 行操作序列全部来自 src/favorites/render.ts（issue 242/ADR-0104/0105），
+   * 与插件 ui.ts 消费同一份；本壳只留演示层（localStorage 假数据/自绘 toast/确认框/mountIcons）。 */
+  const R = window.BZR_favorites;
+  const esc = R.esc;
+  const icon = R.iconSpan;
+  const localNow = R.localNow;
+
+  /* ==================== 壳基座：mountIcons（prototype-icons.js 内联 SVG——壳层差异表） ==================== */
+  const ICONS = window.FAV_ICONS || {};
+  function mountIcons(root) {
+    if (!root) return;
+    root.querySelectorAll('i[data-lucide]').forEach((el) => {
+      const d = ICONS[el.dataset.lucide];
+      if (d && !el.firstChild) {
+        el.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+      }
+    });
+  }
+
+  /* ==================== 演示数据（壳层差异表：localStorage 假数据 + 真实库快照） ==================== */
+  const LS = 'bz-fav-c5-shared-v1';
+  const LS_THEME = 'bz-fav-c5-theme';
+  let items;
+  try {
+    const saved = JSON.parse(localStorage.getItem(LS) || 'null');
+    items = Array.isArray(saved) && saved.length ? saved : FAV.ITEMS.map((x) => ({ ...x }));
+  } catch (e) { items = FAV.ITEMS.map((x) => ({ ...x })); }
+  /* 视图状态（与 render.FavView / ui.ts FavState 切片同构） */
+  const M = { tag: null, archived: false };
+  const byId = (id) => items.find((i) => i.id === id);
+  const save = () => { try { localStorage.setItem(LS, JSON.stringify(items)); } catch (e) { } };
+
+  /* ==================== 面板骨架（markup 单源 R.panelHtml；桌面 + 手机框各一份） ==================== */
+  const dtHost = document.getElementById('dtHost');
+  const mobHost = document.getElementById('mobHost');
+  dtHost.innerHTML = R.panelHtml(false);
+  mobHost.innerHTML = R.panelHtml(true);
+  const dtPanel = dtHost.querySelector('.bz-fav-panel');
+  const mobPanel = mobHost.querySelector('.bz-fav-panel');
+
+  /* 抽屉遮罩：插件挂 body（fixed 全屏），评审壳收进手机框（演示层差异） */
+  const sheetMask = document.createElement('div');
+  sheetMask.className = 'bz-fav-sheet-mask bz-fav-scope';
+  const sheet = document.createElement('div');
+  sheet.className = 'bz-fav-sheet';
+  sheetMask.appendChild(sheet);
+  mobHost.appendChild(sheetMask);
+
+  /* ==================== 渲染（纯层胶水 R.renderPanelView；磁贴单行横滑/新收藏置首随 mobile 钩子） ==================== */
+  function renderPanel(panel, mobile) {
+    R.renderPanelView(panel, items, M, { mountIcons, mobile });
+  }
+  function renderAll() {
+    renderPanel(dtPanel, false);
+    renderPanel(mobPanel, true);
+  }
+
+  /* ==================== 行为演示（动作元语 R.actionSpecs → 壳侧演示实现；插件侧映射 core 服务） ==================== */
+  function runAction(it, spec) {
+    if (spec.act === 'open') { if ((it.url || '').trim()) window.open(it.url, '_blank'); }
+    else if (spec.act === 'pin') { it.pinned = !it.pinned; save(); renderAll(); }
+    else if (spec.act === 'edit') { openForm(it); }
+    else if (spec.act === 'unarchive') {
+      it.archived = false; it.archivedAt = null; save(); renderAll();
+      toast(`已取消归档，「${it.title}」回到主列表`);
+    } else if (spec.act === 'archive') {
+      confirmDlg('归档收藏', `确定归档收藏「${it.title}」吗？归档后不在主列表显示（数据保留），可在通知中撤销。`, '归档', () => {
+        it.archived = true; it.archivedAt = localNow(); save(); renderAll();
+        toast(`已归档收藏「${it.title}」`, '撤销', () => { it.archived = false; it.archivedAt = null; save(); renderAll(); });
+      });
+    } else if (spec.act === 'del') {
+      confirmDlg('删除收藏', `确定删除收藏「${it.title}」吗？删除后可在通知中撤销。`, '删除', () => {
+        const idx = items.indexOf(it);
+        items.splice(idx, 1); save(); renderAll();
+        toast(`已删除收藏「${it.title}」`, '撤销', () => { items.splice(Math.min(idx, items.length), 0, it); save(); renderAll(); });
+      });
+    }
+  }
+
+  /* ==================== 桌面右键菜单（容器壳建，内容单源 R.ctxMenuHtml） ==================== */
+  let menuEl = null;
+  function closeMenu() { if (menuEl) { menuEl.remove(); menuEl = null; } }
+  function openMenu(it, x, y) {
+    closeMenu();
+    const acts = R.actionSpecs(it);
+    menuEl = document.createElement('div');
+    menuEl.className = 'bz-fav-ctx bz-fav-scope';
+    menuEl.innerHTML = R.ctxMenuHtml(acts);
+    menuEl.addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      closeMenu(); runAction(it, acts[+b.dataset.k]);
+    });
+    document.body.appendChild(menuEl);
+    mountIcons(menuEl);
+    const r = menuEl.getBoundingClientRect();
+    menuEl.style.left = Math.min(x, innerWidth - r.width - 8) + 'px';
+    menuEl.style.top = Math.min(y, innerHeight - r.height - 8) + 'px';
+  }
+  document.addEventListener('click', (e) => { if (menuEl && !menuEl.contains(e.target)) closeMenu(); });
+  dtPanel.querySelector('[data-fav-content]').addEventListener('contextmenu', (e) => {
+    const card = e.target.closest('[data-fav-id]'); if (!card) return;
+    e.preventDefault();
+    const it = byId(card.dataset.favId);
+    if (it) openMenu(it, e.clientX, e.clientY);
+  });
+  /* 桌面：点击不弹菜单（操作唯一入口右键）——有链接直开 */
+  dtPanel.querySelector('[data-fav-content]').addEventListener('click', (e) => {
+    const card = e.target.closest('[data-fav-id]'); if (!card) return;
+    const it = byId(card.dataset.favId); if (!it) return;
+    if ((it.url || '').trim()) window.open(it.url, '_blank');
+  });
+
+  /* ==================== 移动端底部抽屉（内容单源 R.sheetHtml） ==================== */
+  function openSheet(it) {
+    const acts = R.actionSpecs(it);
+    sheet.innerHTML = R.sheetHtml(it, acts);
+    mountIcons(sheet);
+    sheet.onclick = (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      closeSheet(); runAction(it, acts[+b.dataset.k]);
+    };
+    sheetMask.classList.add('bz-fav-show');
+  }
+  function closeSheet() { sheetMask.classList.remove('bz-fav-show'); }
+  sheetMask.addEventListener('click', (e) => { if (e.target === sheetMask) closeSheet(); });
+  mobPanel.querySelector('[data-fav-content]').addEventListener('click', (e) => {
+    const card = e.target.closest('[data-fav-id]'); if (!card) return;
+    const it = byId(card.dataset.favId); if (it) openSheet(it);
+  });
+  mobPanel.querySelector('[data-fav-close]').addEventListener('click', () => toast('评审壳：插件内此处关闭全屏面板'));
+
+  /* ==================== 磁贴行点击（两端委托，与 ui.ts 同语义） ==================== */
+  function bindTags(panel) {
+    panel.querySelector('[data-fav-tags]').addEventListener('click', (e) => {
+      if (e.target.closest('[data-fav-add]')) { openForm(null); return; }
+      const chip = e.target.closest('[data-fav-tag]');
+      if (!chip) return;
+      const label = chip.dataset.favTag;
+      if (label === '全部') { M.tag = null; M.archived = false; }
+      else if (label === '已归档') { M.tag = null; M.archived = !M.archived; }
+      else { M.archived = false; M.tag = M.tag === label ? null : label; }
+      closeMenu(); renderAll();
+    });
+  }
+  bindTags(dtPanel); bindTags(mobPanel);
+
+  /* ==================== 确认框 / toast（插件侧走 core flow-dialog/notice，演示壳自绘） ==================== */
+  function confirmDlg(title, msg, okLabel, onOk) {
+    const mask = document.createElement('div');
+    mask.className = 'bz-fav-form-mask bz-fav-scope';
+    mask.innerHTML = `<div class="bz-fav-form" style="width:320px;padding:20px 22px 16px">
+      <h2 style="font-size:14.5px;margin-bottom:9px">${esc(title)}</h2>
+      <p style="font-size:12.5px;line-height:1.7;color:var(--pop-mut);margin-bottom:16px">${esc(msg)}</p>
+      <div class="bz-fav-btns"><button data-a="c">取消</button><button data-a="ok" class="bz-fav-pri">${esc(okLabel)}</button></div></div>`;
+    const done = () => mask.remove();
+    mask.addEventListener('click', (e) => {
+      if (e.target === mask || e.target.dataset.a === 'c') return done();
+      if (e.target.dataset.a === 'ok') { done(); onOk(); }
+    });
+    document.body.appendChild(mask);
+  }
+  let toastEl = null, toastTimer = 0;
+  function toast(msg, undoLabel, onUndo) {
+    if (toastEl) toastEl.remove();
+    clearTimeout(toastTimer);
+    toastEl = document.createElement('div');
+    toastEl.id = 'demoToast';
+    toastEl.style.cssText = 'position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:700;display:flex;align-items:center;gap:14px;background:#4a443a;color:#f3efe4;font-size:12.5px;padding:10px 16px;border-radius:99px;box-shadow:0 8px 24px rgba(0,0,0,.28)';
+    toastEl.innerHTML = `<span>${esc(msg)}</span>` + (undoLabel ? `<button style="border:none;background:none;color:#e0b73a;font:700 12.5px 'Microsoft YaHei';cursor:pointer">${esc(undoLabel)}</button>` : '');
+    if (undoLabel) toastEl.querySelector('button').onclick = () => { toastEl.remove(); toastEl = null; onUndo(); };
+    document.body.appendChild(toastEl);
+    toastTimer = setTimeout(() => { toastEl && toastEl.remove(); toastEl = null; }, 5000);
+  }
+
+  /* ==================== 添加 / 编辑表单（骨架单源 R.formHtml；演示行为在壳） ==================== */
+  function openForm(it) {
+    const editing = !!it;
+    const mask = document.createElement('div');
+    mask.className = 'bz-fav-form-mask bz-fav-scope';
+    mask.innerHTML = R.formHtml(it);
+    document.body.appendChild(mask);
+    mountIcons(mask);
+    const form = mask.querySelector('.bz-fav-form');
+    const sel = new Set((it ? it.tags : []) || []);
+    const pick = form.querySelector('#fz-tags');
+    const drawPick = () => {
+      pick.innerHTML = R.pickChipsHtml(sel);
+      pick.querySelectorAll('[data-tag]').forEach((b) => b.addEventListener('click', () => {
+        const label = b.dataset.tag;
+        if (sel.has(label)) sel.delete(label); else sel.add(label);
+        drawPick();
+      }));
+      mountIcons(pick);
+    };
+    drawPick();
+    form.querySelector('#fz-pin').addEventListener('click', (e) => e.currentTarget.classList.toggle('bz-fav-on'));
+    const titleInp = form.querySelector('#fz-title'), urlInp = form.querySelector('#fz-url');
+    titleInp.addEventListener('paste', (e) => {
+      const text = (e.clipboardData || window.clipboardData)?.getData('text')?.trim() || '';
+      if (!/^https?:\/\/\S+$/i.test(text)) return;
+      e.preventDefault();
+      if (!urlInp.value.trim()) urlInp.value = text;
+      setTimeout(() => titleInp.focus(), 0);
+    });
+    const aiBtn = form.querySelector('#fz-ai');
+    aiBtn.addEventListener('click', () => {
+      const g = (id) => form.querySelector(id)?.value.trim() || '';
+      if (!g('#fz-title') && !g('#fz-url') && !g('#fz-desc')) { form.querySelector('#fz-err').textContent = '请至少输入标题、链接或简介中的一项，以便 AI 参考'; return; }
+      form.querySelector('#fz-err').textContent = '';
+      aiBtn.disabled = true;
+      aiBtn.querySelector('span').textContent = 'AI 整理中…';
+      toast('AI 分析中…');
+      setTimeout(() => {
+        const url = g('#fz-url');
+        const gh = url.match(/github\.com\/([^\/?#]+)\/([^\/?#]+)/);
+        const setVal = (id, v) => { const el = form.querySelector(id); if (el && !el.value.trim() && v) el.value = String(v); };
+        if (gh) setVal('#fz-title', gh[2]);
+        else if (!g('#fz-title')) {
+          try { setVal('#fz-title', new URL(/^https?:\/\//.test(url) ? url : 'https://' + url).hostname.replace(/^www\./, '').split('.')[0]); } catch (e) { }
+        }
+        const guess = [];
+        if (/github\.com\//.test(url)) guess.push('GitHub');
+        const hay = (g('#fz-title') + ' ' + g('#fz-desc')).toLowerCase();
+        FAV.TAGS.forEach((t) => { if (t.label !== 'GitHub' && hay.includes(t.label.toLowerCase())) guess.push(t.label); });
+        guess.forEach((t) => sel.add(t));
+        drawPick();
+        aiBtn.disabled = false;
+        aiBtn.querySelector('span').textContent = 'AI 整理';
+        toast('AI 整理完成（评审壳为模拟，插件内为真实 AI 调用）');
+      }, 1200);
+    });
+    mask.addEventListener('click', (e) => {
+      if (e.target === mask || e.target.closest('[data-fz-cancel]')) return mask.remove();
+      if (!e.target.closest('#fz-save')) return;
+      const title = titleInp.value.trim();
+      if (!title) { form.querySelector('#fz-err').textContent = '标题不能为空'; return; }
+      const tags = FAV.TAGS.map((t) => t.label).filter((l) => sel.has(l));
+      const patch = { title, url: urlInp.value.trim(), description: form.querySelector('#fz-desc').value.trim(), tags, type: tags[0] || '', pinned: form.querySelector('#fz-pin').classList.contains('bz-fav-on') };
+      if (editing) Object.assign(it, patch);
+      else items.unshift({ id: String(Date.now()), created: localNow(), ...patch });
+      save(); renderAll(); mask.remove();
+      toast(editing ? `已更新「${title}」` : `已添加「${title}」`);
+    });
+    titleInp.focus();
+  }
+
+  /* ==================== 主题切换（body.theme-dark ↔ .theme-dark .bz-fav-scope） ==================== */
+  const themeBtn = document.getElementById('themeBtn');
+  function applyTheme(dark) {
+    document.body.classList.toggle('theme-dark', dark);
+    themeBtn.innerHTML = icon(dark ? 'sun' : 'eye', 16);
+    try { localStorage.setItem(LS_THEME, dark ? 'dark' : 'light'); } catch (e) { }
+  }
+  let dark = false;
+  try { dark = localStorage.getItem(LS_THEME) === 'dark'; } catch (e) { }
+  themeBtn.onclick = () => applyTheme(!document.body.classList.contains('theme-dark'));
+  applyTheme(dark);
+
+  /* ==================== Esc / 重置 ==================== */
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (menuEl) return closeMenu();
+    if (sheetMask.classList.contains('bz-fav-show')) return closeSheet();
+    const mask = document.querySelector('.bz-fav-form-mask');
+    if (mask) mask.remove();
+  });
+  document.getElementById('reset').onclick = () => {
+    confirmDlg('重置演示数据', '丢弃本页所有改动，恢复为 vault 里的真实收藏数据。', '重置', () => {
+      localStorage.removeItem(LS);
+      items = FAV.ITEMS.map((x) => ({ ...x }));
+      M.tag = null; M.archived = false;
+      save(); renderAll(); toast('已恢复真实数据');
+    });
+  };
+
+  renderAll();
+
+  /* ==================== 自检（?selftest=1） ==================== */
+  if (location.search.includes('selftest')) {
+    window.__st = { pass: 0, fail: [] };
+    const t = (name, cond) => cond ? window.__st.pass++ : window.__st.fail.push(name);
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const dtCards = () => dtPanel.querySelectorAll('[data-fav-content] .bz-fav-card').length;
+    const mobCards = () => mobPanel.querySelectorAll('[data-fav-content] .bz-fav-card').length;
+    const chipOf = (panel, label) => [...panel.querySelectorAll('[data-fav-tag]')].find((b) => b.dataset.favTag === label);
+    const firstCardTitle = (panel) => panel.querySelector('[data-fav-content] .bz-fav-card h3')?.textContent || '';
+    (async () => {
+      try {
+        const alive = items.filter((i) => !i.archived);
+        t('初始51条', items.length === 51);
+        t('桌面卡数=非归档数', dtCards() === alive.length);
+        t('移动卡数=非归档数', mobCards() === alive.length);
+        t('磁贴首枚=全部', dtPanel.querySelector('[data-fav-tag]')?.dataset.favTag === '全部');
+        t('已归档贴纸在场', !!chipOf(dtPanel, '已归档'));
+        t('新收藏chip在场', !!dtPanel.querySelector('[data-fav-add]'));
+        t('磁贴图标兑现', !!dtPanel.querySelector('[data-fav-tags] button svg'));
+        t('移动关闭钮在场', !!mobPanel.querySelector('[data-fav-close]'));
+        t('移动磁贴新收藏置首', mobPanel.querySelector('[data-fav-tags]').firstElementChild?.hasAttribute('data-fav-add') === true);
+
+        chipOf(dtPanel, '已归档').click();
+        t('归档视图卡数=归档数', dtCards() === items.filter((i) => i.archived).length);
+        t('归档卡带冷存类', !!dtPanel.querySelector('[data-fav-content] .bz-fav-card.bz-fav-arch'));
+        chipOf(dtPanel, '已归档').click();
+        t('再点回全部', dtCards() === alive.length);
+
+        const ghChip = chipOf(dtPanel, 'GitHub');
+        if (ghChip) {
+          ghChip.click();
+          const ghOk = dtCards() > 0 && [...dtPanel.querySelectorAll('[data-fav-content] .bz-fav-card')].every((c) => c.querySelector('.bz-fav-tags-row')?.textContent.includes('GitHub'));
+          t('GitHub筛选命中', ghOk);
+          chipOf(dtPanel, 'GitHub').click();
+          t('再点取消筛选', dtCards() === alive.length);
+        }
+
+        /* 新增（表单单源 R.formHtml） */
+        dtPanel.querySelector('[data-fav-add]').click();
+        t('表单开', !!document.querySelector('.bz-fav-form-mask .bz-fav-form'));
+        document.querySelector('#fz-title').value = '测试收藏';
+        document.querySelector('#fz-tags [data-tag="网站"]').click();
+        document.querySelector('#fz-save').click();
+        await sleep(60);
+        const nu = items.find((i) => i.title === '测试收藏');
+        t('新增落演示数据', !!nu);
+        t('表单已关', !document.querySelector('.bz-fav-form'));
+        t('新增卡在场', !!dtPanel.querySelector(`[data-fav-id="${nu.id}"]`));
+        t('新增卡标签徽记', dtPanel.querySelector(`[data-fav-id="${nu.id}"] .bz-fav-tags-row`)?.textContent.includes('网站') === true);
+
+        /* 右键菜单：置顶/取消置顶 */
+        dtPanel.querySelector(`[data-fav-id="${nu.id}"]`).dispatchEvent(new MouseEvent('contextmenu', { clientX: 300, clientY: 300, bubbles: true, cancelable: true }));
+        t('右键菜单开', !!document.querySelector('.bz-fav-ctx'));
+        [...document.querySelectorAll('.bz-fav-ctx button')].find((b) => b.textContent.includes('置顶') && !b.textContent.includes('取消')).click();
+        t('置顶生效', nu.pinned === true);
+        t('置顶卡挂金边类', !!dtPanel.querySelector(`[data-fav-id="${nu.id}"].bz-fav-pinc`));
+        t('置顶恒最前', firstCardTitle(dtPanel) === '测试收藏');
+        dtPanel.querySelector(`[data-fav-id="${nu.id}"]`).dispatchEvent(new MouseEvent('contextmenu', { clientX: 300, clientY: 300, bubbles: true, cancelable: true }));
+        [...document.querySelectorAll('.bz-fav-ctx button')].find((b) => b.textContent.includes('取消置顶')).click();
+        t('取消置顶', nu.pinned === false);
+
+        /* 删除 + 撤销（演示 toast） */
+        dtPanel.querySelector(`[data-fav-id="${nu.id}"]`).dispatchEvent(new MouseEvent('contextmenu', { clientX: 300, clientY: 300, bubbles: true, cancelable: true }));
+        [...document.querySelectorAll('.bz-fav-ctx button')].find((b) => b.textContent.includes('删除')).click();
+        t('确认框开', !!document.querySelector('.bz-fav-form-mask [data-a="ok"]'));
+        document.querySelector('.bz-fav-form-mask [data-a="ok"]').click();
+        t('删除生效', !items.some((i) => i.id === nu.id));
+        document.querySelector('#demoToast button').click();
+        t('撤销恢复', items.some((i) => i.id === nu.id));
+
+        /* 清理测试条目 */
+        items = items.filter((i) => i.id !== nu.id); save(); renderAll();
+
+        /* 移动抽屉 */
+        mobPanel.querySelector('[data-fav-content] [data-fav-id]').click();
+        t('移动抽屉开', sheetMask.classList.contains('bz-fav-show'));
+        t('抽屉磁点+标题', !!sheet.querySelector('.bz-fav-sh-dot') && !!sheet.querySelector('.bz-fav-sh-title'));
+        t('抽屉动作列在场', sheet.querySelectorAll('.bz-fav-sh-acts button').length >= 4);
+        sheetMask.click();
+        t('移动抽屉关', !sheetMask.classList.contains('bz-fav-show'));
+
+        document.title = window.__st.fail.length
+          ? 'SELFTEST FAIL ' + window.__st.fail.join(',')
+          : `SELFTEST OK ${window.__st.pass}/${window.__st.pass + window.__st.fail.length}`;
+      } catch (err) { document.title = 'SELFTEST ERR ' + (err && err.message || err); }
+    })();
+  }
+})();
+</script>
+</body>
+</html>

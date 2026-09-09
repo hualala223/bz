@@ -2,14 +2,13 @@
 /* bz-bili-* 任务队列样式（视频录入面板/历史弹窗沿用，ticket 136 迁移时丢失、ticket 138 恢复）；
    新增 bz-lit-* 主面板/术语面板样式；主面板视觉细节对齐日记本（ticket 138 §4）。 */
 
-/* ---- 主面板/术语面板共享遮罩与窗口（bz- 前缀，样式收敛于此处，不内联视觉） ---- */
+/* ---- 主面板/术语面板共享遮罩与窗口（bz- 前缀，样式收敛于此处，不内联视觉）
+   z 静态档（99999/100000）已清——五处显示路径均由 topifyZ(mask, popup) 动态发号（ADR-0067） ---- */
 .bz-lit-mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, .45);
-  backdrop-filter: blur(2px); /* 对齐日记本遮罩质感 */
+  background: var(--background-modifier-cover); /* 纯遮罩（手册 §5.2 不采用毛玻璃质感） */
   animation: bz-lit-fade-in .2s ease-out;
-  z-index: 99999;
 }
 .bz-lit-window {
   position: fixed;
@@ -24,7 +23,6 @@
   border-radius: 12px;
   box-shadow: 0 12px 48px rgba(0, 0, 0, .3); /* 对齐日记本弹窗阴影 */
   animation: bz-lit-slide-up .25s ease-out;
-  z-index: 100000;
 }
 /* 小型弹窗（添加任务 / 术语生成）：内容直接铺开，无需独立滚动区 */
 .bz-lit-dialog {
@@ -43,7 +41,6 @@
   border-radius: 12px;
   box-shadow: 0 12px 48px rgba(0, 0, 0, .3);
   animation: bz-lit-slide-up .25s ease-out;
-  z-index: 100000;
 }
 .bz-lit-list {
   flex: 1;
@@ -154,6 +151,9 @@
   font-size: 12px;
   line-height: 1.5;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   border: 1px solid var(--background-modifier-border);
   color: var(--text-normal);
   transition: background .2s, border-color .2s, color .2s;
@@ -603,19 +603,18 @@
   color: var(--color-green, #46a758);
 }
 
-/* ---- 状态徽标 ---- */
+/* ---- 状态徽标（.bz-badge--* 模式：语义色 16% 透明底 + 深语义字，实底白字对比不达 AA 已撤） ---- */
 .bz-bili-status {
   flex-shrink: 0;
   font-size: 11px;
   padding: 1px 8px;
   border-radius: 999px;
-  color: #fff;
   line-height: 18px;
 }
-.bz-bili-pending { background: var(--text-muted); }
-.bz-bili-processing { background: var(--interactive-accent); animation: bz-bili-pulse 1.2s ease-in-out infinite; }
-.bz-bili-success { background: var(--color-green, #46a758); }
-.bz-bili-failed { background: var(--text-error, #e5484d); }
+.bz-bili-pending { background: var(--background-modifier-hover); color: var(--text-muted); }
+.bz-bili-processing { background: color-mix(in srgb, var(--interactive-accent) 16%, transparent); color: var(--interactive-accent); animation: bz-bili-pulse 1.2s ease-in-out infinite; }
+.bz-bili-success { background: color-mix(in srgb, var(--color-green, #46a758) 16%, transparent); color: var(--color-green, #46a758); }
+.bz-bili-failed { background: color-mix(in srgb, var(--text-error, #e5484d) 16%, transparent); color: var(--text-error, #e5484d); }
 
 @keyframes bz-bili-pulse {
   0%, 100% { opacity: 1; }
@@ -749,3 +748,6 @@
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
 }
+/* 「全部」行头图标（issue 208 全域统一；setIcon 落 .bz-lit-filter-ic 槽） */
+.bz-lit-filter-ic { display: inline-flex; width: 12px; height: 12px; flex-shrink: 0; color: var(--bz-text-3); }
+.bz-lit-filter-ic svg { width: 100%; height: 100%; }

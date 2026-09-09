@@ -11,7 +11,7 @@
  */
 import { tryGetSettings } from './settings-provider';
 
-export type FileDomainKind = 'diary' | 'flash' | 'poem' | 'letter' | 'movie' | 'clipping' | 'literature';
+export type FileDomainKind = 'diary' | 'flash' | 'cinema' | 'movie' | 'clipping' | 'poem' | 'letter' | 'literature';
 
 /** 目录归一：trim + 反斜杠转正斜杠 + 去尾斜杠 */
 function normalizeDir(dir: string): string {
@@ -48,9 +48,8 @@ export function classifyFilePath(path: string | null | undefined): FileDomainKin
   if (isUnderDir('卡片盒', p)) return 'flash';
   // 剪藏：settings.articleDirectory（「📂 剪藏目录」）；缺键回退 '归档/网页剪藏'（出处：DEFAULT_SETTINGS）
   if (matchSettingDir(s.articleDirectory, p, '归档/网页剪藏')) return 'clipping';
-  // 影视：movieFolderPath（影视域「📁 影视文件夹」）/ movieDirectory（日记本用）两键任一命中即算
-  // ——两键默认值同为 '我的/影视'（src/settings.ts DEFAULT_SETTINGS 与 src/diary/config.ts MOVIE_DIRECTORY 一致），
-  //   用户只改其中一键时另一处位置也归影视域
+  // 影视（本地口径：movieFolderPath 键 + 'movie' 标签；movieDirectory 为日记本侧同目录键。
+  // 两键缺省回落 '我的/影视'，与 src/settings.ts DEFAULT_SETTINGS 一致）
   if (matchSettingDir(s.movieFolderPath, p, '我的/影视') || matchSettingDir(s.movieDirectory, p, '我的/影视')) return 'movie';
   // 现代诗：settings 无对应键，沿用 src/smartcat/context-source.ts 硬编码 '我的/现代诗'
   if (isUnderDir('我的/现代诗', p)) return 'poem';

@@ -65,6 +65,8 @@ const registeredCommands: any[] = [];
 /** 期望的命令 id 全集（spec「命令 id 全清单」第 9 轮：COMMANDS 表 + 日记本 bz-diary-open） */
 const EXPECTED_COMMAND_IDS = [
   'bz-home',
+  // 上游线并入新域（第一档）：内容首页/今日回顾/回忆墙/数据体检/设置面板
+  'bz-home-open', 'bz-recap-today', 'bz-diary-wall-open', 'bz-data-checkup-open', 'bz-settings-panel-open',
   'bz-memo-open', 'bz-memo-add',
   'bz-belongings-add', 'bz-belongings-open',
   'bz-clipping-open',

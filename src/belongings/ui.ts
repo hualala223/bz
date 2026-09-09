@@ -1,1260 +1,862 @@
 /**
- * 归物本 UI（归物本.js 逐字移植）
- * 主面板：__gui_wu_ben__（visibility 控制，不销毁，显示即 topifyZ 发号）；弹窗 z-index 动态发号（ADR-0067）：谁后打开谁在上；
- * 统一抽屉（桌面右键/移动长按）：状态流转 + 编辑 + 删除（用户拍板，替换原手写 pointerdown 长按删除/单击编辑）；
- * 刷新：右上角 ⏳ 按钮已移除 → 打开期间监听 belongings.json 变更自动刷新（用户拍板）；
- * MutationObserver 主题变化重渲染。
+ * 归物本 UI（issue 237/ADR-0104 起 markup 单源：面板/网格/详情/表单的 HTML 全部出自
+ * ./render.ts（渲染纯层，评审壳 prototype.html 经 prototype-render.js 消费同一份）——
+ * 本文件只保留行为层：生命周期、事件绑定、core 服务接线、数据读写。
+ *
+ * 桌面：无壳头行（issue 219b/c 收藏本完全原型化范式）：海报 hero 即头，点遮罩/Esc 关闭，⚙ 收敛设置面板 →
+ *   海报主区——特大字标题（= 筛选名，issue 208 头行标题语义）+ 字距标语 + KPI 行
+ *   （在库件数强调/在库投入/日均成本/已离场·回收）→ 筛选 chips（全部/资产/四态带计数，
+ *   再点回全部，issue 208 范式）→ 工具行（搜索 + 年份 + 排序三档 segmented + 记一笔）→
+ *   大字网格（3 列纸面卡：NO.XX 编号 + 状态徽章 + 特大 emoji + 名称 + 大字价格 + meta；
+ *   hover 整卡反色；离场卡灰化；末行空位补纸面 filler 防露格线）。
+ *   点卡片 = 详情弹窗（字段全览 + 四态流转条 + 编辑/删除）；操作菜单仍走右键（issue 202）。
+ * 移动 ≤768：真全屏；窄头行 ＋记一笔 → 🔍搜索(展开) → ✕（移动专属）；chips 横滑（bz-mobstrip）；
+ *   hero 压缩 2×2；网格单列；点卡弹底部抽屉（core/item-actions）。全 icon lucide；数据 emoji 走
+ *   emoji-icon-map 全量映射（issue 231 拍板全转），未入表 emoji 原样兜底。
+ *
+ * 契约保留：belongings.json 零迁移；smartcat 事件（add/edit/status/delete + belongingsEditChanges）；
+ *   belongingsDefaultStatus / belongingsMobileDefaultFullscreen 设置键；命令路径 openForm（面板未开可弹）；
+ *   自动刷新（数据文件 modify，自写短路）；主题变化重渲染；ESC 分层（详情→表单→主面板）；
+ *   脏表单 confirmDiscard；notifyUndo 撤销；topifyZ 动态发号（ADR-0067）。
+ * 视觉换血按 ADR-0097 判例：.bz-bel--poster 域内 token 作用域覆盖 + .bz-bel-* 装饰类，
+ *   chips/segmented/空态在 render.ts 串里沿用组件库皮（bz-chip/bz-segmented/bz-empty，ADR-0094 视觉）。
  */
-import { notice } from '../core/notice';
+import { notice, notifyUndo, notifySaveError } from '../core/notice';
+import { topifyZ } from '../core/z-order';
 import { getApp } from '../core/app';
 import { escManager } from '../core/esc-manager';
-import { allocZ, topifyZ } from '../core/z-order';
-import { escapeHtml, formatRelativeTime } from '../core/utils';
+import { applyMobileWindowFullscreen, isMobileEnv } from '../core/mobile';
 import { tryGetSettings } from '../core/settings-provider';
-import { applyMobileWindowFullscreen } from '../core/mobile';
-import { openSettingsModal } from '../core/settings-modal';
 import { mobileFullscreenGroup } from '../core/settings-common';
-import {
-  attachItemActions,
-  refreshItemSheet,
-  registerSheetCompanion,
-  unregisterSheetCompanion,
-  closeItemMenu,
-  type ItemAction,
-} from '../core/item-actions';
-import { loadDatabase, saveDatabase, calculateDailyCost, calculateDaysUsed, getDataFilePath } from './data';
-import type { BelongingsDatabase, BelongingsItem } from './types';
+import { openFlowDialog, confirmDiscard } from '../core/flow-dialog';
+import { mountIcons, uiSuggest, uiIconSpan } from '../core/ui';
+import { openItemMenu, openItemSheet, refreshItemSheet, registerSheetCompanion, unregisterSheetCompanion, closeItemMenu, type ItemAction, resetItemMenuClickGuard } from '../core/item-actions';
 import { emitDomainEvent } from '../core/domain-bus';
 import { belongingsEditChanges } from '../smartcat/belongings-source';
 import type { SettingsSchema } from '../core/settings-schema';
+import { loadDatabase, saveDatabase, getDataFilePath } from './data';
+import {
+  renderPanelView, panelHtml,
+  belDetailHtml, flowBtnsHtml, belFormHtml, belFormInit, statusPickHtml, sheetHeadHtml,
+  actionSpecs, todayStr, isExited, exitedStatus,
+} from './render';
+import type { BelongingsDatabase, BelongingsItem } from './types';
+import { aiSuggestCategory } from './ai';
 
-/** 归物本设置 schema（ticket 131 声明式；空态域唯一内容为通用「移动端」组） */
-export function belongingSettingsSchema(): SettingsSchema {
-  return { groups: [mobileFullscreenGroup('belongingsMobileDefaultFullscreen')] };
-}
-
-// ----- 类型 -----
-/** 弹窗色板（createModalShell 返回值） */
-interface ModalPalette {
-  bg: string;
-  text: string;
-  border: string;
-  inputBg: string;
-  isDark: boolean;
-}
-
-/** 表单字段描述（添加/编辑共用） */
-interface FormField {
-  id: string;
-  label: string;
-  type: string;
-  placeholder?: string;
-  value?: any;
-  default?: string;
-  options?: string[];
-  required?: boolean;
-}
-
-
-// ----- 模块状态（原脚本全局变量） -----
-
-let database: BelongingsDatabase | null = null;
-let listContainer: HTMLDivElement | null = null;
-/** 抽屉来源的编辑（保存成功后关抽屉，与收藏本 Q8 同决策） */
-let sheetEditPending = false;
-/** 数据文件变更监听（打开期间注册，关闭注销——用户拍板"自动刷新"） */
-let autoRefreshOff: (() => void) | null = null;
-/** 主题变化监听（模块级持有，cleanupBelongings 时断开——防卸载残留） */
-let bodyThemeObserver: MutationObserver | null = null;
-/** 主题淡化渲染只关心 body 上的主题类（P44 去全量重渲染） */
 const THEME_CLASSES = new Set(['theme-dark', 'theme-light']);
-let sortField = 'purchase_date'; // 默认按购买日期
-let sortOrder = 'desc'; // 降序
 
-// ----- 渲染主界面 -----
-function render() {
-  if (!listContainer) return;
-  const isDarkMode = document.body.classList.contains('theme-dark');
+// ==================== 模块状态 ====================
 
-  // ----- 排序：根据当前 sortField 和 sortOrder -----
-  const items = sortItems();
-  const { totalValue, totalDailyCost, statusMap } = computeStats(items);
-
-  const palette = {
-    bg: isDarkMode ? '#1e1e1e' : '#ffffff',
-    textColor: isDarkMode ? '#ffffff' : '#333333',
-    cardBg: isDarkMode ? '#2d2d2d' : '#ffffff',
-    muted: isDarkMode ? '#b0b0b0' : '#666666',
-    border: isDarkMode ? '#404040' : '#e0e0e0',
-    isDark: isDarkMode,
-  };
-
-  const html = `
-  <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 15px; background: ${palette.bg}; min-height: 100vh; color: ${palette.textColor};">
-    ${buildStatsHtml(palette, totalValue, totalDailyCost, statusMap)}
-    ${items.length === 0 ? buildEmptyGuideHtml(palette) : buildItemGroupsHtml(palette, statusMap)}
-    <div style="text-align: center; color: ${palette.muted}; font-size: 11px; margin-top: 15px; padding-top: 15px; border-top: 1px solid ${palette.border};">
-      最后更新: ${new Date().toLocaleString('zh-CN')}
-    </div>
-  </div>
-  `;
-
-  listContainer.innerHTML = html;
-
-  // 为每个物品卡片挂统一抽屉
-  bindCardDrawers();
+interface BelState {
+  overlay: HTMLElement | null;
+  db: BelongingsDatabase | null;
+  /** 状态筛选 key（null = 全部；asset = 在库合成） */
+  status: string | null;
+  /** 年份筛选（'' = 全部） */
+  year: string;
+  q: string;
+  /** 排序档（recent 最近购入 / price 投入最高 / daily 日均最高） */
+  sort: 'recent' | 'price' | 'daily';
+  renderFn: (() => void) | null;
 }
 
-/** 排序：按当前 sortField/sortOrder 返回排序后的物品 */
-function sortItems(): any[] {
-  const items = Object.values(database!.items);
-  items.sort((a: any, b: any) => {
-    const aVal = a[sortField];
-    const bVal = b[sortField];
-    if (typeof aVal === 'string') {
-      return sortOrder === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-    }
-    if (aVal < bVal) return sortOrder === 'asc' ? -1 : 1;
-    if (aVal > bVal) return sortOrder === 'asc' ? 1 : -1;
-    return 0;
-  });
-  return items;
+const M: BelState = {
+  overlay: null,
+  db: null,
+  status: null,
+  year: '',
+  q: '',
+  sort: 'recent',
+  renderFn: null,
+};
+
+/** 自绘下拉的 document 外点收起监听（openPanel 挂，closePanel 摘） */
+let dropDocClick: ((e: MouseEvent) => void) | null = null;
+
+export function resetBelongingsState(): void {
+  M.overlay = null;
+  M.db = null;
+  M.status = null;
+  M.year = '';
+  M.q = '';
+  M.sort = 'recent';
+  M.renderFn = null;
 }
 
-/** 统计计算：总资产/日均成本/按状态分组（保持全局排序顺序） */
-function computeStats(items: any[]): {
-  totalValue: number;
-  totalDailyCost: number;
-  statusMap: Record<string, any[]>;
-} {
-  // P2 形状容错：purchase_price 缺失按 0 计，不再 NaN/TypeError
-  const totalValue = items.reduce((sum: number, item: any) => sum + (item.purchase_price || 0), 0);
-  const totalDailyCost = items.reduce((sum: number, item: any) => {
-    return sum + parseFloat(calculateDailyCost(item.purchase_price || 0, item.purchase_date));
-  }, 0);
+// ==================== 设置 schema ====================
 
-  // 按状态分组，但保持全局排序顺序
-  const statusMap: Record<string, any[]> = { '使用中': [], '闲置': [], '已转卖': [], '已丢弃': [] };
-  items.forEach((item: any) => {
-    if (statusMap[item.current_status]) statusMap[item.current_status].push(item);
-  });
-  return { totalValue, totalDailyCost, statusMap };
-}
+/** 默认状态筛选合法值（与 chips 同源；空串=全部） */
+const DEFAULT_STATUS_VALUES = ['', 'using', 'idle', 'sold', 'discard'];
 
-/** 统计 HTML：顶部渐变统计卡 + 状态计数四宫格 */
-function buildStatsHtml(
-  palette: { bg: string; textColor: string; cardBg: string; muted: string; border: string },
-  totalValue: number,
-  totalDailyCost: number,
-  statusMap: Record<string, any[]>
-): string {
-  const { bg, textColor, cardBg, muted, border } = palette;
-  return `
-    <!-- 统计卡片 -->
-    <div style="background: linear-gradient(135deg, #3498db, #2ecc71); border-radius: 15px; padding: 20px; color: white; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(52,152,219,0.2);">
-      <div style="margin-bottom: 15px;">
-        <div style="font-size: 14px; opacity: 0.9;">总资产</div>
-        <div style="font-size: 28px; font-weight: bold;">￥${totalValue.toFixed(2)}</div>
-      </div>
-      <div>
-        <div style="font-size: 14px; opacity: 0.9;">日均成本</div>
-        <div style="font-size: 20px; font-weight: bold;">￥${totalDailyCost.toFixed(2)}/天</div>
-      </div>
-    </div>
-    <!-- 状态统计 -->
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px;">
-      ${['使用中', '闲置', '已转卖', '已丢弃'].map((status) => {
-        const count = statusMap[status]?.length || 0;
-        const icon = { '使用中': '✅', '闲置': '📦', '已转卖': '💰', '已丢弃': '🗑' }[status];
-        const color = { '使用中': '#2ecc71', '闲置': '#f39c12', '已转卖': '#9b59b6', '已丢弃': '#e74c3c' }[status];
-        return `<div style="background: ${cardBg}; border-radius: 12px; padding: 12px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border: 1px solid ${border};">
-          <div style="font-size: 20px; color: ${color};">${icon}</div>
-          <div style="font-size: 16px; font-weight: bold; color: ${textColor};">${count}</div>
-          <div style="font-size: 11px; color: ${muted};">${status}</div>
-        </div>`;
-      }).join('')}
-    </div>`;
-}
-
-/** 物品列表 HTML：按状态分组渲染渐变卡片 */
-function buildItemGroupsHtml(
-  palette: { textColor: string; muted: string; border: string; isDark: boolean },
-  statusMap: Record<string, any[]>
-): string {
-  const { textColor, muted, border, isDark } = palette;
-  return `
-    <!-- 物品列表 -->
-    ${['使用中', '闲置', '已转卖', '已丢弃'].map((status) => {
-      const list = statusMap[status] || [];
-      if (list.length === 0) return '';
-      const colors = isDark
-        ? ['linear-gradient(135deg,#1e4a5f,#1a6b4b)', 'linear-gradient(135deg,#5d3a6f,#1e4a5f)', 'linear-gradient(135deg,#8b2c20,#a85e1a)', 'linear-gradient(135deg,#117a60,#0e6e57)', 'linear-gradient(135deg,#a85e1a,#8b4a0a)', 'linear-gradient(135deg,#1e4a5f,#1a4a6b)']
-        : ['linear-gradient(135deg,#3498db,#2ecc71)', 'linear-gradient(135deg,#9b59b6,#3498db)', 'linear-gradient(135deg,#e74c3c,#e67e22)', 'linear-gradient(135deg,#1abc9c,#16a085)', 'linear-gradient(135deg,#f39c12,#d35400)', 'linear-gradient(135deg,#3498db,#2980b9)'];
-      return `
-      <div style="margin-bottom: 20px;">
-        <h2 style="color: ${textColor}; font-size: 16px; margin-bottom: 12px;">${status === '使用中' ? '✅ 使用中' : status === '闲置' ? '📦 闲置' : status === '已转卖' ? '💰 已转卖' : '🗑 已丢弃'}</h2>
-        <div style="display: flex; flex-direction: column; gap: 12px;">
-          ${list.map((item, idx) => {
-            const dailyCost = calculateDailyCost(item.purchase_price || 0, item.purchase_date);
-            const daysUsed = calculateDaysUsed(item.purchase_date);
-            // P0-8：名称/分类/分类图标过 escapeHtml（物品名含 HTML 时按文本渲染）；P2：字段兜底
-            const catIcon = escapeHtml(database!.categoryIcons[item.category] || '📦');
-            const catName = escapeHtml((item.category || '').replace(/^[^ ]+ /, ''));
-            const colorIdx = idx % colors.length;
-            return `<div style="background: ${colors[colorIdx]}; border-radius: 15px; padding: 15px; color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.1);" data-id="${escapeHtml(item.id)}">
-              <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                <div style="display: flex; align-items: center; gap: 12px;">
-                  <div style="font-size: 24px;">${catIcon}</div>
-                  <div>
-                    <div style="font-size: 16px; font-weight: bold; margin-bottom: 3px;">${escapeHtml(item.name)}</div>
-                    <div style="font-size: 14px; opacity: 0.9;">${catName}</div>
-                  </div>
-                </div>
-                <div style="text-align: right;">
-                  <div style="font-size: 16px; font-weight: bold;">￥${(item.purchase_price ?? 0).toFixed(2)}</div>
-                  <div style="font-size: 14px; opacity: 0.9;">￥${dailyCost}/天</div>
-                </div>
-              </div>
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.2);">
-                <div style="font-size: 14px;">${daysUsed}天</div>
-                <div style="font-size: 12px; opacity: 0.8;">${formatRelativeTime(item.purchase_date)}购买</div>
-              </div>
-            </div>`;
-          }).join('')}
-        </div>
-      </div>`;
-    }).join('')}`;
-}
-
-/** 空态首步引导（l6-belongings）：零物品时提示点 ✏️ 添加第一个物品 */
-function buildEmptyGuideHtml(palette: { textColor: string; muted: string; border: string }): string {
-  const { textColor, muted, border } = palette;
-  return `
-    <div style="text-align:center;padding:32px 16px;border:1px dashed ${border};border-radius:12px;color:${muted};font-size:13px;">
-      <div style="font-size:15px;color:${textColor};font-weight:600;margin-bottom:8px;">归物本还没有物品</div>
-      点右上角 ✏️ 添加第一个物品
-    </div>`;
-}
-
-/** 为物品卡片挂统一抽屉（桌面右键菜单 / 移动长按抽屉）：状态流转 + 编辑 + 删除 */
-function bindCardDrawers(): void {
-  if (!listContainer) return;
-  listContainer.querySelectorAll('[data-id]').forEach((cardEl) => {
-    const id = (cardEl as HTMLElement).dataset.id!;
-    const item = database!.items[id];
-    if (!item) return;
-    const rebuild = () => refreshItemSheet(buildActions(item, rebuild), buildSheetHead(item));
-    attachItemActions(cardEl as HTMLElement, buildActions(item, rebuild), { sheetHead: buildSheetHead(item) });
-  });
-}
-
-/** 归物本抽屉动作：4 状态流转（当前状态不显示，keepOpen）→ 编辑 → 删除 */
-function buildActions(item: BelongingsItem, rebuild: () => void): ItemAction[] {
-  const acts: ItemAction[] = [];
-  const STATUS_ICONS: Record<string, any> = {
-    使用中: 'check-circle',
-    闲置: 'package',
-    已转卖: 'banknote',
-    已丢弃: 'archive',
-  };
-
-  // 状态流转（归物本特色：常用操作，比进编辑改下拉快）
-  for (const s of ['使用中', '闲置', '已转卖', '已丢弃']) {
-    if (s === item.current_status) continue; // 当前状态不显示（头部已示）
-    acts.push({
-      icon: STATUS_ICONS[s],
-      label: `标记为${s}`,
-      keepOpen: true,
-      onClick: () => {
-        void (async () => {
-          item.current_status = s;
-          item.last_updated = new Date().toISOString();
-          await saveAndRender();
-          // ticket 079：状态流转通知 smartcat（4 态动词化，不防抖）
-          emitDomainEvent('belongings', { kind: 'status', title: item.name, status: s });
-          notice(`「${item.name}」已标记为${s}`, 'success');
-          rebuild();
-        })();
+export function belongingSettingsSchema(): SettingsSchema {
+  return {
+    groups: [
+      {
+        icon: 'eye',
+        name: '显示',
+        rows: [
+          {
+            type: 'select',
+            name: '默认状态筛选',
+            desc: '打开面板时选中的物品状态',
+            binding: { key: 'belongingsDefaultStatus' },
+            options: [
+              { value: '', label: '全部' },
+              { value: 'using', label: '使用中' },
+              { value: 'idle', label: '闲置' },
+              { value: 'sold', label: '已转卖' },
+              { value: 'discard', label: '已丢弃' },
+            ],
+          },
+        ],
       },
-    });
-  }
-
-  // 编辑（keepOpen：编辑弹窗叠抽屉；保存后关抽屉）
-  acts.push({
-    icon: 'pencil',
-    label: '编辑',
-    keepOpen: true,
-    onClick: () => {
-      sheetEditPending = true;
-      void editItemById(item.id);
-    },
-  });
-
-  // 删除（danger：点删除先收抽屉再弹确认）
-  acts.push({
-    icon: 'trash-2',
-    label: '删除',
-    kind: 'danger',
-    onClick: () => {
-      void deleteItemById(item.id);
-    },
-  });
-
-  return acts;
-}
-
-/** 抽屉头部：分类 emoji + 名称 + 小字行（分类名 · 价格 · 天数），复用通用头部类 */
-function buildSheetHead(item: BelongingsItem): HTMLElement {
-  const head = document.createElement('div');
-  head.className = 'bz-item-sheet-entry';
-  const body = document.createElement('div');
-  body.style.cssText = 'display:flex; align-items:flex-start; gap:10px;';
-
-  const catIcon = database!.categoryIcons[item.category] || '📦';
-  const emoji = document.createElement('span');
-  emoji.className = 'bz-item-sheet-emoji';
-  emoji.textContent = catIcon;
-  body.appendChild(emoji);
-
-  const info = document.createElement('div');
-  info.style.cssText = 'flex:1; min-width:0;';
-  const title = document.createElement('div');
-  title.className = 'bz-item-sheet-title';
-  title.textContent = item.name;
-  info.appendChild(title);
-  const sub = document.createElement('div');
-  sub.className = 'bz-item-sheet-sub';
-  // P2 形状容错：脏数据缺字段不再 TypeError
-  const catName = (item.category || '').replace(/^[^ ]+ /, '');
-  const days = calculateDaysUsed(item.purchase_date);
-  sub.textContent = `${catName} · ￥${(item.purchase_price ?? 0).toFixed(2)} · 已用 ${days} 天`;
-  info.appendChild(sub);
-
-  body.appendChild(info);
-  head.appendChild(body);
-  return head;
-}
-
-
-// ----- 操作函数 -----
-
-/** 创建搜索下拉分类（与添加/编辑一致，可复用 helper） */
-function createSearchSelect(
-  field: FormField,
-  palette: ModalPalette
-): HTMLDivElement {
-  const { bg, text, border, inputBg, isDark } = palette;
-  const searchWrapper = document.createElement('div');
-  searchWrapper.style.cssText = 'position: relative;';
-
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.placeholder = field.placeholder || '搜索分类...';
-  input.value = field.value || '';
-  input.style.cssText = `
-        width: 100%; padding: 8px 12px; border-radius: 6px;
-        border: 1px solid ${border}; background: ${inputBg}; color: ${text};
-        font-size: 14px; box-sizing: border-box;
-      `;
-  input.autocomplete = 'off';
-
-  const dropdown = document.createElement('div');
-  dropdown.className = 'bz-belongings-overlay--dropdown'; // 标识钩子（层级已动态发号 ADR-0067）
-  dropdown.style.zIndex = String(allocZ()); // ADR-0067：动态发号（overlay 层叠上下文内最高，压过 modal 兄弟）
-  dropdown.style.cssText = `
-        position: absolute; top: 100%; left: 0; right: 0;
-        background: ${bg}; border: 1px solid ${border};
-        border-radius: 6px; max-height: 200px; overflow-y: auto;
-        display: none;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      `;
-
-  const allOptions = field.options || [];
-  const optionItems: HTMLDivElement[] = [];
-
-  allOptions.forEach((opt) => {
-    const item = document.createElement('div');
-    item.textContent = opt;
-    item.style.cssText = `
-          padding: 6px 12px; cursor: pointer; font-size: 14px;
-          color: ${text}; border-bottom: 1px solid ${border};
-        `;
-    item.addEventListener('mouseenter', () => {
-      item.style.background = isDark ? '#3d3d3d' : '#e8e8e8';
-    });
-    item.addEventListener('mouseleave', () => {
-      item.style.background = 'transparent';
-    });
-    item.addEventListener('click', () => {
-      input.value = opt;
-      dropdown.style.display = 'none';
-      input.dispatchEvent(new Event('input'));
-    });
-    dropdown.appendChild(item);
-    optionItems.push(item);
-  });
-
-  searchWrapper.appendChild(input);
-  searchWrapper.appendChild(dropdown);
-
-  // 搜索过滤
-  input.addEventListener('input', () => {
-    const query = input.value.toLowerCase().trim();
-    let hasVisible = false;
-    optionItems.forEach((item) => {
-      const text = item.textContent!.toLowerCase();
-      if (text.includes(query)) {
-        item.style.display = 'block';
-        hasVisible = true;
-      } else {
-        item.style.display = 'none';
-      }
-    });
-    dropdown.style.display = hasVisible ? 'block' : 'none';
-  });
-
-  // 聚焦显示下拉
-  input.addEventListener('focus', () => {
-    input.dispatchEvent(new Event('input'));
-  });
-
-  // 点击外部关闭（P2 监听泄漏修复：closeDropdown 引用化——弹窗销毁（searchWrapper 脱离文档）
-  // 后首次点击自注销，不再永久挂在 document 上）
-  const closeDropdown = (e: MouseEvent): void => {
-    if (!searchWrapper.isConnected) {
-      document.removeEventListener('click', closeDropdown);
-      return;
-    }
-    if (!searchWrapper.contains(e.target as Node)) {
-      dropdown.style.display = 'none';
-    }
+      mobileFullscreenGroup('belongingsMobileDefaultFullscreen', { desc: '' }),
+    ],
   };
-  document.addEventListener('click', closeDropdown);
-
-  // 键盘事件
-  input.addEventListener('keydown', (e) => {
-    const visibleItems = optionItems.filter((item) => item.style.display !== 'none');
-    if (visibleItems.length === 0) return;
-    let currentIdx = visibleItems.findIndex((item) => item.style.background !== 'transparent');
-
-
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      const newIdx = Math.min(currentIdx + 1, visibleItems.length - 1);
-      visibleItems.forEach((item, idx) => {
-        item.style.background = idx === newIdx ? (isDark ? '#3d3d3d' : '#e8e8e8') : 'transparent';
-      });
-      if (newIdx >= 0) visibleItems[newIdx].scrollIntoView({ block: 'nearest' });
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      const newIdx = Math.max(currentIdx - 1, 0);
-      visibleItems.forEach((item, idx) => {
-        item.style.background = idx === newIdx ? (isDark ? '#3d3d3d' : '#e8e8e8') : 'transparent';
-      });
-      if (newIdx >= 0) visibleItems[newIdx].scrollIntoView({ block: 'nearest' });
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      const selected = visibleItems.find((item) => item.style.background !== 'transparent');
-      if (selected) {
-        input.value = selected.textContent!;
-        dropdown.style.display = 'none';
-        input.dispatchEvent(new Event('input'));
-      }
-    } else if (e.key === 'Escape') {
-      // e1：下拉可见 → 只收下拉，不再冒泡到 escManager 连关整层弹窗（ESC 一次只关一层）；
-      // 修 c3：下拉不可见/无匹配时放行冒泡，ESC 照常经 escManager 关弹窗/主面板（不留 ESC 死区）
-      if (dropdown.style.display !== 'none') {
-        e.stopImmediatePropagation();
-        dropdown.style.display = 'none';
-      }
-    }
-  });
-
-  return searchWrapper;
 }
 
-/** 表单校验（添加/编辑共用）：返回错误消息或 null */
-function validateForm(inputs: Record<string, any>): string | null {
-  if (!inputs.name.value.trim()) return '请输入物品名称';
-  const price = parseFloat(inputs.price.value);
-  if (isNaN(price) || price < 0) return '请输入有效的价格';
-  if (!inputs.date.value) return '请选择购买日期';
-  if (!inputs.category.value.trim()) return '请选择或输入分类';
-  return null;
+// ==================== 数据存取 ====================
+
+function itemList(): BelongingsItem[] {
+  return M.db ? Object.values(M.db.items) : [];
+}
+function itemById(id: string): BelongingsItem | undefined {
+  return M.db?.items[id];
 }
 
-/** 次要按钮（取消/关闭） */
-function createSecondaryButton(
-  text: string,
-  palette: Pick<ModalPalette, 'text' | 'border'>,
-  onClick: () => void
-): HTMLButtonElement {
-  const btn = document.createElement('button');
-  btn.textContent = text;
-  btn.style.cssText = `
-      padding: 8px 20px; border-radius: 6px; border: 1px solid ${palette.border};
-      background: transparent; color: ${palette.text}; cursor: pointer; font-size: 14px;
-    `;
-  btn.addEventListener('click', onClick);
-  return btn;
-}
+// ==================== 主面板生命周期 ====================
 
-/** 主操作按钮（保存/删除等，自定义背景色） */
-function createActionButton(
-  text: string,
-  background: string,
-  onClick: () => void
-): HTMLButtonElement {
-  const btn = document.createElement('button');
-  btn.textContent = text;
-  btn.style.cssText = `
-      padding: 8px 20px; border-radius: 6px; border: none;
-      background: ${background}; color: white; cursor: pointer; font-size: 14px; font-weight: 500;
-    `;
-  btn.addEventListener('click', onClick);
-  return btn;
-}
-
-/** 构建表单（添加/编辑共用）；searchSelectInit 用于 search-select 字段的差异化初始化 */
-function buildForm(
-  fields: FormField[],
-  palette: ModalPalette,
-  searchSelectInit?: (input: HTMLInputElement, field: FormField) => void
-): { form: HTMLDivElement; inputs: Record<string, any> } {
-  const { text, border, inputBg } = palette;
-  const form = document.createElement('div');
-  form.style.cssText = 'display: flex; flex-direction: column; gap: 16px;';
-
-  const inputs: Record<string, any> = {};
-
-  fields.forEach((field) => {
-    const wrapper = document.createElement('div');
-
-    const label = document.createElement('label');
-    label.textContent = field.label;
-    label.style.cssText = `display: block; font-size: 14px; font-weight: 500; margin-bottom: 4px; color: ${text};`;
-
-    let input: any;
-
-    if (field.type === 'search-select') {
-      const searchWrapper = createSearchSelect(field, palette);
-      const searchInput = searchWrapper.querySelector('input') as HTMLInputElement;
-      if (searchSelectInit) searchSelectInit(searchInput, field);
-      input = searchInput;
-      wrapper.appendChild(label);
-      wrapper.appendChild(searchWrapper);
-    } else if (field.type === 'select') {
-      input = document.createElement('select');
-      input.style.cssText = `
-        width: 100%; padding: 8px 12px; border-radius: 6px;
-        border: 1px solid ${border}; background: ${inputBg}; color: ${text};
-        font-size: 14px; box-sizing: border-box;
-      `;
-      (field.options || []).forEach((opt: string) => {
-        const option = document.createElement('option');
-        option.value = opt;
-        option.textContent = opt;
-        if (opt === field.value) option.selected = true;
-        input.appendChild(option);
-      });
-      wrapper.appendChild(label);
-      wrapper.appendChild(input);
-    } else if (field.type === 'textarea') {
-      input = document.createElement('textarea');
-      input.style.cssText = `
-        width: 100%; padding: 8px 12px; border-radius: 6px;
-        border: 1px solid ${border}; background: ${inputBg}; color: ${text};
-        font-size: 14px; box-sizing: border-box; resize: vertical; min-height: 60px;
-      `;
-      input.placeholder = field.placeholder || '';
-      input.value = field.value || '';
-      wrapper.appendChild(label);
-      wrapper.appendChild(input);
-    } else {
-      // text, number, date
-      input = document.createElement('input');
-      input.type = field.type;
-      input.style.cssText = `
-        width: 100%; padding: 8px 12px; border-radius: 6px;
-        border: 1px solid ${border}; background: ${inputBg}; color: ${text};
-        font-size: 14px; box-sizing: border-box;
-      `;
-      if (field.placeholder) input.placeholder = field.placeholder;
-      if (field.default) input.value = field.default;
-      else if (field.value !== undefined && field.value !== null) input.value = field.value;
-      if (field.type === 'number') input.step = '0.01';
-      wrapper.appendChild(label);
-      wrapper.appendChild(input);
-    }
-
-    if (field.required) input.required = true;
-    form.appendChild(wrapper);
-    inputs[field.id] = input;
-  });
-
-  return { form, inputs };
-}
-
-
-/** 弹窗公共结构（遮罩/弹窗/色板） */
-function createModalShell(maxWidth: number, titleText: string): {
-  overlay: HTMLDivElement;
-  modal: HTMLDivElement;
-  palette: ModalPalette;
-} {
-  const isDark = document.body.classList.contains('theme-dark');
-  const bg = isDark ? '#1e1e1e' : '#ffffff';
-  const text = isDark ? '#ffffff' : '#333333';
-  const border = isDark ? '#404040' : '#e0e0e0';
-  const inputBg = isDark ? '#2d2d2d' : '#f5f7fa';
-  const palette = { bg, text, border, inputBg, isDark };
-
-  const overlay = document.createElement('div');
-  overlay.className = 'bz-belongings-overlay--modal'; // 标识钩子（层级已动态发号 ADR-0067）
-  overlay.style.cssText = `
-      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.5);
-      display: flex; align-items: center; justify-content: center;
-    `;
-  overlay.style.zIndex = String(allocZ()); // ADR-0067：弹窗每次新建，创建即显示即发号（modal 为子节点随动）
-
-  const modal = document.createElement('div');
-  modal.style.cssText = `
-      background: ${bg}; color: ${text};
-      border-radius: 12px; width: 90%; max-width: ${maxWidth}px;
-      padding: 24px; box-shadow: 0 8px 30px rgba(0,0,0,0.3);
-      border: 1px solid ${border};
-      max-height: 90vh; overflow-y: auto;
-    `;
-
-  const title = document.createElement('h3');
-  title.textContent = titleText;
-  title.style.cssText = 'margin: 0 0 20px 0; font-size: 20px;';
-  modal.appendChild(title);
-
-  document.body.appendChild(overlay);
-  overlay.appendChild(modal);
-  return { overlay, modal, palette };
-}
-
-/** 编辑弹窗关闭路径统一清理：清抽屉编辑标志 + 注销附属浮层（取消/遮罩/ESC，抽屉保持） */
-function closeSheetEditState(overlay: HTMLElement): void {
-  if (sheetEditPending) {
-    sheetEditPending = false;
-    unregisterSheetCompanion(overlay);
-  }
-}
-
-/** 编辑物品（单击卡片触发） */
-function editItemById(id: string): Promise<void> {
-  const item = database!.items[id];
-  if (!item) {
-    notice('物品不存在', 'warning');
-    return Promise.resolve();
-  }
-
-  // ----- 创建独立编辑弹窗 -----
-  return new Promise((resolve) => {
-    // P0-7：抬到 11100 档——companion 编辑弹窗必须压过抽屉遮罩 10999 / 抽屉本体 11000
-    const { overlay, modal, palette } = createModalShell(480, '编辑物品');
-    // 抽屉来源的编辑：注册附属浮层（弹窗内点击不误关抽屉）
-    if (sheetEditPending) registerSheetCompanion(overlay);
-
-    // ticket 079：编辑前的 old 值快照（保存时直接改 item 引用，通知时比较生成 changes）
-    const snapshot = { ...item };
-
-    // 表单字段（预填当前值）
-    const fields: FormField[] = [
-      { id: 'name', label: '📝 物品名称', type: 'text', placeholder: '请输入物品名称', value: item.name, required: true },
-      { id: 'category', label: '📦 分类', type: 'search-select', options: database!.categories, value: item.category, placeholder: '输入搜索分类...' },
-      { id: 'price', label: '💰 购买价格（元）', type: 'number', placeholder: '0.00', value: item.purchase_price.toString(), required: true },
-      { id: 'date', label: '📅 购买日期', type: 'date', value: item.purchase_date, required: true },
-      { id: 'status', label: '📌 当前状态', type: 'select', options: ['使用中', '闲置', '已转卖', '已丢弃'], value: item.current_status },
-      { id: 'description', label: '📋 描述（可选）', type: 'textarea', placeholder: '规格、颜色、购买原因等...', value: item.description },
-    ];
-
-    const { form, inputs } = buildForm(fields, palette, (input, field) => {
-      // search-select：设置 id（回车处理识别）+ 初始化后触发搜索以高亮匹配项
-      input.id = `edit-item-${field.id}`;
-      setTimeout(() => {
-        input.dispatchEvent(new Event('input'));
-      }, 0);
-    });
-
-    // 按钮容器
-    const btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display: flex; justify-content: flex-end; gap: 12px; margin-top: 12px;';
-
-    const cancelBtn = createSecondaryButton('取消', palette, () => {
-      document.body.removeChild(overlay);
-      closeSheetEditState(overlay);
-      resolve();
-    });
-
-    const saveBtn = createActionButton('💾 保存', 'var(--interactive-accent)', async () => {
-      const errMsg = validateForm(inputs);
-      if (errMsg) {
-        notice(errMsg, 'warning');
+/** ESC 层（bz-bel）：表单 || 详情 || 主面板——顶层先关，不穿透（对照 favorites bz-fav；
+ *  表单叠详情时（详情点编辑）先关表单，修 B6 层序倒挂） */
+let mainEscRegistered = false;
+function ensureBelongingsEsc(): void {
+  if (mainEscRegistered) return;
+  mainEscRegistered = true;
+  escManager.register('bz-bel', {
+    isVisible: () => !!M.overlay || !!document.querySelector('.bz-bel-form-mask') || !!document.querySelector('.bz-bel-detail-mask'),
+    close: () => {
+      const form = document.querySelector('.bz-bel-form-mask') as HTMLElement | null;
+      if (form) {
+        // 脏表单走 confirmDiscard 拦截（ticket 189，对照 favorites）
+        requestCloseBelForm(form);
         return;
       }
-      const name = inputs.name.value.trim();
-
-      // 更新 item
-      item.name = name;
-      item.category = inputs.category.value.trim();
-      item.purchase_price = parseFloat(inputs.price.value);
-      item.purchase_date = inputs.date.value;
-      item.current_status = inputs.status.value;
-      item.description = inputs.description.value.trim();
-      item.last_updated = new Date().toISOString();
-
-      await saveAndRender();
-      notice(`物品「${name}」已更新`, 'success');
-      // ticket 079：编辑成功通知 smartcat（α 变化列表：snapshot vs 保存后的 item）
-      emitDomainEvent('belongings', { kind: 'edit', title: name, changes: belongingsEditChanges(snapshot, item) });
-
-      if (document.body.contains(overlay)) {
-        document.body.removeChild(overlay);
-      }
-      // 抽屉来源的编辑：保存成功后关抽屉（用户拍板）
-      if (sheetEditPending) {
-        closeSheetEditState(overlay);
-        closeItemMenu();
-      }
-      resolve();
-    });
-
-    btnRow.appendChild(cancelBtn);
-    btnRow.appendChild(saveBtn);
-
-    modal.appendChild(form);
-    modal.appendChild(btnRow);
-    escManager.register('belongings-modal', {
-      isVisible: () => overlay.isConnected,
-      close: () => {
-        if (document.body.contains(overlay)) document.body.removeChild(overlay);
-        closeSheetEditState(overlay);
-        resolve();
-      },
-    });
-
-    // 点击遮罩关闭
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        document.body.removeChild(overlay);
-        closeSheetEditState(overlay);
-        resolve();
-        resolve();
-      }
-    });
-
-    // 回车提交（忽略搜索输入框）
-    modal.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
-        if ((e.target as HTMLElement).id && (e.target as HTMLElement).id.startsWith('edit-item-category')) return;
-        e.preventDefault();
-        saveBtn.click();
-      }
-    });
-
-    // 聚焦名称输入框
-    setTimeout(() => inputs.name.focus(), 100);
-  });
-}
-
-/** 删除物品（长按卡片触发，带确认弹窗） */
-function deleteItemById(id: string): Promise<void> {
-  const item = database!.items[id];
-  if (!item) {
-    notice('物品不存在', 'warning');
-    return Promise.resolve();
-  }
-
-  // ----- 创建独立确认弹窗 -----
-  return new Promise((resolve) => {
-    const { overlay, modal, palette } = createModalShell(400, '确认删除');
-    const { isDark } = palette;
-
-    modal.style.maxHeight = 'none';
-    modal.style.overflow = 'visible';
-
-    const message = document.createElement('p');
-    message.textContent = `确定要删除物品「${item.name}」吗？此操作不可撤销。`;
-    message.style.cssText = `margin: 0 0 20px 0; font-size: 14px; color: ${isDark ? '#b0b0b0' : '#666'};`;
-
-    const btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display: flex; justify-content: flex-end; gap: 12px;';
-
-    const cancelBtn = createSecondaryButton('取消', palette, () => {
-      document.body.removeChild(overlay);
-      resolve();
-    });
-
-    const confirmBtn = createActionButton('🗑 删除', '#e74c3c', async () => {
-      delete database!.items[id];
-      await saveAndRender();
-      notice(`已删除「${item.name}」`, 'success');
-      // ticket 079：删除成功通知 smartcat（仅标题）
-      emitDomainEvent('belongings', { kind: 'delete', title: item.name });
-      document.body.removeChild(overlay);
-      resolve();
-    });
-
-    btnRow.appendChild(cancelBtn);
-    btnRow.appendChild(confirmBtn);
-
-    modal.appendChild(message);
-    modal.appendChild(btnRow);
-    escManager.register('belongings-modal', {
-      isVisible: () => overlay.isConnected,
-      close: () => {
-        if (document.body.contains(overlay)) document.body.removeChild(overlay);
-        resolve();
-        resolve();
-      },
-    });
-
-    // 点击遮罩关闭（等同于取消）
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        document.body.removeChild(overlay);
-        resolve();
-        resolve();
-      }
-    });
-
-    // 回车处理（P1-38 + 修 c4：Enter 跟随当前焦点——焦点在「取消」→ 取消，不再焦点在取消却按 Enter 删除；
-    // 焦点在「删除」或未聚焦 → 确认删除；preventDefault 与 edit/add 弹窗对齐，拦原生按钮激活防双发）
-    modal.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        if (document.activeElement === cancelBtn) {
-          cancelBtn.click();
-        } else {
-          confirmBtn.click();
-        }
-      } else if (e.key === 'Escape') {
-        // e1：本地关确认弹窗即止，不再冒泡到 escManager 连关主面板（ESC 一次只关一层）
-        e.stopImmediatePropagation();
-        cancelBtn.click();
-      }
-    });
-
-    // P19：默认焦点不落在「删除」按钮（防误触），落在「取消」
-    setTimeout(() => cancelBtn.focus(), 100);
-  });
-}
-
-// ----- 排序弹窗 -----
-export function showSortModal(): Promise<void> {
-  return new Promise((resolve) => {
-    const { overlay, modal, palette } = createModalShell(480, '排序设置');
-    const { text, border } = palette;
-    modal.style.maxHeight = 'none';
-    modal.style.overflow = 'visible';
-
-    // ---- 排序按钮容器 ----
-    const sortGroup = document.createElement('div');
-    sortGroup.style.cssText = 'display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px;';
-
-    // 定义排序选项（与书库类似）
-    const sortOptions = [
-      { label: '名称 ↑', field: 'name', order: 'asc' },
-      { label: '名称 ↓', field: 'name', order: 'desc' },
-      { label: '价格 ↑', field: 'purchase_price', order: 'asc' },
-      { label: '价格 ↓', field: 'purchase_price', order: 'desc' },
-      { label: '日期 ↑', field: 'purchase_date', order: 'asc' },
-      { label: '日期 ↓', field: 'purchase_date', order: 'desc' },
-      { label: '状态 ↑', field: 'current_status', order: 'asc' },
-      { label: '状态 ↓', field: 'current_status', order: 'desc' },
-    ];
-    const accent = 'var(--interactive-accent)';
-
-    sortOptions.forEach((opt) => {
-      const btn = document.createElement('button');
-      btn.textContent = opt.label;
-      btn.style.cssText = `
-        padding: 6px 14px; border-radius: 20px; border: 1px solid ${border};
-        background: var(--background-secondary); color: ${text};
-        cursor: pointer; font-size: 0.85rem;
-        transition: all 0.15s;
-        box-shadow: none;
-      `;
-      // 高亮当前选中的排序
-      if (sortField === opt.field && sortOrder === opt.order) {
-        btn.style.background = accent;
-        btn.style.color = 'white';
-        btn.style.borderColor = accent;
-      }
-      btn.addEventListener('click', () => {
-        sortField = opt.field;
-        sortOrder = opt.order;
-        render();
-        document.body.removeChild(overlay);
-        resolve();
-        resolve();
-      });
-      sortGroup.appendChild(btn);
-    });
-
-    // ---- 底部按钮（关闭） ----
-    const btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display: flex; justify-content: flex-end; gap: 12px; margin-top: 8px;';
-
-    const closeBtn = createSecondaryButton('关闭', palette, () => {
-      document.body.removeChild(overlay);
-      resolve();
-    });
-
-    btnRow.appendChild(closeBtn);
-
-    modal.appendChild(sortGroup);
-    modal.appendChild(btnRow);
-    escManager.register('belongings-modal', {
-      isVisible: () => overlay.isConnected,
-      close: () => closeBtn.click(),
-    });
-
-    // 点击遮罩关闭
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        document.body.removeChild(overlay);
-        resolve();
-        resolve();
-      }
-    });
-
-    // ESC 关闭
-    modal.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        // e1：本地关排序弹窗即止，不再冒泡到 escManager 连关主面板（ESC 一次只关一层）
-        e.stopImmediatePropagation();
-        closeBtn.click();
-      }
-    });
-  });
-}
-
-/** 添加物品（弹窗） */
-export function addItem(): Promise<void> {
-  return new Promise((resolve) => {
-    const { overlay, modal, palette } = createModalShell(480, '添加物品');
-
-    const fields: FormField[] = [
-      { id: 'name', label: '📝 物品名称', type: 'text', placeholder: '请输入物品名称', required: true },
-      { id: 'category', label: '📦 分类', type: 'search-select', options: database!.categories, placeholder: '输入搜索分类...' },
-      { id: 'price', label: '💰 购买价格（元）', type: 'number', placeholder: '0.00', required: true },
-      { id: 'date', label: '📅 购买日期', type: 'date', default: new Date().toISOString().split('T')[0] },
-      { id: 'status', label: '📌 当前状态', type: 'select', options: ['使用中', '闲置', '已转卖', '已丢弃'] },
-      { id: 'description', label: '📋 描述（可选）', type: 'textarea', placeholder: '规格、颜色、购买原因等...' },
-    ];
-
-    const { form, inputs } = buildForm(fields, palette);
-
-    // 按钮容器
-    const btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display: flex; justify-content: flex-end; gap: 12px; margin-top: 12px;';
-
-    const cancelBtn = createSecondaryButton('取消', palette, () => {
-      document.body.removeChild(overlay);
-      resolve();
-    });
-
-    const submitBtn = createActionButton('✅ 保存', 'var(--interactive-accent)', async () => {
-      const errMsg = validateForm(inputs);
-      if (errMsg) {
-        notice(errMsg, 'warning');
+      const detail = document.querySelector('.bz-bel-detail-mask') as HTMLElement | null;
+      if (detail) {
+        closeBelDetail();
         return;
       }
-      const name = inputs.name.value.trim();
-
-      const newItem = {
-        id: `item_${Date.now()}`,
-        name: name,
-        category: inputs.category.value.trim(),
-        purchase_price: parseFloat(inputs.price.value),
-        purchase_date: inputs.date.value,
-        current_status: inputs.status.value,
-        description: inputs.description.value.trim(),
-        created_date: new Date().toISOString(),
-        last_updated: new Date().toISOString(),
-      };
-
-      database!.items[newItem.id] = newItem;
-      await saveAndRender();
-      notice(`物品「${name}」已添加`, 'success');
-      // ticket 079：添加成功通知 smartcat（键值式完整信息，字段有才加）
-      emitDomainEvent('belongings', { kind: 'add', item: newItem });
-
-      if (document.body.contains(overlay)) {
-        document.body.removeChild(overlay);
-      }
-      resolve();
-    });
-
-    btnRow.appendChild(cancelBtn);
-    btnRow.appendChild(submitBtn);
-
-    modal.appendChild(form);
-    modal.appendChild(btnRow);
-    escManager.register('belongings-modal', {
-      isVisible: () => overlay.isConnected,
-      close: () => {
-        if (document.body.contains(overlay)) document.body.removeChild(overlay);
-        resolve();
-        resolve();
-      },
-    });
-
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        document.body.removeChild(overlay);
-        resolve();
-        resolve();
-      }
-    });
-
-    modal.addEventListener('keydown', (e) => {
-      const tag = (e.target as HTMLElement).tagName;
-      const type = (e.target as HTMLInputElement).type;
-      if (e.key === 'Enter' && tag !== 'TEXTAREA' && tag !== 'INPUT' && type !== 'text') {
-        // 忽略在搜索输入框中的回车，由键盘事件处理
-        if ((e.target as HTMLElement).id === 'add-item-category') return;
-        e.preventDefault();
-        submitBtn.click();
-      }
-    });
-
-    setTimeout(() => inputs.name.focus(), 100);
+      closePanel();
+    },
   });
 }
-
-/** 本会话写盘标记（P44 去双渲染）：saveAndRender 保存期间置位，modify 事件自写短路吸收 */
+/** 数据文件 modify 自动刷新（打开期间注册，关闭注销——用户拍板实时刷新） */
+let autoRefreshOff: (() => void) | null = null;
+/** 本会话写盘标记（自写短路：modify 事件不回读重渲） */
 let selfWritePending = false;
+/** 主题变化监听（模块级持有，卸载时断开） */
+let bodyThemeObserver: MutationObserver | null = null;
+/** 打开中互斥（loadDatabase await 窗口内重入直接忽略，杜绝双触发双遮罩——僵尸遮罩只能重载） */
+let opening = false;
 
-/** 保存 + 渲染单点入口：先置写盘标记再保存，事件型自动刷新对自写出让（不再重载重渲染）；
- *  外部修改（非本会话写盘）仍走 startAutoRefresh 的 modify 路径重载。 */
-async function saveAndRender(): Promise<void> {
-  selfWritePending = true;
-  try {
-    await saveDatabase(database!);
-  } finally {
-    selfWritePending = false;
-  }
-  render();
-}
-
-/** 打开期间监听数据文件变更自动刷新（用户拍板：去 ⏳ 按钮改实时）；面板隐藏时注销。
- *  监听对象是 belongings.json（json 数据文件）：域事件总线一期仅收编 md 事件不覆盖，维持原生订阅（ADR-0048 边界）。 */
-function startAutoRefresh(): void {
-  stopAutoRefresh();
-  const app = getApp();
-  const off = app.vault.on('modify', (file: any) => {
-    if (file && file.path === getDataFilePath()) {
-      // 自写短路（P44 去双渲染）：本会话 saveAndRender 已渲染，事件型刷新不再重载重渲染
-      if (selfWritePending) {
-        selfWritePending = false;
-        return;
-      }
-      void (async () => {
-        database = await loadDatabase();
-        render();
-      })();
-    }
-  });
-  autoRefreshOff = () => app.vault.offref(off);
-}
-
-/** 停止数据文件变更监听（幂等） */
-function stopAutoRefresh(): void {
-  if (autoRefreshOff) {
-    autoRefreshOff();
-    autoRefreshOff = null;
-  }
-}
-
-// ----- 创建主弹窗 -----
-export async function openBelongingsPanel(): Promise<void> {
-  const app = getApp();
-
-  if (document.getElementById('__gui_wu_ben__')) {
-    const overlayEl = document.getElementById('__gui_wu_ben__') as HTMLElement;
-    // 移动端默认全屏：开关开=挂 .bz-win-mfs 全屏类（幂等，对已存在面板同样生效），关=常规卡
-    applyMobileWindowFullscreen(overlayEl.firstElementChild as HTMLElement | null, tryGetSettings().belongingsMobileDefaultFullscreen === true);
-    topifyZ(overlayEl); // ADR-0067：显示即发号，谁后显示谁在上（modal 为子节点随动）
-    overlayEl.style.visibility = 'visible';
-    // 重新加载数据并渲染
-    database = await loadDatabase();
-    render();
-    startAutoRefresh();
+export async function openPanel(): Promise<void> {
+  if (M.overlay) {
+    closePanel();
     return;
   }
+  if (opening) return;
+  opening = true;
+  try {
+    await openPanelInner();
+  } finally {
+    opening = false;
+  }
+}
 
-  database = await loadDatabase();
-
+async function openPanelInner(): Promise<void> {
+  // 默认状态筛选接线（issue 194）：每次打开读设置，非法值回全部（设置是「下次打开的初始值」，
+  // 面板内改选为会话内临时态，同收藏本 openPanel 语义）
+  const st = (tryGetSettings() as Record<string, unknown>).belongingsDefaultStatus;
+  M.status = typeof st === 'string' && DEFAULT_STATUS_VALUES.includes(st) && st !== '' ? st : null;
+  M.db = await loadDatabase();
   const overlay = document.createElement('div');
-  overlay.id = '__gui_wu_ben__';
-  overlay.className = 'bz-belongings-overlay--main'; // 标识钩子（层级已动态发号 ADR-0067）
-  overlay.style.cssText = `
-      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.5);
-      display: flex; align-items: center; justify-content: center;
-    `;
-  overlay.style.zIndex = String(allocZ()); // ADR-0067：首建即显示即发号（modal 为子节点随动）
-
-  const modal = document.createElement('div');
-  modal.style.cssText = `
-      background: var(--background-primary); color: var(--text-normal);
-      border-radius: 12px; width: 100%; max-width: 600px; height: 90vh;
-      display: flex; flex-direction: column; overflow: hidden;
-      box-shadow: 0 8px 30px rgba(0,0,0,0.3);
-    `;
-  // 移动端默认全屏：开关开=挂 .bz-win-mfs 全屏类（幂等），关=常规卡
-  applyMobileWindowFullscreen(modal, tryGetSettings().belongingsMobileDefaultFullscreen === true);
-
-  // 头部
-  const header = document.createElement('div');
-  header.className = 'bz-win-head';
-  header.style.cssText = `
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 0 26px;
-    `;
-  header.innerHTML = '<p style="font-size:.8rem;">归物本</p>';
-
-  const headerButtons = document.createElement('div');
-  headerButtons.style.cssText = 'display: flex; align-items: center; gap: 8px;';
-
-  const addBtn = document.createElement('button');
-  addBtn.textContent = '✏️';
-  addBtn.style.cssText = `background: none; border: none; font-size: .7rem;
-    cursor: pointer; color: var(--text-muted);
-    box-shadow: none;
-    padding: 0;
-    margin-left: 3px;`;
-  addBtn.addEventListener('click', async () => {
-    await addItem();
-    render();
-  });
-
-  const sortBtn = document.createElement('button');
-  sortBtn.textContent = '🔀';
-  sortBtn.title = '排序';
-  sortBtn.style.cssText = ` background: none; border: none; font-size: .7rem;
-    cursor: pointer; color: var(--text-muted);
-    box-shadow: none;
-    padding: 0;
-    margin-left: 3px;`;
-  sortBtn.addEventListener('click', async () => {
-    await showSortModal();
-  });
-
-  // 设置弹窗（ADR-0009：归物本无行为设置，空弹窗）
-  const settingsBtn = document.createElement('button');
-  settingsBtn.textContent = '⚙️';
-  settingsBtn.title = '归物本设置';
-  settingsBtn.style.cssText = ` background: none; border: none; font-size: .7rem;
-    cursor: pointer; color: var(--text-muted);
-    box-shadow: none;
-    padding: 0;
-    margin-left: 3px;`;
-  settingsBtn.addEventListener('click', () => {
-    openSettingsModal({
-      title: '归物本设置',
-      maxWidth: 520, // 拍板 Q11：空态域统一分组卡片口径、宽度向 520 看齐
-      // 空态域：唯一内容为通用「移动端」组（桌面端整组隐藏 → 照常显示空态文案）
-      schema: belongingSettingsSchema(),
-      emptyText: '归物本没有可配置的设置项',
-      emptyDesc: '数据文件路径由全局设置「数据存储路径」统一管理',
-    });
-  });
-
-  const closeBtn = document.createElement('button');
-  closeBtn.textContent = '❌';
-  closeBtn.className = 'bz-win-close';
-  closeBtn.style.cssText = ` background: none; border: none; font-size: .6rem;
-    cursor: pointer; color: var(--text-muted);
-    box-shadow: none;
-    padding: 0;
-    margin-left: 3px;`;
-  closeBtn.addEventListener('click', () => {
-    (overlay as HTMLElement).style.visibility = 'hidden';
-    stopAutoRefresh();
-  });
-
-  headerButtons.appendChild(addBtn);
-  headerButtons.appendChild(sortBtn);
-  headerButtons.appendChild(settingsBtn);
-  headerButtons.appendChild(closeBtn);
-  header.appendChild(headerButtons);
-
-  // 列表容器
-  listContainer = document.createElement('div');
-  listContainer.style.cssText = 'flex:1; overflow-y: auto; padding: 8px 16px;';
-
-  modal.appendChild(header);
-  modal.appendChild(listContainer);
-  overlay.appendChild(modal);
+  overlay.className = 'bz-panel-overlay';
+  overlay.innerHTML = panelHtml();
   document.body.appendChild(overlay);
+  topifyZ(overlay); // ADR-0067：显示即发号（原静态 z-index:100000 已删）
+  M.overlay = overlay;
+  M.renderFn = () => renderAll();
+  applyMobileWindowFullscreen(
+    overlay.querySelector('.bz-bel-panel') as HTMLElement,
+    (tryGetSettings() as any)?.belongingsMobileDefaultFullscreen === true
+  );
+  mountIcons(overlay);
 
-  // 点击外部关闭
+  // ESC（主面板 + 表单/详情多窗口径；表单也可能先于面板打开——命令路径）
+  ensureBelongingsEsc();
+
+  // ---- 年份/移动排序下拉（自绘海报菜单，原生 select 弹层退役；与桌面 seg 双向同步） ----
+  // 触发器开合 + 选项点选 + 外点收起，一处 document 委托；closePanel 时摘除
+  const closeDrops = () => {
+    overlay.querySelectorAll('.bz-bel-yearsel.is-open').forEach((w) => w.classList.remove('is-open'));
+  };
+  const onDocClick = (e: MouseEvent) => {
+    const t = e.target as HTMLElement;
+    const trig = t.closest('[data-bel-year],[data-bel-mobsortsel]') as HTMLElement | null;
+    if (trig) {
+      const wrap = trig.parentElement as HTMLElement;
+      const wasOpen = wrap.classList.contains('is-open');
+      closeDrops();
+      if (!wasOpen) wrap.classList.add('is-open');
+      return;
+    }
+    const opt = t.closest('.bz-bel-dropopt') as HTMLElement | null;
+    if (opt) {
+      closeDrops();
+      const v = opt.dataset.v ?? '';
+      if (opt.closest('[data-bel-yearmenu]')) M.year = v;
+      else M.sort = v as BelState['sort'];
+      renderAll();
+      return;
+    }
+    closeDrops();
+  };
+  const onDropKey = (e: KeyboardEvent) => {
+    const t = e.target as HTMLElement;
+    if ((e.key === 'Enter' || e.key === ' ') && t.closest('.bz-bel-select')) {
+      e.preventDefault();
+      (t as HTMLElement).click();
+    }
+  };
+  document.addEventListener('click', onDocClick);
+  overlay.addEventListener('keydown', onDropKey);
+  dropDocClick = onDocClick;
+
+  // ---- 事件委托（chips/排序/KPI 一处接管；桌面与移动横滑条共用 data-bel-st 钩子） ----
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) {
-      overlay.style.visibility = 'hidden';
-      stopAutoRefresh();
+    const t = e.target as HTMLElement;
+    if (e.target === overlay) { closePanel(); return; }
+    if (t.closest('[data-bel-add]')) { void openForm(null); return; }
+    if (t.closest('[data-bel-close]')) { closePanel(); return; }
+    // 状态 chips：再点「全部」= 取消筛选回未筛选；再点当前项 = 取消筛选回全部
+    const chip = t.closest('[data-bel-st]') as HTMLElement | null;
+    if (chip) { applyStatusFilter(chip.dataset.belSt as string); return; }
+    // 排序三档 segmented（桌面；移动走上方下拉 change）
+    const segBtn = t.closest('.bz-segmented-btn') as HTMLElement | null;
+    if (segBtn) {
+      M.sort = segBtn.dataset.k as BelState['sort'];
+      renderAll();
+      return;
+    }
+    // KPI 可点（ticket 189 语义保留）：在库件数/在库投入 = 在库合成筛选（再点取消）
+    const kpi = t.closest('[data-bel-statclick]') as HTMLElement | null;
+    if (kpi) {
+      const kind = kpi.dataset.belStatclick;
+      if (kind === 'asset') M.status = M.status === 'asset' ? null : 'asset';
+      renderAll();
+      return;
     }
   });
-  // ESC 关闭（全局注册表，同 ID 去重）
-  escManager.register('belongings', {
-    isVisible: () => {
-      const el = document.getElementById('__gui_wu_ben__');
-      return !!el && el.style.visibility === 'visible';
-    },
-    close: () => {
-      const el = document.getElementById('__gui_wu_ben__');
-      if (el) el.style.visibility = 'hidden';
-      stopAutoRefresh();
-    },
+  // 搜索（B3：防抖定时器在面板关闭后仍会触发——首行守卫 overlay 存活；渲染序列含 hero，
+  // 副题「N 件在列」计数随搜索刷新）
+  const bindSearch = (inp: HTMLInputElement) => {
+    inp.addEventListener('input', () => {
+      clearTimeout((inp as any)._belDeb);
+      (inp as any)._belDeb = setTimeout(() => {
+        if (!M.overlay) return;
+        M.q = inp.value.trim();
+        renderAll();
+      }, 180);
+    });
+  };
+  bindSearch(overlay.querySelector('[data-bel-search]') as HTMLInputElement);
+
+  // 内容区：卡片点击（桌面=详情弹窗；移动=底部抽屉）+ 右键菜单
+  const content = overlay.querySelector('[data-bel-content]') as HTMLElement;
+  content.addEventListener('click', (e) => {
+    const cell = (e.target as HTMLElement).closest('[data-bel-id]') as HTMLElement | null;
+    if (!cell) return;
+    e.stopPropagation();
+    const it = itemById(cell.dataset.belId as string);
+    if (!it) return;
+    // 桌面点卡 = 详情弹窗（P20）；移动点卡 = 底部详情抽屉（issue 202：动作菜单只走右键/抽屉）
+    if (isMobileEnv()) openMobSheet(it);
+    else openBelDetail(it);
+  });
+  content.addEventListener('contextmenu', (e) => {
+    const cell = (e.target as HTMLElement).closest('[data-bel-id]') as HTMLElement | null;
+    if (!cell || isMobileEnv()) return;
+    e.preventDefault();
+    const it = itemById(cell.dataset.belId as string);
+    if (it) openRowMenuAt(it, e.clientX, e.clientY);
   });
 
-  // 初次渲染
-  render();
+  renderAll();
   startAutoRefresh();
-
-  // 主题变化监听（P44 去全量重渲染）：body class 任意变更不再全量重渲染，
-  // 仅当实际变化的类与渲染相关（主题类 theme-dark/theme-light）才重渲染
-  bodyThemeObserver?.disconnect();
-  let lastBodyClasses = document.body.className;
-  bodyThemeObserver = new MutationObserver(() => {
-    const cur = document.body.className;
-    if (cur === lastBodyClasses) return;
-    const prevTokens = new Set(lastBodyClasses.split(/\s+/).filter(Boolean));
-    const nextTokens = new Set(cur.split(/\s+/).filter(Boolean));
-    lastBodyClasses = cur;
-    let relevant = false;
-    for (const c of nextTokens) if (!prevTokens.has(c) && THEME_CLASSES.has(c)) { relevant = true; break; }
-    if (!relevant) for (const c of prevTokens) if (!nextTokens.has(c) && THEME_CLASSES.has(c)) { relevant = true; break; }
-    if (relevant) render();
-  });
-  bodyThemeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
-  window.addEventListener('beforeunload', () => bodyThemeObserver?.disconnect());
+  observeTheme();
 }
 
-/** 命令回调体：belongings-add-item（面板不打开，直接弹添加） */
-export async function addBelongingsItemCommand(): Promise<void> {
-  if (!database) database = await loadDatabase();
-  void addItem(); // 弹窗 promise 在使用者关闭时 resolve，命令回调不等待
+export function closePanel(): void {
+  stopAutoRefresh();
+  closeBelDetail();
+  if (dropDocClick) { document.removeEventListener('click', dropDocClick); dropDocClick = null; }
+  if (M.overlay) {
+    M.overlay.remove();
+    M.overlay = null;
+  }
+  M.renderFn = null;
+  // 会话态一并清（B1/B3）：面板关后命令/撤销路径若复用陈旧库会把外部改动覆盖写盘；
+  // 搜索词残留会让重开面板「空搜索框配过滤后列表」。库按需重载（openForm/撤销回调自补）
+  M.db = null;
+  M.q = '';
 }
 
-/** 卸载清理：移除主面板 DOM */
 export function cleanupBelongings(): void {
   stopAutoRefresh();
-  // 主题监听断开（l2：防卸载残留）
+  closeBelDetail();
+  if (dropDocClick) { document.removeEventListener('click', dropDocClick); dropDocClick = null; }
   if (bodyThemeObserver) {
     bodyThemeObserver.disconnect();
     bodyThemeObserver = null;
   }
-  const el = document.getElementById('__gui_wu_ben__');
-  if (el) el.remove();
-  listContainer = null;
-  database = null;
+  if (M.overlay) {
+    M.overlay.remove();
+    M.overlay = null;
+  }
+  resetBelongingsState();
+}
+
+// ==================== 数据文件自动刷新 / 主题监听 ====================
+
+/** 打开期间监听数据文件变更（modify）自动刷新；自写短路吸收（P44 去双渲染） */
+function startAutoRefresh(): void {
+  stopAutoRefresh();
+  const app = getApp();
+  const filePath = getDataFilePath();
+  const off = (app.vault as any).on('modify', (file: any) => {
+    if (file?.path !== filePath) return;
+    if (selfWritePending) return;
+    void (async () => {
+      M.db = await loadDatabase();
+      M.renderFn?.();
+    })();
+  });
+  autoRefreshOff = () => (app.vault as any).offref(off);
+}
+function stopAutoRefresh(): void {
+  if (autoRefreshOff) {
+    try { autoRefreshOff(); } catch (e) { /* 忽略 */ }
+    autoRefreshOff = null;
+  }
+}
+
+/** 主题变化重渲染（仅关心 body theme 类差异，P44 去全量） */
+function observeTheme(): void {
+  if (bodyThemeObserver) {
+    bodyThemeObserver.disconnect();
+    bodyThemeObserver = null;
+  }
+  const themeOf = () => {
+    const cls = document.body.className.split(' ').find((c) => THEME_CLASSES.has(c));
+    return cls || '';
+  };
+  let prev = themeOf();
+  bodyThemeObserver = new MutationObserver(() => {
+    const now = themeOf();
+    if (now !== prev) {
+      prev = now;
+      M.renderFn?.();
+    }
+  });
+  bodyThemeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+}
+
+/** 保存 + 渲染单点入口（自写短路标记） */
+async function saveAndRender(): Promise<void> {
+  if (!M.db) return;
+  selfWritePending = true;
+  try {
+    await saveDatabase(M.db);
+  } finally {
+    selfWritePending = false;
+  }
+  M.renderFn?.();
+}
+
+// ==================== 渲染（单源胶水：render.ts renderPanelView 六步全量） ====================
+
+function renderAll(): void {
+  if (!M.overlay) return;
+  const panel = M.overlay.querySelector('.bz-bel-panel') as HTMLElement | null;
+  if (!panel) return;
+  // BelState 与 render.BelViewState 结构兼容（status/year/q/sort）；view.year 悬空回写直通 M
+  renderPanelView(panel, itemList(), M, { mountIcons });
+}
+
+/** 状态筛选切换语义（chips 与移动横滑条委托共用）：
+ *  再点「全部」= 取消筛选回未筛选；再点当前项 = 取消筛选回全部 */
+function applyStatusFilter(k: string): void {
+  if (k === '__all') M.status = null;
+  else M.status = M.status === k ? null : k;
+  renderAll();
+}
+
+// ==================== 详情弹窗（P20 桌面点卡） ====================
+
+function closeBelDetail(): void {
+  document.querySelector('.bz-bel-detail-mask')?.remove();
+}
+
+function openBelDetail(it: BelongingsItem): void {
+  closeBelDetail();
+  const mask = document.createElement('div');
+  mask.className = 'bz-overlay-mask bz-bel-detail-mask';
+  mask.innerHTML = belDetailHtml(it);
+  document.body.appendChild(mask);
+  topifyZ(mask); // ADR-0067：显示即发号（详情恒压主面板；表单再开时后发号恒压详情）
+  mountIcons(mask);
+  ensureBelongingsEsc(); // 详情可在面板未开时被带起（命令路径保险）
+
+  // 四态流转条（当前态高亮；点击 = 同右键菜单流转，带撤销）
+  const acts = mask.querySelector('[data-bd-acts]') as HTMLElement;
+  const drawActs = () => {
+    const cur = itemById(it.id);
+    if (!cur) return;
+    acts.innerHTML = flowBtnsHtml(cur.current_status);
+  };
+  drawActs();
+  acts.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest('[data-bd-flow]') as HTMLElement | null;
+    if (!b) return;
+    const cur = itemById(it.id);
+    if (!cur) { closeBelDetail(); return; }
+    void (async () => {
+      await applyFlowWithUndo(cur, b.dataset.bdFlow as string);
+      const now = itemById(it.id);
+      if (!now) { closeBelDetail(); return; }
+      drawActs();
+      // 详情头行字段同步（状态徽章/出离行随流转刷新）
+      openBelDetail(itemById(it.id)!);
+    })();
+  });
+  mask.addEventListener('mousedown', (e) => { if (e.target === mask) closeBelDetail(); });
+  mask.querySelector('[data-bd-close]')?.addEventListener('click', closeBelDetail);
+  mask.querySelector('[data-bd-edit]')?.addEventListener('click', () => {
+    const cur = itemById(it.id);
+    if (cur) openForm(cur);
+  });
+  mask.querySelector('[data-bd-del]')?.addEventListener('click', () => {
+    const cur = itemById(it.id);
+    if (cur) void deleteItem(cur);
+  });
+}
+
+// ==================== 行操作浮层 ====================
+
+/** 抽屉头：render.ts 串 → 元素（core/item-actions 契约收 HTMLElement；占位图标在此兑现） */
+function sheetHeadEl(it: BelongingsItem): HTMLElement {
+  const holder = document.createElement('div');
+  holder.innerHTML = sheetHeadHtml(it);
+  mountIcons(holder);
+  return holder.firstElementChild as HTMLElement;
+}
+
+/** 状态流转核心（右键菜单 / 详情流转条共用）：落盘 + status 事件 + notifyUndo（回写旧状态 + 恢复出离日期）
+ *  ticket 189：转卖/丢弃落 exit_date（ADR-0089）；B4：已是出离态再流转保留原封口日期 */
+async function applyFlowWithUndo(it: BelongingsItem, s: string): Promise<void> {
+  // 外部 modify 自动刷新会把 M.db 整体换新——按 id 从当前库重取再改，防旧引用改动静默丢失
+  const cur = itemById(it.id);
+  if (!cur) {
+    notice('该物品已被外部变更删除，列表已刷新', 'warning');
+    M.renderFn?.();
+    return;
+  }
+  const prevStatus = cur.current_status;
+  const prevExit = cur.exit_date;
+  cur.current_status = s;
+  // 出离闭环（ADR-0089）：从非出离态转入出离态记当天封口；已是出离态再流转保留原封口日期
+  // （与表单编辑路径对齐，修复前转卖→丢弃会把锚点重置成今天）；退出出离态且旧值存在才清（避免写冗余 null）
+  if (isExited(cur)) {
+    if (!exitedStatus(prevStatus)) cur.exit_date = todayStr();
+  } else if (cur.exit_date != null) {
+    cur.exit_date = null;
+  }
+  cur.last_updated = new Date().toISOString();
+  // 写盘失败兜底（B5）：内存已改必须从盘回滚——否则后续任意保存会把未落盘的改动补刀持久化
+  try {
+    await saveAndRender();
+  } catch (e) {
+    notifySaveError(e, '状态流转');
+    M.db = await loadDatabase().catch(() => null);
+    M.renderFn?.();
+    return; // 失败路径不发领域事件、不弹撤销 toast
+  }
+  emitDomainEvent('belongings', { kind: 'status', title: cur.name, status: s });
+  notifyUndo(`「${cur.name}」已标记为${s}`, () => {
+    void (async () => {
+      // B1：面板已关（closePanel 清 M.db）后撤销从盘重载，不误报「已被外部变更删除」
+      if (!M.db) M.db = await loadDatabase();
+      const now = itemById(it.id);
+      if (!now) {
+        notice('该物品已被外部变更删除，无法撤销', 'warning');
+        return;
+      }
+      now.current_status = prevStatus;
+      // B4：恢复流转前封口快照（出离→出离撤销不丢原日期）；无快照且现值非空才清（避免写冗余 null）
+      if (prevExit != null) now.exit_date = prevExit;
+      else if (now.exit_date != null) now.exit_date = null;
+      now.last_updated = new Date().toISOString();
+      await saveAndRender();
+      notice(`已撤销，「${now.name}」回到${prevStatus}`, 'success');
+    })();
+  }, { type: 'restore' });
+}
+
+/** 行操作（specs → ItemAction：序列/图标/文案单源在 render.actionSpecs，onClick 行为在本侧） */
+function buildActions(it: BelongingsItem, rebuild: () => void): ItemAction[] {
+  return actionSpecs(it).map((sp) => ({
+    icon: sp.icon,
+    label: sp.label,
+    keepOpen: sp.keepOpen,
+    kind: sp.danger ? 'danger' : undefined,
+    onClick: () => {
+      if (sp.act === 'flow' && sp.status) {
+        void (async () => {
+          await applyFlowWithUndo(it, sp.status!);
+          rebuild();
+        })();
+        return;
+      }
+      if (sp.act === 'edit') {
+        openForm(it);
+        return;
+      }
+      void deleteItem(it);
+    },
+  }));
+}
+
+function openRowMenuAt(it: BelongingsItem, x: number, y: number): void {
+  const rebuild = () => {
+    const it2 = itemById(it.id);
+    if (it2) refreshItemSheet(buildActions(it2, rebuild), sheetHeadEl(it2));
+  };
+  openItemMenu(x, y, buildActions(it, rebuild), true, 'bz-bel-menu');
+  // 复位残余 click 抑制（issue 198 同款 P1）：右键时序会置位 armed 吞下一次左键；右键无补发 click，直接复位
+  resetItemMenuClickGuard();
+}
+function openMobSheet(it: BelongingsItem): void {
+  const rebuild = () => {
+    const it2 = itemById(it.id);
+    if (it2) refreshItemSheet(buildActions(it2, rebuild), sheetHeadEl(it2));
+  };
+  openItemSheet(buildActions(it, rebuild), { sheetHead: sheetHeadEl(it) });
+}
+
+// ==================== 删除（ticket 189：去威慑文案，确认后接撤销 toast） ====================
+
+async function deleteItem(it: BelongingsItem): Promise<void> {
+  const v = await openFlowDialog({
+    title: '删除物品',
+    message: `确定要删除物品「${it.name}」吗？删除后可在通知中撤销。`,
+    actions: [
+      { label: '取消', value: 'cancel' },
+      { label: '删除', value: 'del', danger: true, cta: true },
+    ],
+  });
+  if (v !== 'del' || !M.db) return;
+  // 外部 modify 自动刷新会把 M.db 整体换新——确认后仍按 id 校验当前库中存在
+  if (!M.db.items[it.id]) {
+    notice('该物品已被外部变更删除，列表已刷新', 'warning');
+    M.renderFn?.();
+    return;
+  }
+  const snapshot = { ...M.db.items[it.id] };
+  delete M.db.items[it.id];
+  closeBelDetail(); // 详情内删除：详情随之关闭
+  // 写盘失败兜底（B5）：条目已在内存摘除，须回滚——否则后续任意保存把删除补刀持久化
+  try {
+    await saveAndRender();
+  } catch (e) {
+    M.db.items[snapshot.id] = snapshot;
+    notifySaveError(e, '删除物品');
+    M.db = await loadDatabase().catch(() => null);
+    M.renderFn?.();
+    return; // 失败路径不发领域事件、不弹撤销 toast
+  }
+  emitDomainEvent('belongings', { kind: 'delete', title: it.name });
+  notifyUndo(`已删除「${it.name}」`, () => {
+    void (async () => {
+      if (!M.db) M.db = await loadDatabase(); // B1：面板已关后撤销从盘重载
+      if (M.db.items[snapshot.id]) {
+        notice(`已存在同 id 物品（${snapshot.id}），跳过恢复`, 'warning');
+        return;
+      }
+      M.db.items[snapshot.id] = snapshot;
+      await saveAndRender();
+      notice(`已恢复「${snapshot.name}」`, 'success');
+    })();
+  }, { type: 'restore' });
+}
+
+// ==================== 表单（记一笔 / 编辑；markup 单源 = render.belFormHtml） ====================
+
+// 表单防丢（ticket 189，对照 favorites）：开表单时的全字段快照，脏表单关前 confirmDiscard
+
+interface BelFormBaseline {
+  name: string;
+  cat: string;
+  price: string;
+  date: string;
+  status: string;
+  desc: string;
+  exitDate: string;
+  soldPrice: string;
+}
+let _belBaseline: BelFormBaseline | null = null;
+
+function belFormStatusNow(mask: HTMLElement): string {
+  return (mask.querySelector('[data-status].is-on') as HTMLElement | null)?.dataset.status || '';
+}
+
+function belFormDirty(): boolean {
+  if (!_belBaseline) return false;
+  const mask = document.querySelector('.bz-bel-form-mask') as HTMLElement | null;
+  if (!mask) return false;
+  const g = (id: string) => (mask.querySelector(id) as HTMLInputElement | null)?.value ?? '';
+  return (
+    g('#bm-name') !== _belBaseline.name ||
+    g('#bm-cat') !== _belBaseline.cat ||
+    g('#bm-price') !== _belBaseline.price ||
+    g('#bm-date') !== _belBaseline.date ||
+    g('#bm-desc') !== _belBaseline.desc ||
+    g('#bm-exitdate') !== _belBaseline.exitDate ||
+    g('#bm-soldprice') !== _belBaseline.soldPrice ||
+    belFormStatusNow(mask) !== _belBaseline.status
+  );
+}
+
+function closeBelForm(mask: HTMLElement): void {
+  _belBaseline = null;
+  unregisterSheetCompanion(mask);
+  mask.remove();
+}
+
+function requestCloseBelForm(mask: HTMLElement): void {
+  if (belFormDirty()) confirmDiscard(() => closeBelForm(mask));
+  else closeBelForm(mask);
+}
+
+export function openForm(it: BelongingsItem | null): void {
+  // B8 防叠开：已有表单悬浮时聚焦既有表单直接返回——重复开会让模块级 _belBaseline 互踩、脏拦截失效
+  const existing = document.querySelector('.bz-bel-form-mask') as HTMLElement | null;
+  if (existing) {
+    (existing.querySelector('input, textarea') as HTMLInputElement | null)?.focus();
+    return;
+  }
+  // 命令路径（面板未开）先确保 db 已载（旧 addBelongingsItemCommand 语义）；B7：失败弹提示，不静默
+  if (!M.db) {
+    void loadDatabase()
+      .then((db) => {
+        M.db = db;
+        openForm(it);
+      })
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        notice('数据加载失败：' + msg, 'error');
+      });
+    return;
+  }
+  const init = belFormInit(it);
+  const mask = document.createElement('div');
+  mask.className = 'bz-overlay-mask bz-bel-form-mask';
+  mask.innerHTML = belFormHtml(it);
+  document.body.appendChild(mask);
+  topifyZ(mask); // ADR-0067：显示即发号（原静态 z-index:110000 已删，恒压主面板）
+  mountIcons(mask);
+  ensureBelongingsEsc(); // 表单可在面板未开时打开（命令路径）——ESC 层在此保证已注册
+  // 编辑自抽屉：companion 防误关
+  const sheetOpen = !!document.querySelector('.bz-item-sheet-mask');
+  if (it && sheetOpen) registerSheetCompanion(mask);
+
+  // 防丢基线（ticket 189）：开表单时的全字段快照（初值口径与 belFormHtml 同源）
+  _belBaseline = {
+    name: it?.name ?? '',
+    cat: init.catVal,
+    price: init.priceVal,
+    date: init.dateVal,
+    status: it?.current_status || '使用中',
+    desc: init.descVal,
+    exitDate: init.exitDateVal,
+    soldPrice: init.soldPriceVal,
+  };
+
+  // 分类搜索联想（组件库 uiSuggest，issue 203）+ 表单图标状态（issue 231/ADR-0102）：
+  // 候选 = 历史分类；点选历史分类自动带上馆内图标；AI 归类同写 formIcon，随保存入 item.icon
+  const catInput = mask.querySelector('#bm-cat') as HTMLInputElement;
+  let formIcon: string | null = it?.icon || null;
+  const iconChip = mask.querySelector('#bm-icon') as HTMLElement;
+  const drawIconChip = () => {
+    iconChip.replaceChildren();
+    iconChip.hidden = !formIcon;
+    if (formIcon) iconChip.appendChild(uiIconSpan(formIcon));
+  };
+  drawIconChip();
+  const historyIconOf = (cat: string): string => (M.db?.categoryIcons?.[cat] as string) || '';
+  uiSuggest({
+    anchor: catInput,
+    source: () => M.db?.categories ?? [],
+    max: 60,
+    iconOf: (raw: string) => {
+      const name = historyIconOf(raw);
+      return name ? uiIconSpan(name) : '';
+    },
+    onPick: (raw: string) => {
+      const name = historyIconOf(raw);
+      if (name) { formIcon = name; drawIconChip(); }
+    },
+  });
+  // 状态单选（平铺胶囊，markup = render.statusPickHtml）；出离态展开出离记录行（ADR-0089）
+  const statusPick = mask.querySelector('#bm-status') as HTMLElement;
+  const exitRow = mask.querySelector('#bm-exit') as HTMLElement;
+  const soldField = mask.querySelector('#bm-soldfield') as HTMLElement;
+  let curStatus = it?.current_status || '使用中';
+  const syncExitRow = () => {
+    const exited = curStatus === '已转卖' || curStatus === '已丢弃';
+    exitRow.hidden = !exited;
+    soldField.hidden = curStatus !== '已转卖';
+  };
+  const drawStatus = () => {
+    statusPick.innerHTML = statusPickHtml(curStatus);
+    mountIcons(statusPick);
+    statusPick.querySelectorAll('[data-status]').forEach((b) => b.addEventListener('click', () => {
+      curStatus = (b as HTMLElement).dataset.status as string;
+      drawStatus();
+    }));
+    syncExitRow();
+  };
+  drawStatus();
+
+  const errEl = mask.querySelector('#bm-err') as HTMLElement;
+  const fail = (msg: string) => { errEl.textContent = msg; };
+  const saveBtn = mask.querySelector('#bm-save') as HTMLButtonElement;
+  // 保存防重入（对齐 favorites：双击/连点不并发双写——ticket 141 通病 4）
+  let saving = false;
+
+  // AI 归类（issue 231/ADR-0102）：按名称建议分类 + 图标；未配置/失败内联降级，不阻塞手填
+  const aiBtn = mask.querySelector('#bm-ai') as HTMLButtonElement;
+  aiBtn.addEventListener('click', () => {
+    if (aiBtn.disabled) return;
+    const aiName = (mask.querySelector('#bm-name') as HTMLInputElement).value.trim();
+    if (!aiName) { fail('先填物品名称，AI 才能归类'); return; }
+    aiBtn.disabled = true;
+    aiBtn.classList.add('is-busy');
+    void (async () => {
+      try {
+        const sug = await aiSuggestCategory(aiName, M.db?.categories?.slice(0, 40) ?? []);
+        catInput.value = sug.category;
+        formIcon = sug.icon;
+        drawIconChip();
+        errEl.textContent = '';
+      } catch (e: any) {
+        fail('AI 归类失败：' + (e?.message || '未知错误'));
+      } finally {
+        aiBtn.disabled = false;
+        aiBtn.classList.remove('is-busy');
+      }
+    })();
+  });
+
+  mask.addEventListener('mousedown', (e) => { if (e.target === mask) requestCloseBelForm(mask); });
+  mask.querySelector('[data-bm-cancel]')?.addEventListener('click', () => requestCloseBelForm(mask));
+  saveBtn.addEventListener('click', () => {
+    if (saving) return;
+    const name = (mask.querySelector('#bm-name') as HTMLInputElement).value.trim();
+    const price = parseFloat((mask.querySelector('#bm-price') as HTMLInputElement).value);
+    const date = (mask.querySelector('#bm-date') as HTMLInputElement).value;
+    if (!name) { fail('请输入物品名称'); return; }
+    if (isNaN(price) || price < 0) { fail('请输入有效的价格'); return; }
+    if (!date) { fail('请选择购买日期'); return; }
+    const category = catInput.value.trim() || init.catVal;
+    if (!category) { fail('请选择或输入分类'); return; }
+    // 出离字段（ADR-0089）：转卖售价可选但填了必须合法
+    const exited = curStatus === '已转卖' || curStatus === '已丢弃';
+    const exitVal = exited ? (mask.querySelector('#bm-exitdate') as HTMLInputElement).value : '';
+    const soldRaw = curStatus === '已转卖' ? (mask.querySelector('#bm-soldprice') as HTMLInputElement).value.trim() : '';
+    let soldPrice: number | null = null;
+    if (soldRaw !== '') {
+      const sp = parseFloat(soldRaw);
+      if (isNaN(sp) || sp < 0) { fail('请输入有效的售价'); return; }
+      soldPrice = Math.round(sp * 100) / 100;
+    }
+    const desc = (mask.querySelector('#bm-desc') as HTMLTextAreaElement).value.trim();
+    saving = true;
+    saveBtn.disabled = true;
+    saveBtn.textContent = '保存中…';
+    void (async () => {
+      try {
+        // B1：面板可能已在表单开启期间被遮罩点击关闭（closePanel 清 M.db）——按需从盘重载，
+        // 不然编辑路径按 id 重取落空误报「已被外部变更删除」、新增路径直接「数据库未加载」
+        if (!M.db) M.db = await loadDatabase();
+        if (it) {
+          // 外部 modify 自动刷新会把 M.db 整体换新——保存前按 id 从当前库重取，防旧引用改动静默丢失
+          const cur = itemById(it.id);
+          if (!cur) {
+            notice('该物品已被外部变更删除，本次保存未写入', 'warning');
+            unregisterSheetCompanion(mask);
+            closeItemMenu();
+            mask.remove();
+            return;
+          }
+          const snapshot = { ...cur };
+          cur.name = name;
+          cur.category = category;
+          cur.icon = formIcon;
+          cur.purchase_price = Math.round(price * 100) / 100;
+          cur.purchase_date = date;
+          cur.current_status = curStatus;
+          cur.description = desc;
+          // 出离字段（ADR-0089）：只在出离态写值；退出出离态且旧值存在才清（避免给老记录写冗余 null）
+          if (exited) cur.exit_date = exitVal || todayStr();
+          else if (cur.exit_date != null) cur.exit_date = null;
+          if (curStatus === '已转卖') cur.sold_price = soldPrice;
+          else if (cur.sold_price != null) cur.sold_price = null; // 丢弃/在用态无售价语义
+          cur.last_updated = new Date().toISOString();
+          await saveAndRender();
+          emitDomainEvent('belongings', { kind: 'edit', title: name, changes: belongingsEditChanges(snapshot, cur) });
+          notice(`物品「${name}」已更新`, 'success');
+        } else {
+          if (!M.db) throw new Error('数据库未加载');
+          const newItem: BelongingsItem = {
+            id: 'item_' + Date.now(),
+            name,
+            category,
+            purchase_price: Math.round(price * 100) / 100,
+            purchase_date: date,
+            current_status: curStatus,
+            description: desc,
+            created_date: new Date().toISOString(),
+            last_updated: new Date().toISOString(),
+            ...(exited ? { exit_date: exitVal || todayStr() } : {}),
+            ...(curStatus === '已转卖' ? { sold_price: soldPrice } : {}),
+            ...(formIcon ? { icon: formIcon } : {}),
+          };
+          M.db.items[newItem.id] = newItem; // 用当前库（外部 modify 换新后旧 db 引用会丢写）
+          await saveAndRender();
+          emitDomainEvent('belongings', { kind: 'add', item: newItem });
+          notice(`物品「${name}」已添加`, 'success');
+        }
+        _belBaseline = null;
+        unregisterSheetCompanion(mask);
+        closeItemMenu();
+        mask.remove();
+      } catch (e: any) {
+        notice(`保存失败：${e?.message || '未知错误'}`, 'error');
+        saving = false;
+        saveBtn.disabled = false;
+        saveBtn.textContent = it ? '更新' : '保存';
+      }
+    })();
+  });
+  setTimeout(() => (mask.querySelector('#bm-name') as HTMLInputElement)?.focus(), 100);
 }

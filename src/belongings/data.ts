@@ -1,19 +1,20 @@
 /**
  * 归物本数据层（归物本.js loadDatabase/saveDatabase/工具函数 逐字移植）
  * 数据：CONFIG/STORAGE/belongings.json（dataFolder 可配置）
- * 默认分类 1226 条来自 default-categories.gen.ts（源码逐字提取）
+ * 历史分类派生 + emoji 分类迁移（issue 231/ADR-0102：内置预设 1226 条退役）
  */
 import { notice } from '../core/notice';
 import { getApp } from '../core/app';
 import { getSettings } from '../core/settings-provider';
-import { jsonFileStore, storageFile } from '../core/storage';
-import { DEFAULT_CATEGORIES } from './default-categories.gen';
+import { enqueueFileTask, jsonFileStore, storageFile } from '../core/storage';
+import moment from 'moment';
+import { splitEmojiCategory } from './emoji-icon-map';
 import type { BelongingsDatabase } from './types';
 
 /** 数据文件路径（ADR-0009：storagePath 优先，旧 dataFolder 兼容兜底） */
 export function getDataFilePath(): string {
   const s = getSettings() as any;
-  return storageFile('belongings.json', (s.storagePath || s.belongingsDataFolder) || 'CONFIG/STORAGE');
+  return storageFile('belongings.json', s.storagePath || 'CONFIG/STORAGE');
 }
 
 /** 空数据库结构 */
@@ -27,72 +28,103 @@ function emptyDatabase(): BelongingsDatabase {
   };
 }
 
-/** 加载数据库（统一数据读写层语义：缺失建空库文件、损坏改名留档重建；notice 文案逐字保留——铁律 1） */
+/** 加载数据库（统一数据读写层语义：缺失建空库文件、损坏改名留档重建；解析失败走 core 默认通知——含留档路径与「数据不会丢」承诺） */
 export async function loadDatabase(): Promise<BelongingsDatabase> {
   const filePath = getDataFilePath();
   const raw = await jsonFileStore<any>(filePath, {
     defaultValue: () => emptyDatabase(),
-    onCorrupt: () => {
-      notice('数据文件解析失败，已重置为空', 'warning', 5000);
-    },
   }).read();
   let db: BelongingsDatabase;
   try {
-    // P2 形状容错：非对象/空对象/数组 → 走既有失败 notice 路径（不再 TypeError 白屏）
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).length === 0) {
-      throw new Error('数据文件结构异常（非对象或空对象）');
+    // P2 形状容错：非对象/数组 → 结构异常提示（不再 TypeError 白屏）；
+    // 合法空对象 {}（文件被手动清空等）视为空库，不告警
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new Error('数据文件结构异常（非对象）');
     }
     db = raw as BelongingsDatabase;
   } catch (error) {
-    notice('数据文件解析失败，已重置为空', 'warning', 5000);
-    console.error('数据文件解析错误:', error);
+    notice('数据文件结构异常，已按空库继续，原文件未改动', 'warning', 5000);
+    console.error('数据文件结构异常:', error);
     db = emptyDatabase();
   }
 
-  // ----- 分类固定使用内置默认（自定义分类设置已移除）-----
-  const uniqueCategories = [...new Set(DEFAULT_CATEGORIES)];
-
-  (db as BelongingsDatabase).categories = uniqueCategories;
-
-  // 生成 categoryIcons
-  (db as BelongingsDatabase).categoryIcons = {};
-  (db as BelongingsDatabase).categories.forEach((cat) => {
-    const icon = cat.split(' ')[0];
-    (db as BelongingsDatabase).categoryIcons[cat] = icon;
-  });
-
   if (!db.items) db.items = {};
+
+  // ----- 迁移（issue 231/ADR-0102）：emoji 前缀分类 → 纯文字分类 + icon 字段 -----
+  // 内存迁移、幂等（无 emoji 前缀即跳过）；icon 只在未设时由映射表补，已有值不覆写；
+  // 落盘随下一次自然保存发生，不在读取路径写盘
+  for (const it of Object.values(db.items)) {
+    if (!it || typeof it !== 'object') continue;
+    const split = splitEmojiCategory(it.category);
+    if (!split.emoji) continue;
+    it.category = split.name;
+    if (split.icon && (it.icon == null || it.icon === '')) it.icon = split.icon;
+  }
+
+  // ----- 历史分类派生（issue 231：内置预设退役，联想 = 自己的历史分类）-----
+  // categories = 去重历史（频次降序 → 最近更新降序）；categoryIcons = 分类 → 馆内首个已设图标
+  const freq = new Map<string, { n: number; last: string }>();
+  const icons: Record<string, string> = {};
+  for (const it of Object.values(db.items)) {
+    if (!it || typeof it !== 'object') continue;
+    const cat = String(it.category || '').trim();
+    if (!cat) continue;
+    const cur = freq.get(cat) || { n: 0, last: '' };
+    cur.n += 1;
+    cur.last = String(it.last_updated || '');
+    freq.set(cat, cur);
+    if (it.icon && !icons[cat]) icons[cat] = it.icon;
+  }
+  (db as BelongingsDatabase).categories = [...freq.entries()]
+    .sort((a, b) => b[1].n - a[1].n || b[1].last.localeCompare(a[1].last))
+    .map(([c]) => c);
+  (db as BelongingsDatabase).categoryIcons = icons;
   return db as BelongingsDatabase;
 }
 
-/** 保存数据库 */
+/**
+ * 保存数据库（D2 可靠写契约原语 1 收编）：写盘入 core per-path 串行队列（键 =
+ * belongings.json 路径）——并发保存按序落盘，杜绝交错写导致的半截/覆盖竞态；
+ * 坏文件由 jsonFileStore 留档降级（原语 3）。数据形状与 API 不变。
+ */
 export async function saveDatabase(database: BelongingsDatabase): Promise<void> {
   const saveData = {
     version: database.version,
     last_updated: new Date().toISOString(),
     items: database.items,
   };
-  await jsonFileStore<any>(getDataFilePath()).write(saveData);
+  await enqueueFileTask(getDataFilePath(), () => jsonFileStore<any>(getDataFilePath()).write(saveData));
 }
 
 // ----- 工具函数（复用） -----
 
+/** 已用天数（本地日历日口径，对照 todo/due 的 moment 用法）：
+ *  购买日与今天按本地时区取自然日相减；当天/无效日期 = 0 天（全价）。
+ *  原 new Date('YYYY-MM-DD') 按 UTC 解析，UTC+8 早 8 点前会多算一天。 */
+export function calculateDaysUsed(purchaseDate: string): number {
+  const purchase = moment(String(purchaseDate || '').slice(0, 10), 'YYYY-MM-DD');
+  if (!purchase.isValid()) return 0;
+  const days = moment().startOf('day').diff(purchase.startOf('day'), 'days');
+  return days > 0 ? days : 0;
+}
+
+/** 已用天数封口版（ticket 189，ADR-0089 出离闭环）：endDate 缺省 = 截至今天（同 calculateDaysUsed）；
+ *  出离条目传 exit_date 把陪伴天数封在出离日（不再随时间增长）。
+ *  endDate 无效回落今天口径；早于购买日（脏数据）= 0 天。 */
+export function calculateDaysUsedUntil(purchaseDate: string, endDate?: string | null): number {
+  if (!endDate) return calculateDaysUsed(purchaseDate);
+  const purchase = moment(String(purchaseDate || '').slice(0, 10), 'YYYY-MM-DD');
+  if (!purchase.isValid()) return 0;
+  const end = moment(String(endDate).slice(0, 10), 'YYYY-MM-DD');
+  if (!end.isValid()) return calculateDaysUsed(purchaseDate);
+  const days = end.startOf('day').diff(purchase.startOf('day'), 'days');
+  return days > 0 ? days : 0;
+}
+
 export function calculateDailyCost(price: number, purchaseDate: string): string {
-  const purchase = new Date(purchaseDate);
-  const now = new Date();
-  const diffTime = Math.abs(now.getTime() - purchase.getTime());
-  const diffDays = Math.ceil(diffTime / 86400000);
-  // P2 形状容错：无效日期（NaN）与当天购买同走全价，不产出 "NaN"
+  const diffDays = calculateDaysUsed(purchaseDate);
+  // 当天/无效日期（0 天）同走全价，不产出 "NaN"
   if (!(diffDays > 0)) return price.toFixed(2);
   const dailyCost = price / diffDays;
   return dailyCost < 0.01 ? dailyCost.toFixed(4) : dailyCost.toFixed(2);
-}
-
-export function calculateDaysUsed(purchaseDate: string): number {
-  const purchase = new Date(purchaseDate);
-  const now = new Date();
-  const diffTime = Math.abs(now.getTime() - purchase.getTime());
-  // P2 形状容错：无效日期按 0 天，不产出 NaN
-  if (!isFinite(diffTime)) return 0;
-  return Math.ceil(diffTime / 86400000);
 }

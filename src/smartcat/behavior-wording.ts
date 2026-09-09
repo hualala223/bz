@@ -165,8 +165,8 @@ registerEntity('book', {
     const content = s.extras?.content ? `：「${clip(s.extras.content, 40)}」` : '';
     return `你在《${s.name || '未知书'}》写了条想法${content}`;
   },
-  added: (s) => `你把《${s.name || '未知书'}》加入了书架`,
-  removed: (s) => `你把《${s.name || '未知书'}》移出了书架`,
+  added: (s) => `你把《${s.name || '未知书'}》加入了书库`,
+  removed: (s) => `你把《${s.name || '未知书'}》移出了书库`,
 }, ['library'], (s) => `《${s.name || '一本书'}》的书库活动`);
 
 // ==================== diary（日记；实际 entityType=diary_entry，注册 diary 别名） ====================
@@ -263,12 +263,6 @@ registerEntity('quiz', {
     return `你回答了题目「${s.name || '未命名'}」${suffix}`;
   },
 }, [], (s) => `题库「${s.name || '未命名'}」有更新`);
-
-// ==================== launcher（入口页；规则就绪待域事件接线） ====================
-
-registerEntity('launcher', {
-  opened: () => '你打开了入口页',
-}, [], () => '入口页有动态');
 
 // ==================== attach（附件搬移；规则就绪待域事件接线） ====================
 

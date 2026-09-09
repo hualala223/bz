@@ -372,7 +372,7 @@ export function createEntryCard(entry: DiaryEntry) {
       actions.push({
         icon: 'lock',
         label: '加密',
-        title: '加密（移入保险箱）',
+        title: '加密（移入保险库）',
         sub: attCount > 0 ? `${attCount} 附件` : undefined,
         tone: isUnlocked() ? 'accent' : undefined,
         onClick: () => void encryptFromSheet(entry.id!),
@@ -507,7 +507,7 @@ async function encryptFromSheet(entryId: string) {
       await reloadWithEncrypted();
       // 动作埋点：加密移入保险箱成功（本期无消费者，emit 即可）
       emitDomainEvent('diary:entry-encrypted', { entryId, date: entry.date, time: entry.time });
-      notice('已加密移入保险箱', 'success');
+      notice('已加密移入保险库', 'success');
     }
   } catch (e: any) {
     notice('加密失败：' + (e?.message || e), 'error');
@@ -533,7 +533,7 @@ async function decryptFromSheet(entryId: string) {
     const newTags = entry.tags.filter((t) => t !== ENCRYPT_TAG);
     const ok = await reclassifyEntry(entry.noteId, newTags);
     if (!ok) {
-      notice('解密失败', 'error');
+      notice('解密失败：主密码可能不正确，密文未受影响', 'error');
       return;
     }
     // 主动重读该日期文件（还原块已在 md 内）：不依赖文件监听事件，还原条目立即进列表
@@ -543,7 +543,7 @@ async function decryptFromSheet(entryId: string) {
     emitDomainEvent('diary:entry-decrypted', { noteId: entry.noteId, date: entry.date, newTags });
     notice('已解密还原', 'success');
   } catch (e) {
-    notice('解密失败', 'error');
+    notice('解密失败：主密码可能不正确，密文未受影响', 'error');
   }
 }
 
@@ -593,7 +593,7 @@ export function showConfirm(entryId: string) {
   void openFlowDialog({
     title: '确认删除',
     message: isEncrypted
-      ? '确定删除这篇加密日记吗？\n\n此操作不可撤销，密文将从保险箱永久销毁。'
+      ? '确定删除这篇加密日记吗？\n\n此操作不可撤销，密文将从保险库永久销毁。'
       : '确定要删除这篇日记吗？\n\n此操作不可撤销，日记将从笔记中永久删除。',
     actions: [
       { label: '取消', value: 'cancel' },
@@ -614,6 +614,10 @@ export function showConfirm(entryId: string) {
     }
     notice('日记条目已删除', 'success');
     hidePickers();
+  }).catch((err: any) => {
+    // P3 审查修复：删除失败必须有人话提示（旧实现 .then 无 .catch，deleteEntry 抛错
+    // 成为 unhandled rejection，用户确认后什么都没发生也无从排查）
+    notice('删除日记失败：' + (err?.message || err), 'error');
   });
 }
 

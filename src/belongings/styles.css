@@ -1,12 +1,402 @@
-/* ============================================================
- * bz（包仔）归物本域样式（src/belongings/styles.css）
- * 主面板遮罩档位定义（e3 抬档）；其余视觉仍为内联 / 由 core 伞规则覆盖
- * 本文件是样式源之一，构建时由 scripts/build-css.mjs 聚合成根 styles.css
- * ============================================================ */
+/* ==================== 归物本域样式（src/belongings/styles.css，P20「瑞士大字报」） ====================
+ * 单源：本文件同时是域内 prototype.html（评审壳）的唯一组件样式来源——先改原型评审、再落这里。
+ * 视觉基准 = 拍板原型 .zcode/ui-prototypes/belongings-redesign20/p20-full.html（issue 230 方向纠正：
+ * 原型 → 域，禁止拿域现状反向生成原型）。p20 的 CSS 值逐字回灌（面板 920×640 相对原型整页海报
+ * 等比缩档：h1 56→40 / hero KPI 56→42 / cell em 44→40 / name 20→19 / price 25→23）。
+ * 架构：.bz-bel--poster / .bz-bel-form / .bz-bel-detail 作用域 token 覆盖（米白纸面 #f5f2ec +
+ * 墨黑 #171512 + 赤橙 #e8481f，双主题恒定纸面）+ .bz-bel-* 装饰类；通用件继续消费组件库
+ * （chips/segmented/搜索/按钮/字段），在其上做海报皮作用域覆盖（方角/墨框/下划线）。
+ * 移动端 = p20 手机壳设计：m-kpis 四格 / 工具行(搜索+年份) → 横滑 chips → 排序 seg → 单列网格
+ * → 底部记一笔 → 居中脚注；判定走容器查询（评审壳手机框与真机全屏同源，见文末）。
+ * 口径：标签/徽章字号 ≥11px；不持静态 z-index；触控 44px 档走 .bz-touch-target / min-height。
+ */
 
-/* 层级已动态发号（ADR-0067）：主面板显示时 topifyZ、弹窗创建时 allocZ；--main/--modal/--dropdown 仅作标识钩子 */
-/* 主面板根（legacy id）双保险：JS 仅清内联 z 而暂未挂类时同样兜底抬档 */
+/* ---- 皮肤 token（面板 + 表单 + 详情 + 右键菜单四壳同源；纸面双主题恒定） ----
+   菜单/表单/详情挂 body，须自带 token（.bz-bel-menu 经 openItemMenu menuClass 挂上） */
+.bz-bel--poster,
+.bz-bel-form,
+.bz-bel-detail,
+.bz-bel-menu {
+  --bz-bel-paper: #f5f2ec;
+  --bz-bel-ink: #171512;
+  --bz-bel-accent: #e8481f;
+  --bz-bel-line: #dcd5c4;
+  --bz-bel-dim: #e9e4d8;
+  --bz-surface-1: #f5f2ec;
+  --bz-surface-2: #fbf9f3;
+  --bz-surface-3: #f5f2ec;
+  --bz-surface-4: #fbf9f3; /* 浮层（联想 .bz-popover 等）钉纸面，不随主题翻色 */
+  --bz-surface-hover: #eae4d6;
+  --bz-text-1: #171512;
+  --bz-text-2: #4a4638;
+  --bz-text-3: #8b8474;
+  --bz-border: #dcd5c4;
+  --bz-border-strong: #171512;
+  --bz-border-hover: #b9b2a0;
+  --bz-brand: #e8481f;
+  --bz-brand-hover: #c93a10; /* 海报橙加深档：悬停/按压不漏组件库全局暗橙 */
+  --bz-brand-soft: rgba(232, 72, 31, 0.14); /* 品牌浅底（accent 图标钮/badge）同源 */
+}
 
+/* ---- 主面板（骨架走 .bz-panel-frame，遮罩走 .bz-panel-overlay；瑞士方角） ---- */
+.bz-bel-panel {
+  width: 920px; max-width: calc(100vw - 32px); height: 640px; max-height: 92vh;
+  background: var(--bz-bel-paper);
+  border: 2px solid var(--bz-bel-ink);
+  border-radius: 0;
+  box-shadow: 8px 8px 0 rgba(23, 21, 18, 0.22);
+}
+/* 无壳头行（issue 219b/c 范式）：桌面无头（hero 即头，点遮罩/Esc 关闭）；印章头 .bz-bel-mobhead 移动专属 */
+.bz-bel-mobhead,
+.bz-bel-mob-only { display: none; }
 
-/* 子弹窗档位（createModalShell 生成：添加/编辑/删除/排序）：JS 已挂 .bz-belongings-overlay--11100/11101 类，
-   值压过统一抽屉 10999/11000（companion 档 11100+，与家族表注释一致） */
+.bz-bel-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+
+/* ---- 海报 hero：特大字标题（= 筛选名）+ 字距标语 + KPI 行 ---- */
+.bz-bel-hero {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 20px;
+  padding: 18px 22px 14px;
+  border-bottom: 4px solid var(--bz-bel-ink);
+  flex-shrink: 0;
+}
+.bz-bel-hero-text { min-width: 0; }
+.bz-bel-hero-title {
+  font-size: 40px; font-weight: 800; letter-spacing: -1px; line-height: 1;
+  color: var(--bz-bel-ink);
+}
+.bz-bel-hero-sub {
+  margin-top: 10px; font-size: 11px; font-weight: 600;
+  letter-spacing: 4px; color: var(--bz-bel-accent);
+}
+.bz-bel-kpis { display: flex; align-items: flex-end; gap: 26px; text-align: right; flex-shrink: 0; }
+.bz-bel-kpi b {
+  display: block; font-size: 24px; font-weight: 800; line-height: 1;
+  font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--bz-bel-ink);
+}
+.bz-bel-kpi span { display: block; margin-top: 7px; font-size: 11px; letter-spacing: 2px; color: var(--bz-text-3); white-space: nowrap; }
+.bz-bel-kpi--hero b { font-size: 42px; color: var(--bz-bel-accent); }
+.bz-bel-kpi--click { cursor: pointer; }
+.bz-bel-kpi--click:hover b { color: var(--bz-bel-accent); }
+.bz-bel-kpi--click:hover span { color: var(--bz-text-2); }
+/* 输入聚焦去轮廓（海报皮肤下浏览器/core 默认 focus ring 与纸面风格冲突） */
+.bz-bel-panel .bz-input:focus,
+.bz-bel-form .bz-input:focus,
+.bz-bel-detail .bz-input:focus { outline: none; box-shadow: none; }
+
+/* ---- 筛选 chips（p20 .chip 逐字：方角墨框、on=墨底纸字、计数弱化；组件库 .bz-chip 皮） ---- */
+.bz-bel-chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 22px 0; flex-shrink: 0; }
+.bz-bel-chips .bz-chip {
+  height: auto; padding: 6px 13px;
+  border: 1.5px solid var(--bz-bel-ink) !important;
+  border-radius: 0; background: transparent !important;
+  color: var(--bz-bel-ink) !important;
+  font-size: 12px; letter-spacing: 1px;
+}
+.bz-bel-chips .bz-chip:hover { background: var(--bz-bel-dim) !important; }
+.bz-bel-chips .bz-chip--on,
+.bz-bel-chips .bz-chip--on:hover { background: var(--bz-bel-ink) !important; color: var(--bz-bel-paper) !important; }
+.bz-bel-chips .bz-chip-cnt { margin-left: 5px; font-size: 11px; opacity: 0.55; }
+
+/* ---- 工具行（p20 下划线输入 + 墨色记一笔；壳走组件库 .bz-toolrow） ---- */
+.bz-bel-toolrow { flex-wrap: wrap; gap: 14px; padding: 0 22px; margin-top: 16px; }
+.bz-bel-sort { flex-shrink: 0; }
+/* 搜索 = p20 .inp 下划线（无框无底，聚焦转赤橙；p20 无前导图标，隐藏之） */
+.bz-bel-toolrow .bz-search { flex: 0 1 190px; min-width: 120px; }
+.bz-bel-toolrow .bz-search .bz-ic { display: none; }
+.bz-bel-toolrow .bz-search .bz-input {
+  width: 100%; height: auto; padding: 7px 2px;
+  border: none; border-bottom: 2px solid var(--bz-bel-ink);
+  border-radius: 0; background: transparent; font-size: 14px;
+}
+.bz-bel-toolrow .bz-search .bz-input:focus { outline: none; border-bottom-color: var(--bz-bel-accent); }
+/* 年份/排序下拉 = 同款下划线触发器 + 自绘海报菜单（原生 select 弹层系统皮与整体不搭，退役） */
+.bz-bel-yearsel { position: relative; flex-shrink: 0; }
+.bz-bel-select {
+  display: flex; align-items: center;
+  border-bottom: 2px solid var(--bz-bel-ink);
+  background: transparent; border-radius: 0; box-shadow: none;
+  height: 32px; padding: 0 24px 0 2px; font-size: 14px; color: var(--bz-text-1);
+  font-family: inherit; cursor: pointer; min-width: 104px; user-select: none;
+}
+.bz-bel-select:hover, .bz-bel-select:focus-visible { background: var(--bz-bel-dim); outline: none; }
+.bz-bel-select-chev { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 13px; height: 13px; color: var(--bz-text-3); pointer-events: none; transition: transform 0.15s ease; }
+.bz-bel-yearsel.is-open .bz-bel-select-chev { transform: translateY(-50%) rotate(180deg); }
+/* 弹出菜单 = .bz-bel-menu 同款海报皮：纸面墨框方角 + 硬投影；hover 墨底纸字、当前项赤橙 */
+.bz-bel-dropmenu {
+  display: none; position: absolute; left: 0; top: calc(100% + 6px);
+  min-width: 100%; max-height: 264px; overflow-y: auto;
+  background: var(--bz-bel-paper);
+  border: 2px solid var(--bz-bel-ink); border-radius: 0;
+  box-shadow: 6px 6px 0 rgba(23, 21, 18, 0.22);
+  z-index: 3; /* 面板内浮层：后置定位卡片会盖住同层菜单，小值抬一层（窗口层仍归 topifyZ） */
+}
+.bz-bel-yearsel.is-open .bz-bel-dropmenu { display: block; }
+.bz-bel-dropopt {
+  padding: 9px 14px; font-size: 13px; letter-spacing: 1px;
+  color: var(--bz-text-1); cursor: pointer; white-space: nowrap;
+}
+.bz-bel-dropopt:hover { background: var(--bz-bel-ink); color: var(--bz-bel-paper); }
+.bz-bel-dropopt.is-cur { color: var(--bz-bel-accent); font-weight: 600; }
+.bz-bel-dropopt.is-cur:hover { background: var(--bz-bel-accent); color: var(--bz-bel-paper); }
+/* 记一笔 = p20 .btn：墨底纸字、hover 转赤橙（桌面工具行 + 移动底部同款） */
+.bz-bel-addbtn,
+.bz-bel-mobadd {
+  background: var(--bz-bel-ink) !important; color: var(--bz-bel-paper) !important;
+  letter-spacing: 3px; font-weight: 600;
+}
+.bz-bel-addbtn:hover,
+.bz-bel-mobadd:hover { background: var(--bz-bel-accent) !important; }
+.bz-bel-addbtn { margin-left: auto; }
+
+/* ---- 排序 seg 海报皮（p20 .seg：join 方格墨框，on=墨底纸字；横滑 chips 同皮） ---- */
+.bz-bel-panel .bz-segmented {
+  gap: 0; padding: 0; background: transparent;
+  border: 1.5px solid var(--bz-bel-ink); border-radius: 0;
+}
+.bz-bel-panel .bz-segmented-btn {
+  height: auto; padding: 7px 13px;
+  border-right: 1.5px solid var(--bz-bel-ink);
+  border-radius: 0; font-size: 12px; letter-spacing: 1px;
+  box-shadow: none !important;
+}
+.bz-bel-panel .bz-segmented-btn:last-child { border-right: none; }
+.bz-bel-panel .bz-segmented-btn:hover { background: var(--bz-bel-dim) !important; }
+.bz-bel-panel .bz-segmented-btn.is-on { background: var(--bz-bel-ink) !important; color: var(--bz-bel-paper) !important; }
+.bz-bel-panel .bz-mobstrip-chip {
+  border: 1.5px solid var(--bz-bel-ink) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--bz-bel-ink) !important;
+}
+.bz-bel-panel .bz-mobstrip-chip.is-on { background: var(--bz-bel-ink) !important; color: var(--bz-bel-paper) !important; }
+
+/* ---- 移动专属段（桌面恒隐）：底部记一笔 + 排序下拉 ---- */
+.bz-bel-mobadd { display: none; }
+.bz-bel-mobsortsel-wrap { display: none; }
+
+/* ---- 大字网格（P20 主视觉）：墨黑缝线 + 纸面卡 + hover 整卡反色 ---- */
+.bz-bel-content { flex: 1; overflow-y: auto; padding: 14px 22px 6px; min-height: 0; margin-top: 4px; }
+.bz-bel-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+  background: var(--bz-bel-ink);
+  border: 2px solid var(--bz-bel-ink);
+}
+.bz-bel-cell {
+  display: flex; flex-direction: column; align-items: flex-start;
+  min-height: 172px; padding: 15px 17px; position: relative;
+  background: var(--bz-bel-paper); color: var(--bz-bel-ink);
+  cursor: default; user-select: none; -webkit-user-select: none;
+}
+.bz-bel-cell:hover { background: var(--bz-bel-ink); color: var(--bz-bel-paper); }
+.bz-bel-cell:hover .bz-bel-cell-idx { color: #b9b2a2; }
+.bz-bel-cell:hover .bz-bel-mut { color: #b9b2a2; }
+.bz-bel-cell-idx { font-size: 11px; letter-spacing: 2px; color: var(--bz-text-3); }
+.bz-bel-tag {
+  position: absolute; top: 13px; right: 13px;
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 600; letter-spacing: 1px; line-height: 16px;
+  border: 1.5px solid currentColor; border-radius: 999px; padding: 1px 9px;
+}
+.bz-bel-tag .bz-ic { width: 11px; height: 11px; }
+/* 状态徽章（数据语义色，P20 海报化：使用中=实底墨 / 闲置=赤橙 / 转卖=棕橙 / 丢弃=虚线灰） */
+.bz-bel-tag--using { background: var(--bz-bel-ink); border-color: var(--bz-bel-ink); color: var(--bz-bel-paper); }
+.bz-bel-tag--idle { border-color: var(--bz-bel-accent); color: var(--bz-bel-accent); }
+.bz-bel-tag--sold { border-color: #8a5a26; color: #8a5a26; }
+.bz-bel-tag--discard { border-style: dashed; border-color: #8a8375; color: #8a8375; }
+.bz-bel-cell:hover .bz-bel-tag--using { background: var(--bz-bel-paper); border-color: var(--bz-bel-paper); color: var(--bz-bel-ink); }
+.bz-bel-cell-em { font-size: 40px; line-height: 1; margin: auto 0; padding: 10px 0 8px; }
+.bz-bel-name {
+  font-size: 19px; font-weight: 800; letter-spacing: -0.3px; line-height: 1.25;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bz-bel-price { font-size: 23px; font-weight: 800; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.bz-bel-cell--idle .bz-bel-price { color: var(--bz-bel-accent); }
+.bz-bel-cell:hover .bz-bel-price { color: inherit; }
+.bz-bel-mut { font-size: 11px; color: var(--bz-text-3); line-height: 1.7; margin-top: 6px; }
+/* 离场卡（转卖/丢弃）：纸面灰化 + hover 同反色 */
+.bz-bel-cell--gone { background: var(--bz-bel-dim); }
+.bz-bel-cell--gone .bz-bel-cell-em,
+.bz-bel-cell--gone .bz-bel-name,
+.bz-bel-cell--gone .bz-bel-price { opacity: 0.55; }
+.bz-bel-cell--gone:hover .bz-bel-cell-em,
+.bz-bel-cell--gone:hover .bz-bel-name,
+.bz-bel-cell--gone:hover .bz-bel-price { opacity: 0.85; }
+/* 末行空位补纸（黑缝线只出现在卡与卡之间，空区保持纸面） */
+.bz-bel-filler { background: var(--bz-bel-paper); }
+
+/* ---- 空态（组件库 uiEmpty 工厂 → .bz-empty，token 覆盖自动纸面化） ---- */
+
+/* ---- 详情弹窗（P20 桌面点卡）：纸面 + 墨框 + 硬阴影 + 四态流转条 ----
+   遮罩 z 由 openBelDetail 经 topifyZ 动态发号（ADR-0067，恒压主面板） */
+.bz-bel-detail {
+  width: 520px; max-width: calc(100vw - 32px); max-height: 86vh; overflow-y: auto;
+  background: var(--bz-bel-paper); color: var(--bz-bel-ink);
+  border: 2px solid var(--bz-bel-ink); border-radius: 0;
+  box-shadow: 10px 10px 0 rgba(23, 21, 18, 0.85);
+  padding: 22px 24px;
+}
+.bz-bel-detail-head {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+  border-bottom: 4px solid var(--bz-bel-ink); padding-bottom: 12px;
+}
+.bz-bel-detail-title { font-size: 24px; font-weight: 800; letter-spacing: -0.5px; line-height: 1.15; min-width: 0; overflow-wrap: anywhere; }
+.bz-bel-detail-idrow { display: flex; align-items: center; gap: 14px; margin: 14px 0 4px; }
+.bz-bel-detail-idrow .bz-bel-cell-em { font-size: 34px; margin: 0; padding: 0; }
+/* 行尾状态徽章回内联（.bz-bel-tag 默认 absolute 飞出弹窗锚到遮罩，p20 原型 .dbig .tag 同款 static） */
+.bz-bel-detail-idrow .bz-bel-tag { position: static; }
+.bz-bel-detail-idinfo { flex: 1; min-width: 0; }
+.bz-bel-detail-cat { font-size: 11px; letter-spacing: 2px; color: var(--bz-text-3); }
+.bz-bel-detail-desc { font-size: 13px; margin-top: 3px; color: var(--bz-text-2); overflow-wrap: anywhere; }
+.bz-bel-detail-fields { margin-top: 10px; }
+.bz-bel-dfield { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--bz-bel-line); font-size: 13px; }
+.bz-bel-dfield span { font-size: 11px; letter-spacing: 2px; color: var(--bz-text-3); flex-shrink: 0; }
+.bz-bel-dfield b { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.bz-bel-detail-acts { display: grid; grid-template-columns: repeat(4, 1fr); border: 1.5px solid var(--bz-bel-ink); margin-top: 16px; }
+.bz-bel-flowbtn {
+  padding: 10px 0; font-size: 12px; letter-spacing: 1px;
+  border-right: 1.5px solid var(--bz-bel-ink); background: transparent; color: var(--bz-bel-ink);
+}
+.bz-bel-flowbtn:last-child { border-right: none; }
+.bz-bel-flowbtn:hover { background: var(--bz-bel-ink); color: var(--bz-bel-paper); }
+.bz-bel-flowbtn.is-cur { background: var(--bz-bel-ink); color: var(--bz-bel-paper); }
+/* p20 .cur.c2：闲置当前态 = 赤橙实底 */
+.bz-bel-flowbtn.is-cur.bz-bel-c2 { background: var(--bz-bel-accent); border-color: var(--bz-bel-accent); }
+.bz-bel-detail-btns { margin-top: 18px; justify-content: flex-end; }
+.bz-bel-delbtn { background: var(--bz-bel-accent) !important; }
+
+/* ---- 右键菜单海报皮（openItemMenu menuClass='bz-bel-menu'；压 core 圆角白底） ----
+   菜单挂 body，须带类作用域防泄漏他域 */
+.bz-item-menu.bz-bel-menu {
+  border-radius: 0; padding: 0; min-width: 160px;
+  background: var(--bz-bel-paper);
+  border: 2px solid var(--bz-bel-ink);
+  box-shadow: 6px 6px 0 rgba(23, 21, 18, 0.85);
+  overflow: hidden;
+}
+.bz-item-menu.bz-bel-menu button.bz-item-menu-item { border-radius: 0 !important; padding: 10px 16px; font-size: 13px; letter-spacing: 1px; }
+.bz-item-menu.bz-bel-menu button.bz-item-menu-item:hover { background: var(--bz-bel-ink) !important; color: var(--bz-bel-paper) !important; }
+.bz-item-menu.bz-bel-menu button.bz-item-menu-item--danger:hover { background: var(--bz-bel-accent) !important; color: var(--bz-bel-paper) !important; }
+
+/* ---- 底部抽屉头（sheetHeadOf：原两处内联 flex 上岸，双端同挂类） ---- */
+.bz-bel-sheet-head { display: flex; align-items: flex-start; gap: 10px; }
+.bz-bel-sheet-info { flex: 1; min-width: 0; }
+
+/* ---- 表单（弹窗骨架用组件库 .bz-overlay-mask；状态 = p20 .choice 平铺四格）----
+   表单遮罩 z 由 openForm 经 topifyZ 动态发号（ADR-0067，恒压主面板），不写死静态档；
+   分类候选浮层（.bz-popover）锚定所在 .bz-field 下方 */
+.bz-bel-form {
+  background: var(--bz-bel-paper); color: var(--bz-bel-ink);
+  border-radius: 0;
+  border: 2px solid var(--bz-bel-ink); box-shadow: 10px 10px 0 rgba(23, 21, 18, 0.85);
+  width: 480px; max-width: calc(100vw - 32px); max-height: 86vh; overflow-y: auto;
+  padding: var(--bz-space-lg); display: flex; flex-direction: column;
+}
+.bz-bel-form .bz-field { position: relative; }
+.bz-bel-form .bz-input { border-color: var(--bz-bel-ink); background: transparent; }
+/* 分类联想浮层（uiSuggest .bz-popover）海报化：纸面+墨框方角+硬投影，hover/选中走墨系 */
+.bz-bel-form .bz-popover {
+  background: var(--bz-bel-paper);
+  border: 1.5px solid var(--bz-bel-ink); border-radius: 0;
+  box-shadow: 4px 4px 0 rgba(23, 21, 18, 0.15);
+}
+.bz-bel-form .bz-popover-item:hover { background: var(--bz-bel-dim); }
+.bz-bel-form .bz-popover-item.is-on { background: var(--bz-bel-dim); color: var(--bz-bel-accent); }
+.bz-bel-form .bz-popover-item.is-on .bz-ic { color: var(--bz-bel-accent); }
+.bz-bel-form-title {
+  font-size: 22px; font-weight: 800; letter-spacing: -0.3px; color: var(--bz-text-1);
+  border-bottom: 4px solid var(--bz-bel-ink); padding-bottom: 10px;
+}
+.bz-bel-form-body { display: flex; flex-direction: column; gap: var(--bz-space-md); margin-top: var(--bz-space-md); }
+.bz-bel-form-body .bz-field { margin-bottom: 0; }
+.bz-bel-form-body textarea.bz-input { min-height: 56px; }
+.bz-bel-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--bz-space-md); }
+/* hidden 属性须显式压过作者 display（UA [hidden] 输给任何 display 规则——出离行/售价行恒隐开关） */
+.bz-bel-form-row[hidden] { display: none; }
+.bz-bel-form .bz-field[hidden] { display: none; }
+.bz-bel-form-err { font-size: var(--bz-font-meta); color: var(--bz-danger); min-height: 16px; }
+.bz-bel-form-actions { justify-content: flex-end; }
+.bz-bel-form-spacer { flex: 1; }
+/* 状态单选 = p20 .choice 逐字：join 四格、on=墨底、闲置 c2=赤橙 */
+.bz-bel-statuspick { display: grid; grid-template-columns: repeat(4, 1fr); border: 1.5px solid var(--bz-bel-ink); }
+.bz-bel-statuspick .bz-choice-btn {
+  justify-content: center; border: none; border-right: 1.5px solid var(--bz-bel-ink);
+  border-radius: 0; background: transparent; color: var(--bz-bel-ink);
+  padding: 10px 0; font-size: 12px; letter-spacing: 1px; height: auto;
+}
+.bz-bel-statuspick .bz-choice-btn:last-child { border-right: none; }
+/* 核心 .bz-choice-btn.is-on 带 !important，皮覆盖须同重 */
+.bz-bel-statuspick .bz-choice-btn.is-on { background: var(--bz-bel-ink) !important; color: var(--bz-bel-paper) !important; }
+.bz-bel-statuspick .bz-choice-btn.is-on:hover { background: var(--bz-bel-ink) !important; }
+.bz-bel-statuspick .bz-choice-btn.is-on.bz-bel-c2 { background: var(--bz-bel-accent) !important; color: var(--bz-on-brand, #fff) !important; }
+.bz-bel-statuspick .bz-choice-btn.is-on.bz-bel-c2:hover { background: var(--bz-bel-accent) !important; }
+
+/* ---- 移动端（≤768px = p20 手机壳）----
+   容器查询基座：面板与浮层遮罩各为容器（原型评审壳 .demo-mob 396px 由此触发移动端样式，
+   单源双端）。真实端语义与原 @media(max-width:768px) 等价：移动全屏面板宽 = 100vw、
+   详情遮罩 inset:0 宽 = 100vw，均恰在 ≤768 时命中。面板自身尺寸规则仍走 @media
+   （容器查询不能命中容器自己）。 */
+.bz-bel-panel,
+.bz-bel-form-mask,
+.bz-bel-detail-mask { container-type: inline-size; }
+@media (max-width: 768px) {
+  .bz-bel-panel {
+    width: 100vw; height: 100vh; max-width: none; max-height: none;
+    border-radius: 0; border: none;
+  }
+  .bz-bel-detail { width: 100vw; max-width: none; border-left: none; border-right: none; }
+}
+@container (max-width: 768px) {
+  /* hero 顶行 = 印章头（H8 拍板）：墨章「64 在库」+「归物本」+ 钱数小字 + ✕ 右对齐；
+     桌面 hero 不受影响；顶部避让由根节点 .bz-panel-mtop 统一接管 44px */
+  .bz-bel-mob-only { display: inline-flex; }
+  .bz-bel-hero { padding: 10px 8px 10px 14px; }
+  /* 整体隐藏连带标语 hero-sub（多余装饰，用户拍板去除——C4：原单独隐藏规则系死代码已删） */
+  .bz-bel-hero-text { display: none; }
+  .bz-bel-kpis { display: none; }
+  .bz-bel-mobhead { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+  .bz-bel-stamp { width: 52px; height: 52px; background: var(--bz-bel-ink); color: var(--bz-bel-paper); display: flex; flex-direction: column; align-items: center; justify-content: center; flex-shrink: 0; }
+  .bz-bel-stamp b { font-size: 21px; line-height: 1; font-variant-numeric: tabular-nums; }
+  .bz-bel-stamp span { font-size: 11px; letter-spacing: 2px; margin-top: 3px; color: var(--bz-bel-accent); font-weight: 700; }
+  .bz-bel-mobhead-tx { min-width: 0; }
+  .bz-bel-mobhead-t { font-size: 16px; font-weight: 800; letter-spacing: 1px; }
+  .bz-bel-mobhead-sub { font-size: 11px; color: var(--bz-text-3); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bz-bel-mobhead .bz-bel-mob-only { margin-left: auto; }
+  /* 工具行常驻（p20 m-tools：搜索 + 年份 + 排序下拉，同年份样式） */
+  .bz-bel-chips { display: none; }
+  .bz-bel-toolrow { display: flex; margin-top: 12px; padding: 0 16px; flex-wrap: nowrap; }
+  .bz-bel-toolrow .bz-search { flex: 1 1 auto; }
+  .bz-bel-sort { display: none; }
+  .bz-bel-addbtn { display: none; }
+  .bz-bel-mobsortsel-wrap { display: block; flex-shrink: 0; min-width: 0; }
+  .bz-bel-mobsortsel-wrap .bz-bel-select { min-width: 0; }
+  /* 横滑条显示本体在 core @media(视口)；评审壳视口不窄，容器内补同效规则（真实移动端两处同值不冲突）。
+     用户拍板缩小（去资产后五枚放一行），44px 触控档让位（enh-sweep-c 守卫已同步改口径） */
+  .bz-bel-panel .bz-mobstrip { display: flex; margin-top: 10px; gap: 4px; }
+  .bz-bel-panel .bz-mobstrip-chip { flex: 1 1 0; min-width: 0; justify-content: center; padding: 5px 4px; font-size: 11px; }
+  /* 底部记一笔（p20 m-add）独收尾，安全区随边距 */
+  .bz-bel-mobadd { display: flex; width: calc(100% - 32px); margin: 14px 16px calc(14px + env(safe-area-inset-bottom, 0px)); justify-content: center; flex-shrink: 0; }
+  /* 网格单列 + 手机卡档（p20 #mob .cell：em 34/name 16/price 19，单行省略） */
+  .bz-bel-grid { grid-template-columns: 1fr; }
+  .bz-bel-content { padding: 12px 16px 10px; }
+  .bz-bel-cell { min-height: 0; padding: 13px 15px; }
+  .bz-bel-cell-em { font-size: 30px; padding: 6px 0 4px; }
+  .bz-bel-name { font-size: 16px; }
+  .bz-bel-price { font-size: 19px; }
+}
+
+/* 触控热区（设计手册 §8.2）已收编 core 样式库 .bz-touch-target（components.css，
+   头行图标钮挂类，coarse 下 ::after 外扩 -6px 补足 44px），域内不再复制外扩块。 */
+
+/* ---- 数据图标（issue 231/ADR-0102）：lucide 替位 emoji 的盒模型锚定 ----
+ * svg 尺寸走 .bz-ic svg 百分比，宿主须块级（inline 宿主会让 svg 膨胀到容器宽） */
+.bz-bel-cell-em .bz-ic, .bz-item-sheet-emoji .bz-ic, .bz-suggest-ic .bz-ic { display: block; }
+
+/* ---- 表单分类行（issue 231/ADR-0102）：图标 chip + 输入 + AI 归类钮 ---- */
+.bz-bel-catrow { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bz-bel-catrow .bz-input { flex: 1; min-width: 0; }
+.bz-bel-form-icon { display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; flex: none; color: var(--bz-bel-ink); }
+.bz-bel-form-icon .bz-ic { width: 16px; height: 16px; }
+.bz-bel-form-icon[hidden] { display: none; }
+.bz-bel-aibtn { flex: none; }
+.bz-bel-aibtn.is-busy { opacity: 0.5; pointer-events: none; }

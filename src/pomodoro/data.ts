@@ -6,7 +6,7 @@
  */
 import type { App } from 'obsidian';
 import { tryGetSettings } from '../core/settings-provider';
-import { jsonFileStore, storageFile } from '../core/storage';
+import { enqueueFileTask, jsonFileStore, storageFile } from '../core/storage';
 import type { PomodoroState, HistoryEntry } from './state';
 import { createInitialState, PHASES } from './state';
 
@@ -35,7 +35,12 @@ function normalizeData(raw: any): PomodoroData {
   const history = Array.isArray(raw.history)
     ? raw.history
         .filter((h: any) => h && typeof h.ts === 'number' && typeof h.duration === 'number')
-        .map((h: any) => ({ ts: h.ts, duration: h.duration })) // 显式重建：剥离 target 等残留字段（ticket 63）
+        // 显式重建：剥离 target 等残留字段（ticket 63）；归属任务标题（字符串非空）保留
+        .map((h: any) => ({
+          ts: h.ts,
+          duration: h.duration,
+          ...(typeof h.task === 'string' && h.task ? { task: h.task } : {}),
+        }))
     : [];
   return { version: 1, state, history };
 }
@@ -53,6 +58,8 @@ function normalizeState(raw: any): PomodoroState {
     pausedBy: raw.pausedBy === 'autopause' ? 'autopause' : undefined,
     cycleFocusCount:
       typeof raw.cycleFocusCount === 'number' && raw.cycleFocusCount >= 0 ? raw.cycleFocusCount : def.cycleFocusCount,
+    // 归属任务标题：仅字符串非空保留（旧数据/非法值 → undefined）
+    task: typeof raw.task === 'string' && raw.task ? raw.task : undefined,
   };
 }
 
@@ -63,17 +70,30 @@ export class PomodoroDataManager {
     this.app = app;
   }
 
-  /** 读取数据（统一数据读写层：不存在 → 建默认数据文件；坏 JSON → 原文件改名留档后重建默认） */
+  /**
+   * 读取数据（统一数据读写层：不存在 → 建默认数据文件；坏 JSON → 原文件留档 CONFIG/.CORRUPT 后重建默认）。
+   * 读也入 core per-path 串行队列：读是「load → 改 state → save」事务的读半边，
+   * 排在未落盘的写任务之后才能读到新值（读写同队列，消灭「读-写窗口交错」）。
+   */
   async load(): Promise<PomodoroData> {
-    const raw = await jsonFileStore<any>(getPomodoroFilePath(), {
-      defaultValue: () => defaultPomodoroData(),
-      app: this.app,
-    }).read();
+    const raw = await enqueueFileTask(getPomodoroFilePath(), () =>
+      jsonFileStore<any>(getPomodoroFilePath(), {
+        defaultValue: () => defaultPomodoroData(),
+        app: this.app,
+      }).read()
+    );
     return normalizeData(raw);
   }
 
-  /** 保存（统一数据读写层：存在 modify / 不存在 create+建目录） */
+  /**
+   * 保存（统一数据读写层：存在 modify / 不存在 create+建目录）。
+   * D3 可靠写契约原语 1 收编：整写入 core per-path 串行队列（键 = pomodoro.json 路径）——
+   * 计时器心跳保存与用户操作保存并发时按序落盘，后写者不再用陈旧基线覆盖先写者；
+   * 坏文件由 jsonFileStore 留档降级（原语 3）。数据形状与 API 不变。
+   */
   async save(data: PomodoroData): Promise<void> {
-    await jsonFileStore<PomodoroData>(getPomodoroFilePath(), { app: this.app }).write(data);
+    await enqueueFileTask(getPomodoroFilePath(), () =>
+      jsonFileStore<PomodoroData>(getPomodoroFilePath(), { app: this.app }).write(data)
+    );
   }
 }

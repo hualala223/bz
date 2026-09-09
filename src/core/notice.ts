@@ -62,6 +62,8 @@ export interface NoticeOptions {
   title?: string;
   /** 操作按钮（点击后执行回调并收起通知） */
   action?: NoticeAction;
+  /** 多操作按钮（与 action 二选一；两个都给时合并去重）——如「写入日记/复制」双动作 */
+  actions?: NoticeAction[];
   /** 动画变体（默认：桌面 slide-right，移动端 drop） */
   variant?: NoticeVariant;
   /** 去重键：同键通知存活时合并更新消息不新弹；已消失后 30s 窗口内也不重复弹（防后台自动事件刷屏） */
@@ -143,6 +145,15 @@ export function notifyUndo(
 export function notifySaveError(err: unknown, what?: string): void {
   const msg = err instanceof Error ? err.message : String(err);
   notify(what ? `保存失败（${what}）：${msg}` : `保存失败：${msg}`, { type: 'error' });
+}
+
+/**
+ * 动作失败统一提示（enh-sweep B 包）：非写盘类动作（清理/还原/加密等）失败的人话错误 toast。
+ * 与 notifySaveError 同风格——说明什么失败（动作名）+ 原因 + 重试途径（「请重试」尾巴）。
+ */
+export function notifyActionError(err: unknown, action: string): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  notify(`${action}失败：${msg}，请重试`, { type: 'error' });
 }
 
 /** 当前视口是否为移动端（决定默认位置/动画：移动端顶部居中，桌面右侧弹出） */
@@ -355,6 +366,21 @@ function noopHandle(): NoticeHandle {
   };
 }
 
+/** 操作按钮 span（span 而非 button——Obsidian 核心 button 默认 height: var(--input-height) 会把通知框撑高）；
+ *  创建与去重合并（progress→结果原地更新时补挂）共用 */
+function appendActionBtn(n: InternalNotice, action: NoticeAction): void {
+  const btn = document.createElement('span');
+  btn.className = 'bz-notice-action';
+  btn.setAttribute('role', 'button');
+  btn.textContent = action.label;
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (action.onClick) action.onClick();
+    hideNow(n);
+  });
+  n.el.appendChild(btn);
+}
+
 export function notify(msg: string, opts?: NoticeOptions): NoticeHandle {
   const kind: NoticeKind = (opts && opts.type) || 'info';
   const isProgress = kind === 'progress';
@@ -374,6 +400,16 @@ export function notify(msg: string, opts?: NoticeOptions): NoticeHandle {
       // 类型变化（如 progress 完成 → success）时同步切换图标/配色
       if (r.n.isProgress !== isProgress || r.n.el.classList.contains('bz-notice--' + type) === false) {
         applyTypeToEl(r.n, kind);
+      }
+      // 合并期补挂 action（如 progress 原地更新为带「查看」的结果通知）；按 label 去重不重复挂
+      const mergeActions: NoticeAction[] = [];
+      if (opts.action) mergeActions.push(opts.action);
+      if (opts.actions) mergeActions.push(...opts.actions);
+      const existingLabels = new Set(
+        Array.from(r.n.el.querySelectorAll('.bz-notice-action')).map((el) => el.textContent || '')
+      );
+      for (const a of mergeActions) {
+        if (!existingLabels.has(a.label)) appendActionBtn(r.n, a);
       }
       armTimer(r.n, kind, opts.duration, msg);
       return noopHandle();
@@ -425,20 +461,15 @@ export function notify(msg: string, opts?: NoticeOptions): NoticeHandle {
 
   const n: InternalNotice = { el, timer: null, msgEl, progressEl, iconEl: icon, variant, isProgress, persistent: false };
 
-  // 操作按钮（可选；span 而非 button——Obsidian 核心 button 默认 height: var(--input-height) 会把通知框撑高）
-  if (opts && opts.action) {
-    const btn = document.createElement('span');
-    btn.className = 'bz-notice-action';
-    btn.setAttribute('role', 'button');
-    btn.textContent = opts.action.label;
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const cb = opts && opts.action ? opts.action.onClick : null;
-      if (cb) cb();
-      hideNow(n);
-    });
-    el.appendChild(btn);
+  // 操作按钮（可选；富文本 action，点击后自动收起；actions 多按钮与 action 单按钮合并去重）
+  const actions: NoticeAction[] = [];
+  if (opts && opts.action) actions.push(opts.action);
+  if (opts && opts.actions) {
+    for (const a of opts.actions) {
+      if (!actions.some((x) => x.label === a.label)) actions.push(a);
+    }
   }
+  for (const a of actions) appendActionBtn(n, a);
 
   // 点击本体关闭
   el.addEventListener('click', () => hideNow(n));

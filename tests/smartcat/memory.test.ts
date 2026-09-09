@@ -218,7 +218,7 @@ describe('观察可信度 credibility（085，ADR-0036）', () => {
 
   it('ruleCredibility 负向信号：news 跳过/移出书架 → 低档 0.3；其它来源负向词 −0.15（下限 0.25）', () => {
     expect(ruleCredibility('news', '你跳过了《X》（平台）')).toBe(0.3);
-    expect(ruleCredibility('domain:library', '你把《X》移出了书架')).toBe(0.3);
+    expect(ruleCredibility('domain:library', '你把《X》移出了书库')).toBe(0.3);
     expect(ruleCredibility('favorites', '你删除了收藏《X》')).toBeCloseTo(0.6, 10);
     expect(ruleCredibility('memo', '你删除了待办「X」')).toBeCloseTo(0.6, 10);
     expect(ruleCredibility('belongings', '你删除了物品《X》')).toBeCloseTo(0.6, 10);
@@ -270,7 +270,7 @@ describe('观察可信度 credibility（085，ADR-0036）', () => {
 
   it('addObservation 写入 credibility（来源档位 / 显式 opts 覆盖）', async () => {
     const m = make();
-    const mem: MemoryStreamEntry | null = await m.addObservation('你把《X》移出了书架', { source: 'domain:library' }) as MemoryStreamEntry | null;
+    const mem: MemoryStreamEntry | null = await m.addObservation('你把《X》移出了书库', { source: 'domain:library' }) as MemoryStreamEntry | null;
     expect(mem!.credibility).toBe(0.3);
     const mem2: MemoryStreamEntry | null = await m.addObservation('特殊观察', { source: 'chat', credibility: 0.8, importance: 0.6 }) as MemoryStreamEntry | null;
     expect(mem2!.credibility).toBe(0.8);
@@ -801,9 +801,9 @@ describe('RAG 增强（2026-08：来源标签/相对时间/情绪时段 query）
   it('formatRelativeTime：分钟/小时/天/月日分级', () => {
     const now = Date.now();
     expect(formatRelativeTime(new Date(now - 30 * 1000).toISOString(), now)).toBe('刚刚');
-    expect(formatRelativeTime(new Date(now - 5 * 60000).toISOString(), now)).toBe('5 分钟前');
-    expect(formatRelativeTime(new Date(now - 3 * 3600 * 1000).toISOString(), now)).toBe('3 小时前');
-    expect(formatRelativeTime(new Date(now - 2 * 86400000).toISOString(), now)).toBe('2 天前');
+    expect(formatRelativeTime(new Date(now - 5 * 60000).toISOString(), now)).toBe('5分钟前');
+    expect(formatRelativeTime(new Date(now - 3 * 3600 * 1000).toISOString(), now)).toBe('3小时前');
+    expect(formatRelativeTime(new Date(now - 2 * 86400000).toISOString(), now)).toBe('2天前');
     const monthAgo = new Date(now - 40 * 86400000).toISOString();
     expect(formatRelativeTime(monthAgo, now)).toMatch(/^\d+ 月 \d+ 日$/);
   });
@@ -819,7 +819,7 @@ describe('RAG 增强（2026-08：来源标签/相对时间/情绪时段 query）
     const text = m.formatMemoriesForPrompt([
       { id: 'x', created: new Date(Date.now() - 86400000 * 2).toISOString(), lastAccessed: '', description: '用户说：记得买牛奶', importance: 0.6, type: 'observation', source: 'chat' } as any,
     ]);
-    expect(text).toContain('[observation（聊天·2 天前）]');
+    expect(text).toContain('[observation（聊天·2天前）]');
     expect(text).toContain('记得买牛奶');
   });
 });

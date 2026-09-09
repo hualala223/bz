@@ -3,7 +3,7 @@
  * createSiteIcon/createOverlay——jsdom 环境行为断言。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { notice, longPress, createIconBtn, createSiteIcon, createOverlay } from '../../src/core/dom';
+import { notice, longPress, createIconBtn, createSiteIcon, createOverlay, swallowNextClick } from '../../src/core/dom';
 import { __resetZForTests, allocZ } from '../../src/core/z-order';
 import { getNoticeMessages } from '../mock-obsidian-entry';
 
@@ -173,22 +173,29 @@ describe('createSiteIcon', () => {
     expect(createSiteIcon(null)).toBeNull();
   });
 
-  it('生成 img 元素（yandex 源）', () => {
+  it('生成 img 元素（yandex v2 源带 size 高清参数）', () => {
     const img = createSiteIcon('example.com', 16);
     expect(img).not.toBeNull();
-    expect(img!.src).toContain('favicon.yandex.net/favicon/example.com');
+    expect(img!.src).toContain('favicon.yandex.net/favicon/v2/example.com?size=16');
     expect(img!.style.width).toBe('16px');
+    // 大尺寸头像位：源图按请求尺寸取（不再是恒 16px 小图放大发糊）
+    const big = createSiteIcon('example.com', 64);
+    expect(big!.src).toContain('size=64');
   });
 
   it('域名映射（daily.zhihu.com → zhihu.com）', () => {
     const img = createSiteIcon('daily.zhihu.com');
-    expect(img!.src).toContain('favicon/zhihu.com');
+    expect(img!.src).toContain('favicon/v2/zhihu.com');
   });
 
-  it('localStorage 缓存命中直接使用缓存', () => {
-    localStorage.setItem('favicon_example.com', 'data:image/png;base64,xxx');
+  it('localStorage 缓存命中直接使用缓存（v2 键；旧 v1 糊图键自动失效）', () => {
+    localStorage.setItem('favicon_v2_example.com_16', 'data:image/png;base64,xxx');
     const img = createSiteIcon('example.com');
     expect(img!.src).toBe('data:image/png;base64,xxx');
+    // v1 旧键不再命中：即便存在旧糊图缓存也走网络高清源
+    localStorage.setItem('favicon_example.com', 'data:image/png;base64,old-blurry');
+    const img2 = createSiteIcon('example.com', 32);
+    expect(img2!.src).toContain('favicon.yandex.net/favicon/v2/example.com?size=32');
   });
 });
 
@@ -226,5 +233,40 @@ describe('createOverlay', () => {
     expect(onMaskClick).toHaveBeenCalledTimes(1);
     popup.click();
     expect(onMaskClick).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ===== issue 222：拖拽收尾吞终端 click（uiResizable/uiVSplitter 共用防线）=====
+
+describe('swallowNextClick', () => {
+  const fire = (el: EventTarget, type: string) =>
+    el.dispatchEvent(new MouseEvent(type, { bubbles: true }));
+
+  it('吞掉随后一次 click：body 冒泡监听收不到（拖拽松手在遮罩上不再误关闭）', () => {
+    const inner = document.createElement('div');
+    document.body.appendChild(inner);
+    const seen = vi.fn();
+    document.body.addEventListener('click', seen);
+    swallowNextClick();
+    fire(inner, 'click');
+    expect(seen).not.toHaveBeenCalled();
+    // 只吞一发：下一次 click 正常放行
+    fire(inner, 'click');
+    expect(seen).toHaveBeenCalledTimes(1);
+    inner.remove();
+    document.body.removeEventListener('click', seen);
+  });
+
+  it('click 未触发时，下次 mousedown 撤防（不误吞正常点击）', () => {
+    const inner = document.createElement('div');
+    document.body.appendChild(inner);
+    swallowNextClick();
+    fire(document, 'mousedown'); // 撤防
+    const seen = vi.fn();
+    document.body.addEventListener('click', seen);
+    fire(inner, 'click');
+    expect(seen).toHaveBeenCalledTimes(1);
+    inner.remove();
+    document.body.removeEventListener('click', seen);
   });
 });

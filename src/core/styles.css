@@ -5,6 +5,8 @@
  * 本文件是样式源之一，构建时由 scripts/build-css.mjs 聚合成根 styles.css
  * ============================================================ */
 
+/* 全局按钮基线已迁至 src/core/reset.css（全局覆盖层，issue 196） */
+
 /* ===== 设置页顶部分页（参考 obsidian-linter 设置页） ===== */
 /* 设置区块标题（ADR-0009 单页平铺：🤖 AI / 📂 数据存储路径） */
 .bz-setting-section-title {
@@ -26,6 +28,16 @@
    tests/settings-tab.test.ts 的「无 tab」负向回归，非使用方） */
 .bz-setting-hidden {
     display: none !important;
+}
+
+/* 设置行控件统一最小宽度（ticket 170）：number/text 等输入控件对齐到 120px */
+.setting-item .setting-item-control input[type="number"],
+.setting-item .setting-item-control input[type="text"] {
+    min-width: 120px;
+}
+/* ticket 170：UP 主弹窗描述行允许换行（弹窗加宽后文字不再拥挤） */
+#bz-up-manager-popup .setting-item .setting-item-info .setting-item-description {
+    white-space: normal;
 }
 
 
@@ -127,60 +139,6 @@ button.news-close-btn {
 .bz-win-mfs button.todo-btn-close,
 .bz-win-mfs button.news-close-btn {
   display: flex !important;
-}
-
-/* ==================== 键盘焦点可见（p3 冻结面授权）：全站 focus-visible 焦点环 ==================== */
-/* 仅 :focus-visible 触发（键盘 Tab 导航）；文本录入元素（text/number/date/textarea/select）点击聚焦
-   同样出环（浏览器对文本录入元素恒匹配 :focus-visible 的基线行为）——与既有 :focus border 高亮叠加
-   属预期行为，接受；非输入类元素鼠标点击不触发，与既有 hover/active 高亮互不冲突。
-   伞规则按铁律 8 bz- 命名空间收敛（含 bz- 容器内无 bz- 类名的交互元素）；
-   遗留非 bz 类名根（日记/备忘录/复习/做题家/密码本/番茄钟/聚合讯/剪藏/影视/归物本/小橘对话等）下方显式补齐。 */
-[class*="bz-"]:is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-[class*="bz-"] :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-/* 入口页磁贴（launcher-tile 非 bz- 类名，p3 覆盖项） */
-#launcher-grid .launcher-tile:focus-visible,
-/* 入口页（骨架内弹窗/编辑控件 + 四个 picker：菜单/命令/图标/改名） */
-#launcher-modal :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-#launcher-edit-controls :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-#launcher-cmd-popup :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-#launcher-icon-popup :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-#launcher-rename-popup :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-#launcher-menu-popup :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-/* 收藏本（主面板 + 添加/编辑弹窗：标题/链接/描述输入与类型按钮） */
-#fav-popup :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-#fav-add-popup :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-/* 日记本 */
-#add-diary-popup :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-#diary-filter-mask :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-#diary-tag-selector-mask :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-#diary-date-filter-mask :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-#unified-datetime-picker-mask :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-/* 备忘录 */
-#todo-popup :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-#add-todo-popup :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-/* 复习（评级弹窗 body 级挂载，独立根）与做题家 */
-#review-popup :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-.difficulty-dialog :is(button, [tabindex]):focus-visible,
-#quiz-popup :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-/* 密码本 / 番茄钟（含状态栏 chip） */
-#pw-popup :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-#pw-add-popup :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-#pomodoro-popup :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-.pomodoro-statusbar:focus-visible,
-/* 聚合讯 / 剪藏 */
-.news-popup :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-#article-view-popup :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-/* AI 剪藏批准确认框（memo clip-archive：遮罩无 id，按钮带 id 直接覆盖） */
-#clip-cancel:focus-visible,
-#clip-ok:focus-visible,
-/* 影视主面板 / 归物本主面板 / 小橘对话（主面板根为 legacy id；影视添加/编辑等子弹窗遮罩经 bz-movie-overlay--* 类覆盖，见影视域） */
-#__yin_ying__ :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-#__gui_wu_ben__ :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-#chat-panel :is(button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]):focus-visible,
-/* 共享确认框（core/flow-dialog，承继旧 core/confirm 契约） */
-#__shared_confirm_mask__ :is(button, input, select, textarea, a[href], [tabindex]):focus-visible {
-  outline: 2px solid var(--interactive-accent);
-  outline-offset: 2px;
 }
 
 /* ==================== core 层样式收敛（ticket 60 延伸：notice/settings-modal/confirm/dom） ==================== */
@@ -461,10 +419,7 @@ button.news-close-btn {
     }
 }
 
-/* 通用确认弹窗（core/flow-dialog 流程框，承继旧 core/confirm.ts 的 Q3.js 移植结构；id 保持外部约定；popup 为 mask 子节点，层级由 mask 承载）
-   z 档位 10250：确认类弹窗应永远最顶层——压过全部域弹窗（域模态旧档 10001-10060 / encrypt unlock 10070·
-   体检 10080 / launcher 10100·10101·10200），原 10060 被 encrypt 10070/10080 盖住属倒挂（encrypt-pw 审查发现，
-   点确认需两次）已修；同时低于统一抽屉 10999/11000、companion 11100+、movie 小窗 12000、toast 100000 */
+/* 通用确认弹窗（core/flow-dialog 流程框，承继旧 core/confirm.ts 的 Q3.js 移植结构；id 保持外部约定；popup 为 mask 子节点，层级由 mask 承载——动态发号见 core/z-order，旧静态档位家族已废除） */
 #__shared_confirm_mask__ {
   position: fixed;
   top: 0;
@@ -770,6 +725,55 @@ button.news-close-btn {
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
+/* ---- 抽屉共享基线（恢复：movie 域退役 ADR-0087 时随 src/movie/styles.css 误删的共享规则——
+   本组件样式早年散落各域文件，退役清理时未迁回 core，致动作项失 flex 纵列挤成一行、
+   抗 Obsidian 按钮 !important 组/危险红/右对齐小字/入场动画全部失效） ---- */
+/* 头部标题/小字（sheetTitle 路径；sheetHead 路径走 .bz-item-sheet-entry 族） */
+.bz-item-sheet-title {
+  font-size: 14px; font-weight: 600; color: var(--text-normal);
+  line-height: 1.4; word-break: break-word;
+}
+.bz-item-sheet-sub { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+/* 功能项一行行列出：左对齐、无背景色、无边框分割，小字号。
+   高特异性 + !important 抗 Obsidian 默认 button 样式（灰底/边框/圆角）压盖 */
+.bz-item-sheet button.bz-item-sheet-item {
+  display: flex; align-items: center; gap: 8px;
+  justify-content: flex-start !important; /* 抗 Obsidian 默认 button 居中 */
+  width: 100%; padding: 8px 6px;
+  font-size: 13px; line-height: 1.5; color: var(--text-normal);
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  cursor: pointer; text-align: left !important;
+}
+.bz-item-sheet button.bz-item-sheet-item:hover,
+.bz-item-sheet button.bz-item-sheet-item:active {
+  background: transparent !important; /* 无背景反馈，保持纯粹 */
+}
+.bz-item-sheet button.bz-item-sheet-item--danger { color: var(--text-error) !important; }
+/* 动作项右侧小字（次级/动态数据，如「123 字」）：右对齐、faint 弱化，不参与换行；仅移动端抽屉（桌面菜单不渲染小字） */
+.bz-item-sheet-item-sub {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45%;
+  flex-shrink: 1;
+}
+.bz-item-sheet-icon { width: 16px; height: 14px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--text-muted); }
+.bz-item-sheet-item--danger .bz-item-sheet-icon { color: var(--text-error); }
+@keyframes bz-sheet-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes bz-mask-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 /* 移动端底部抽屉（长按卡片弹出，参照 B 站/网易云：遮罩 + 底部滑入 + 顶部选中条目信息） */
 .bz-item-sheet-mask {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
@@ -881,7 +885,8 @@ button.news-close-btn {
   border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
   font-size: 13px;
-  background: var(--background-primary);
+  /* 与设置面板输入框同底色（--input-bg）：文件选择器配色与面板一致（用户拍板） */
+  background: var(--input-bg, var(--background-primary));
   color: var(--text-normal);
 }
 .bz-path-picker-search:focus { outline: none; border-color: var(--interactive-accent); }
@@ -1080,3 +1085,34 @@ button.news-close-btn {
    （双保险：即使按钮元素未及时移出 DOM，只要行有值即不可见；桌面/移动端一致） */
 .setting-item.bz-path-picker-setting-row[data-filled='1'] .bz-path-picker-btn--slim { display: none; }
 
+
+/* ticket 173 模型选择器弹窗：列表行（名称 + 来源小字），当前生效值高亮；行内嵌按钮随输入框等宽 */
+.bz-model-picker-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+.bz-model-picker-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.bz-model-picker-row:hover {
+  background: var(--background-modifier-hover);
+}
+.bz-model-picker-row.is-current {
+  background: var(--background-modifier-active-hover);
+  font-weight: var(--font-semibold, 600);
+}
+.bz-model-picker-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-all;
+}
+.bz-model-picker-detail {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--text-muted);
+}

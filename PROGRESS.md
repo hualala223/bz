@@ -341,3 +341,19 @@
 - [x] `QuestionGenerator.countRangeForLength` 四档（<500 字 2~3 / <2000 3~5 / <5000 5~8 / 其余 8~12，上限 12 × ≈200 token 输出可控）；出题数量留空时生效，显式数字仍「恰好 N 道」优先；提示词同时告知模型本篇字数
 - [x] 测试：四档边界 + 提示词分档 + 显式优先；顺带修复选项打乱引入的非确定性断言（改「索引→原文本」映射，连跑 5 次无 flake）；全量 3631 绿
 - [x] 门禁：tsc 0 错 + 构建部署
+
+## 上游线合并（tier 1+2）— 并入 yeshimei/bz 第一档安全增量与第二档换肤
+
+**状态：已交付**（2026-09-09）
+
+- [x] 取证：yeshimei/bz 与本地自 af7ed6b5 分叉（上游 727 提交 UI 重构线 / 本地 40 提交功能线）；按「不影响现有功能」分三档裁决，仅并第一档（纯加法）+ 第二档（数据兼容换肤），第三档（review 域重写、todo 接管 memo.json、8 域删除、命令 id 更替）整体排除
+- [x] 第一档并入：上游 ADR-0077~0105、issues 177~244、5 份 UI 手册、新只读聚合域 home/recap/checkup/diary-wall、settings-panel（ADR-0080 并存不替换）、core ui 组件库（components.css/tokens.css/ui/* 等 35 文件）、domain-icons 单一事实源
+- [x] 第二档并入：favorites/belongings/pomodoro/smartcat/diary/secondbrain/attach/literature/auto-summary 换肤（styles.css+ui），全局裸 button 排版基线（reset.css）
+- [x] 本地数据源适配（新域消费本地域）：home/river+weekly、recap/aggregate 改用本地 movie(rebuildItems)/library(getBookItems/loadEpubBookItems)；checkup files/orphans/consistency 适配 weave 路径与 memo 单视角；home 磁贴命令映射本地 id（movie/clipping/library/pw）
+- [x] 双方同改文件三方合并或手工重打：smartcat/ui.ts（上游换肤 + 本地电源组重植）、secondbrain/panel.ts（上游重构 + ticket 173 进度视图重植）、smoke 白名单 +5 新命令、favorites/ui.test 取上游（本地零增量）
+- [x] 冲突裁决：settings-common 保留本地「移动端默认全屏」默认描述（文案冻结）；settings-schema 恢复 ToggleRow/SelectRow 导出；path-classify 恢复 movieFolderPath 键 + 'movie' 标签；core/json-store 采上游集中式 CONFIG/.CORRUPT 留档（launcher 测试断言同步）；main.ts 导出 applyDiarySettingsToRuntime；ai-models/settings-model-picker（上游 AI 注册表，与本地 ticket 175 冲突）不并入
+- [x] 排除域遗留测试清理：walkthrough-fix-c/review-fix-b/enh-sweep-c（专测上游独占域样式）删除；d3-write-gate 白名单映射本地域；render-purity PREVIEW_DOMAINS 裁剪为本地四域；settings-panel.test 按本地域集重写
+- [x] 设置键新增（接口+默认值）：belongingsDefaultStatus、settingsPanelLayout/Skin/MobileDefaultFullscreen、diaryWallMobileDefaultFullscreen
+- [x] main.ts 接线：5 新命令（bz-home-open/bz-recap-today/bz-diary-wall-open/bz-data-checkup-open/bz-settings-panel-open）+ applyWallDirectories + 5 unload；attach/index 重植 ensureAttachSeed（本地 launcher 播种）；favorites/index 重植 file-sync 出口
+- [x] reading-report 保持本地版（上游改版与未并入的 bookshelf 深度耦合）；review/encrypt/todo/clipbook/cinema/bookshelf/memo/launcher 全部保持本地
+- [x] 门禁：tsc 0 错 + 全量 4192 测试绿 + 构建部署
