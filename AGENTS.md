@@ -1,6 +1,6 @@
 # AGENTS.md — 包仔（bz）Obsidian 插件
 
-独立 Obsidian 插件，25 功能域（详见领域清单；2026-09 自上游线 yeshimei/bz 并入 home/recap/checkup/diary-wall/settings-panel 五域，memo 域由 todo 待办域换血接替、movie 域由 cinema 影院域换血接替、news+clipping 域由 clipbook 剪藏本融合域换血接替，见 PROGRESS）。数据沿用既有格式（`CONFIG/STORAGE/*.json`、`我的/*.md`、frontmatter），旧数据直接可读。**项目语言：中文**。
+独立 Obsidian 插件，25 功能域（详见领域清单；2026-09 自上游线 yeshimei/bz 并入 home/recap/checkup/diary-wall/settings-panel 五域，memo 域由 todo 待办域换血接替、movie 域由 cinema 影院域换血接替、news+clipping 域由 clipbook 剪藏本融合域换血接替、password 域并入 encrypt 统一保险库，见 PROGRESS）。数据沿用既有格式（`CONFIG/STORAGE/*.json`、`我的/*.md`、frontmatter），旧数据直接可读。**项目语言：中文**。
 
 ## 交互约定
 
@@ -70,7 +70,7 @@
 | pomodoro | pomodoro.json |
 | attach | —（搬当前笔记引用的 vault 附件） |
 | bili-downloader | bili-tasks.json |
-| encrypt | `CONFIG/.ENCRYPT/`（.safe.enc + .随机名.enc） |
+| encrypt（保险库，上游换血：password 并入，ADR-0085） | `CONFIG/.ENCRYPT/`（.safe.enc 清单 + 附件；密码=kind=password-vault SafeNote） |
 
 ## 测试与质量门禁
 

@@ -444,3 +444,16 @@
 - [x] settings.ts：删 clippingMobileDefaultFullscreen/newsRetentionSavedDays+SkippedDays；加 clipbookMobileDefaultFullscreen/ReaderFontSize/PanelWidth/Height/MidWidth/newsRetentionUnsavedDays；articleDirectory 保留
 - [x] settings-panel/home 磁贴/build-css/d3 白名单（news/reader → clipbook/save+ui）/lint-b（恢复上游 clipbook+up-manager 目标）/mobile（clipping 键退役，9 键）/smoke 同步
 - [x] 门禁：tsc 0 错 + 全量 4191 测试绿 + 构建部署
+
+## 上游线 C6 裁决落地 — encrypt 统一保险库换血，password 域退役（ADR-0085）
+
+**状态：已交付**（2026-09-09，用户裁决：C4/C5/C6 直接完整替换）
+
+- [x] 数据零迁移确认：同一 .safe.enc 清单、同一主密码/解锁态；密码=kind='password-vault' SafeNote；fav 字段新增兼容旧 7 字段
+- [x] 换血：src/encrypt 上游版（ui 2695 行三栏工作台 + vault-data/vault-pw-view/vault-assets-view/pw-picker 子模块 + styles）+ tests/encrypt（8）并入；新增 core/crypto.ts（CryptoService 独立模块）；src/password + tests/password 退役删除
+- [x] main.ts：命令 bz-pw-open/add/generate 退役；bz-encrypt-open 正名「保险库」；bz-encrypt-copy-password 走上游 controller.quickCopyPassword；onunload 移除 unloadPassword
+- [x] settings.ts：删 passwordMobileDefaultFullscreen（charset/length/securityMode 保留——生成器消费）；encrypt 行正名
+- [x] 面板/磁贴：password 行删除、encrypt 行正名「保险库·密码·加密笔记·日记」；home password 磁贴删除
+- [x] P3 适配版退役：自移植 pw-picker/quick-copy 由上游原生实现替代（fav 字段随 vault-data 到位，P4 兑现）
+- [x] 测试同步：smoke（bz-pw 三条删/passwordLength 抽查删）、mobile（ON 删 password，8 键）、lint-a（删 password 目标）、settings-panel（域清单/NAV_SECS/保险库正名）、main-lifecycle（unloadPassword 移除）
+- [x] 门禁：tsc 0 错 + 全量 4176 测试绿 + 构建部署

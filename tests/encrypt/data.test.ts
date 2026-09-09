@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { SafeManager, fingerprintOf, flatName, mapLimit, type HealthProgress, type SafeNote } from '../../src/encrypt/data';
-import { CryptoService, clearCryptoKeyCache } from '../../src/password/crypto';
+import { CryptoService, clearCryptoKeyCache } from '../../src/core/crypto';
 import { setApp } from '../../src/core/app';
 import { MockVault } from '../mock-vault';
 
@@ -460,6 +460,31 @@ describe('SafeManager 进度回调（onProgress）', () => {
     const md = vault.files.get('我的/日记/2025-06-01.md')!;
     // 09:00 块只出现一次（不重复插入）
     expect(md.match(/# 📖 09:00/g)).toHaveLength(1);
+    expect(sm.manifest.notes.some((n) => n.id === note.id)).toBe(false);
+  });
+
+  it('回归（P0）：同分钟同标签两条日记标题行相同，还原其一不吞块——md 里两条都在', async () => {
+    makeApp(vault);
+    // 同 minute 同 emoji：留在 md 里的那条与还原块标题行完全一致（旧实现按标题行判重 →
+    // 误判「已还原」跳过插入，还原内容被静默吞掉且清单条目照常清除）
+    vault.create('我的/日记/2025-06-01.md', '# 📖 09:00\n甲写的\n');
+    const sm = new SafeManager('CONFIG/.ENCRYPT');
+    await sm.unlock('pw');
+    const note = await sm.lockNote({
+      path: '我的/日记/2025-06-01.md',
+      title: '2025-06-01 · 09:00 日记',
+      kind: 'diary-entry',
+      content: '# 📖🔐 09:00\n乙写的',
+      attachments: [],
+    });
+    const ok = await sm.restoreDiaryEntry(note.id, '# 📖 09:00\n乙写的');
+    expect(ok).toBe(true);
+    const md = vault.files.get('我的/日记/2025-06-01.md')!;
+    // 两条内容都在：同刻两条各占一块，还原块不因标题行相同被吞
+    expect(md).toContain('甲写的');
+    expect(md).toContain('乙写的');
+    expect(md.match(/# 📖 09:00/g)).toHaveLength(2);
+    // 取出即删语义不变
     expect(sm.manifest.notes.some((n) => n.id === note.id)).toBe(false);
   });
 });

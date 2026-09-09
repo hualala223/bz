@@ -7,7 +7,7 @@
  */
 import { createOverlay } from '../core/dom';
 import { escManager } from '../core/esc-manager';
-import type { PasswordEntry } from '../password/data';
+import type { PasswordVaultEntry } from './vault-data';
 
 /**
  * fuzzy 匹配得分（大小写不敏感）：未命中 -1；
@@ -30,10 +30,10 @@ export function fuzzyScore(hay: string, query: string): number {
 
 /** fuzzy 过滤 + 排序（得分降序，平分按创建时间倒序）：返回命中条目（不含得分） */
 export function fuzzyFilterEntries(
-  entries: PasswordEntry[],
+  entries: PasswordVaultEntry[],
   query: string
-): PasswordEntry[] {
-  const hits: Array<{ e: PasswordEntry; score: number }> = [];
+): PasswordVaultEntry[] {
+  const hits: Array<{ e: PasswordVaultEntry; score: number }> = [];
   for (const e of entries) {
     const score = Math.max(
       fuzzyScore(e.platform || '', query),
@@ -79,8 +79,8 @@ export function closePasswordQuickPicker(): void {
  * 复制与 60s 自动清空由调用方执行（本模块不碰剪贴板）。
  */
 export function openPasswordQuickPicker(
-  entries: PasswordEntry[],
-  onPick: (entry: PasswordEntry) => void
+  entries: PasswordVaultEntry[],
+  onPick: (entry: PasswordVaultEntry) => void
 ): void {
   closePasswordQuickPicker();
   const { mask, popup } = createOverlay({
@@ -113,7 +113,7 @@ export function openPasswordQuickPicker(
   listEl.className = 'bz-encrypt-pwqp-list';
 
   // 状态：过滤结果 + 键盘活动行（Enter 取当前活动行，无活动行取首行）
-  const state: { hits: PasswordEntry[]; active: number } = { hits: [], active: 0 };
+  const state: { hits: PasswordVaultEntry[]; active: number } = { hits: [], active: 0 };
 
   const setActive = (i: number): void => {
     if (!state.hits.length) return;

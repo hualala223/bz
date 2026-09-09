@@ -52,9 +52,7 @@ export const DOMAINS: HomeDomain[] = [
   { id: 'wall', commandId: 'bz-diary-wall-open', name: '回忆墙', sub: '相片墙浏览日记', icon: iconOf('wall') },
   { id: 'belongings', commandId: 'bz-belongings-open', name: '归物本', sub: '物品登记', icon: iconOf('belongings') },
   { id: 'attach', commandId: 'bz-attach-move', name: '移动附件', sub: '附件归位', icon: iconOf('attach') },
-  // 本地口径：保险库未合并（ADR-0085 为上游线决策），保险箱与密码本仍为两域
-  { id: 'encrypt', commandId: 'bz-encrypt-open', name: '保险箱', sub: '加密笔记与日记', icon: iconOf('encrypt') },
-  { id: 'password', commandId: 'bz-pw-open', name: '密码本', sub: '密码条目与生成', icon: iconOf('password') },
+  { id: 'encrypt', commandId: 'bz-encrypt-open', name: '保险库', sub: '密码·加密笔记·日记', icon: iconOf('encrypt') },
   { id: 'settings', commandId: 'bz-settings-panel-open', name: '设置', sub: '全域设置', icon: iconOf('settings') },
 ];
 

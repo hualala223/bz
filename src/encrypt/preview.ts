@@ -1,5 +1,5 @@
 /**
- * 保险箱预览层生成（encrypt 域，preview）
+ * 保险库预览层生成（encrypt 域，preview）
  * 图片：canvas 缩放压缩（体积小但看得清）；视频：抽帧成图（零外部依赖，用户拍板）。
  * 依赖 document/canvas——仅 UI 层调用；环境不支持（jsdom 无 canvas 实现）时返回 null，
  * 调用方据此跳过预览层（hasPreview=false）。产物为 dataURL(base64)，再经数据层加密入库。
@@ -18,7 +18,7 @@ export interface CompressResult {
 export const PREVIEW_TIMEOUT_MS = 5000;
 
 /**
- * 省略图默认档（作为 compressImage/videoFrame 默认参数；实际取值由保险箱设置
+ * 省略图默认档（作为 compressImage/videoFrame 默认参数；实际取值由保险库设置
  * 「预览目标长边/预览质量」注入——用户可调，无需改代码）。
  * 长边 384 / JPEG 质量 0.5：手机预览清晰、体积小；要看清就点击缩略图按需加载原始质量。
  */

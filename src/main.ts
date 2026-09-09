@@ -24,7 +24,6 @@ import { openTodoPanel, addTodoItem, unloadTodo, ensureTodoReminders, ensureFile
 import { addBelongingsItem, openBelongings, unloadBelongings } from './belongings';
 // 剪藏本融合域（clipbook，上游 ADR-0082/issue 177）：聚合讯未读流 + 剪藏笔记一体化工作台
 import { openClipbook, unloadClipbook } from './clipbook';
-import { openPasswordManager, addPasswordEntry, generatePassword, quickCopyPassword, unloadPassword } from './password';
 import { openFavoritesPanel, addFavoriteItem, unloadFavorites } from './favorites';
 // 书架墙（bookshelf 域，上游并存式新域终局换血：数据同源，旧 library 退役）
 import { openBookshelf, openBookshelfReport, unloadBookshelf } from './bookshelf';
@@ -50,7 +49,7 @@ import { openLiteraturePanel, openTermNote, unloadLiterature } from './literatur
 // 附件搬移（ticket 65 新域：移动当前笔记附件，fileManager 自动更新内部链接 + 入口页磁贴播种）
 import { openAttachMove, ensureAttachSeed, ATTACH_COMMAND_ID } from './attach';
 // 保险箱（encrypt 域：移出式清单容器加密，正文+图片/视频附件；原名「加密保险箱」，ticket 68 更名仅文案）
-import { openEncrypt, encryptCurrentNote, unloadEncrypt, mountEncryptStatusBar, unmountEncryptStatusBar } from './encrypt';
+import { openEncrypt, encryptCurrentNote, copyVaultPassword, unloadEncrypt, mountEncryptStatusBar, unmountEncryptStatusBar } from './encrypt';
 import { openLauncherPanel, unloadLauncherPanel, setLauncherShowTextSetter, setLauncherGestureSetter, LauncherModal } from './launcher';
 import { registerGestureListeners } from './launcher/gestures';
 import { ensureAutoSummary, unloadAutoSummary } from './auto-summary';
@@ -94,10 +93,6 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-belongings-open', name: '归物本', icon: 'package', callback: () => openBelongings(getApp()) },
   // 剪藏本（clipbook 融合域，上游 ADR-0082：聚合讯未读流 + 剪藏笔记一体化工作台）
   { id: 'bz-clipbook-open', name: '剪藏本', icon: 'scissors', callback: () => openClipbook(getApp()) },
-  // 密码本
-  { id: 'bz-pw-open', name: '密码本', icon: 'key', callback: () => openPasswordManager(getApp()) },
-  { id: 'bz-pw-add', name: '加密码', icon: 'key-round', callback: () => addPasswordEntry(getApp()) },
-  { id: 'bz-pw-generate', name: '生成随机密码', icon: 'key-square', callback: () => generatePassword(getApp()) },
   // 收藏本
   { id: 'bz-favorites-open', name: '收藏本', icon: 'star', callback: () => openFavoritesPanel(getApp()) },
   { id: 'bz-favorites-add', name: '加收藏', icon: 'bookmark', callback: () => addFavoriteItem(getApp()) },
@@ -140,11 +135,11 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-literature-note-term', name: '术语生成文献笔记', icon: 'book-type', callback: () => openTermNote(getApp()) },
   // 附件搬移（ticket 65 新域：移动当前笔记附件到指定文件夹，fileManager 自动更新内部链接）
   { id: ATTACH_COMMAND_ID, name: '移动附件', icon: 'folder-down', callback: () => openAttachMove(getApp()) },
-  // 保险箱（encrypt 域：移出式清单容器加密；原名「加密保险箱」，ticket 68 更名仅文案）
-  { id: 'bz-encrypt-open', name: '保险箱', icon: 'lock', callback: () => openEncrypt(getApp()) },
+  // 统一保险库（encrypt 域，上游 ADR-0085：密码/加密笔记/加密日记三资产单一面板）
+  { id: 'bz-encrypt-open', name: '保险库', icon: 'lock', callback: () => openEncrypt(getApp()) },
   { id: 'bz-encrypt-lock', name: '加密当前笔记', icon: 'lock-keyhole', callback: () => encryptCurrentNote(getApp()) },
-  // 快速复制密码（上游线 P3 移植：不打开密码本面板，fuzzy 选择即复制，60s 自动清空剪贴板）
-  { id: 'bz-encrypt-copy-password', name: '快速复制密码', icon: 'key-round', callback: () => quickCopyPassword() },
+  // 快速复制密码（bz-encrypt-copy-password：不打开保险库面板，fuzzy 选择即复制，60s 自动清空剪贴板）
+  { id: 'bz-encrypt-copy-password', name: '快速复制密码', icon: 'key-round', callback: () => copyVaultPassword(getApp()) },
   // 小橘陪伴猫（smartcat 域）
   { id: 'bz-smartcat-open', name: '小橘', icon: 'cat', callback: () => openSmartCat(getApp()) },
   // f7：去 message-circle 重复（第二大脑对话保留）→ messages-square
@@ -312,7 +307,6 @@ export default class BzPlugin extends Plugin {
     unloadSecondBrain();
     // 各域卸载清理补全（fix(main)：unload 函数均不内部触发 ensure，可无条件调用；
     // 未初始化域调用为幂等空清理，不引起无谓装载）
-    unloadPassword();
     unloadBelongings();
     unloadFavorites();
     unloadReview();

@@ -70,7 +70,6 @@ const EXPECTED_COMMAND_IDS = [
   'bz-todo-open', 'bz-todo-add',
   'bz-belongings-add', 'bz-belongings-open',
   'bz-clipbook-open',
-  'bz-pw-open', 'bz-pw-add', 'bz-pw-generate',
   'bz-favorites-open', 'bz-favorites-add',
   'bz-bookshelf-open',
   'bz-reading-report-open',
@@ -193,7 +192,6 @@ describe('bz 骨架冒烟', () => {
     expect(s.favoritesStoragePath).toBe('CONFIG/STORAGE');
     expect(s.secondBrainOllamaUrl).toBe('http://localhost:11434');
     expect(s.secondBrainEmbeddingModel).toBe('bge-m3');
-    expect(s.passwordLength).toBe('16');
   });
 
   it('域命令回调不抛异常（已实现域真实执行，未实现域占位 Notice）', async () => {

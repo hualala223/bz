@@ -331,7 +331,6 @@ export default interface BzSettings {
   clipbookPanelHeight: number;
   clipbookMidWidth: number;
   /** 密码本：移动端默认全屏（默认开——原 JS 内联强制全屏） */
-  passwordMobileDefaultFullscreen: boolean;
   /** 收藏本：移动端默认全屏（默认开——原 JS 内联强制全屏） */
   favoritesMobileDefaultFullscreen: boolean;
   /** 收藏本：列表排序键（created=创建时间最新优先 / title=标题 / domain=域名，ticket 141。
@@ -633,7 +632,6 @@ export const DEFAULT_SETTINGS: BzSettings = {
   clipbookPanelWidth: 0,
   clipbookPanelHeight: 0,
   clipbookMidWidth: 0,
-  passwordMobileDefaultFullscreen: true,
   favoritesMobileDefaultFullscreen: true,
   favoritesSortKey: 'created',
   cinemaMobileDefaultFullscreen: true,

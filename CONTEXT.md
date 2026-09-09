@@ -173,6 +173,9 @@ _Avoid_: 错题本（无独立收藏视图）
 
 **获取模型名 (Fetch Models)**: 上游线 P5 移植（AI 设置组尾按钮，ticket 173）——按当前 AI 服务商拉取 OpenAI 兼容 `/models` 列表弹选择器回填该服务商模型行；`core/ai-models.ts`（本地五家静态端点表，与 getAIProvider 逐字对齐）+ `core/settings-model-picker.ts`。上游的 per-provider 覆盖 registry（issue 170/171）未并入。
 
+**保险库 (Vault)**: 上游线 C6 裁决整体换血（ADR-0085）——原保险箱（encrypt）与密码本（password）合并为统一保险库，encrypt 单域三栏工作台承载**密码/加密笔记/加密日记**三资产（数据零迁移：同一 `.safe.enc` 清单、同一主密码；密码=kind='password-vault' SafeNote，fav 字段新增兼容）。命令 `bz-encrypt-open`（保险库三栏工作台）、`bz-encrypt-copy-password`（快速取密，60s 自动清空）、`bz-encrypt-lock`（加密当前笔记）；`bz-pw-open/add/generate` 随 password 域退役。子模块 vault-data/vault-pw-view/vault-assets-view/pw-picker；core/crypto.ts（CryptoService 自 encrypt 抽出）。设置键 `passwordMobileDefaultFullscreen` 删除（encrypt 键沿用）。
+_Avoid_: 保险箱、密码本面板（均已退役）
+
 **剪藏本 (Clipbook)**: 上游线 C5 裁决整体换血的融合域（ADR-0082/0086，issue 177）——原聚合讯（news）与剪藏（clipping）两域退役删除，clipbook 一体化承担：未读流（news.json 四段双写者，磁盘为基底各自保留非本域段）+ 剪藏笔记工作台 + `clipbook.json` 侧写（articleOverrides/savedArchive/order）。阅读右栏编辑部排版、保存为正式剪藏流水线、B 站源设置组（news-sources-group）、写队列（write-queue）。命令 `bz-clipbook-open`（替代旧 `bz-news-open`/`bz-clipping-open`）。设置键 `clipbookMobileDefaultFullscreen/clipbookReaderFontSize/clipbookPanelWidth/Height/clipbookMidWidth` + `newsRetentionUnsavedDays`（原 Saved/Skipped 两键合一）。auto-summary 域保留并随上游对接 clipbook。
 _Avoid_: 聚合讯面板（指旧 news 阅读器，已退役）
 

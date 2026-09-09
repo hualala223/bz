@@ -42,7 +42,7 @@ describe('设置面板域清单（本地口径）', () => {
   it('包含本地 20 域与上游并入新域，且不含上游独占域', () => {
     const ids = DOMAINS.map((d) => d.id);
     // 本地既有域
-    for (const id of ['global', 'ai', 'diary', 'todo', 'belongings', 'clipping', 'favorites', 'cinema', 'bookshelf', 'review', 'secondbrain', 'pomodoro', 'password', 'encrypt', 'literature', 'smartcat']) {
+    for (const id of ['global', 'ai', 'diary', 'todo', 'belongings', 'clipping', 'favorites', 'cinema', 'bookshelf', 'review', 'secondbrain', 'pomodoro', 'encrypt', 'literature', 'smartcat']) {
       expect(ids, `缺本地域 ${id}`).toContain(id);
     }
     // 上游并入新域
@@ -50,18 +50,17 @@ describe('设置面板域清单（本地口径）', () => {
       expect(ids, `缺并入域 ${id}`).toContain(id);
     }
     // 上游独占域不得出现（todo 已随 ADR-0092 换血并入，不再属上游独占）
-    for (const id of ['memo', 'movie', 'clipbook', 'recap', 'checkup']) {
+    for (const id of ['memo', 'movie', 'password', 'clipbook', 'recap', 'checkup']) {
       expect(ids, `不应出现上游独占域 ${id}`).not.toContain(id);
     }
   });
 
-  it('域名映射本地口径：备忘录/影视/书库/密码本/保险箱（非上游命名）', () => {
+  it('域名映射本地口径：待办/影院/书库/保险库', () => {
     const nameOf = (id: string) => DOMAINS.find((d) => d.id === id)?.name;
     expect(nameOf('todo')).toBe('待办');
     expect(nameOf('cinema')).toBe('影院');
     expect(nameOf('bookshelf')).toBe('书库');
-    expect(nameOf('password')).toBe('密码本');
-    expect(nameOf('encrypt')).toBe('保险箱');
+    expect(nameOf('encrypt')).toBe('保险库'); // 上游 ADR-0085：密码本并入统一保险库
     expect(nameOf('diary-wall')).toBe('回忆墙');
   });
 

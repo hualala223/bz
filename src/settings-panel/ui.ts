@@ -77,7 +77,6 @@ const schemaLoaders: Record<string, () => Promise<SettingsSchema>> = {
   belongings: async () => (await import('../belongings/ui')).belongingSettingsSchema(),
   clipping: async () => (await import('../clipbook/ui')).clipbookSettingsSchema(),
   favorites: async () => (await import('../favorites/ui')).favoritesSettingsSchema(),
-  password: async () => (await import('../password/ui')).passwordSettingsSchema(),
   bookshelf: async () => (await import('../bookshelf/settings')).bookshelfSettingsSchema(),
   cinema: async () => (await import('../cinema/settings')).cinemaSettingsSchema(),
   review: async () => {
@@ -143,8 +142,7 @@ export const DOMAINS: DomainDef[] = [
   { id: 'launcher', name: '入口页', icon: 'app-window', desc: '磁贴入口页', noSettings: true },
   { id: 'pomodoro', name: '番茄钟', icon: DOMAIN_ICONS.pomodoro, desc: '专注计时与休息', schemaLoader: schemaLoaders.pomodoro },
   { id: 'attach', name: '附件搬移', icon: DOMAIN_ICONS.attach, desc: '附件整理', noSettings: true },
-  { id: 'password', name: '密码本', icon: DOMAIN_ICONS.password, desc: '密码条目与生成', schemaLoader: schemaLoaders.password },
-  { id: 'encrypt', name: '保险箱', icon: DOMAIN_ICONS.encrypt, desc: '加密笔记与加密日记', schemaLoader: schemaLoaders.encrypt },
+  { id: 'encrypt', name: '保险库', icon: DOMAIN_ICONS.encrypt, desc: '密码、加密笔记与加密日记', schemaLoader: schemaLoaders.encrypt },
   { id: 'smartcat', name: '小橘陪伴猫', icon: DOMAIN_ICONS.smartcat, desc: '桌面宠物陪伴', schemaLoader: schemaLoaders.smartcat },
   { id: 'literature', name: '文献盒', icon: DOMAIN_ICONS.literature, desc: '文献笔记与术语录入', schemaLoader: schemaLoaders.literature },
 ];
@@ -155,7 +153,7 @@ export const NAV_SECS: Array<{ title: string; ids: string[] }> = [
   { title: '基础', ids: ['global', 'appearance', 'ai'] },
   { title: '记录', ids: ['diary', 'diary-wall', 'todo', 'belongings', 'clipping', 'favorites'] },
   { title: '媒体与知识', ids: ['cinema', 'bookshelf', 'review', 'secondbrain', 'literature'] },
-  { title: '工具', ids: ['pomodoro', 'password', 'encrypt', 'smartcat'] },
+  { title: '工具', ids: ['pomodoro', 'encrypt', 'smartcat'] },
 ];
 
 /** 已加载域的 schema 行缓存（移动端搜索「设置项」段用：域名 → 行名/描述列表） */

@@ -32,7 +32,6 @@ const SOURCES = [
   "src/launcher/styles.css",
   "src/todo/styles.css",
   "src/clipbook/styles.css",
-  "src/password/styles.css",
   "src/favorites/styles.css",
   "src/review/styles.css",
   "src/quiz/styles.css",
