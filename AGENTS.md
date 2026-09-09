@@ -49,12 +49,13 @@
 |---|---|
 | diary | `我的/日记/*.md` |
 | todo（待办，上游换血接替 memo，ADR-0092） | memo.json（唯一属主） |
+| bookshelf（书架墙，上游换血接替 library） | `书库/*.md`、EPUB（weave-data.json） |
 | belongings | belongings.json |
 | clipping | `归档/网页剪藏/*.md` |
 | news | news.json |
 | password | passwords.json |
 | favorites | favorites.json |
-| library | `书库/*.md`、`我的/读书笔记` |
+| bookshelf（书架墙，上游换血接替 library） | `书库/*.md`、EPUB（weave-data.json）、读书报告内嵌面板（ADR-0091） |
 | reading-report | metadataCache 统计 |
 | movie | `我的/影视/*.md` |
 | review | review.json |

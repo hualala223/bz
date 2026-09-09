@@ -125,7 +125,13 @@ export default interface BzSettings {
 
   // ===== 📚 书库（7 项）=====
   /** 📁 书库文件夹 */
-  libraryFolderPath: string;
+  // ===== 📚 书架墙（bookshelf 域；旧书库域 library 已退役，本域独立承担书库 UI）=====
+  /** 📁 书库文件夹（书架墙域；空 = 运行时回落旧 libraryFolderPath 存量值，再回落「书库」） */
+  bookshelfFolderPath: string;
+  bookshelfMobileDefaultFullscreen: boolean;
+  bookshelfDefaultSide: string;
+  bookshelfSortMode: string;
+  bookshelfSkin: string;
   /** 🏷️ 书籍识别标签 */
   bookTag: string;
   /** 📦 显示文件大小 */
@@ -336,7 +342,6 @@ export default interface BzSettings {
    *  且违背「既有结构不改」铁律；排序键落设置与 memoSortMode/movieDefaultSort 同惯例） */
   favoritesSortKey: string;
   /** 书库：移动端默认全屏（默认开——原 CSS ≤768 全屏主面板与读书笔记；阅读报告跟随此键） */
-  libraryMobileDefaultFullscreen: boolean;
   /** 影视：移动端默认全屏（默认开——主面板/影视分析/影视报告同控，原 JS 内联强制全屏） */
   movieMobileDefaultFullscreen: boolean;
   /** 番茄钟：移动端默认全屏（默认关——原移动端 320px 居中卡） */
@@ -505,7 +510,12 @@ export const DEFAULT_SETTINGS: BzSettings = {
   favoritesStoragePath: 'CONFIG/STORAGE',
 
   // 书库
-  libraryFolderPath: '书库',
+  // 书架墙（bookshelf；空 = 未配置，运行时回落旧 libraryFolderPath 存量值——零感知迁移）
+  bookshelfFolderPath: '',
+  bookshelfMobileDefaultFullscreen: true,
+  bookshelfDefaultSide: 'all',
+  bookshelfSortMode: 'date',
+  bookshelfSkin: 'nordic',
   bookTag: 'book',
   showFileSize: true,
   showReadingTime: true,
@@ -619,7 +629,6 @@ export const DEFAULT_SETTINGS: BzSettings = {
   passwordMobileDefaultFullscreen: true,
   favoritesMobileDefaultFullscreen: true,
   favoritesSortKey: 'created',
-  libraryMobileDefaultFullscreen: true,
   movieMobileDefaultFullscreen: true,
   pomodoroMobileDefaultFullscreen: false,
   encryptMobileDefaultFullscreen: true,

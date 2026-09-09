@@ -27,7 +27,7 @@ import { reviewApp } from '../review/app';
 import type { ReviewItem } from '../review/data';
 import { rebuildItems } from '../movie/data';
 import { STATUS_WANT, STATUS_WATCHING } from '../movie/constants';
-import { getBookItems, loadEpubBookItems } from '../library/items';
+import { scanMarkdownBooks, loadEpubItems } from '../bookshelf/data';
 import { loadDatabase as loadBelongings } from '../belongings/data';
 import { DataManager as FavoritesDataManager } from '../favorites/data';
 import { getStoragePath as getFavoritesPath } from '../favorites/config';
@@ -114,11 +114,11 @@ function collectCinemaCounts(app: App, c: RiverCounts): void {
 
 /** 书库：在读 / 读完（md + EPUB 三分口径，同 library 域） */
 async function collectBookshelfCounts(app: App, c: RiverCounts): Promise<void> {
-  for (const b of getBookItems(app)) {
+  for (const b of scanMarkdownBooks(app)) {
     if (b.status === '在读') c.bookshelfReading++;
     else if (b.status === '已读') c.bookshelfFinished++;
   }
-  for (const b of await loadEpubBookItems(app)) {
+  for (const b of await loadEpubItems(app)) {
     if (b.status === '在读') c.bookshelfReading++;
     else if (b.status === '已读') c.bookshelfFinished++;
   }

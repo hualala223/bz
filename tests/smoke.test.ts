@@ -73,7 +73,7 @@ const EXPECTED_COMMAND_IDS = [
   'bz-news-open',
   'bz-pw-open', 'bz-pw-add', 'bz-pw-generate',
   'bz-favorites-open', 'bz-favorites-add',
-  'bz-library-open', 'bz-book-notes-open',
+  'bz-bookshelf-open',
   'bz-reading-report-open',
   'bz-movie-open', 'bz-movie-add', 'bz-movie-report',
   'bz-review-count', 'bz-review-add-current', 'bz-review-add-current-with-links',
@@ -141,7 +141,7 @@ describe('bz 骨架冒烟', () => {
     expect(byId('bz-todo-add').name).toBe('加待办');
     expect(byId('bz-movie-add').name).toBe('加影视');
     // t2：阅读分析报告 → 阅读数据分析报告
-    expect(byId('bz-reading-report-open').name).toBe('阅读数据分析报告');
+    expect(byId('bz-reading-report-open').name).toBe('阅读分析报告'); // 上游 ADR-0091：报告内嵌书架墙，正名收短
     // ticket 168：复习域单一入口——仅「复习（按数量）」命令保留，10 个旧命令已退役
     expect(byId('bz-review-count').name).toBe('复习（按数量）');
     // ticket 169：「加入复习计划」加回——editorCallback 注册（命令面板 + 快捷键 + 文档右键待选）
@@ -190,7 +190,7 @@ describe('bz 骨架冒烟', () => {
     expect(s.articleDirectory).toBe('归档/网页剪藏');
     expect(s.articleDirectory).toBe('归档/网页剪藏');
     expect(s.movieFolderPath).toBe('我的/影视');
-    expect(s.libraryFolderPath).toBe('书库');
+    expect(s.bookshelfFolderPath).toBe(''); // 上游换血：空=运行时回落旧 libraryFolderPath 存量值
     expect(s.favoritesStoragePath).toBe('CONFIG/STORAGE');
     expect(s.secondBrainOllamaUrl).toBe('http://localhost:11434');
     expect(s.secondBrainEmbeddingModel).toBe('bge-m3');

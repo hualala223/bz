@@ -3,7 +3,7 @@
  * 源码：阅读数据分析报告.js（重复函数只保留最终版）
  */
 import { pad2 } from '../core/utils';
-import { readWeaveDataAggregates, deriveBookSettings } from '../library/items';
+import { readWeaveAggregates, resolveBookTag, resolveFolderPath } from '../bookshelf/data';
 
 // ---------- 数据采集 ----------
 
@@ -77,7 +77,7 @@ function buildEpubBookNoteEntry(aggregate: any): BookNoteEntry | null {
 
 /** 阅读报告的 EPUB 书条目（全库 weave 书，不筛目录；ADR-0013 扩展）。 */
 export async function getEpubBookNotes(app: any): Promise<BookNoteEntry[]> {
-  const aggregates = await readWeaveDataAggregates(app);
+  const aggregates = await readWeaveAggregates(app);
   const entries: BookNoteEntry[] = [];
   for (const aggregate of aggregates) {
     const entry = buildEpubBookNoteEntry(aggregate);
@@ -86,19 +86,28 @@ export async function getEpubBookNotes(app: any): Promise<BookNoteEntry[]> {
   return entries;
 }
 
-/** 获取所有带 book 标签的笔记 */
+/**
+ * 获取书库目录内所有带 book 标签的笔记。
+ * 口径（读书报告内嵌化拍板）：只统计书库目录内的书，与书架墙 scanMarkdownBooks 同规则——
+ * 路径在书库目录（bookshelfFolderPath 回落链）之下，或目录本身是单个 md 笔记；
+ * 库外 book 标签笔记不再混入报告（书架墙看不到的书，报告也不统计）。
+ */
 export function getAllBookNotes(app: any): BookNoteEntry[] {
-  const { bookTag } = deriveBookSettings();
+  // 旧 library 域退役：book 标签改经 bookshelf 域解析（bookshelfFolderPath/bookTag 同键同源）
+  const bookTag = resolveBookTag();
+  const folderPath = resolveFolderPath();
   const files = app.vault.getMarkdownFiles();
   const bookNotes: BookNoteEntry[] = [];
 
   for (const file of files) {
     try {
+      // 口径：书库目录内才统计（目录前缀 / 目录本身单文件，与 bookshelf scanMarkdownBooks 回落分支一致）
+      if (file.path !== `${folderPath}.md` && !file.path.startsWith(`${folderPath}/`)) continue;
       const cache = app.metadataCache.getFileCache(file);
       if (!cache || !cache.frontmatter) continue;
 
       const tags = cache.frontmatter.tags;
-      // 与 library/items.ts 口径对齐：数组项/整串精确等值（'ebook' 等子串不再误判）
+      // 与 bookshelf/data.ts parseBookFile 口径对齐：数组项/整串精确等值（'ebook' 等子串不再误判）
       let isBook = false;
 
       if (typeof tags === 'string') {
@@ -203,10 +212,11 @@ export function calculateReadingStats(books: BookNoteEntry[]): ReadingStats {
         stats.readingSessions = stats.readingSessions.concat(fm.readingSessions).filter((d) => d.duration > 60);
       }
 
-      // 统计阅读状态
-      if (fm.completionDate) {
+      // 统计阅读状态（audit G：与 bookshelf/library 双日期口径统一——
+      // readingDate && completionDate 才算已读；只补完成日期的书在两面板不再状态分叉）
+      if (fm.readingDate && fm.completionDate) {
         stats.readBooks++;
-      } else if (fm.readingDate && !fm.completionDate) {
+      } else if (fm.readingDate) {
         stats.readingBooks++;
       } else {
         stats.unreadBooks++;
@@ -258,13 +268,13 @@ export function calculateReadingStats(books: BookNoteEntry[]): ReadingStats {
           stats.monthlyStats[monthKey].booksRead++;
           stats.monthlyStats[monthKey].totalReadingTime += readingTime;
           stats.monthlyStats[monthKey].totalHighlights += parseInt(fm.highlights) || 0;
-          if (readingProgress >= 100) stats.monthlyStats[monthKey].booksCompleted++;
+          // audit H：booksCompleted 只在 completionDate 桶记一次（下方完成日期统计），
+          // 不再在阅读月按 progress>=100 重复计数
 
           if (!stats.yearlyStats[yearKey]) stats.yearlyStats[yearKey] = emptyYearlyStats();
           stats.yearlyStats[yearKey].booksRead++;
           stats.yearlyStats[yearKey].totalReadingTime += readingTime;
           stats.yearlyStats[yearKey].totalHighlights += parseInt(fm.highlights) || 0;
-          if (readingProgress >= 100) stats.yearlyStats[yearKey].booksCompleted++;
         } catch (dateError) {
           console.warn(`日期解析错误: ${fm.readingDate}`, dateError);
         }
@@ -453,13 +463,13 @@ function calculateMonthlyAverage(monthlyData: any[]): string {
   return (total / monthlyData.length).toFixed(1);
 }
 
-/** 获取当前月统计 */
-function getCurrentMonthStats(monthlyData: any[]) {
-  if (monthlyData.length === 0) return { books: 0, completed: 0 };
-  const current = monthlyData[monthlyData.length - 1];
+/** 获取当前月统计（audit F：按当前年月键直查；当月无数据 → 0，不再取「升序末位」的旧月份数据） */
+function getCurrentMonthStats(monthlyData: any[], now: Date = new Date()) {
+  const key = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`;
+  const current = monthlyData.find((m) => m.month === key);
   return {
-    books: current.booksRead,
-    completed: current.booksCompleted,
+    books: current?.booksRead ?? 0,
+    completed: current?.booksCompleted ?? 0,
   };
 }
 
@@ -490,8 +500,8 @@ export function analyzeTrendDirection(monthlyData: any[]): string {
   return diff > 0 ? '↑' : '↓';
 }
 
-/** 分析阅读趋势（完整） */
-export function analyzeReadingTrends(stats: ReadingStats, bookNotes: BookNoteEntry[]) {
+/** 分析阅读趋势（完整）；now 供测试固定「本月」 */
+export function analyzeReadingTrends(stats: ReadingStats, bookNotes: BookNoteEntry[], now: Date = new Date()) {
   const monthlyData = getMonthlyTrendData(stats); // 升序（旧→新）
   const ascendingRecent = monthlyData.slice(-6); // 统计口径：反转前的升序切片
   const recentMonths = [...ascendingRecent].reverse(); // 最近6个月，仅供图表高亮展示（新→旧）
@@ -499,7 +509,7 @@ export function analyzeReadingTrends(stats: ReadingStats, bookNotes: BookNoteEnt
   return {
     recentMonths,
     monthlyAvg: calculateMonthlyAverage(ascendingRecent),
-    currentMonth: getCurrentMonthStats(ascendingRecent),
+    currentMonth: getCurrentMonthStats(ascendingRecent, now),
     quarterlyAvg: calculateQuarterlyAverage(ascendingRecent),
     completionRate: calculateCompletionRate(stats),
     trendDirection: analyzeTrendDirection(ascendingRecent),
@@ -686,6 +696,33 @@ function groupByMonth(dailyData: Record<string, any>) {
   return monthlyData;
 }
 
+/** 热力图月键全集（升序）：翻月导航 ‹ › 的可切换范围（processHeatmapData 已算全部月度数据） */
+export function getHeatmapMonthKeys(heatmapData: { monthlyData: Record<string, any> }): string[] {
+  return Object.keys(heatmapData?.monthlyData || {}).sort();
+}
+
+/**
+ * 某年 12 个月柱数据（固定 1..12 月，缺月补零）：年卡展开的月柱数据源。
+ * 月桶口径与热力图翻月同源（都按 YYYY-MM 键聚合；本函数读 calculateReadingStats.monthlyStats）。
+ */
+export function getYearMonthBars(
+  monthlyStats: Record<string, any>,
+  year: string,
+): { month: string; label: string; booksRead: number; booksCompleted: number }[] {
+  const bars: { month: string; label: string; booksRead: number; booksCompleted: number }[] = [];
+  for (let m = 1; m <= 12; m++) {
+    const key = `${year}-${pad2(m)}`;
+    const bucket = monthlyStats?.[key];
+    bars.push({
+      month: key,
+      label: `${m}月`,
+      booksRead: bucket?.booksRead || 0,
+      booksCompleted: bucket?.booksCompleted || 0,
+    });
+  }
+  return bars;
+}
+
 /** 计算强度等级 */
 export function calculateIntensityLevel(durationHours: number): number {
   if (durationHours >= 4) return 4;
@@ -826,7 +863,7 @@ function analyzeFocusTimePatterns(sessions: any[]) {
 /** 分析专注度趋势 */
 function analyzeFocusTrend(sessions: any[]) {
   if (sessions.length < 5) {
-    return { trend: '数据不足', description: '需要更多会话数据进行趋势分析', icon: '➖' };
+    return { trend: '数据不足', description: '需要更多会话数据进行趋势分析', icon: 'minus' };
   }
 
   const sortedSessions = [...sessions].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
@@ -840,13 +877,13 @@ function analyzeFocusTrend(sessions: any[]) {
   const trendPercentage = ((recentAvg - earlyAvg) / earlyAvg) * 100;
 
   if (trendPercentage > 20) {
-    return { trend: '显著提升', description: `+${Math.round(trendPercentage)}%`, icon: '📈' };
+    return { trend: '显著提升', description: `+${Math.round(trendPercentage)}%`, icon: 'trending-up' };
   } else if (trendPercentage > 5) {
-    return { trend: '稳步提升', description: `+${Math.round(trendPercentage)}%`, icon: '↗️' };
+    return { trend: '稳步提升', description: `+${Math.round(trendPercentage)}%`, icon: 'arrow-up-right' };
   } else if (trendPercentage < -10) {
-    return { trend: '需要关注', description: `-${Math.round(Math.abs(trendPercentage))}%`, icon: '📉' };
+    return { trend: '需要关注', description: `-${Math.round(Math.abs(trendPercentage))}%`, icon: 'trending-down' };
   } else {
-    return { trend: '保持稳定', description: '0%', icon: '➡️' };
+    return { trend: '保持稳定', description: '0%', icon: 'arrow-right' };
   }
 }
 
@@ -976,7 +1013,7 @@ function getDefaultFocusData() {
     completionRate: 0,
     trend: '暂无趋势',
     trendDescription: '需要更多阅读数据',
-    trendIcon: '➖',
+    trendIcon: 'minus',
     recommendations: '开始记录阅读会话以获得专注度分析',
     consistencyScore: 0,
     efficiencyScore: 0,

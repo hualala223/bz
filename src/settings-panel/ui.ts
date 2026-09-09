@@ -78,7 +78,7 @@ const schemaLoaders: Record<string, () => Promise<SettingsSchema>> = {
   clipping: async () => (await import('../clipping/view')).clippingSettingsSchema(),
   favorites: async () => (await import('../favorites/ui')).favoritesSettingsSchema(),
   password: async () => (await import('../password/ui')).passwordSettingsSchema(),
-  library: async () => (await import('../library/ui')).librarySettingsSchema(),
+  bookshelf: async () => (await import('../bookshelf/settings')).bookshelfSettingsSchema(),
   movie: async () => (await import('../movie/ui')).movieSettingsSchema(),
   review: async () => {
     const { reviewApp } = await import('../review/app');
@@ -134,7 +134,7 @@ export const DOMAINS: DomainDef[] = [
   { id: 'reading-report', name: '阅读报告', icon: DOMAIN_ICONS['reading-report'], desc: '阅读统计', noSettings: true },
 
   { id: 'movie', name: '影视', icon: 'film', desc: '影视目录与海报', schemaLoader: schemaLoaders.movie },
-  { id: 'library', name: '书库', icon: 'book-open', desc: '藏书与读书笔记', schemaLoader: schemaLoaders.library },
+  { id: 'bookshelf', name: '书库', icon: 'book-open', desc: '藏书与读书笔记', schemaLoader: schemaLoaders.bookshelf },
   { id: 'review', name: '复习计划', icon: DOMAIN_ICONS.review, desc: '间隔重复与做题', schemaLoader: schemaLoaders.review },
   { id: 'quiz', name: '做题家', icon: 'graduation-cap', desc: '复习出题与做题', noSettings: true },
   { id: 'secondbrain', name: '第二大脑', icon: DOMAIN_ICONS.secondbrain, desc: '嵌入检索与对话', schemaLoader: schemaLoaders.secondbrain },
@@ -154,7 +154,7 @@ export const DOMAINS: DomainDef[] = [
 export const NAV_SECS: Array<{ title: string; ids: string[] }> = [
   { title: '基础', ids: ['global', 'appearance', 'ai'] },
   { title: '记录', ids: ['diary', 'diary-wall', 'todo', 'belongings', 'clipping', 'favorites'] },
-  { title: '媒体与知识', ids: ['movie', 'library', 'review', 'secondbrain', 'literature'] },
+  { title: '媒体与知识', ids: ['movie', 'bookshelf', 'review', 'secondbrain', 'literature'] },
   { title: '工具', ids: ['pomodoro', 'password', 'encrypt', 'smartcat'] },
 ];
 

@@ -25,7 +25,7 @@ import { parseLocalDay } from '../home/weekly';
 import { parseFile, isEncryptedEntry } from '../diary/parser';
 import { rebuildItems } from '../movie/data';
 import { STATUS_WATCHED } from '../movie/constants';
-import { getBookItems, loadEpubBookItems } from '../library/items';
+import { scanMarkdownBooks, loadEpubItems } from '../bookshelf/data';
 
 /** 痕迹归属域（与 DOMAIN_ICONS 键一致） */
 export type RecapDomain = 'diary' | 'cinema' | 'bookshelf' | 'todo' | 'pomodoro';
@@ -339,16 +339,16 @@ export async function collectRecap(app: App, now: number = Date.now()): Promise<
 
   // 读书：md + EPUB 读完；在读且笔记改动在今天 → 读到 N%（mtime 从宽口径；本地 library 域口径）
   try {
-    for (const b of getBookItems(app)) {
+    for (const b of scanMarkdownBooks(app)) {
       const finished = parseLocalDay(b.completionDate) === range.start;
       const mtime = numOr0((b.file as { stat?: { mtime?: unknown } } | null)?.stat?.mtime);
       if (finished) {
         sources.books.push({ title: b.title, finished: true, progress: null, ts: mtime });
-      } else if (b.status === '在读' && b.readingProgress > 0 && inRange(mtime, range)) {
-        sources.books.push({ title: b.title, finished: false, progress: b.readingProgress, ts: mtime });
+      } else if (b.status === '在读' && b.progress > 0 && inRange(mtime, range)) {
+        sources.books.push({ title: b.title, finished: false, progress: b.progress, ts: mtime });
       }
     }
-    for (const b of await loadEpubBookItems(app)) {
+    for (const b of await loadEpubItems(app)) {
       if (parseLocalDay(b.completionDate) === range.start) {
         sources.books.push({ title: b.title, finished: true, progress: null, ts: range.start });
       }

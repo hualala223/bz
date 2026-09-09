@@ -36,7 +36,7 @@ const SOURCES = [
   "src/review/styles.css",
   "src/quiz/styles.css",
   "src/pomodoro/styles.css",
-  "src/library/styles.css",
+  "src/bookshelf/styles.css",
   "src/attach/styles.css",
   "src/encrypt/styles.css",
   "src/belongings/styles.css",

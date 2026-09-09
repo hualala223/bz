@@ -15,7 +15,7 @@ import type { CheckIssue, CheckOpts, CheckResult, CheckSection } from './types';
 import { fileExists, readRawJson, jsonScanTargets } from './files';
 import { tryGetSettings } from '../core/settings-provider';
 import { rebuildItems } from '../movie/data';
-import { getBookItems, loadEpubBookItems } from '../library/items';
+import { scanMarkdownBooks, loadEpubItems } from '../bookshelf/data';
 
 /** 默认剪藏目录（clipbook 域 clipDir 同默认：articleDirectory 设置可改） */
 function clipDirOf(): string {
@@ -58,9 +58,9 @@ export async function checkOrphans(app: App, opts: CheckOpts = {}): Promise<Chec
     }
   }
 
-  // 2) 书库：md 书封面缺失 / EPUB 文件缺失（本地 library 域口径）
+  // 2) 书库：md 书封面缺失 / EPUB 文件缺失（bookshelf 域口径）
   {
-    const mdBooks = getBookItems(app);
+    const mdBooks = scanMarkdownBooks(app);
     for (const b of mdBooks) {
       if (opts.isCancelled?.()) return null;
       scanned += 1;
@@ -74,12 +74,11 @@ export async function checkOrphans(app: App, opts: CheckOpts = {}): Promise<Chec
       }
       await opts.tick?.(`书库 · ${b.title}`);
     }
-    const epubs = await loadEpubBookItems(app);
+    const epubs = await loadEpubItems(app);
     for (const b of epubs) {
       if (opts.isCancelled?.()) return null;
       scanned += 1;
-      // 本地 EPUB 条目：file.path 即 EPUB 的 vault 路径（buildEpubBookItem 口径）
-      const p = b.isEpub ? String((b.file as { path?: unknown })?.path || '').trim() : '';
+      const p = (b.epubVaultPath || '').trim();
       if (p && !fileExists(app, p)) {
         issues.push({
           severity: 'warn',

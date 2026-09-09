@@ -27,9 +27,9 @@ vi.mock('../../src/movie', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   unloadMovie: vi.fn(),
 }));
-vi.mock('../../src/library', async (importOriginal) => ({
+vi.mock('../../src/bookshelf', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  unloadLibrary: vi.fn(),
+  unloadBookshelf: vi.fn(),
 }));
 vi.mock('../../src/news', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -56,7 +56,7 @@ import { unloadBelongings } from '../../src/belongings';
 import { unloadFavorites } from '../../src/favorites';
 import { unloadReview } from '../../src/review';
 import { unloadMovie } from '../../src/movie';
-import { unloadLibrary } from '../../src/library';
+import { unloadBookshelf } from '../../src/bookshelf';
 import { unloadNewsReader } from '../../src/news';
 import { unloadArticleView } from '../../src/clipping';
 import { unloadAutoSummary } from '../../src/auto-summary';
@@ -108,7 +108,7 @@ function clearSpies(): void {
     unloadFavorites,
     unloadReview,
     unloadMovie,
-    unloadLibrary,
+    unloadBookshelf,
     unloadNewsReader,
     unloadArticleView,
     unloadAutoSummary,
@@ -135,7 +135,7 @@ describe('onunload 卸载接线补全（fix(main)）', () => {
     expect(unloadFavorites).toHaveBeenCalledTimes(1);
     expect(unloadReview).toHaveBeenCalledTimes(1);
     expect(unloadMovie).toHaveBeenCalledTimes(1);
-    expect(unloadLibrary).toHaveBeenCalledTimes(1);
+    expect(unloadBookshelf).toHaveBeenCalledTimes(1);
     expect(unloadNewsReader).toHaveBeenCalledTimes(1);
     expect(unloadArticleView).toHaveBeenCalledTimes(1);
     expect(unloadAutoSummary).toHaveBeenCalledTimes(1);

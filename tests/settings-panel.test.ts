@@ -42,7 +42,7 @@ describe('设置面板域清单（本地口径）', () => {
   it('包含本地 20 域与上游并入新域，且不含上游独占域', () => {
     const ids = DOMAINS.map((d) => d.id);
     // 本地既有域
-    for (const id of ['global', 'ai', 'diary', 'todo', 'belongings', 'clipping', 'favorites', 'movie', 'library', 'review', 'secondbrain', 'pomodoro', 'password', 'encrypt', 'literature', 'smartcat']) {
+    for (const id of ['global', 'ai', 'diary', 'todo', 'belongings', 'clipping', 'favorites', 'movie', 'bookshelf', 'review', 'secondbrain', 'pomodoro', 'password', 'encrypt', 'literature', 'smartcat']) {
       expect(ids, `缺本地域 ${id}`).toContain(id);
     }
     // 上游并入新域
@@ -50,7 +50,7 @@ describe('设置面板域清单（本地口径）', () => {
       expect(ids, `缺并入域 ${id}`).toContain(id);
     }
     // 上游独占域不得出现（todo 已随 ADR-0092 换血并入，不再属上游独占）
-    for (const id of ['memo', 'cinema', 'bookshelf', 'clipbook', 'recap', 'checkup']) {
+    for (const id of ['memo', 'cinema', 'clipbook', 'recap', 'checkup']) {
       expect(ids, `不应出现上游独占域 ${id}`).not.toContain(id);
     }
   });
@@ -59,7 +59,7 @@ describe('设置面板域清单（本地口径）', () => {
     const nameOf = (id: string) => DOMAINS.find((d) => d.id === id)?.name;
     expect(nameOf('todo')).toBe('待办');
     expect(nameOf('movie')).toBe('影视');
-    expect(nameOf('library')).toBe('书库');
+    expect(nameOf('bookshelf')).toBe('书库');
     expect(nameOf('password')).toBe('密码本');
     expect(nameOf('encrypt')).toBe('保险箱');
     expect(nameOf('diary-wall')).toBe('回忆墙');

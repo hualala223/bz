@@ -108,8 +108,8 @@ var BZR_home = (() => {
     { id: "clipping", commandId: "bz-clipping-open", name: "剪藏本", sub: "未读流与剪藏", icon: iconOf("clipping") },
     // 文献盒（literature 域，ADR-0072）：文献笔记列表 + 视频/术语录入（补内容域曝光位）
     { id: "literature", commandId: "bz-literature-open", name: "文献盒", sub: "文献笔记与录入", icon: iconOf("literature") },
-    // 书库（library 域）：藏书与读书笔记入口
-    { id: "bookshelf", commandId: "bz-library-open", name: "书库", sub: "藏书与读书笔记", icon: iconOf("bookshelf") },
+    // 书库（bookshelf 域换血接替 library；内部 id 保持兼容 home.json 钉选）
+    { id: "bookshelf", commandId: "bz-bookshelf-open", name: "书库", sub: "藏书与读书笔记", icon: iconOf("bookshelf") },
     { id: "wall", commandId: "bz-diary-wall-open", name: "回忆墙", sub: "相片墙浏览日记", icon: iconOf("wall") },
     { id: "belongings", commandId: "bz-belongings-open", name: "归物本", sub: "物品登记", icon: iconOf("belongings") },
     { id: "attach", commandId: "bz-attach-move", name: "移动附件", sub: "附件归位", icon: iconOf("attach") },

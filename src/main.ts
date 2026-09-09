@@ -26,8 +26,10 @@ import { openArticleView, unloadArticleView } from './clipping';
 import { openNewsReader, unloadNewsReader } from './news';
 import { openPasswordManager, addPasswordEntry, generatePassword, quickCopyPassword, unloadPassword } from './password';
 import { openFavoritesPanel, addFavoriteItem, unloadFavorites } from './favorites';
-import { openLibrary, openBookNotes, unloadLibrary } from './library';
-import { showReadingReport, unloadReadingReport } from './reading-report';
+// 书架墙（bookshelf 域，上游并存式新域终局换血：数据同源，旧 library 退役）
+import { openBookshelf, openBookshelfReport, unloadBookshelf } from './bookshelf';
+// 阅读数据分析报告（读书报告内嵌化 ADR-0091：独立弹窗退役，报告为书架墙面板内视图）
+import { unloadReadingReport } from './reading-report';
 import { openMovieManager, addMovieItem, unloadMovie } from './movie';
 // 影视分析报告（独立域，ADR-0048）
 import { openMovieReport, unloadMovieReport } from './movie-report';
@@ -102,11 +104,10 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   // 收藏本
   { id: 'bz-favorites-open', name: '收藏本', icon: 'star', callback: () => openFavoritesPanel(getApp()) },
   { id: 'bz-favorites-add', name: '加收藏', icon: 'bookmark', callback: () => addFavoriteItem(getApp()) },
-  // 书库
-  { id: 'bz-library-open', name: '书库', icon: 'library', callback: () => openLibrary(getApp()) },
-  { id: 'bz-book-notes-open', name: '读书笔记', icon: 'book-open', callback: () => openBookNotes(getApp()) },
-  // 阅读数据分析报告（t2：阅读分析报告 → 阅读数据分析报告，术语随 CONTEXT.md）
-  { id: 'bz-reading-report-open', name: '阅读数据分析报告', icon: 'bar-chart-3', callback: () => showReadingReport(getApp()) },
+  // 书架墙（bookshelf 域：书脊墙 1:1，读书笔记/阅读报告均内嵌面板内）
+  { id: 'bz-bookshelf-open', name: '书库', icon: 'book-open', callback: () => openBookshelf(getApp()) },
+  // 阅读分析报告（上游 ADR-0091 内嵌化：与书架墙面板内报告视图同一去向）
+  { id: 'bz-reading-report-open', name: '阅读分析报告', icon: 'bar-chart-3', callback: () => openBookshelfReport(getApp()) },
   // 影视
   { id: 'bz-movie-open', name: '影视', icon: 'film', callback: () => openMovieManager(getApp()) },
   { id: 'bz-movie-add', name: '加影视', icon: 'clapperboard', callback: () => addMovieItem(getApp()) },
@@ -320,8 +321,8 @@ export default class BzPlugin extends Plugin {
     unloadReview();
     unloadMovie();
     unloadMovieReport();
+    unloadBookshelf();
     unloadReadingReport();
-    unloadLibrary();
     unloadNewsReader();
     unloadArticleView();
     unloadAutoSummary();

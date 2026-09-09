@@ -12,7 +12,7 @@ import type { App } from 'obsidian';
 import { storageDir, storageFile } from '../core/storage';
 import { tryGetSettings } from '../core/settings-provider';
 import { getStoragePath } from '../favorites/config';
-import { resolveWeaveDataPath, DEFAULT_WEAVE_DATA_FILE as WEAVE_DATA_FILE } from '../library/items';
+import { resolveWeaveDataPath, WEAVE_DATA_FILE } from '../bookshelf/data';
 
 /** 冲突留档目录（与 core/storage D1 原语 3 的 CORRUPT_BACKUP_DIR 同名；勿改，合并时对齐） */
 export const CORRUPT_DIR = 'CONFIG/.CORRUPT';

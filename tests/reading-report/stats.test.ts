@@ -13,6 +13,7 @@ import {
   calculateBalanceScore, getSuggestedCategories, analyzeInteractionPattern,
   analyzeConnectionLevel, extractNotesInteractions, getAllBookNotes,
   analyzeReadingTrends, analyzeReadingCategories,
+  getHeatmapMonthKeys, getYearMonthBars,
 } from '../../src/reading-report/stats';
 import { setSettingsProvider } from '../../src/core/settings-provider';
 
@@ -30,7 +31,7 @@ function localIsoDate(ts: number): string {
 describe('calculateReadingStats', () => {
   it('状态计数 + 汇总 + 进度分布', () => {
     const books = [
-      book({ completionDate: '2025-07-01', readingProgress: 100, readingTime: 3600000, highlights: 10, thinks: 2, dialogue: 1, outlinks: 3, pages: 300, wordCount: 80000 }),
+      book({ readingDate: '2025-05-01', completionDate: '2025-07-01', readingProgress: 100, readingTime: 3600000, highlights: 10, thinks: 2, dialogue: 1, outlinks: 3, pages: 300, wordCount: 80000 }),
       book({ readingDate: '2025-06-01', readingProgress: 50 }),
       book({ readingProgress: 0 }),
     ];
@@ -49,6 +50,14 @@ describe('calculateReadingStats', () => {
     expect(s.progressDistribution.unread).toBe(1);
   });
 
+  it('audit G：状态口径与 bookshelf/library 双日期统一——只补 completionDate 不算已读', () => {
+    // 回归：旧实现「有 completionDate 即已读」，与两面板（双日期口径）状态分叉
+    const s = calculateReadingStats([book({ completionDate: '2025-07-01', readingProgress: 100 })]);
+    expect(s.readBooks).toBe(0);
+    expect(s.readingBooks).toBe(0);
+    expect(s.unreadBooks).toBe(1);
+  });
+
   it('阅读速度均值（totalReadingTime>0）', () => {
     const books = [book({ completionDate: '2025-07-01', readingTime: 3600000, pages: 60, wordCount: 12000 })];
     const s = calculateReadingStats(books);
@@ -62,8 +71,9 @@ describe('calculateReadingStats', () => {
     expect(s.monthlyStats['2025-06'].booksRead).toBe(1);
     expect(s.monthlyStats['2025-07'].booksCompleted).toBe(1);
     expect(s.yearlyStats['2025'].booksRead).toBe(1);
-    // 源码行为：completed 书在阅读月+完成月各计一次 booksCompleted
-    expect(s.yearlyStats['2025'].booksCompleted).toBe(2);
+    // audit H：completed 只在完成日期桶记一次（阅读月不再按 progress>=100 重复计数）
+    expect(s.yearlyStats['2025'].booksCompleted).toBe(1);
+    expect(s.monthlyStats['2025-06'].booksCompleted).toBe(0);
   });
 
   it('作者统计', () => {
@@ -178,6 +188,31 @@ describe('热力图', () => {
     expect(calculateIntensityLevel(0.1)).toBe(0);
   });
 
+  it('getHeatmapMonthKeys：月键全集升序（翻月 ‹ › 可切换范围）', () => {
+    const hm = processHeatmapData([
+      { start: '2025-06-01T08:00:00', duration: 600 },
+      { start: '2025-01-15T08:00:00', duration: 600 },
+      { start: '2024-12-24T08:00:00', duration: 600 },
+    ]);
+    expect(getHeatmapMonthKeys(hm)).toEqual(['2024-12', '2025-01', '2025-06']);
+    expect(getHeatmapMonthKeys({ monthlyData: {} })).toEqual([]);
+  });
+
+  it('getYearMonthBars：固定 12 个月柱、缺月补零（年卡展开数据源，与热力图同月桶口径）', () => {
+    const monthly = {
+      '2025-01': { booksRead: 2, booksCompleted: 1 },
+      '2025-07': { booksRead: 5, booksCompleted: 3 },
+    };
+    const bars = getYearMonthBars(monthly, '2025');
+    expect(bars.length).toBe(12);
+    expect(bars[0]).toEqual({ month: '2025-01', label: '1月', booksRead: 2, booksCompleted: 1 });
+    expect(bars[6]).toEqual({ month: '2025-07', label: '7月', booksRead: 5, booksCompleted: 3 });
+    expect(bars[11].label).toBe('12月');
+    // 缺月补零
+    expect(bars[3].booksRead).toBe(0);
+    expect(bars[3].booksCompleted).toBe(0);
+  });
+
   it('analyzeFocusConsistency：<5 会话 → 5 分数据不足', () => {
     expect(analyzeFocusConsistency([{ start: '2025-01-01T08:00:00', duration: 600 }]).score).toBe(5);
   });
@@ -284,7 +319,7 @@ describe('analyzeReadingTrends 趋势修复（P1-17）', () => {
   }
 
   it('升序 [1,1,1,2,2,9]：本月=9、季均≈4.33、方向 ↑；recentMonths 反转仅供图表', () => {
-    const t = analyzeReadingTrends(makeStats([1, 1, 1, 2, 2, 9]), []);
+    const t = analyzeReadingTrends(makeStats([1, 1, 1, 2, 2, 9]), [], new Date(2025, 5, 15)); // now=2025-06
     expect(t.currentMonth.books).toBe(9);
     expect(t.quarterlyAvg).toBe('4.3'); // (2+2+9)/3 ≈ 4.33
     expect(t.monthlyAvg).toBe('2.7');   // 16/6 ≈ 2.67
@@ -297,9 +332,25 @@ describe('analyzeReadingTrends 趋势修复（P1-17）', () => {
   });
 
   it('反向样例 [9,2,2,1,1,1]：本月=1、方向 ↓（旧实现会给出全反结论）', () => {
-    const t = analyzeReadingTrends(makeStats([9, 2, 2, 1, 1, 1]), []);
+    const t = analyzeReadingTrends(makeStats([9, 2, 2, 1, 1, 1]), [], new Date(2025, 5, 15)); // now=2025-06
     expect(t.currentMonth.books).toBe(1);
     expect(t.trendDirection).toBe('↓');
+  });
+
+  it('audit F：当月无数据 → 本月阅读显示 0，不再取「升序末位」旧月份数据', () => {
+    // 数据止于 2025-06，「现在」是 2026-09：旧实现把 2025-06 的 9 本当「本月」
+    const t = analyzeReadingTrends(makeStats([1, 1, 1, 2, 2, 9]), [], new Date(2026, 8, 4));
+    expect(t.currentMonth.books).toBe(0);
+    expect(t.currentMonth.completed).toBe(0);
+    // 其余统计口径不受影响
+    expect(t.quarterlyAvg).toBe('4.3');
+    expect(t.trendDirection).toBe('↑');
+  });
+
+  it('audit F：当月有数据 → 按当前年月键直查对应桶', () => {
+    const t = analyzeReadingTrends(makeStats([1, 1, 1, 2, 2, 9]), [], new Date(2025, 5, 30));
+    expect(t.currentMonth.books).toBe(9);
+    expect(t.currentMonth.completed).toBe(0);
   });
 });
 
@@ -343,5 +394,40 @@ describe('getAllBookNotes 集成', () => {
     };
     const r = getAllBookNotes(app as any);
     expect(r.map((b) => b.file.path)).toEqual(['书库/A.md']);
+  });
+
+  it('口径：只统计书库目录——库外 book 标签笔记不混入报告（对齐书架墙 scanMarkdownBooks）', () => {
+    setSettingsProvider(() => ({}) as any); // 目录缺省回落「书库」
+    const files = [
+      { path: '书库/库内.md' },     // 书库目录 + book → 收
+      { path: '书库/子/嵌套.md' },  // 书库子目录 + book → 收
+      { path: 'Inbox/笔记.md' },    // 库外 + book 标签 → 不收（内嵌化口径拍板）
+      { path: '读书.md' },          // 同名前缀目录/文件（非「书库/」内）→ 不收
+    ];
+    const app = {
+      vault: { getMarkdownFiles: () => files },
+      metadataCache: {
+        getFileCache: () => ({ frontmatter: { tags: ['book'] } }),
+      },
+    };
+    const r = getAllBookNotes(app as any);
+    expect(r.map((b) => b.file.path)).toEqual(['书库/库内.md', '书库/子/嵌套.md']);
+  });
+
+  it('口径：目录本身是单个 md 笔记（书库.md）时收录；自定义目录同规则', () => {
+    setSettingsProvider(() => ({ bookshelfFolderPath: '我的书' }) as any);
+    const files = [
+      { path: '我的书.md' },        // 目录本身单文件 → 收
+      { path: '我的书/里.md' },     // 目录下 → 收
+      { path: '别处.md' },          // 库外 → 不收
+    ];
+    const app = {
+      vault: { getMarkdownFiles: () => files },
+      metadataCache: {
+        getFileCache: () => ({ frontmatter: { tags: ['book'] } }),
+      },
+    };
+    const r = getAllBookNotes(app as any);
+    expect(r.map((b) => b.file.path)).toEqual(['我的书.md', '我的书/里.md']);
   });
 });

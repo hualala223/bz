@@ -176,6 +176,9 @@ _Avoid_: 错题本（无独立收藏视图）
 **待办 (Todo)**: 上游线 C2 裁决整体换血的新域（ADR-0092）——原备忘录（memo）域退役删除，todo 为 `memo.json` **唯一属主**（UI/交互/写盘/引用同步/被动捕获全归本域；数据与字段同源零迁移）。UI 为「场景工作台」：左场景栏（全部/今日/重要+自定义场景）+ 条目列表 + 搜索排序 + 面板拖拽缩放（尺寸记忆）+ 皮肤系统（`todoSkin`）。命令 `bz-todo-open`/`bz-todo-add`；ribbon「待办」。被动捕获：启动自动弹出/打开笔记提醒（`autoPopupOnStart`/`openNoteReminder` 与旧 memo 共键）。引用同步 `todo/file-sync.ts` 只管 memo.json（收藏本同步仍走 favorites 域本地保留）。设置键：`todoPanelWidth/Height`（尺寸记忆）、`todoSkin`、`todoMobileDefaultFullscreen`（默认关）+ 原 memo 场景/默认值键沿用。
 _Avoid_: 备忘录（域已退役；历史文档中「备忘录面板/加备忘」均指本域旧形态）
 
+**书架墙 (Bookshelf)**: 上游线 C3 裁决整体换血的新域（ADR-0083/0096/0098/0099）——原书库（library）域退役删除，bookshelf 独立承担书库 UI，数据同源零迁移（`书库/*.md` + EPUB weave-data.json；`bookshelfFolderPath` 空时运行时回落旧 `libraryFolderPath` 存量值）。书脊墙 1:1 布局（点书脊弹借书卡）、五肤×亮暗（`bookshelfSkin`）、筛选排序管道、移动端同构窄墙。**读书报告内嵌化**（ADR-0091）：`bz-reading-report-open` 打开面板内报告视图（独立弹窗退役）。**读书笔记窗口**（notes.ts/notes-ui.ts，逻辑自 library 逐字平移并修复弃用 activeLeaf 聚焦）：md 划线/批注树、EPUB 划线+想法+weave-cfi 继续读深链；批注写盘 vault.process 原子读改写。命令 `bz-bookshelf-open`/`bz-reading-report-open`。命令 `bz-book-notes-open` 随 library 退役（笔记窗口从面板进入）。
+_Avoid_: 书库面板（指旧 library 网格，已退役）
+
 **内容首页 (Home)**: 上游线（yeshimei/bz）并入的新只读聚合域（命令 `bz-home-open`）——各域数据快照的活动河/周历/域卡统计与磁贴入口；数据偏好落 `CONFIG/STORAGE/home.json`（钉选）。域卡/活动河消费本地域数据层（movie rebuildItems / library getBookItems+loadEpubBookItems / review reviewApp）。磁贴命令 id 映射本地域（影视=bz-movie-open、剪藏本=bz-clipping-open、书库=bz-library-open），内部 id（cinema/bookshelf/clipping）保持上游以兼容 home.json 钉选。
 _Avoid_: 主页（与入口页混淆）、homepage
 

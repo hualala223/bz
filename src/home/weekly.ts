@@ -20,7 +20,7 @@ import { tryGetSettings } from '../core/settings-provider';
 import { storageFile } from '../core/storage';
 import { rebuildItems } from '../movie/data';
 import { STATUS_WATCHED } from '../movie/constants';
-import { getBookItems } from '../library/items';
+import { scanMarkdownBooks } from '../bookshelf/data';
 import { PomodoroDataManager } from '../pomodoro/data';
 
 /** 周窗口（本地毫秒）：start = 本周一 0 点（含），end = 下周一 0 点（不含） */
@@ -207,7 +207,7 @@ export async function collectWeeklyStat(app: App, now: number = Date.now()): Pro
 
   // 读完：书库 md 书目 completionDate 落本周（口径同快照在读徽标的 md 书目）
   try {
-    out.booksFinished = countBooksFinished(getBookItems(app), range);
+    out.booksFinished = countBooksFinished(scanMarkdownBooks(app), range);
   } catch {
     /* 目录缺失等：回落 0 */
   }

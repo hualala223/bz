@@ -74,9 +74,8 @@ const WHITELIST: Array<{ file: RegExp; reason: string; /** 防回归哨兵：预
     reason: '影视笔记 md 用户文档写（AI 推荐一键想看建条，含防重名前置拦截）',
   },
   {
-    // 本地口径：上游 bookshelf/notes.ts 对应本地 library/notes.ts + epub-notes.ts
-    file: /^src\/library\/(notes|epub-notes)\.ts$/,
-    reason: '书评/划线/读书笔记 md 用户笔记写，vault.process 原子读改写（Obsidian 内建单步语义）',
+    file: /^src\/bookshelf\/notes\.ts$/,
+    reason: '书评/划线 md 用户笔记写，vault.process 原子读改写（audit D 已收口，Obsidian 内建单步语义）',
   },
   {
     file: /^src\/auto-summary\/processor\.ts$/,

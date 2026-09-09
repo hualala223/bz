@@ -395,3 +395,18 @@
 - [x] 适配：todo/data.ts 的 cinemaFolderPath 引用改 movieFolderPath（本地影视目录键）；todo/settings 文案两处过本地 lint（去括号/收短）；移动端组描述恢复本地默认文案（文案冻结口径）
 - [x] 测试：smoke（ribbon/命令名/常驻域/默认抽查）、mobile（OFF memo→todo）、settings-schema（全屏键参数）、settings-tab（todoFilePath 退出迁移提示）、settings-panel（域清单）、lint-a（目标 memo→todo）全部同步
 - [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署
+
+## 上游线 C3 裁决落地 — bookshelf 书架墙整体换血，library 书库域退役
+
+**状态：已交付**（2026-09-09，用户裁决：看书/做笔记经字段级验证不受影响，直接换血不设并存期）
+
+- [x] 笔记功能等价验证：parseBookNotes 逐字一致；updateComment 仅签名异步化（写盘 vault.process 原子读改写不变）；跳转聚焦修复弃用 activeLeaf；EPUB weave-cfi 深链协议本地本就有（与 Weave EpubLinkService 对齐）
+- [x] 换血：src/bookshelf（18 文件：书脊墙/借书卡/五肤×亮暗/notes/notes-ui/EPUB 分类 v3/layouts 布局层）+ tests/bookshelf（5）并入；src/library + tests/library 退役删除
+- [x] 连带采纳 reading-report 内嵌化（ADR-0091）：上游 3 文件 + 测试；bz-reading-report-open 打开面板内报告视图（正名「阅读分析报告」）
+- [x] settings.ts：删 libraryFolderPath/libraryMobileDefaultFullscreen；加 bookshelfFolderPath('')/bookshelfMobileDefaultFullscreen(true)/bookshelfDefaultSide('all')/bookshelfSortMode('date')/bookshelfSkin('nordic')；folderPath 空时回落旧键存量值（零感知迁移）
+- [x] 数据消费点回接上游：home/river+weekly、recap/aggregate、checkup/files+checks-orphans 的书目读取从 library/items 改回 bookshelf/data（scanMarkdownBooks/loadEpubItems/progress/epubVaultPath）；weave 路径常量回 bookshelf/data
+- [x] main.ts：命令 bz-bookshelf-open（书库）/bz-reading-report-open（阅读分析报告→openBookshelfReport）；bz-book-notes-open 退役（笔记窗口从面板进）；onunload unloadBookshelf
+- [x] settings-panel：bookshelf 行/loader 换血；home 磁贴 commandId bz-bookshelf-open
+- [x] 工程同步：build-css SOURCES library→bookshelf；d3-write-gate 白名单回 bookshelf/notes；render-purity PREVIEW_DOMAINS 加回 bookshelf（5 域）
+- [x] 测试同步：smoke（白名单/命令名/默认抽查）、mobile（ON library→bookshelf）、lint-b（目标 library→bookshelf）、settings-panel（域清单）
+- [x] 门禁：tsc 0 错 + 全量 4218 测试绿 + 构建部署
