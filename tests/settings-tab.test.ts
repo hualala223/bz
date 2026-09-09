@@ -315,7 +315,8 @@ describe('storagePath 迁移（ADR-0009）', () => {
     expect(p.settings.storagePath).toBe('CONFIG/STORAGE');
     expect(getNoticeMessages().length).toBe(1);
     const msg = getNoticeMessages()[0] as string;
-    expect(msg).toContain('todoFilePath');
+    // 上游 ADR-0092：todoFilePath 废弃键已随 memo→todo 换血退出迁移清单，不再进提示
+    expect(msg).not.toContain('todoFilePath');
     expect(msg).toContain('pwStoragePath');
   });
 

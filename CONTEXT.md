@@ -173,6 +173,9 @@ _Avoid_: 错题本（无独立收藏视图）
 
 **获取模型名 (Fetch Models)**: 上游线 P5 移植（AI 设置组尾按钮，ticket 173）——按当前 AI 服务商拉取 OpenAI 兼容 `/models` 列表弹选择器回填该服务商模型行；`core/ai-models.ts`（本地五家静态端点表，与 getAIProvider 逐字对齐）+ `core/settings-model-picker.ts`。上游的 per-provider 覆盖 registry（issue 170/171）未并入。
 
+**待办 (Todo)**: 上游线 C2 裁决整体换血的新域（ADR-0092）——原备忘录（memo）域退役删除，todo 为 `memo.json` **唯一属主**（UI/交互/写盘/引用同步/被动捕获全归本域；数据与字段同源零迁移）。UI 为「场景工作台」：左场景栏（全部/今日/重要+自定义场景）+ 条目列表 + 搜索排序 + 面板拖拽缩放（尺寸记忆）+ 皮肤系统（`todoSkin`）。命令 `bz-todo-open`/`bz-todo-add`；ribbon「待办」。被动捕获：启动自动弹出/打开笔记提醒（`autoPopupOnStart`/`openNoteReminder` 与旧 memo 共键）。引用同步 `todo/file-sync.ts` 只管 memo.json（收藏本同步仍走 favorites 域本地保留）。设置键：`todoPanelWidth/Height`（尺寸记忆）、`todoSkin`、`todoMobileDefaultFullscreen`（默认关）+ 原 memo 场景/默认值键沿用。
+_Avoid_: 备忘录（域已退役；历史文档中「备忘录面板/加备忘」均指本域旧形态）
+
 **内容首页 (Home)**: 上游线（yeshimei/bz）并入的新只读聚合域（命令 `bz-home-open`）——各域数据快照的活动河/周历/域卡统计与磁贴入口；数据偏好落 `CONFIG/STORAGE/home.json`（钉选）。域卡/活动河消费本地域数据层（movie rebuildItems / library getBookItems+loadEpubBookItems / review reviewApp）。磁贴命令 id 映射本地域（影视=bz-movie-open、剪藏本=bz-clipping-open、书库=bz-library-open），内部 id（cinema/bookshelf/clipping）保持上游以兼容 home.json 钉选。
 _Avoid_: 主页（与入口页混淆）、homepage
 

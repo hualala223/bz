@@ -73,7 +73,7 @@ const schemaLoaders: Record<string, () => Promise<SettingsSchema>> = {
   appearance: async () => (await import('./schema')).appearanceSettingsSchema(),
   diary: async () => (await import('../diary/ui/panel')).diarySettingsSchema(),
   'diary-wall': async () => (await import('../diary-wall/settings')).diaryWallSettingsSchema(),
-  memo: async () => (await import('../memo/ui')).memoSettingsSchema(),
+  todo: async () => (await import('../todo/settings')).todoSettingsSchema(),
   belongings: async () => (await import('../belongings/ui')).belongingSettingsSchema(),
   clipping: async () => (await import('../clipping/view')).clippingSettingsSchema(),
   favorites: async () => (await import('../favorites/ui')).favoritesSettingsSchema(),
@@ -126,7 +126,7 @@ export const DOMAINS: DomainDef[] = [
   { id: 'ai', name: 'AI', icon: DOMAIN_ICONS.ai, desc: 'AI 服务商与模型配置', schemaLoader: schemaLoaders.ai },
   { id: 'diary', name: '日记本', icon: DOMAIN_ICONS.diary, desc: '日记目录、显示与默认视图', schemaLoader: schemaLoaders.diary },
   { id: 'diary-wall', name: '回忆墙', icon: DOMAIN_ICONS['diary-wall'], desc: '回忆墙媒体视图（只读）', schemaLoader: schemaLoaders['diary-wall'] },
-  { id: 'memo', name: '备忘录', icon: DOMAIN_ICONS.memo, desc: '备忘录与待办条目', schemaLoader: schemaLoaders.memo },
+  { id: 'todo', name: '待办', icon: DOMAIN_ICONS.todo, desc: '待办工作台与提醒（memo.json）', schemaLoader: schemaLoaders.todo },
   { id: 'belongings', name: '归物本', icon: DOMAIN_ICONS.belongings, desc: '物品登记与查找', schemaLoader: schemaLoaders.belongings },
   { id: 'clipping', name: '剪藏本', icon: DOMAIN_ICONS.clipping, desc: '剪藏笔记与阅读口径', schemaLoader: schemaLoaders.clipping },
   { id: 'news', name: '聚合讯', icon: 'rss', desc: '订阅未读流', noSettings: true },
@@ -153,7 +153,7 @@ export const DOMAINS: DomainDef[] = [
  *  id 口径 = DOMAINS 的 id（本地域 id：备忘录 memo/影视 movie/书库 library）。导出供回归测试断言。 */
 export const NAV_SECS: Array<{ title: string; ids: string[] }> = [
   { title: '基础', ids: ['global', 'appearance', 'ai'] },
-  { title: '记录', ids: ['diary', 'diary-wall', 'memo', 'belongings', 'clipping', 'favorites'] },
+  { title: '记录', ids: ['diary', 'diary-wall', 'todo', 'belongings', 'clipping', 'favorites'] },
   { title: '媒体与知识', ids: ['movie', 'library', 'review', 'secondbrain', 'literature'] },
   { title: '工具', ids: ['pomodoro', 'password', 'encrypt', 'smartcat'] },
 ];

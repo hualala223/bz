@@ -382,3 +382,16 @@
 - [x] dev 预览包监听补全：esbuild dev 段挂 watchPreview（render.ts 变化重出 prototype-render.js；P7 此前只挂 production 段）
 - [x] 明确不做：A1 移除命令（属 ticket 168 退役的 F2 命令组）、A2 queue.ts（无消费点死代码）、A3 面板样式（无消费点）、P4 fav（消费方在未并入的三栏）、F1 满血 FSRS（行为变更，违背「不影响现有功能」约束）
 - [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署
+
+## 上游线 C2 裁决落地 — todo 待办域整体换血，memo 域退役（ADR-0092）
+
+**状态：已交付**（2026-09-09，用户裁决：「直接全部换成他的，尚未用过该功能」）
+
+- [x] 数据零迁移确认：TodoItem 与 MemoItem 14 字段一致、同一 memo.json、id 生成同源
+- [x] 换血：src/memo + tests/memo 退役删除；上游 src/todo（10 文件：场景工作台 UI/due/reminder/file-sync/settings）+ tests/todo（5 文件）并入
+- [x] main.ts：imports/ribbon「待办」/命令 bz-todo-open+bz-todo-add/onload ensureTodoReminders+ensureFileSync/onunload unloadTodo+unloadFileSync；storagePath 迁移清单 todoFilePath 条目删除；favorites 引用同步保留本地（todo/file-sync 只管 memo.json，天然分工零重复）
+- [x] settings.ts：删 todoFilePath/memoAutoArchive/memoMobileDefaultFullscreen；加 todoPanelWidth/Height/todoSkin/todoMobileDefaultFullscreen；memoScenarios/memoDefault*/autoPopupOnStart/openNoteReminder 保留（todo 设置沿用）；aiAgent 三键保留（本地门控引用同步现状不变）
+- [x] settings-panel：todo 域导航+loader（todoSettingsSchema）替换 memo；DOMAINS/NAV_SECS 同步
+- [x] 适配：todo/data.ts 的 cinemaFolderPath 引用改 movieFolderPath（本地影视目录键）；todo/settings 文案两处过本地 lint（去括号/收短）；移动端组描述恢复本地默认文案（文案冻结口径）
+- [x] 测试：smoke（ribbon/命令名/常驻域/默认抽查）、mobile（OFF memo→todo）、settings-schema（全屏键参数）、settings-tab（todoFilePath 退出迁移提示）、settings-panel（域清单）、lint-a（目标 memo→todo）全部同步
+- [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署

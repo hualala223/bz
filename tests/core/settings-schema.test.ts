@@ -114,7 +114,7 @@ describe('settings-common：移动端默认全屏预设', () => {
   });
 
   it('visibleWhen：桌面端隐藏、移动端显示（Platform.isMobile 口径）', () => {
-    const row = mobileFullscreenRow('memoMobileDefaultFullscreen') as {
+    const row = mobileFullscreenRow('todoMobileDefaultFullscreen') as {
       visibleWhen: (s: SettingsSnapshot) => boolean;
     };
     const prev = Platform.isMobile;

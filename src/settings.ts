@@ -39,9 +39,7 @@ export default interface BzSettings {
   /** 上次选择的目标文件夹（文件夹选择器默认值） */
   attachLastFolder: string;
 
-  // ===== 📝 备忘录（9 项）=====
-  /** 📂 备忘录数据文件路径（memo.json 所在目录）——ADR-0009 废弃，统一走 storagePath，仅兼容保留 */
-  todoFilePath: string;
+  // ===== 📝 备忘录/待办（memo.json 共享键；上游 ADR-0092 起 todo 域为唯一属主）=====
   /** 📄 显示文件名（固定 true，不暴露设置） */
   showFileName: boolean;
   /** 🚀 启动时自动弹出：启动时若存在未完成的重要或到期备忘录，自动弹出面板提醒 */
@@ -56,8 +54,6 @@ export default interface BzSettings {
   memoShowArchivedByDefault: boolean;
   /** ⭐ 新条目默认优先级：minor / important */
   memoDefaultPriority: string;
-  /** ✅ 完成后自动归档：关=完成条目保留主列表显示完成态 */
-  memoAutoArchive: boolean;
   /** 🆕 新条目默认场景（空=第一个场景） */
   memoDefaultScene: string;
   /** 🕒 到期时间格式：relative（今天 14:00 到期）/ absolute（MM/DD HH:mm 到期） */
@@ -319,8 +315,13 @@ export default interface BzSettings {
   // 聚合讯跟随剪藏本键、阅读报告跟随书库键、影视分析随影视键（2026-08 用户拍板，不设独立开关）。
   /** 日记本：移动端默认全屏（默认开——原 ≤480px 即全屏，480-768 原抽屉形态） */
   diaryMobileDefaultFullscreen: boolean;
-  /** 备忘录：移动端默认全屏（默认关——原移动端 95% 居中卡） */
-  memoMobileDefaultFullscreen: boolean;
+  /** 待办（todo 新域）：移动端默认全屏（默认关——与旧备忘录一致，上游 ADR-0092） */
+  todoMobileDefaultFullscreen: boolean;
+  /** 待办面板尺寸记忆（ADR-0084 拖拽缩放；0=未手动调整过，用默认 720×580） */
+  todoPanelWidth: number;
+  todoPanelHeight: number;
+  /** 待办皮肤（ADR-0095 皮肤系统；'paper' 纸面为默认肤） */
+  todoSkin: string;
   /** 归物本：移动端默认全屏（默认开——原 JS 内联强制全屏） */
   belongingsMobileDefaultFullscreen: boolean;
   /** 剪藏本：移动端默认全屏（默认开——原 CSS !important 强制全屏；聚合讯跟随此键） */
@@ -454,8 +455,7 @@ export const DEFAULT_SETTINGS: BzSettings = {
   // 附件搬移（ticket 65，运行时记忆）
   attachLastFolder: '',
 
-  // 备忘录
-  todoFilePath: 'CONFIG/STORAGE',
+  // 备忘录/待办（memo.json 共享键）
   showFileName: true,
   autoPopupOnStart: true,
   openNoteReminder: true,
@@ -463,7 +463,6 @@ export const DEFAULT_SETTINGS: BzSettings = {
   memoSortMode: 'priority',
   memoShowArchivedByDefault: false,
   memoDefaultPriority: 'minor',
-  memoAutoArchive: true,
   memoDefaultScene: '',
   memoDueFormat: 'relative',
 
@@ -610,7 +609,11 @@ export const DEFAULT_SETTINGS: BzSettings = {
   // 移动端主窗口默认全屏（ticket 68：默认值=行为保持——原移动端即全屏→开，原居中卡→关；
   // 聚合讯跟随剪藏本键、阅读报告跟随书库键，不设独立键）
   diaryMobileDefaultFullscreen: true,
-  memoMobileDefaultFullscreen: false,
+  // 待办（todo 域）：面板尺寸记忆 + 皮肤 + 移动端默认全屏（默认关，与旧备忘录一致）
+  todoPanelWidth: 0,
+  todoPanelHeight: 0,
+  todoSkin: 'paper',
+  todoMobileDefaultFullscreen: false,
   belongingsMobileDefaultFullscreen: true,
   clippingMobileDefaultFullscreen: true,
   passwordMobileDefaultFullscreen: true,

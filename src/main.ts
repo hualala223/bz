@@ -15,12 +15,12 @@ import { clearDomainEvents } from './core/domain-bus';
 import { attachObsidianAdapter, detachObsidianAdapter } from './core/obsidian-adapter';
 import { renderSettingsInto } from './core/settings-schema';
 import { mainSettingsSchema } from './core/settings-main-schema';
-import { setBzSettingsProvider, unloadBz, ensureBz } from './memo';
 
 import BzSettings, { DEFAULT_SETTINGS, migrateSecondBrainSettings } from './settings';
 
 // 15 域（懒加载：首次命令/事件触发时 ensureXxx 幂等初始化）
-import { openBzPanel, createMemoItem } from './memo';
+// 待办（todo 域，上游 ADR-0092：memo.json 唯一属主——UI/交互/写盘/引用同步/被动捕获全归本域）
+import { openTodoPanel, addTodoItem, unloadTodo, ensureTodoReminders, ensureFileSync, unloadFileSync } from './todo';
 import { addBelongingsItem, openBelongings, unloadBelongings } from './belongings';
 import { openArticleView, unloadArticleView } from './clipping';
 import { openNewsReader, unloadNewsReader } from './news';
@@ -53,8 +53,7 @@ import { openEncrypt, encryptCurrentNote, unloadEncrypt, mountEncryptStatusBar, 
 import { openLauncherPanel, unloadLauncherPanel, setLauncherShowTextSetter, setLauncherGestureSetter, LauncherModal } from './launcher';
 import { registerGestureListeners } from './launcher/gestures';
 import { ensureAutoSummary, unloadAutoSummary } from './auto-summary';
-// ai-agent 域解散：文件同步拆入 memo/favorites 域（原 ensureAIAgent/unloadAIAgent 换线）
-import { ensureMemoFileSync, unloadMemoFileSync } from './memo';
+// ai-agent 域解散：文件同步拆入 todo/favorites 域（原 ensureAIAgent/unloadAIAgent 换线）
 import { ensureFavoritesFileSync, unloadFavoritesFileSync } from './favorites';
 // 日记本（diary-notebook 合并）
 import { setApp as setDiaryApp } from './diary/app';
@@ -86,9 +85,9 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-data-checkup-open', name: '数据体检', icon: 'stethoscope', callback: () => void openDataCheckup(getApp()) },
   // 设置面板（settings-panel 域，ADR-0080：全域设置聚合入口，与既有设置架构并存不替换）
   { id: 'bz-settings-panel-open', name: '设置面板', icon: 'settings-2', callback: () => openSettingsPanel(getApp()) },
-  // 备忘录
-  { id: 'bz-memo-open', name: '备忘录', icon: 'sticky-note', callback: () => openBzPanel(getApp()) },
-  { id: 'bz-memo-add', name: '加备忘', icon: 'pencil', callback: () => createMemoItem(getApp()) },
+  // 待办（todo 域，上游 ADR-0092：memo.json 唯一属主）
+  { id: 'bz-todo-open', name: '待办', icon: 'check-square', callback: () => openTodoPanel(getApp()) },
+  { id: 'bz-todo-add', name: '加待办', icon: 'clipboard-list', callback: () => addTodoItem(getApp()) },
   // 归物本
   { id: 'bz-belongings-add', name: '加物品', icon: 'archive', callback: () => addBelongingsItem(getApp()) },
   { id: 'bz-belongings-open', name: '归物本', icon: 'package', callback: () => openBelongings(getApp()) },
@@ -225,7 +224,6 @@ export default class BzPlugin extends Plugin {
       this.syncGestures(); // 手势监听随设置变更重注册
     });
     // 备忘录设置注入
-    setBzSettingsProvider(() => this.settings);
     // 日记本注入（diary-notebook 合并）
     setDiaryApp(this.app);
     applyDiarySettingsToRuntime(this.settings);
@@ -244,7 +242,7 @@ export default class BzPlugin extends Plugin {
     void ensureAttachSeed(this.app);
 
     // ribbon 主入口：备忘录面板 + 日记本
-    this.addRibbonIcon('check-square', '备忘录', () => openBzPanel(this.app));
+    this.addRibbonIcon('check-square', '待办', () => openTodoPanel(this.app));
     this.addRibbonIcon('notebook-pen', '日记本', () => showDiaryPanel(this));
 
     // 番茄钟状态栏（ticket 29：常驻倒计时，点击打开弹窗）
@@ -263,13 +261,13 @@ export default class BzPlugin extends Plugin {
     // 事件常驻域按设置开关注册（懒加载架构）
     this.app.workspace.onLayoutReady(() => {
       // 备忘录：启动即初始化（对齐源码 App.init：file-open 提醒 + 剪贴板监听 + autoPopupOnStart）
-      void ensureBz(this.app);
+      ensureTodoReminders(this.app); // 待办被动捕获：启动自动弹出 + 打开笔记提醒（上游线接管 memo.json 属主）
       // 日记本：启动即初始化（diary-notebook 原行为：onLayoutReady → init）
       void diaryInit(this);
       if (this.settings.autoSummaryEnabled) ensureAutoSummary(this.app);
       if (this.settings.aiAgentEnabled) {
-        ensureMemoFileSync(this.app);
-        ensureFavoritesFileSync(this.app);
+        ensureFileSync(this.app); // 待办（todo 域，memo.json 引用同步）
+        ensureFavoritesFileSync(this.app); // 收藏本引用同步（本地保留）
       }
       if (this.settings.secondBrainEnabled) ensureSecondBrainOnReady(this.app);
       // 复习计划：到期提醒开启时常驻（ticket 100——监听/染色/轮询统一启动；否则懒加载）；enableAutoNotify 缺省视为开
@@ -305,8 +303,8 @@ export default class BzPlugin extends Plugin {
     unmountPomodoroStatusBar();
     unmountEncryptStatusBar();
     unloadPomodoro();
-    unloadBz();
-    unloadMemoFileSync();
+    unloadTodo();
+    unloadFileSync();
     unloadFavoritesFileSync();
     unloadLauncherPanel();
     unloadEncrypt();
@@ -384,7 +382,6 @@ export default class BzPlugin extends Plugin {
     const dirOf = (v: string) => (v || '').trim().replace(/\/+$/, '');
     const fileDir = (v: string, file: string) => dirOf(v).replace(new RegExp('/' + file + '$'), '');
     const oldPaths: Array<[string, string]> = [
-      ['todoFilePath', dirOf(this.settings.todoFilePath)],
       ['belongingsDataFolder', dirOf(this.settings.belongingsDataFolder)],
       ['pwStoragePath', dirOf(this.settings.pwStoragePath)],
       ['favoritesStoragePath', dirOf(this.settings.favoritesStoragePath)],

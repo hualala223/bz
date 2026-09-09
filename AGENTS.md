@@ -1,6 +1,6 @@
 # AGENTS.md — 包仔（bz）Obsidian 插件
 
-独立 Obsidian 插件，25 功能域（详见领域清单；2026-09 自上游线 yeshimei/bz 并入 home/recap/checkup/diary-wall/settings-panel 五域，见 PROGRESS）。数据沿用既有格式（`CONFIG/STORAGE/*.json`、`我的/*.md`、frontmatter），旧数据直接可读。**项目语言：中文**。
+独立 Obsidian 插件，25 功能域（详见领域清单；2026-09 自上游线 yeshimei/bz 并入 home/recap/checkup/diary-wall/settings-panel 五域，memo 域由 todo 待办域换血接替，见 PROGRESS）。数据沿用既有格式（`CONFIG/STORAGE/*.json`、`我的/*.md`、frontmatter），旧数据直接可读。**项目语言：中文**。
 
 ## 交互约定
 
@@ -48,7 +48,7 @@
 | 域 | 数据 |
 |---|---|
 | diary | `我的/日记/*.md` |
-| memo | memo.json |
+| todo（待办，上游换血接替 memo，ADR-0092） | memo.json（唯一属主） |
 | belongings | belongings.json |
 | clipping | `归档/网页剪藏/*.md` |
 | news | news.json |

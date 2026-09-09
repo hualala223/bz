@@ -8,15 +8,15 @@ import { MockVault } from './mock-vault';
 import { resetObsidianMocks, getNoticeMessages, hasNotice, clearNotices } from './mock-obsidian-entry';
 import { notify } from '../src/core/notice';
 
-// ai-agent 域解散后的新注册点隔离：ensureMemoFileSync/ensureFavoritesFileSync 换 spy
+// ai-agent 域解散后的新注册点隔离：ensureFileSync（todo）/ensureFavoritesFileSync 换 spy
 // （vi.mock 局部替换，其余导出保持真实实现，命令回调冒烟等用例不受影响）
 const syncSpies = vi.hoisted(() => ({
-  ensureMemoFileSync: vi.fn(),
+  ensureFileSync: vi.fn(),
   ensureFavoritesFileSync: vi.fn(),
 }));
-vi.mock('../src/memo', async (importOriginal) => ({
+vi.mock('../src/todo', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  ensureMemoFileSync: syncSpies.ensureMemoFileSync,
+  ensureFileSync: syncSpies.ensureFileSync,
 }));
 vi.mock('../src/favorites', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -67,7 +67,7 @@ const EXPECTED_COMMAND_IDS = [
   'bz-home',
   // 上游线并入新域（第一档）：内容首页/今日回顾/回忆墙/数据体检/设置面板
   'bz-home-open', 'bz-recap-today', 'bz-diary-wall-open', 'bz-data-checkup-open', 'bz-settings-panel-open',
-  'bz-memo-open', 'bz-memo-add',
+  'bz-todo-open', 'bz-todo-add',
   'bz-belongings-add', 'bz-belongings-open',
   'bz-clipping-open',
   'bz-news-open',
@@ -125,11 +125,11 @@ describe('bz 骨架冒烟', () => {
     }
   });
 
-  it('ribbon 主入口指向备忘录面板', async () => {
+  it('ribbon 主入口指向待办面板（上游 ADR-0092：todo 接管备忘录）', async () => {
     const plugin = await createPlugin(makeMockApp());
 
     expect(plugin.ribbonIcons.length).toBeGreaterThanOrEqual(1);
-    expect(plugin.ribbonIcons[0].title).toBe('备忘录');
+    expect(plugin.ribbonIcons[0].title).toBe('待办');
   });
 
   it('命令名统一（f3/f7/t1/t2，id 不动）与重复图标去重（f7）', async () => {
@@ -137,8 +137,8 @@ describe('bz 骨架冒烟', () => {
     const byId = (id: string) => registeredCommands.find((c: any) => c.id === id)!;
     // t1：主页 → 入口页（术语随 CONTEXT.md；id bz-home 不变）
     expect(byId('bz-home').name).toBe('入口页');
-    // f3：新建类动词统一（写备忘/写影视 → 加备忘/加影视，与加物品/加密码/加收藏一致）
-    expect(byId('bz-memo-add').name).toBe('加备忘');
+    // f3：新建类动词统一（加待办/加影视，与加物品/加密码/加收藏一致；上游 ADR-0092 memo→todo）
+    expect(byId('bz-todo-add').name).toBe('加待办');
     expect(byId('bz-movie-add').name).toBe('加影视');
     // t2：阅读分析报告 → 阅读数据分析报告
     expect(byId('bz-reading-report-open').name).toBe('阅读数据分析报告');
@@ -187,7 +187,7 @@ describe('bz 骨架冒烟', () => {
     const plugin = await createPlugin(makeMockApp());
 
     const s = plugin.settings;
-    expect(s.todoFilePath).toBe('CONFIG/STORAGE');
+    expect(s.articleDirectory).toBe('归档/网页剪藏');
     expect(s.articleDirectory).toBe('归档/网页剪藏');
     expect(s.movieFolderPath).toBe('我的/影视');
     expect(s.libraryFolderPath).toBe('书库');
@@ -224,22 +224,22 @@ describe('bz 骨架冒烟', () => {
 ${failures.join('\n')}`).toEqual([]);
     expect(registeredCommands.length).toBeGreaterThanOrEqual(37);
   }, 15000);
-  it('事件常驻域开关开启时 onload 注册（autoSummary/aiAgent→memo+favorites 文件同步/secondBrain 懒加载分支；旧 flashEnabled 键随 ticket 103 迁移）', async () => {
+  it('事件常驻域开关开启时 onload 注册（autoSummary/aiAgent→todo+favorites 文件同步/secondBrain 懒加载分支；旧 flashEnabled 键随 ticket 103 迁移）', async () => {
     delete diskData['bz'];
     // 故意种旧键：验证 onload 迁移把 flashEnabled 平移为 secondBrainEnabled
     diskData['bz'] = { autoSummaryEnabled: true, aiAgentEnabled: true, flashEnabled: true };
-    syncSpies.ensureMemoFileSync.mockClear();
+    syncSpies.ensureFileSync.mockClear();
     syncSpies.ensureFavoritesFileSync.mockClear();
     const app = makeMockApp();
     const plugin = await createPlugin(app);
     // aiAgent 键名不变（旧 data.json 兼容）：开启后 onLayoutReady 触发新注册点——
-    // memo/favorites 两路文件同步 ensure 各恰好一次，均不抛错
+    // todo/favorites 两路文件同步 ensure 各恰好一次，均不抛错
     expect(plugin.settings.autoSummaryEnabled).toBe(true);
     expect(plugin.settings.aiAgentEnabled).toBe(true);
     expect(plugin.settings.secondBrainEnabled).toBe(true);
     expect(plugin.settings.flashEnabled).toBeUndefined();
-    expect(syncSpies.ensureMemoFileSync).toHaveBeenCalledTimes(1);
-    expect(syncSpies.ensureMemoFileSync).toHaveBeenCalledWith(app);
+    expect(syncSpies.ensureFileSync).toHaveBeenCalledTimes(1);
+    expect(syncSpies.ensureFileSync).toHaveBeenCalledWith(app);
     expect(syncSpies.ensureFavoritesFileSync).toHaveBeenCalledTimes(1);
     expect(syncSpies.ensureFavoritesFileSync).toHaveBeenCalledWith(app);
   }, 15000);

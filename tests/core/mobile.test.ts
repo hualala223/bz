@@ -52,7 +52,7 @@ describe('DEFAULT_SETTINGS 移动端默认全屏默认值（行为保持映射�
   it('10 键存在且默认值 = 原移动端行为（8 开 2 关）；聚合讯/阅读报告不设独立键', () => {
     // ticket 168：复习主窗口退役，reviewMobileDefaultFullscreen 键删除（ADR-0077）
     const ON = ['diary', 'belongings', 'clipping', 'password', 'favorites', 'library', 'movie', 'encrypt'];
-    const OFF = ['memo', 'pomodoro'];
+    const OFF = ['todo', 'pomodoro']; // memo 键随上游 ADR-0092 退役，todo 键接替（默认关一致）
     for (const k of ON) {
       expect(DEFAULT_SETTINGS[`${k}MobileDefaultFullscreen`]).toBe(true);
       expect(typeof DEFAULT_SETTINGS[`${k}MobileDefaultFullscreen`]).toBe('boolean');
