@@ -60,10 +60,10 @@ export class QuestionGenerator {
   buildPrompt(content: string, enableMultipleChoice: boolean, questionsPerNote: number, difficulty: string): string {
     const truncated = content.slice(0, NOTE_CONTENT_LIMIT);
     let typeHint = '单选题（四选一）';
-    let structure = `{ "question": "题目文本", "options": ["A选项","B选项","C选项","D选项"], "correctIndices": [0] }`;
+    let structure = `{ "question": "题目文本", "options": ["A选项","B选项","C选项","D选项"], "correctIndices": [0], "explain": "一句话解析+原文依据" }`;
     if (enableMultipleChoice) {
       typeHint = '可以是单选题或多选题（正确选项数量不限）';
-      structure = `{ "question": "题目文本", "options": ["A选项","B选项","C选项","D选项"], "correctIndices": [0, 2] }（数组内为正确选项的索引）`;
+      structure = `{ "question": "题目文本", "options": ["A选项","B选项","C选项","D选项"], "correctIndices": [0, 2], "explain": "一句话解析+原文依据" }（数组内为正确选项的索引）`;
     }
     let countHint = '';
     if (questionsPerNote > 0) {
@@ -96,6 +96,7 @@ export class QuestionGenerator {
 ${difficultyHint}
 - 选项不要带「A.」「A、」等编号前缀，四个选项内容互不相同
 - 题目和答案必须依据笔记内容，不要编造笔记中没有的信息
+- 每题必须带 explain 字段：用一句话解析正确答案，并附原文依据（简短引用或出处）
 笔记内容：
 ${truncated}`;
   }

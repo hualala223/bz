@@ -18,7 +18,9 @@ describe('buildPrompt', () => {
     expect(p).toContain('根据以下笔记内容，生成若干道四选一的选择题（每题一个正确答案），以便复习。请仅返回一个合法的 JSON 对象');
     expect(p).toContain('"questions"');
     expect(p).toContain('注意：题目类型为 单选题（四选一），请生成恰好 5 道题目。');
-    expect(p).toContain('"correctIndices": [0] }');
+    expect(p).toContain('"correctIndices": [0], "explain": "一句话解析+原文依据" }');
+    // 上游线 A4：prompt 要求每题带 explain（一句话解析+原文依据）
+    expect(p).toContain('每题必须带 explain 字段');
     expect(p).toContain('笔记内容：\n内容内容');
   });
 
@@ -28,7 +30,7 @@ describe('buildPrompt', () => {
     expect(p).toContain('根据以下笔记内容，生成若干道选择题，以便复习。');
     expect(p).not.toContain('每题一个正确答案');
     expect(p).toContain('可以是单选题或多选题（正确选项数量不限）');
-    expect(p).toContain('"correctIndices": [0, 2] }（数组内为正确选项的索引）');
+    expect(p).toContain('"correctIndices": [0, 2], "explain": "一句话解析+原文依据" }（数组内为正确选项的索引）');
   });
 
   it('按篇幅自适应出题数量（ticket 176 追加）：四档区间 + 提示词分档 + 显式数量优先', () => {
@@ -138,6 +140,20 @@ describe('generate', () => {
     await expect(g.generate('x', { json: vi.fn().mockResolvedValue('{"foo":1}') } as any, false, 1, 'random')).rejects.toThrow(
       'AI 未返回有效题目数组。'
     );
+  });
+
+  it('上游线 A4：explain 字段随逐题过滤保留（坏题剔除不影响好题的解析）', async () => {
+    const g = mkGen();
+    const raw = JSON.stringify({
+      questions: [
+        { question: '有解析', options: ['a', 'b', 'c', 'd'], correctIndices: [0], explain: '因为甲，依据首段。' },
+        { question: '无解析也行', options: ['a', 'b', 'c', 'd'], correctIndices: [1] },
+      ],
+    });
+    const ai = { json: vi.fn().mockResolvedValue(raw) };
+    const r = await g.generate('x', ai as any, false, 1, 'random');
+    expect(r.find((q) => q.question === '有解析')?.explain).toBe('因为甲，依据首段。');
+    expect(r.find((q) => q.question === '无解析也行')?.explain).toBeUndefined();
   });
 
   it('JSON 提取失败（提取层错误）不重试，抛「无法从 AI 响应中提取有效的 JSON」', async () => {

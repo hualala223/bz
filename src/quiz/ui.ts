@@ -349,6 +349,7 @@ btn.innerHTML = `<span>${optionLabels[idx]}.</span><span class="bz-quiz-option-t
             const fb = btn.querySelector('.feedback-mark');
             if (fb) fb.textContent = '❌';
             this.addFeedbackBanner(optionsContainer, '❌ 回答错误，正确答案已标绿', false);
+            this.addExplainLine(optionsContainer, q);
             this.addNextButton(optionsContainer);
           }
         } else {
@@ -408,6 +409,7 @@ btn.innerHTML = `<span>${optionLabels[idx]}.</span><span class="bz-quiz-option-t
           this.wrongCount++;
           this.currentQuestions.splice(this.currentIndex, 1);
           this.addFeedbackBanner(optionsContainer, '❌ 回答错误，正确答案已标绿', false);
+          this.addExplainLine(optionsContainer, q);
           this.addNextButton(optionsContainer);
         }
       };
@@ -480,6 +482,19 @@ btn.innerHTML = `<span>${optionLabels[idx]}.</span><span class="bz-quiz-option-t
         : 'background:rgba(255,71,87,0.15);color:#ff4757;border:1px solid rgba(255,71,87,0.4);');
     banner.textContent = text;
     container.appendChild(banner);
+  }
+
+/** 辅助：错题解析行（上游线 A4 移植）——答错横幅下方渲染随题生成的 explain（一句话解析+原文依据）；
+ *  存量题无此字段静默不显示，零迁移。 */
+  addExplainLine(container: HTMLElement, q: { explain?: string }): void {
+    const explain = (q.explain || '').trim();
+    if (!explain) return;
+    const line = document.createElement('div');
+    line.className = 'quiz-explain';
+    line.style.cssText = 'margin-top:8px;padding:8px 12px;border-radius:6px;font-size:13px;line-height:1.6;' +
+      'background:var(--background-secondary);color:var(--text-muted);border:1px solid var(--background-modifier-border);';
+    line.textContent = `💡 ${explain}`;
+    container.appendChild(line);
   }
 
   /**

@@ -3,7 +3,7 @@ import process from "process";
 import fs from "fs";
 import path from "path";
 import { buildStyles, watchStyles } from "./scripts/build-css.mjs";
-import { buildPreview } from "./scripts/build-preview.mjs";
+import { buildPreview, PREVIEW_DOMAINS } from "./scripts/build-preview.mjs";
 import { VAULT_PLUGIN_DIR } from "./scripts/vault-dir.mjs";
 
 const prod = process.argv[2] === "production";
@@ -50,6 +50,23 @@ if (prod) {
   await context.watch();
   buildStyles();
   watchStyles(); // 监听 src/**/*.css 变化重新聚合（esbuild 只监听 TS 依赖图）
+  watchPreview(); // 监听各域 render.ts 变化重出评审壳预览包（上游线 P7 补全：dev 迭代同步）
   copyStatic();
   console.log("watching for changes...");
+}
+
+/** 监听各域 render.ts（单源清单内）变化重出 prototype-render.js（同 watchStyles 模式；
+ *  fs.watch 递归回调的 filename 相对监听目录，Windows 反斜杠统一归一） */
+function watchPreview() {
+  const srcDir = path.join(process.cwd(), "src");
+  let timer = null;
+  const hit = (norm) => PREVIEW_DOMAINS.some((d) => norm === `${d}/render.ts` || norm.endsWith(`/src/${d}/render.ts`));
+  fs.watch(srcDir, { recursive: true }, (_event, filename) => {
+    const norm = filename ? String(filename).replace(/\\/g, "/") : "";
+    if (!norm || !hit(norm)) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      buildPreview().catch((err) => console.error("✗ prototype-render.js rebuild failed:", err.message));
+    }, 80);
+  });
 }

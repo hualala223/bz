@@ -372,3 +372,13 @@
 - [x] smoke 白名单 +2；AGENTS 命令数 44；CONTEXT 增补四词条
 - [x] 拒绝项维持：C1 review 面板/冲刺/quiz-core、C7 AI registry 全套、C9 main-schema 拆分、C10 esbuild 上游部署目标
 - [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署
+
+## 上游线补充移植 — A4 错题解析 + dev 预览包监听（用户裁决：冲突项全部不动）
+
+**状态：已交付**（2026-09-09）
+
+- [x] 用户裁决：C1 直接冲突项（三区面板/冲刺、quiz-core、批量出题、满血 FSRS、快捷评级命令组）全部不改；纯增量由包仔裁量
+- [x] A4 错题解析：QuizQuestion.explain 可选字段（存量零迁移）+ prompt 要求每题「一句话解析+原文依据」+ quiz/ui 单选/多选答错分支渲染 .quiz-explain 行（存量题静默不显示）；补数据层+UI 层测试 3 用例
+- [x] dev 预览包监听补全：esbuild dev 段挂 watchPreview（render.ts 变化重出 prototype-render.js；P7 此前只挂 production 段）
+- [x] 明确不做：A1 移除命令（属 ticket 168 退役的 F2 命令组）、A2 queue.ts（无消费点死代码）、A3 面板样式（无消费点）、P4 fav（消费方在未并入的三栏）、F1 满血 FSRS（行为变更，违背「不影响现有功能」约束）
+- [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署

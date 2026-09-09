@@ -196,6 +196,28 @@ await flushPersist();
     expect(quiz.notes['A.md']).toHaveLength(1);
   });
 
+  it('上游线 A4：答错渲染错题解析行；存量题无 explain 静默不渲染', () => {
+    const vault = new MockVault();
+    seedQuiz(vault, { 'A.md': [Q('Q1?', [0])] });
+    const app = makeApp(vault);
+    setApp(app);
+    const ui = new QuizMasterUI();
+    const withExplain = { ...Q('Q1?', [0]), explain: '因为甲，依据首段。' };
+    ui.startReviewSession({ questions: [withExplain], onComplete: vi.fn() });
+    (document.querySelectorAll('.quiz-option-btn')[1] as HTMLElement).click(); // 选错
+    const line = document.querySelector('.quiz-explain');
+    expect(line).not.toBeNull();
+    expect(line!.textContent).toContain('因为甲，依据首段。');
+
+    // 存量题（无 explain 字段）：不渲染解析行，其余反馈不变
+    document.body.innerHTML = '';
+    const ui2 = new QuizMasterUI();
+    ui2.startReviewSession({ questions: [Q('Q1?', [0])], onComplete: vi.fn() });
+    (document.querySelectorAll('.quiz-option-btn')[1] as HTMLElement).click();
+    expect(document.querySelector('.quiz-explain')).toBeNull();
+    expect(document.querySelector('.quiz-next-btn')).not.toBeNull();
+  });
+
   it('题号进度：答错点下一题 → 题号递增（2/N）', () => {
     const vault = new MockVault();
     seedQuiz(vault, { 'A.md': [Q('Q1?', [0]), Q('Q2?', [0])] });

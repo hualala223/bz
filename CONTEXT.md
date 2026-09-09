@@ -164,6 +164,9 @@ _Avoid_: 闪念（旧功能名，仅存于「闪念笔记」文档类型语义�
 
 **闪念笔记 (Flash Note)**: 卡片盒目录下的快速笔记**文档类型**（path-classify 分类 `'flash'`；smartcat 观察来源标签与 credibility 0.9 档位沿用此词汇）。注意与「第二大脑」功能相区分：前者是笔记类型，后者是管理/检索它们的功能模块。
 
+**错题解析 (Explain)**: 上游线 A4 移植（ticket 上游 item 3）——出题 prompt 要求每题带 `explain` 字段（一句话解析+原文依据），`QuizQuestion.explain` 可选存储；答错时选项下方渲染解析行（`.quiz-explain`），存量旧题无此字段静默不显示，零迁移。与 ticket 176 加固（超时/重试/打乱/篇幅自适应）完全共存。
+_Avoid_: 错题本（无独立收藏视图）
+
 **复习计划分析报告 (Review Report)**: 上游线 P2 移植的统计弹窗（命令 `bz-review-report`，ADR-0077/ticket 174）——streak/评级分布/逾期率/未来负载热力图 + 单条复习时间线，只读 review.json；数据模块 `review/stats.ts`、UI `review/stats-ui.ts`。**记忆拟合 (FSRS Fit)**: 配套的 P1 能力（`review/fit.ts`）——每 `reviewFitEveryN` 次评级后台按复习历史拟合 FSRS 19 权重（样本 ≥100 才拟合），产物落 `review-fit.json`，经 `reviewApp.currentW()` 注入调度（无产物回退默认，行为等同）；开关 `reviewEnableFit`（⚙️ 复习设置「记忆拟合」组）。
 
 **快速复制密码 (Quick Copy Password)**: 上游线 P3 移植（命令 `bz-encrypt-copy-password`）——不打开密码本面板，fuzzy 搜索条目选中即复制，60 秒自动清空剪贴板；未解锁先弹主密码。选择器 `encrypt/pw-picker.ts`（条目类型对齐本地 PasswordEntry），数据走 password 域 DataManager（.safe.enc 密码镜像）。
