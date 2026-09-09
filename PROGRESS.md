@@ -457,3 +457,13 @@
 - [x] P3 适配版退役：自移植 pw-picker/quick-copy 由上游原生实现替代（fav 字段随 vault-data 到位，P4 兑现）
 - [x] 测试同步：smoke（bz-pw 三条删/passwordLength 抽查删）、mobile（ON 删 password，8 键）、lint-a（删 password 目标）、settings-panel（域清单/NAV_SECS/保险库正名）、main-lifecycle（unloadPassword 移除）
 - [x] 门禁：tsc 0 错 + 全量 4176 测试绿 + 构建部署
+
+## 2026-09-09 · 日记隐私门（ADR-0106）：日记内容零上云硬开关
+
+- [x] settings.ts：新增 `diaryPrivacyGuard`（默认 true，仅显式 false 关闭——缺省宁紧勿松）
+- [x] smartcat/memory.ts：addObservation 新旧签名在路由解析前拦截 diary 来源（与 ADR-0069 exempt 同口径：不落行为/记忆任何流、不打分、不进反思与对话）
+- [x] recap/summarize.ts：numbersSegments/buildRecapDigest 增 `excludeDiary` 选项；generateRecapContent 按隐私门剔除 AI 提示词中的日记数字与日记时间轴（本地写回不受影响）
+- [x] diary/ui/panel.ts：日记本 ⚙️ 新增「隐私」组开关
+- [x] 测试：tests/smartcat/diary-privacy-guard.test.ts（4 例）+ summarize.test.ts 增 digest 剔除/AI 提示词剔除（2 例）
+- [x] 同步：CONTEXT.md 术语「日记隐私门」+ docs/adr/0106
+- [x] 门禁：tsc + 全量测试 + 构建部署

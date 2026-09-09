@@ -11,7 +11,8 @@ import { requestUrl } from '../mock-obsidian-entry';
 import type { SmartCatData, MemoryStreamEntry } from '../../src/smartcat/types';
 
 // ticket 160：巩固参数走 BzSettings smartcat* 键——mock settings-provider 控制覆盖值（其余键缺省）
-const mockSettings: Record<string, any> = { behaviorMaxDays: 30, behaviorMaxCount: 2000 };
+// diaryPrivacyGuard: false——本文件验证日记入库机器本身；隐私门语义由 diary-privacy-guard.test.ts 单独覆盖（ADR-0106）
+const mockSettings: Record<string, any> = { behaviorMaxDays: 30, behaviorMaxCount: 2000, diaryPrivacyGuard: false };
 vi.mock('../../src/core/settings-provider', () => ({
   tryGetSettings: () => mockSettings,
 }));

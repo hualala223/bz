@@ -19,6 +19,7 @@
  */
 import type { App, TFile } from 'obsidian';
 import { createAI, getAIProvider } from '../core/ai';
+import { tryGetSettings } from '../core/settings-provider';
 import { parseFile } from '../diary/parser';
 import type { DiaryEntry } from '../diary/types';
 import { fmtHM, localDayStr, settingDir } from './aggregate';
@@ -30,10 +31,10 @@ export const RECAP_MARKER = '【今日回顾】';
 
 /* ---------- 纯函数：数字段 / 模板 / 提示词 / 条目正文 ---------- */
 
-/** 关键数字段（读取失败的域不计入——数字不可信宁可不写） */
-export function numbersSegments(summary: RecapSummary, failed: RecapDomain[]): string[] {
+/** 关键数字段（读取失败的域不计入——数字不可信宁可不写）；excludeDiary 供 AI 输入摘要剔除日记（隐私门，ADR-0100） */
+export function numbersSegments(summary: RecapSummary, failed: RecapDomain[], opts?: { excludeDiary?: boolean }): string[] {
   const segs: string[] = [];
-  if (!failed.includes('diary')) segs.push(`日记 ${summary.diary} 条`);
+  if (!failed.includes('diary') && !opts?.excludeDiary) segs.push(`日记 ${summary.diary} 条`);
   if (!failed.includes('cinema')) segs.push(`影视 ${summary.movies} 部`);
   if (!failed.includes('bookshelf')) segs.push(`读完 ${summary.books} 本`);
   if (!failed.includes('todo')) segs.push(`完成 ${summary.todoDone} 个待办`);
@@ -53,14 +54,18 @@ export function templateSummary(summary: RecapSummary, failed: RecapDomain[]): s
   return segs.length ? `今天：${segs.join('、')}` : '今天：暂时没有可用的记录';
 }
 
-/** AI 输入摘要：数字 + 时间轴痕迹文本（一行一条，域口径与面板时间轴一致） */
-export function buildRecapDigest(data: RecapData): string {
+/** AI 输入摘要：数字 + 时间轴痕迹文本（一行一条，域口径与面板时间轴一致）；
+ *  excludeDiary（日记隐私门，ADR-0100）：剔除日记数字段与日记时间轴条目——AI 永远看不到日记痕迹 */
+export function buildRecapDigest(data: RecapData, opts?: { excludeDiary?: boolean }): string {
   const lines: string[] = [];
-  const nums = numbersSegments(data.summary, data.failed);
+  const nums = numbersSegments(data.summary, data.failed, opts);
   if (nums.length) lines.push(`【今日数字】${nums.join('、')}`);
   if (data.items.length) {
     lines.push('【今日痕迹】');
-    for (const it of data.items) lines.push(`- ${it.timeLabel} ${it.text}`);
+    for (const it of data.items) {
+      if (opts?.excludeDiary && it.domain === 'diary') continue;
+      lines.push(`- ${it.timeLabel} ${it.text}`);
+    }
   }
   return lines.join('\n');
 }
@@ -162,7 +167,9 @@ export async function generateRecapContent(data: RecapData): Promise<RecapGenera
 
   try {
     const ai = createAI();
-    const raw = await ai.chat(buildSummaryPrompt(buildRecapDigest(data)));
+    // 日记隐私门（ADR-0100）：AI 输入剔除日记痕迹（写回本地的模板/数字行不受影响，全程本地）
+    const excludeDiary = tryGetSettings()?.diaryPrivacyGuard !== false;
+    const raw = await ai.chat(buildSummaryPrompt(buildRecapDigest(data, { excludeDiary })));
     const text = sanitizeSummaryText(String(raw || ''));
     if (!text) {
       // 思考型模型 reasoning 吃光 max_tokens 时 content 为空串（项目既有坑）→ 降级模板

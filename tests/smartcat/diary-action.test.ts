@@ -71,7 +71,8 @@ function dateOffset(offset: number): string {
 beforeEach(() => {
   resetObsidianMocks();
   document.body.innerHTML = '';
-  settings = { storagePath: 'CONFIG/STORAGE', smartcatEnabled: true, smartcatMobileDefaultFullscreen: false };
+  // diaryPrivacyGuard: false——验证日记结算链路机器本身；隐私门语义由 diary-privacy-guard.test.ts 覆盖（ADR-0106）
+  settings = { storagePath: 'CONFIG/STORAGE', smartcatEnabled: true, smartcatMobileDefaultFullscreen: false, diaryPrivacyGuard: false };
   unloadSmartCat();
   __setDiarySettleMsForTests(60); // 注入短计时（unload 会复位，须在 unload 之后设置）
 });

@@ -128,6 +128,21 @@ describe('buildRecapDigest / buildSummaryPrompt', () => {
     expect(prompt).toContain('只输出总结正文');
     expect(prompt).toContain('【今日数字】');
   });
+
+  it('excludeDiary（日记隐私门，ADR-0100）：AI 输入剔除日记数字段，其余域不受影响；缺省不剔除（本地模板口径不变）', () => {
+    const digest = buildRecapDigest(DATA, { excludeDiary: true });
+    expect(digest).not.toContain('日记');
+    expect(digest).toContain('【今日数字】影视 1 部');
+    // 时间轴剔除 diary 域条目，其余域照常
+    const diaryItem = { domain: 'diary' as const, ts: 0, timeLabel: '08:00', text: '新增 2 条' };
+    const withDiary = { ...DATA, items: [diaryItem, ...DATA.items] };
+    const digestWithDiary = buildRecapDigest(withDiary, { excludeDiary: true });
+    expect(digestWithDiary).not.toContain('新增 2 条');
+    expect(digestWithDiary).toContain('- 09:02 完成『晨跑』');
+    // 缺省（不带 opts）行为不变——本地模板/时间轴口径不受隐私门影响
+    expect(buildRecapDigest(withDiary)).toContain('日记 2 条');
+    expect(buildRecapDigest(withDiary)).toContain('- 08:00 新增 2 条');
+  });
 });
 
 describe('sanitizeSummaryText / buildEntryContent / isRecapEntry', () => {
@@ -175,6 +190,22 @@ describe('generateRecapContent', () => {
     expect(r.content).toContain('今日数字：日记 2 条');
     expect(chat).toHaveBeenCalledTimes(1);
     expect(String(chat.mock.calls[0][0])).toContain('完成『晨跑』');
+  });
+
+  it('日记隐私门（ADR-0100）：AI 提示词剔除日记痕迹；显式关闭后恢复完整摘要', async () => {
+    const chat = vi.fn(async (_prompt: string) => '今天节奏不错。');
+    mockedGetProvider.mockResolvedValue({} as never);
+    mockedCreateAI.mockReturnValue({ chat } as never);
+
+    // 缺省（DEFAULT_SETTINGS 开启隐私门）：AI 看不到日记数字
+    const r = await generateRecapContent(DATA);
+    expect(r.mode).toBe('ai');
+    expect(String(chat.mock.calls[0][0])).not.toContain('日记 2 条');
+
+    // 显式关闭：恢复完整摘要（含日记数字）
+    setSettingsProvider(() => ({ ...DEFAULT_SETTINGS, diaryPrivacyGuard: false }));
+    await generateRecapContent(DATA);
+    expect(String(chat.mock.calls[1][0])).toContain('日记 2 条');
   });
 
   it('AI 抛错：降级模板、给人话原因，且不写任何盘（调用方才决定写入）', async () => {

@@ -454,6 +454,11 @@ export class MemorySystem {
     const source = sourceOrDescription;
     const newOpts = options as { structured?: StructuredMeta; dedupe?: boolean; dedupeKey?: string };
     const action = newOpts.structured?.action ?? 'unknown';
+
+    // 日记隐私门（ADR-0100）：开启时 diary 来源整条豁免——不落行为/记忆任何流、不打分、
+    // 不进反思素材与对话注入，与 ADR-0069 加密条目同口径；仅显式设为 false 才放行（缺省按开启，宁紧勿松）
+    if (source === 'diary' && tryGetSettings()?.diaryPrivacyGuard !== false) return null;
+
     const rule = resolveRouting(source, action);
 
     // exempt（ADR-0069 隐私豁免：password/encrypt/日记加密）：不落任何流，直接返回
@@ -594,6 +599,8 @@ export class MemorySystem {
     const legacySource = opts.source ?? 'unknown';
     // 审查 P2：exempt 契约对新旧签名一体适用——legacy 来源同样不落任何流
     if (resolveRouting(legacySource, 'unknown').stream === 'exempt') return null;
+    // 日记隐私门（ADR-0100）：新旧签名一体适用，同上方闸口
+    if (legacySource === 'diary' && tryGetSettings()?.diaryPrivacyGuard !== false) return null;
     // ticket 129：全量口径——legacy 同样先写行为流（无 structured → description 兜底、metadata 缺省）
     await this.writeBehaviorStream(legacySource, undefined, typeof description === 'string' ? description : String(description ?? ''));
     // R0（ADR-0069）：生命线钩子上移——行为流已写，presence/共振计数对 legacy 同样成立

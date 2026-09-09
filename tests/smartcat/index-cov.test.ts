@@ -79,7 +79,8 @@ let origFetch: typeof fetch;
 beforeEach(() => {
   resetObsidianMocks();
   document.body.innerHTML = '';
-  settings = { storagePath: 'CONFIG/STORAGE', smartcatEnabled: true, smartcatMobileDefaultFullscreen: false };
+  // diaryPrivacyGuard: false——验证日记观察链路机器本身；隐私门语义由 diary-privacy-guard.test.ts 覆盖（ADR-0106）
+  settings = { storagePath: 'CONFIG/STORAGE', smartcatEnabled: true, smartcatMobileDefaultFullscreen: false, diaryPrivacyGuard: false };
   unloadSmartCat();
   resetAIProviderCache();
   setAISettingsProvider(() => settings);

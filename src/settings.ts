@@ -72,6 +72,8 @@ export default interface BzSettings {
   useFileDateTime: boolean;
   /** 📄 每批加载数量（滚动加载每批显示的条目数） */
   diaryBatchSize: string;
+  /** 🔒 日记隐私门（ADR-0100）：开启时日记内容绝不发往云端 AI——smartcat 对日记整条豁免、recap AI 摘要剔除日记痕迹；仅显式 false 关闭 */
+  diaryPrivacyGuard: boolean;
   /** 😀 标签按钮显示 emoji（筛选栏与写日记弹窗，关=纯文字） */
   diaryTagShowEmoji: boolean;
   /** 📝 卡片内容渲染方式：markdown / plain（纯文本） */
@@ -481,6 +483,7 @@ export const DEFAULT_SETTINGS: BzSettings = {
   showTagCount: true,
   useFileDateTime: false,
   diaryBatchSize: '20',
+  diaryPrivacyGuard: true,
   diaryTagShowEmoji: true,
   diaryContentRenderMode: 'markdown',
   diaryTagSortMode: 'fixed',

@@ -18,6 +18,7 @@ import { DEEP_DELTA_SCALE } from '../../src/smartcat/character';
 import { USER_CONTENT_BOUNDARY, MemorySystem } from '../../src/smartcat/memory';
 import { defaultSmartCatData } from '../../src/smartcat/data';
 import { setAISettingsProvider, resetAIProviderCache } from '../../src/core/ai';
+import { setSettingsProvider } from '../../src/core/settings-provider';
 import { requestUrl } from '../mock-obsidian-entry';
 import type { SmartCatData } from '../../src/smartcat/types';
 
@@ -355,6 +356,8 @@ describe('onReflect origin 元数据透传（memory → mood 链路）', () => {
     data = defaultSmartCatData();
     saver = vi.fn<(d: SmartCatData) => Promise<void>>(async (d) => { data = d; });
     resetAIProviderCache();
+    // diaryPrivacyGuard: false——本组用 diary 来源观察验证透传链路；隐私门语义由 diary-privacy-guard.test.ts 覆盖（ADR-0106）
+    setSettingsProvider(() => ({ diaryPrivacyGuard: false } as any));
     setAISettingsProvider(() => ({ aiProvider: 'deepseek', deepseekApiKey: opts.ai ? 'sk-test' : '' }));
     const m = new MemorySystem({ vault: { adapter: {} } } as any, () => data, saver);
     (m as any).ollamaAvailable = false;
