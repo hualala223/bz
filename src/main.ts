@@ -72,6 +72,11 @@ import { openDiaryWall, unloadDiaryWall } from './diary-wall';
 import { applyDirectories as applyWallDirectories } from './diary-wall/config';
 import { openSettingsPanel, unloadSettingsPanel } from './settings-panel';
 import { openDataCheckup, unloadDataCheckup } from './checkup';
+// 日常收集（collect 域，issue 246：QuickAdd「日常收集」宏换血进插件）
+import {
+  openCollectPanel, openCollectCapture, openCategoryCapture, captureSelection,
+  unloadCollect, categoryCommandId, DEFAULT_COLLECT_CATEGORIES,
+} from './collect';
 
 /** 命令表：id/name 统一命名（spec「命令 id 全清单」第 9 轮：bz-<域>-<动作>，icon 与入口页磁贴一致）；
  *  editorCallback 可选（ticket 169）：提供后注册为编辑器命令，自动进入文档内右键待选命令 */
@@ -146,6 +151,23 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-encrypt-lock', name: '加密当前笔记', icon: 'lock-keyhole', callback: () => encryptCurrentNote(getApp()) },
   // 快速复制密码（bz-encrypt-copy-password：不打开保险库面板，fuzzy 选择即复制，60s 自动清空剪贴板）
   { id: 'bz-encrypt-copy-password', name: '快速复制密码', icon: 'key-round', callback: () => copyVaultPassword(getApp()) },
+  // 日常收集（collect 域，issue 246：选分类 → 输内容 → 追加到「## 非文件收集」下末尾；与 QuickAdd 宏同格式共存）
+  { id: 'bz-collect-open', name: '日常收集', icon: 'inbox', callback: () => openCollectPanel(getApp()) },
+  // 统一入口：弹窗内选分类（ribbon 图标同向）
+  { id: 'bz-collect-capture', name: '收集内容', icon: 'pencil-line', callback: () => openCollectCapture(getApp()) },
+  // 选区收集：把当前笔记选区（含多行）收进所选分类；文档右键待选
+  {
+    id: 'bz-collect-selection', name: '收集选区', icon: 'text-select',
+    callback: () => captureSelection(getApp()),
+    editorCallback: () => captureSelection(getApp()),
+  },
+  // 每分类直达命令（16 条汉字 id，跳过分类选择步）
+  ...DEFAULT_COLLECT_CATEGORIES.map((c) => ({
+    id: categoryCommandId(c.name),
+    name: c.name,
+    icon: 'inbox',
+    callback: () => openCategoryCapture(getApp(), c.name),
+  })),
   // 小橘陪伴猫（smartcat 域）
   { id: 'bz-smartcat-open', name: '小橘', icon: 'cat', callback: () => openSmartCat(getApp()) },
   // f7：去 message-circle 重复（第二大脑对话保留）→ messages-square
@@ -243,6 +265,8 @@ export default class BzPlugin extends Plugin {
     // ribbon 主入口：备忘录面板 + 日记本
     this.addRibbonIcon('check-square', '待办', () => openTodoPanel(this.app));
     this.addRibbonIcon('notebook-pen', '日记本', () => showDiaryPanel(this));
+    // 日常收集（collect 域）：ribbon 图标直达统一入口（选分类 → 输内容）
+    this.addRibbonIcon('inbox', '日常收集', () => openCollectCapture(this.app));
 
     // 番茄钟状态栏（ticket 29：常驻倒计时，点击打开弹窗）
     mountPomodoroStatusBar(this.addStatusBarItem(), this.app);
@@ -329,6 +353,8 @@ export default class BzPlugin extends Plugin {
     unloadDiaryWall();
     unloadSettingsPanel();
     unloadDataCheckup();
+    // 日常收集（collect 域）：面板 DOM + ESC 层（未初始化时幂等空清理）
+    unloadCollect();
     // 域事件总线收口：摘除 vault 订阅点 + 清空全部域事件订阅（总线为进程内单例，随插件卸载全量清空）
     detachObsidianAdapter();
     clearDomainEvents();

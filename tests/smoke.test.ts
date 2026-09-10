@@ -1,12 +1,14 @@
 /**
  * 骨架加载冒烟（ticket 01）：mock obsidian 环境下插件可加载、
- * 37 命令裸注册、ribbon 主入口、设置页挂载、卸载清理命令（ticket 170 加「批量加入复习计划」后）。
+ * 全量命令裸注册、ribbon 主入口、设置页挂载、卸载清理命令（ticket 170 加「批量加入复习计划」，
+ * issue 246 加 collect 域 19 条：面板/统一入口/选区 + 16 条汉字分类直达）。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import BzPlugin, { BzSettingTab } from '../src/main';
 import { MockVault } from './mock-vault';
 import { resetObsidianMocks, getNoticeMessages, hasNotice, clearNotices } from './mock-obsidian-entry';
 import { notify } from '../src/core/notice';
+import { DEFAULT_COLLECT_CATEGORIES, categoryCommandId } from '../src/collect';
 
 // ai-agent 域解散后的新注册点隔离：ensureFileSync（todo）/ensureFavoritesFileSync 换 spy
 // （vi.mock 局部替换，其余导出保持真实实现，命令回调冒烟等用例不受影响）
@@ -83,6 +85,9 @@ const EXPECTED_COMMAND_IDS = [
   'bz-attach-move',
   'bz-encrypt-open', 'bz-encrypt-lock',
   'bz-smartcat-open', 'bz-smartcat-chat', 'bz-smartcat-hide', 'bz-smartcat-dashboard',
+  // 日常收集（collect 域，issue 246）：面板 + 统一入口 + 选区收集 + 16 条汉字分类直达命令
+  'bz-collect-open', 'bz-collect-capture', 'bz-collect-selection',
+  ...DEFAULT_COLLECT_CATEGORIES.map((c) => categoryCommandId(c.name)),
   'bz-diary-open',
   // 日常时间记录（自 CONFIG/SCRIPTS 三个 QuickAdd 宏整合进 diary 域）
   'bz-diary-task-check', 'bz-diary-review', 'bz-diary-plan',
@@ -207,7 +212,7 @@ describe('bz 骨架冒烟', () => {
     expect(() => registeredCommands.find((c: any) => c.id === 'bz-review-count').callback()).not.toThrow();
     expect(() => registeredCommands.find((c: any) => c.id === 'bz-reading-report-open').callback()).not.toThrow();
   }, 15000);
-  it('全部 37 命令回调冒烟：逐个调用覆盖各域懒加载入口（含日记本 init 两个命令）', async () => {
+  it('全部命令回调冒烟：逐个调用覆盖各域懒加载入口（含日记本 init 两个命令）', async () => {
     const plugin = await createPlugin(makeMockApp());
     const failures: string[] = [];
     for (const c of registeredCommands) {

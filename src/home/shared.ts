@@ -45,6 +45,8 @@ export const DOMAINS: HomeDomain[] = [
   { id: 'pomodoro', commandId: 'bz-pomodoro-open', name: '番茄钟', sub: '专注计时', icon: iconOf('pomodoro') },
   { id: 'favorites', commandId: 'bz-favorites-open', name: '收藏本', sub: '收藏条目', icon: iconOf('favorites') },
   { id: 'clipping', commandId: 'bz-clipbook-open', name: '剪藏本', sub: '未读流与剪藏', icon: iconOf('clipping') },
+  // 日常收集（collect 域，issue 246）：QuickAdd 宏换血进插件，捕获入口在首页留快照位
+  { id: 'collect', commandId: 'bz-collect-open', name: '日常收集', sub: '灵感与素材收集', icon: iconOf('collect') },
   // 文献盒（literature 域，ADR-0072）：文献笔记列表 + 视频/术语录入（补内容域曝光位）
   { id: 'literature', commandId: 'bz-literature-open', name: '文献盒', sub: '文献笔记与录入', icon: iconOf('literature') },
   // 书库（bookshelf 域换血接替 library；内部 id 保持兼容 home.json 钉选）
@@ -67,6 +69,7 @@ export const DOMAIN_DOT: Record<string, string> = {
   pomodoro: '#e5534b',
   favorites: '#f0b429',
   clipping: '#2f9e5f',
+  collect: '#c98a2e',
   literature: '#c2559d',
   bookshelf: '#3d7bd6',
   'reading-report': '#3fa7a0',
@@ -106,6 +109,8 @@ export interface RiverCounts {
   clippingUnread: number;
   favoritesTotal: number;
   belongingsTotal: number;
+  /** 今日收集条数（collect 域目标文件的只读聚合；非标准格式行不计） */
+  collectToday: number;
 }
 
 export const EMPTY_COUNTS: RiverCounts = {
@@ -120,7 +125,16 @@ export const EMPTY_COUNTS: RiverCounts = {
   clippingUnread: 0,
   favoritesTotal: 0,
   belongingsTotal: 0,
+  collectToday: 0,
 };
+
+/** 收集快照一条（分类名 + 正文摘要）。
+ *  本地纯类型：shared 是渲染纯层（import 白名单只放 core/ui/str 与 core/domain-icons），
+ *  不从 collect 域引类型，避免把配置层拖进预览包。 */
+export interface CollectRecentItem {
+  category: string;
+  text: string;
+}
 
 /** 时间线摘要（recap RecapSummary + todoCreated：彩点规则的需要） */
 export interface RiverSummary extends RecapSummary {
@@ -162,6 +176,8 @@ export interface RiverData {
   week: RiverWeekDay[];
   streak: RiverStreak;
   counts: RiverCounts;
+  /** 最近收集条目（时间倒序，最多 3 条；collect 域目标文件只读聚合） */
+  collectRecent: CollectRecentItem[];
 }
 
 /* ---------- 日期/文案小工具 ---------- */
@@ -272,6 +288,7 @@ export function buildDots(data: RiverData): Record<string, RiverDot> {
     pomodoro: day.summary.pomodoros > 0 ? 'ok' : 'off',
     cinema: hasEvent('cinema') ? 'ok' : 'off',
     bookshelf: hasEvent('bookshelf') ? 'ok' : 'off',
+    collect: data.counts.collectToday > 0 ? 'ok' : 'off',
   };
 }
 
@@ -298,6 +315,8 @@ export function riverCountText(id: string, data: RiverData): string | null {
       return `${c.favoritesTotal} 条`;
     case 'belongings':
       return `登记 ${c.belongingsTotal} 件`;
+    case 'collect':
+      return `今日 ${c.collectToday} 条`;
     case 'wall':
       return `${c.diaryTotal} 格`;
     default:
@@ -308,4 +327,13 @@ export function riverCountText(id: string, data: RiverData): string | null {
 /** 时间线域徽记 id（recap 记 todo，展示归 memo：todo/memo 同源） */
 export function memoIdOf(domain: string): string {
   return domain === 'todo' ? 'memo' : domain;
+}
+
+/* ---------- 收集快照（首页第三栏卡片） ---------- */
+
+/** 收集正文摘要截断（空白折叠成单空格；超长加 …；max ≤ 0 原样返回） */
+export function truncateCollect(text: string, max = 42): string {
+  const s = (text || '').replace(/\s+/g, ' ').trim();
+  if (max <= 0 || s.length <= max) return s;
+  return s.slice(0, max) + '…';
 }

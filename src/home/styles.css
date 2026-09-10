@@ -112,6 +112,19 @@
 .bz-home-pr-h::before { content: "✦ "; }
 .bz-home-pr-go { display: inline-block; margin-top: 7px; font-size: 11.5px; color: var(--h-ai); font-weight: 700; }
 
+/* ---- 今日收集快照（collect 域，issue 246）：今日条数 + 最近 3 条只读摘要 ---- */
+.bz-home-panel .bz-home-collect { display: block; margin-top: 16px; background: var(--h-card); border: 1px solid var(--h-line); border-radius: 12px; padding: 12px 14px 13px; cursor: pointer; text-align: left; font-family: inherit; color: inherit; font-size: 100%; width: 100%; }
+.bz-home-panel .bz-home-collect:hover { border-color: var(--h-amber); }
+.bz-home-collect-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
+.bz-home-collect-t { font-size: 11px; letter-spacing: .28em; color: var(--h-dim); }
+.bz-home-collect-n { font-size: 15px; font-weight: 700; color: var(--h-amber); flex: none; }
+.bz-home-collect-bd { display: flex; flex-direction: column; gap: 8px; }
+.bz-home-collect-it { font-size: 12.5px; line-height: 1.65; }
+.bz-home-collect-cat { display: inline-block; font-size: 10.5px; color: var(--h-amber); background: rgba(201, 138, 46, .14); border-radius: 7px; padding: 1px 7px; margin-right: 7px; vertical-align: 1px; }
+.bz-home-collect-tx { color: var(--h-ink); }
+.bz-home-collect-empty { font-size: 12.5px; color: var(--h-dim); line-height: 1.7; }
+.bz-home-collect-go { display: inline-block; margin-top: 10px; font-size: 11.5px; font-weight: 700; color: var(--h-amber); }
+
 /* ---- 移动端判定：面板自身为容器（favorites 先例）。面板自身尺寸走 @media
         （容器查询不作用于自身），内部布局切换走 @container ---- */
 .bz-home-panel { container-type: inline-size; }

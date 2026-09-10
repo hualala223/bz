@@ -10,5 +10,5 @@
 export * from './shared';
 export {
   panelFrameHtml, loadingEntriesHtml, loadingFlowHtml,
-  weekHtml, entriesHtml, flowHtml, nextHtml, tilesHtml,
+  weekHtml, entriesHtml, flowHtml, nextHtml, collectHtml, tilesHtml,
 } from './layouts/river/render';

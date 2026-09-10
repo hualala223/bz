@@ -352,6 +352,17 @@ _Avoid_: 三路分数并入 GA 加法分空间（污染 RL 校准资产）、8 �
 **RL 校准配方 (RL Calibration)**: 正式强化学习收敛后的动力学默认值（ADR-0024，2026-08-23）——以「真实库事件流（过去 365 天真实使用）」环境最优配方为生产新默认：`characterTransition` 默认 δbase 0.003→0.00083（合成配方 0.0096 作对照）、`trustUpdate` 温暖增益 0.01→0.0082/侵蚀 0.003→0.0029（**ticket 027 追加决策：TRUST_CAP=0.85 软收拢**，`v=cap+K(v−cap)` K=0.98 平衡点≈0.91；**ticket 072 校正：K 0.98→0.85——旧系数不动点 cap+49·gain 在现增益下越过硬顶致 trust 饱和 0.999，新不动点 v\*=cap+gain/(1−K)（聊天档≈0.88），存量饱和值被缓慢拉回**；**ADR-0025：中性事件 neutral 短路连软收拢也不动 trust**）；记忆流 GA 三因子 α 1.0→0.5/0.73/0.5、decay 0.995→0.986（**进化第 3 轮 rMem 接回周检索项后重标定：α=0.66/0.95/1.5、decay=0.982，相关度权重上调最猛**）；模拟器独有旋钮（effectScale/emoGain/charSens/decayScale）不迁移生产。**ticket 025**：写日记/闪念以轻质量 0.15 计入信任成长（`developBasedOnInteraction(kind,0.3,0.02,0.15)`，vault 事件挂钩）+ 笔记库内容为信息来源（`context-source.ts`：diary/flash/clipping/movie/reading 实时分类 + 观察文本，**ticket 029 用户拍板扩展为全内容读取 + LLM 云端打分 + 词法情绪**，AI 未配置降级本地规则分，`config.noteSource` 开关默认开）。
 _Avoid_: 记忆文件、memories 目录、四层（已废弃）；迁移（已删除）
 
+### 日常收集域（collect，issue 246）
+
+**收集条目 (Collect Entry)**: 日常收集的最小单位，形如 `- YY/MM/DD-HH:MM:SS 内容` 的单行——时间戳沿用 QuickAdd 宏的 `YY/MM/DD-HH:MM:SS` 形态（`YY` 按 20YY 解释，秒位越界等历史怪值不校验不清洗）。解析器 `parseEntries` 只认这一种标准行，其余行（无时间戳的历史行、引用续行、dataview 代码块）一律忽略。多行输入按行拆成多条，共用同一时间戳前缀。
+_Avoid_: 记录、笔记、事项
+
+**非文件收集 (Non-file Collection)**: 收集条目的归属标题 `## 非文件收集`——追加位置是「该标题段末尾」（找不到标题则追加文件末尾，标题缺失时**不新建标题**）。逐字沿用 QuickAdd 宏的 `insertAfter.after`，是插件与宏共存共写同一批 md 文件的兼容面。
+
+**收集分类 (Collect Category)**: 「分类名 → 目标文件」映射（设置键 `collectCategories`），内置 16 条照 QuickAdd 宏内 choices 迁移（宏内「日常金优秀句子收集」为历史笔误，按其指向的 `日常优秀描写句子收集.md` 正名；「日常人物需求收集 」去尾空格）。宏外文件（冲突类型/冲突：矛盾对抗/情感/想法/疑问）**不预置**，用户在 ⚙️ 自行添加。分类清单为空 = 未配置，回落内置 16 条；每分类对应一条汉字 id 命令 `bz-collect-<分类名>`。
+
+**收集目录 (Collect Folder)**: 分类文件统一落的目录（设置键 `collectFolderPath`，默认 `我的/日常收集`）；分类的 `file` 含「/」时视为完整路径，不再挂在收集目录下。
+
 ### 移动端窗口（ticket 68，跨域）
 
 **移动端默认全屏 (Mobile Default Fullscreen)**: bz 的跨域设置（ticket 68，ADR-0019）——11 个有主窗口的域各一项布尔开关（键 `<域前缀>MobileDefaultFullscreen`，落 data.json；ticket 168 复习主窗口退役、`reviewMobileDefaultFullscreen` 键删除），**仅移动端（`Platform.isMobile`）显示与生效**，桌面端不显示不受影响。语义：≤768px 时 **开=真全屏**（主窗口覆盖整个视口 100vw×100vh、去圆角、头部避让安全区、底部 env(safe-area-inset-bottom)，统一类 `.bz-win-mfs`），**关=常规卡**（95%/90vh 圆角卡）；只决定每次打开的**初始形态**，窗口内无手动切换按钮。多窗口域（影视主面板+影视分析+影视报告、书库主面板+读书笔记+阅读报告）一并对控制，筛选/批注等小弹窗不纳入。**聚合讯跟随剪藏本键、阅读报告跟随书库键（2026-08 用户拍板：两域不设独立开关、窗口无 ⚙️ 设置入口）**。默认值=行为保持（原移动端即全屏的域默认开——日记/归物本/剪藏本/密码本/收藏本/书库/影视/保险箱；原居中卡的 3 域默认关——备忘录/番茄钟/文献盒）。做题家、入口页不设此开关（用户拍板）。

@@ -42,8 +42,18 @@ const SOURCES = [
   "src/belongings/styles.css",
   "src/cinema/styles.css",
   "src/literature/styles.css",
+  "src/collect/styles.css",
   "src/secondbrain/styles.css",
   "src/smartcat/styles.css",
+  // 上游线并入域（yeshimei/bz 第一/二档合并时漏登记，面板在生产环境整片不可见）——
+  // 类名前缀各自独立（bz-home-/bz-recap-/bz-checkup-/bz-diary-wall-/bz-sp-/bz-rr-），
+  // 与既有节无选择器冲突；域间次序不影响其它域。
+  "src/home/styles.css",
+  "src/recap/styles.css",
+  "src/checkup/styles.css",
+  "src/diary-wall/styles.css",
+  "src/settings-panel/styles.css",
+  "src/reading-report/styles.css",
 ];
 
 const HEADER = [

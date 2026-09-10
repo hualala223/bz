@@ -114,6 +114,42 @@ describe('home 活动河 UI（issue 232）', () => {
     expect(document.querySelector(`[data-home-weekday="${yesterday}"]`)!.classList.contains('bz-home-wk--sel')).toBe(true);
   });
 
+  it('今日收集快照卡：今日条数 + 最近 3 条（分类 badge + 摘要）；点卡片直达日常收集', async () => {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, '0');
+    const stamp = `${p(d.getFullYear() % 100)}/${p(d.getMonth() + 1)}/${p(d.getDate())}-08:00:00`;
+    vault.files.set(
+      '我的/日常收集/日常灵感收集.md',
+      `## 非文件收集\n- ${stamp} 一条很长的灵感内容需要被截断展示\n`
+    );
+    const app = recApp(vault);
+    openHome(app);
+    await new Promise((r) => setTimeout(r, 20));
+
+    const card = document.querySelector('.bz-home-collect') as HTMLElement;
+    expect(card).toBeTruthy();
+    expect(card.querySelector('.bz-home-collect-n')!.textContent).toBe('1 条');
+    expect(card.querySelector('.bz-home-collect-cat')!.textContent).toBe('日常灵感收集');
+    expect(card.querySelectorAll('.bz-home-collect-it').length).toBe(1);
+    // 入口行计数文案同源
+    const erow = document.querySelector('[data-home-go="collect"].bz-home-erow') as HTMLElement;
+    expect(erow.querySelector('.bz-home-ect')!.textContent).toBe('今日 1 条');
+
+    card.click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(app.__executed).toEqual(['bz-collect-open']);
+  });
+
+  it('今日收集快照卡空态：无收集文件时给引导文案且不入库', async () => {
+    const app = recApp(vault);
+    openHome(app);
+    await new Promise((r) => setTimeout(r, 20));
+    const card = document.querySelector('.bz-home-collect') as HTMLElement;
+    expect(card.querySelector('.bz-home-collect-empty')).toBeTruthy();
+    expect(card.querySelectorAll('.bz-home-collect-it').length).toBe(0);
+    expect(vault.files.size).toBe(0);
+  });
+
   it('点关闭钮 / 遮罩均关闭（桌面无关闭钮显示由 CSS 控制事件仍可用）', async () => {
     const app = recApp(vault);
     openHome(app);

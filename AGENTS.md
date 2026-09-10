@@ -1,6 +1,6 @@
 # AGENTS.md — 包仔（bz）Obsidian 插件
 
-独立 Obsidian 插件，25 功能域（详见领域清单；2026-09 自上游线 yeshimei/bz 并入 home/recap/checkup/diary-wall/settings-panel 五域，memo 域由 todo 待办域换血接替、movie 域由 cinema 影院域换血接替、news+clipping 域由 clipbook 剪藏本融合域换血接替、password 域并入 encrypt 统一保险库，见 PROGRESS）。数据沿用既有格式（`CONFIG/STORAGE/*.json`、`我的/*.md`、frontmatter），旧数据直接可读。**项目语言：中文**。
+独立 Obsidian 插件，26 功能域（详见领域清单；2026-09 自上游线 yeshimei/bz 并入 home/recap/checkup/diary-wall/settings-panel 五域，memo 域由 todo 待办域换血接替、movie 域由 cinema 影院域换血接替、news+clipping 域由 clipbook 剪藏本融合域换血接替、password 域并入 encrypt 统一保险库；2026-09 collect 日常收集域换血接替外部 QuickAdd「日常收集」宏，ADR-0107，见 PROGRESS）。数据沿用既有格式（`CONFIG/STORAGE/*.json`、`我的/*.md`、frontmatter），旧数据直接可读。**项目语言：中文**。
 
 ## 交互约定
 
@@ -18,7 +18,7 @@
 
 ## 架构
 
-- `src/main.ts`：命令裸注册表、设置页、懒加载、onunload（47 命令 = ticket 170 后 37 + 上游并入新域 5：内容首页/今日回顾/回忆墙/数据体检/设置面板 + 上游 P1~P7 移植 2：复习计划分析报告/快速复制密码 + ticket 245 日常时间记录 3：当天任务完成情况/每日复盘/日程规划）
+- `src/main.ts`：命令裸注册表、设置页、懒加载、onunload（66 命令 = ticket 170 后 37 + 上游并入新域 5：内容首页/今日回顾/回忆墙/数据体检/设置面板 + 上游 P1~P7 移植 2：复习计划分析报告/快速复制密码 + ticket 245 日常时间记录 3：当天任务完成情况/每日复盘/日程规划 + issue 246 日常收集 19：面板/统一入口/选区收集 + 16 条汉字分类命令）
 - `src/core/`：共享层（不挂 window）——app/settings-provider/ai/json-store/domain-bus/obsidian-adapter/path-classify/esc-manager/flow-dialog/utils/dom/changelog/notice（自绘 toast）/settings-modal/settings-schema/settings-common
 - `src/<域>/`：index.ts + data + ui + styles.css（该域样式源头，聚合进根 `styles.css`）；`src/settings.ts`；根 `styles.css`（构建聚合产物，勿手改）；`docs/adr/`；`CONTEXT.md`；`.scratch/<feature>/`
 - **依赖方向（ADR-0002）**：`core ← config/state ← parser ← store ← ui ← main`。store 无 DOM；UI 刷新靠回调订阅；禁止模块顶层互访，函数级引用环须函数体内延迟解析。
@@ -69,6 +69,7 @@
 | launcher | launcher.json |
 | pomodoro | pomodoro.json |
 | attach | —（搬当前笔记引用的 vault 附件） |
+| collect（日常收集，issue 246：换血外部 QuickAdd「日常收集」宏，ADR-0107） | `我的/日常收集/*.md`（分类 → 目标文件映射存 data.json `collectCategories`） |
 | bili-downloader | bili-tasks.json |
 | encrypt（保险库，上游换血：password 并入，ADR-0085） | `CONFIG/.ENCRYPT/`（.safe.enc 清单 + 附件；密码=kind=password-vault SafeNote） |
 

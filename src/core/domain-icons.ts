@@ -44,6 +44,7 @@ export const DOMAIN_ICONS: Readonly<Record<string, string>> = {
   password: 'key-round',
   smartcat: 'cat',
   literature: 'list-video',
+  collect: 'inbox',
   // 命令专属域
   'settings-panel': 'settings-2',
 };

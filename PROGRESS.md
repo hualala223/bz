@@ -479,3 +479,17 @@
 - [x] 入口：COMMANDS 表三条 `bz-diary-task-check`/`bz-diary-review`/`bz-diary-plan` + 日记面板头部 📋/🪞/🗓️ 三按钮
 - [x] 测试：daily-tasks.test.ts（12，node）+ daily-flow.test.ts（12，jsdom）+ smoke 命令 id 同步
 - [x] 门禁：tsc 0 错 + 全量 4210 测试绿 + 构建部署
+
+## 2026-09-10 · issue 246：日常收集（collect）新域——QuickAdd「日常收集」宏换血进插件
+
+**状态：已交付**（issues/246-collect-domain.md；ADR-0107 域新增 + ADR-0108 隐私门边界例外）
+
+- [x] 数据层 `src/collect/data.ts`（纯函数）：捕获管线 `appendCollect`（追加到 `## 非文件收集` 段末尾/标题缺失追加文件末尾）、条目解析器 `parseEntries`（只认 `- YY/MM/DD-HH:MM:SS 内容`）、`formatStamp`/`parseStamp`、初始文件内容（frontmatter + 标题）、分类清单纯操作（normalize/upsert/remove/rename/categoryFilePath/getCategories 空回落内置 16）
+- [x] IO 薄壳 `src/collect/store.ts`：`captureToCategory`（目录逐段建、文件缺失走 initialFileContent、存在则读原文追加后 modify）+ 只读 `readRecentEntries`/`countSameDay`
+- [x] UI `src/collect/ui.ts`：捕获弹窗（选分类/指定分类只读/选区预填、Ctrl+Enter 提交）、主面板分类启动器（`bz-win-head` + ⚙️ + 关闭 + 移动端全屏键）、⚙️ 设置弹窗（目标文件夹 path 行 + 分类增删改）+ `src/collect/styles.css`（进 build-css 聚合清单）
+- [x] settings.ts：`collectCategories`/`collectFolderPath`/`collectMobileDefaultFullscreen` 默认值落盘
+- [x] main.ts：命令 19 条（`bz-collect-open`/`bz-collect-capture`/`bz-collect-selection` + 16 条汉字分类命令 `bz-collect-<分类名>`）+ ribbon + onunload `unloadCollect`
+- [x] home 快照：域清单加 collect 磁贴；`RiverCounts.collectToday` / `RiverData.collectRecent` / `riverCountText` / `buildDots` / `truncateCollect`；第三栏「今日收集」只读卡（今日条数 + 最近 3 条分类 badge + 摘要）
+- [x] 测试：tests/collect/data.test.ts（16，node）+ tests/collect/ui.test.ts（9，jsdom）+ smoke 命令 id 全集同步 + tests/home river/ui-river 收集快照用例
+- [x] 文档：ADR-0107/0108、CONTEXT.md 术语（收集条目/非文件收集/收集分类/收集目录）、AGENTS.md 领域清单与命令数、`.scratch/collect` spec
+- [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署

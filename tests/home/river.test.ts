@@ -11,7 +11,7 @@ import { setSettingsProvider } from '../../src/core/settings-provider';
 import { DEFAULT_SETTINGS } from '../../src/settings';
 import {
   collectRiver, buildNotes, buildPreviews, buildDots, riverCountText,
-  EMPTY_COUNTS, dateStrOf,
+  EMPTY_COUNTS, dateStrOf, truncateCollect,
 } from '../../src/home/river';
 import type { RiverData } from '../../src/home/river';
 
@@ -28,6 +28,7 @@ function emptyRiver(): RiverData {
     week: Array.from({ length: 7 }, (_, i) => emptyWeek(dateStrOf(NOW - i * DAY))),
     streak: { diaryStreak: 0, diaryWrittenToday: false },
     counts: { ...EMPTY_COUNTS },
+    collectRecent: [],
   };
 }
 
@@ -154,6 +155,21 @@ describe('buildDots / riverCountText（入口行彩点与计数文案）', () =>
     expect(riverCountText('settings', d)).toBeNull();
     expect(riverCountText('pomodoro', d)).toBeNull();
   });
+
+  it('收集（collect 域）：彩点随今日条数、计数文案「今日 N 条」、摘要截断', () => {
+    const d = emptyRiver();
+    expect(buildDots(d).collect).toBe('off');
+    expect(riverCountText('collect', d)).toBe('今日 0 条');
+    d.counts.collectToday = 3;
+    expect(buildDots(d).collect).toBe('ok');
+    expect(riverCountText('collect', d)).toBe('今日 3 条');
+
+    // 摘要：空白折叠成单空格；超长截断加 …；max ≤ 0 原样
+    expect(truncateCollect('  多行\n灵感   一条 ')).toBe('多行 灵感 一条');
+    expect(truncateCollect('一二三四五', 3)).toBe('一二三…');
+    expect(truncateCollect('一二三', 3)).toBe('一二三');
+    expect(truncateCollect('一二三', 0)).toBe('一二三');
+  });
 });
 
 /* ---------- collectRiver 采集集成（MockVault，只读契约） ---------- */
@@ -238,5 +254,33 @@ describe('collectRiver（只读采集集成）', () => {
     expect(data.today.summary.todoDone).toBe(1);
     expect(data.today.summary.todoCreated).toBe(2);
     expect(data.today.firstTs).not.toBeNull();
+  });
+
+  it('收集快照：跨分类聚合今日条数 + 最近 3 条倒序回填分类名；非标准行忽略且不建文件', async () => {
+    vault.files.set('我的/日常收集/日常灵感收集.md', [
+      '---',
+      'created: 2025-06-14',
+      '---',
+      '## 非文件收集',
+      '- 26/09/06-10:00:00 昨天一条',
+      '- 26/09/07-08:00:00 今天第一条',
+      '- 26/09/07-09:30:00 今天第二条',
+      '- 26/09/07-10:00:00 今天第三条',
+      '- 26/09/07-11:00:00 今天第四条',
+      '没有时间戳的历史行（解析器忽略）',
+    ].join('\n'));
+    vault.files.set('我的/日常收集/日常吐槽收集.md', '## 非文件收集\n- 26/09/07-11:30:00 吐槽一条\n');
+    const filesBefore = new Set(vault.files.keys());
+
+    const data = await collectRiver(mockAppWithVault(vault) as any, NOW);
+    expect(data.counts.collectToday).toBe(5); // 昨天那条不算，5 条今天
+    expect(data.collectRecent.map((r) => r.text)).toEqual(['吐槽一条', '今天第四条', '今天第三条']);
+    expect(data.collectRecent[0].category).toBe('日常吐槽收集');
+    expect(data.collectRecent[1].category).toBe('日常灵感收集');
+
+    // 只读：缺失分类文件不建、已有文件不改
+    const created = [...vault.files.keys()].filter((p) => !filesBefore.has(p));
+    expect(created).toEqual([]);
+    expect(vault.files.get('我的/日常收集/日常灵感收集.md')).toContain('今天第四条');
   });
 });

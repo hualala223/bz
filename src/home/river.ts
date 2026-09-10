@@ -31,17 +31,19 @@ import { scanMarkdownBooks, loadEpubItems } from '../bookshelf/data';
 import { loadDatabase as loadBelongings } from '../belongings/data';
 import { DataManager as FavoritesDataManager } from '../favorites/data';
 import { getStoragePath as getFavoritesPath } from '../favorites/config';
+import { readRecentEntries, countSameDay } from '../collect/store';
+import type { CollectEntry } from '../collect/data';
 import { EMPTY_COUNTS, EMPTY_SUMMARY, dateStrOf } from './shared';
-import type { RiverData, RiverDay, RiverCounts, RiverStreak, RiverSummary, RiverWeekDay } from './shared';
+import type { CollectRecentItem, RiverData, RiverDay, RiverCounts, RiverStreak, RiverSummary, RiverWeekDay } from './shared';
 
 // 兼容再出口：类型与规则纯函数单源在 ./shared（旧引用 `from './river'` 零改）
 export {
   EMPTY_COUNTS, EMPTY_SUMMARY, dateStrOf,
-  buildNotes, buildPreviews, buildDots, riverCountText, dotOf,
+  buildNotes, buildPreviews, buildDots, riverCountText, dotOf, truncateCollect,
 } from './shared';
 export type {
   RiverData, RiverDay, RiverEvent, RiverStreak, RiverCounts,
-  RiverSummary, RiverWeekDay, RiverNote, RiverPreview, RiverDot,
+  RiverSummary, RiverWeekDay, RiverNote, RiverPreview, RiverDot, CollectRecentItem,
 } from './shared';
 
 const DAY_MS = 86400000;
@@ -172,8 +174,18 @@ function collectDiary(app: App, now: number, c: RiverCounts): RiverStreak {
   return { diaryStreak: streak, diaryWrittenToday: writtenToday };
 }
 
-/* ---------- 聚合入口 ---------- */
+/** 收集快照（collect 域，issue 246）：今日条数 + 最近 3 条。
+ *  只读契约：走 collect 域 readRecentEntries（目标文件缺失/为空一律跳过，不建目录不建文件），
+ *  解析器只认标准 `- YY/MM/DD-HH:MM:SS 内容` 行，非标准行忽略。 */
+async function collectCollectSnapshot(
+  app: App, now: number, c: RiverCounts, recent: CollectRecentItem[]
+): Promise<void> {
+  const all: CollectEntry[] = await readRecentEntries(app, 0);
+  c.collectToday = countSameDay(all, now);
+  for (const e of all.slice(0, 3)) recent.push({ category: e.category, text: e.text });
+}
 
+/* ---------- 聚合入口 ---------- */
 /** 采集活动河全量数据（今天/昨天时间线 + 连击 + 全部域计数；全程只读） */
 export async function collectRiver(app: App, now: number = Date.now()): Promise<RiverData> {
   // 本周 7 天窗口（今天~6 天前）一次并行采集；recap anchor 参数天然支持任意天
@@ -183,6 +195,7 @@ export async function collectRiver(app: App, now: number = Date.now()): Promise<
   );
 
   const counts: RiverCounts = { ...EMPTY_COUNTS };
+  const collectRecent: CollectRecentItem[] = [];
   const safe = (fn: () => void | Promise<void>): Promise<void> =>
     Promise.resolve()
       .then(fn)
@@ -194,6 +207,7 @@ export async function collectRiver(app: App, now: number = Date.now()): Promise<
     safe(() => collectClippingCounts(app, counts)),
     safe(() => collectFavoritesCounts(app, counts)),
     safe(() => collectBelongingsCounts(app, counts)),
+    safe(() => collectCollectSnapshot(app, now, counts, collectRecent)),
   ]);
   let streak: RiverStreak = { diaryStreak: 0, diaryWrittenToday: false };
   try {
@@ -217,5 +231,6 @@ export async function collectRiver(app: App, now: number = Date.now()): Promise<
     week,
     streak,
     counts,
+    collectRecent,
   };
 }

@@ -6,6 +6,7 @@
 import {
   esc, iconSpan, DOMAINS, DOMAIN_MAP, DOMAIN_DOT,
   buildDots, buildNotes, buildPreviews, dotOf, riverCountText, memoIdOf,
+  truncateCollect,
   type RiverData, type RiverWeekDay,
 } from '../../shared';
 
@@ -96,7 +97,7 @@ export function flowHtml(data: RiverData, view: string): string {
   return title + (day.events.length ? '<div class="bz-home-timeline">' + body + '</div>' : empty);
 }
 
-/* ---------- 明天预告卡 ---------- */
+/* ---------- 明天预告卡 + 今日收集快照（第三栏） ---------- */
 
 export function nextHtml(data: RiverData): string {
   return '<div class="bz-home-sec-t bz-home-sec-t--ai">明 天 预 告</div>'
@@ -104,7 +105,31 @@ export function nextHtml(data: RiverData): string {
         '<div role="button" tabindex="0" class="bz-home-pr" data-home-go="' + pr.go + '">'
         + '<div class="bz-home-pr-h">' + esc(pr.h) + '</div><div>' + esc(pr.b) + '</div>'
         + '<span class="bz-home-pr-go">' + esc(pr.goLabel) + '</span></div>'
-      ).join('');
+      ).join('')
+    + collectHtml(data);
+}
+
+/**
+ * 今日收集快照卡（collect 域，issue 246）：今日条数 + 最近 3 条（分类名 + 内容截断）。
+ * 全部只读：数据由 collectRiver 从各分类目标文件解析而来，本卡不改写任何收集文件。
+ * 点卡片直达日常收集主面板（data-home-go="collect"）。
+ */
+export function collectHtml(data: RiverData): string {
+  const n = data.counts.collectToday;
+  const items = data.collectRecent;
+  const head = '<div class="bz-home-collect-h">'
+    + '<span class="bz-home-collect-t">今 日 收 集</span>'
+    + '<span class="bz-home-collect-n">' + n + ' 条</span></div>';
+  const body = items.length
+    ? items.map((it) =>
+        '<div class="bz-home-collect-it">'
+        + '<span class="bz-home-collect-cat">' + esc(it.category) + '</span>'
+        + '<span class="bz-home-collect-tx">' + esc(truncateCollect(it.text)) + '</span></div>'
+      ).join('')
+    : '<div class="bz-home-collect-empty">今天还没有收集，随手记一条灵感吧。</div>';
+  return '<div role="button" tabindex="0" class="bz-home-collect" data-home-go="collect" title="打开日常收集">'
+    + head + '<div class="bz-home-collect-bd">' + body + '</div>'
+    + '<span class="bz-home-collect-go">去收集 →</span></div>';
 }
 
 /* ---------- 移动端全部域两列瓦片（桌面隐藏；单列顺序 时间线 → 预告 → 瓦片） ---------- */

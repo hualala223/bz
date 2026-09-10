@@ -296,6 +296,14 @@ export default interface BzSettings {
   /** 后台自动暂停：窗口 hidden（最小化/遮挡/休眠）时主番茄钟暂停，恢复可见自动继续（默认开，ticket 62；blur 不触发） */
   pomodoroAutoPauseOnHide: boolean;
 
+  // ===== 📥 日常收集（collect 域，issue 246：QuickAdd「日常收集」宏换血）=====
+  /** 📂 目标文件夹（收集 md 统一存放目录，vault 根相对） */
+  collectFolderPath: string;
+  /** 🏷️ 分类映射（分类名 → 目标文件；空/非法回落内置 16 分类） */
+  collectCategories: Array<{ name: string; file: string }>;
+  /** 📥 日常收集主窗口：移动端默认全屏（默认开——分类网格铺满更好点） */
+  collectMobileDefaultFullscreen: boolean;
+
   // ===== 🔐 加密保险箱（encrypt 域，ticket NN）=====
   /** 📂 保险箱根目录（加密清单 .safe.enc 与点前缀密文镜像的统一存放目录，默认 CONFIG/.ENCRYPT——点前缀目录 Obsidian 侧栏不可见，防误删） */
   encryptRoot: string;
@@ -617,6 +625,12 @@ export const DEFAULT_SETTINGS: BzSettings = {
   encryptPreviewEnabled: true,
   encryptPreviewSize: '384',
   encryptPreviewQuality: '0.5',
+
+  // 日常收集（collect 域，issue 246：QuickAdd「日常收集」宏换血进插件）
+  collectFolderPath: '我的/日常收集',
+  // 分类映射默认空 = 运行时回落内置 16 分类（DEFAULT_COLLECT_CATEGORIES）
+  collectCategories: [],
+  collectMobileDefaultFullscreen: true,
   encryptAutoLoadOriginal: false,
   encryptSecurityMode: false,
 

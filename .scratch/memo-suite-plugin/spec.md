@@ -331,6 +331,7 @@ otifyMemoAction（方法监听，一次动作一条）+ **每日到期扫描**�
 - **日记本**（已迁）：`bz-diary-write`、`bz-diary-open`
 - **B站下载器**：`bz-bili-open`
 - **附件搬移**（ticket 65 新域）：`bz-attach-move`（中文名「移动附件」，icon folder-down，主页磁贴自动播种 desktop+mobile 末尾）
+- **日常收集**（issue 246 新域，外部 QuickAdd「日常收集」Multi 宏换血进插件，ADR-0107）：`bz-collect-open`（打开分类启动器面板，ribbon 图标同向）、`bz-collect-capture`（统一入口：弹窗内选分类）、`bz-collect-selection`（选区收集，多行选区保持换行）、`bz-collect-<分类名>`（16 条**汉字 id**直达该分类输入：`bz-collect-故事情节收集` … `bz-collect-日常社会敏感议题收集`）。域数据为追加式 md（`我的/日常收集/*.md`），无 json 存储；分类映射与目标文件夹存 `data.json`（`collectCategories`/`collectFolderPath`），⚙️ 弹窗编辑
 - 已删除命令：`bz-notification-demo`（通知样式演示）、`bz-diary-create-quote`（写摘抄）
 - Q3 自身无命令
 

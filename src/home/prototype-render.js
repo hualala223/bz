@@ -31,6 +31,7 @@ var BZR_home = (() => {
     buildDots: () => buildDots,
     buildNotes: () => buildNotes,
     buildPreviews: () => buildPreviews,
+    collectHtml: () => collectHtml,
     dateStrOf: () => dateStrOf,
     dotOf: () => dotOf,
     entriesHtml: () => entriesHtml,
@@ -45,6 +46,7 @@ var BZR_home = (() => {
     panelFrameHtml: () => panelFrameHtml,
     riverCountText: () => riverCountText,
     tilesHtml: () => tilesHtml,
+    truncateCollect: () => truncateCollect,
     weekHtml: () => weekHtml
   });
 
@@ -88,6 +90,7 @@ var BZR_home = (() => {
     password: "key-round",
     smartcat: "cat",
     literature: "list-video",
+    collect: "inbox",
     // 命令专属域
     "settings-panel": "settings-2"
   };
@@ -105,6 +108,8 @@ var BZR_home = (() => {
     { id: "pomodoro", commandId: "bz-pomodoro-open", name: "番茄钟", sub: "专注计时", icon: iconOf("pomodoro") },
     { id: "favorites", commandId: "bz-favorites-open", name: "收藏本", sub: "收藏条目", icon: iconOf("favorites") },
     { id: "clipping", commandId: "bz-clipbook-open", name: "剪藏本", sub: "未读流与剪藏", icon: iconOf("clipping") },
+    // 日常收集（collect 域，issue 246）：QuickAdd 宏换血进插件，捕获入口在首页留快照位
+    { id: "collect", commandId: "bz-collect-open", name: "日常收集", sub: "灵感与素材收集", icon: iconOf("collect") },
     // 文献盒（literature 域，ADR-0072）：文献笔记列表 + 视频/术语录入（补内容域曝光位）
     { id: "literature", commandId: "bz-literature-open", name: "文献盒", sub: "文献笔记与录入", icon: iconOf("literature") },
     // 书库（bookshelf 域换血接替 library；内部 id 保持兼容 home.json 钉选）
@@ -124,6 +129,7 @@ var BZR_home = (() => {
     pomodoro: "#e5534b",
     favorites: "#f0b429",
     clipping: "#2f9e5f",
+    collect: "#c98a2e",
     literature: "#c2559d",
     bookshelf: "#3d7bd6",
     "reading-report": "#3fa7a0",
@@ -146,7 +152,8 @@ var BZR_home = (() => {
     bookshelfFinished: 0,
     clippingUnread: 0,
     favoritesTotal: 0,
-    belongingsTotal: 0
+    belongingsTotal: 0,
+    collectToday: 0
   };
   var EMPTY_SUMMARY = {
     diary: 0,
@@ -228,7 +235,8 @@ var BZR_home = (() => {
       memo: day.summary.todoDone + day.summary.todoCreated > 0 ? "ok" : "off",
       pomodoro: day.summary.pomodoros > 0 ? "ok" : "off",
       cinema: hasEvent("cinema") ? "ok" : "off",
-      bookshelf: hasEvent("bookshelf") ? "ok" : "off"
+      bookshelf: hasEvent("bookshelf") ? "ok" : "off",
+      collect: data.counts.collectToday > 0 ? "ok" : "off"
     };
   }
   function dotOf(dots, id) {
@@ -252,6 +260,8 @@ var BZR_home = (() => {
         return `${c.favoritesTotal} 条`;
       case "belongings":
         return `登记 ${c.belongingsTotal} 件`;
+      case "collect":
+        return `今日 ${c.collectToday} 条`;
       case "wall":
         return `${c.diaryTotal} 格`;
       default:
@@ -260,6 +270,11 @@ var BZR_home = (() => {
   }
   function memoIdOf(domain) {
     return domain === "todo" ? "memo" : domain;
+  }
+  function truncateCollect(text, max = 42) {
+    const s = (text || "").replace(/\s+/g, " ").trim();
+    if (max <= 0 || s.length <= max) return s;
+    return s.slice(0, max) + "…";
   }
 
   // src/home/layouts/river/render.ts
@@ -325,7 +340,16 @@ var BZR_home = (() => {
   function nextHtml(data) {
     return '<div class="bz-home-sec-t bz-home-sec-t--ai">明 天 预 告</div>' + buildPreviews(data).map(
       (pr) => '<div role="button" tabindex="0" class="bz-home-pr" data-home-go="' + pr.go + '"><div class="bz-home-pr-h">' + esc(pr.h) + "</div><div>" + esc(pr.b) + '</div><span class="bz-home-pr-go">' + esc(pr.goLabel) + "</span></div>"
-    ).join("");
+    ).join("") + collectHtml(data);
+  }
+  function collectHtml(data) {
+    const n = data.counts.collectToday;
+    const items = data.collectRecent;
+    const head = '<div class="bz-home-collect-h"><span class="bz-home-collect-t">今 日 收 集</span><span class="bz-home-collect-n">' + n + " 条</span></div>";
+    const body = items.length ? items.map(
+      (it) => '<div class="bz-home-collect-it"><span class="bz-home-collect-cat">' + esc(it.category) + '</span><span class="bz-home-collect-tx">' + esc(truncateCollect(it.text)) + "</span></div>"
+    ).join("") : '<div class="bz-home-collect-empty">今天还没有收集，随手记一条灵感吧。</div>';
+    return '<div role="button" tabindex="0" class="bz-home-collect" data-home-go="collect" title="打开日常收集">' + head + '<div class="bz-home-collect-bd">' + body + '</div><span class="bz-home-collect-go">去收集 →</span></div>';
   }
   function tilesHtml(data) {
     const dotsMap = buildDots(data);
