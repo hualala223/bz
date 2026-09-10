@@ -22,6 +22,7 @@ import { applyFilter, cancelEdit, updateSticky, initScroll } from './entries';
 import { createTag, rebuildTags, refreshSubTagsBar } from './filter-shared';
 import { createTagPicker, createAddDialog, createDatePicker, showDatePicker, openAddDialog } from './dialogs';
 import { registerOpenDialogCommand } from './quote';
+import { runTaskCheck, openReviewDialog, planTomorrow } from '../daily';
 import { closePanel } from './panel-close';
 import { openDiaryRepairModal } from './repair-modal';
 
@@ -170,12 +171,18 @@ function createHeader() {
   searchButton.style.pointerEvents = 'none';
 
   const addButton = createButton('✏️', '写日记', () => openAddDialog());
+  const taskCheckButton = createButton('📋', '当天任务完成情况', () => void runTaskCheck());
+  const reviewButton = createButton('🪞', '每日复盘', () => openReviewDialog());
+  const planButton = createButton('🗓️', '日程规划（明日日记）', () => void planTomorrow());
 
   const closeButton = createButton('❌', '关闭', () => {
     closePanel();
   });
 
   buttonContainer.appendChild(addButton);
+  buttonContainer.appendChild(taskCheckButton);
+  buttonContainer.appendChild(reviewButton);
+  buttonContainer.appendChild(planButton);
   buttonContainer.appendChild(searchButton);
   buttonContainer.appendChild(settingsButton);
   buttonContainer.appendChild(closeButton);

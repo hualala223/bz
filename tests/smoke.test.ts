@@ -84,6 +84,8 @@ const EXPECTED_COMMAND_IDS = [
   'bz-encrypt-open', 'bz-encrypt-lock',
   'bz-smartcat-open', 'bz-smartcat-chat', 'bz-smartcat-hide', 'bz-smartcat-dashboard',
   'bz-diary-open',
+  // 日常时间记录（自 CONFIG/SCRIPTS 三个 QuickAdd 宏整合进 diary 域）
+  'bz-diary-task-check', 'bz-diary-review', 'bz-diary-plan',
 ];
 
 /** 内存"磁盘"存储：模拟 Obsidian 插件的 data.json 持久层 */

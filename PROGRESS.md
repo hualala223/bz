@@ -467,3 +467,15 @@
 - [x] 测试：tests/smartcat/diary-privacy-guard.test.ts（4 例）+ summarize.test.ts 增 digest 剔除/AI 提示词剔除（2 例）
 - [x] 同步：CONTEXT.md 术语「日记隐私门」+ docs/adr/0106
 - [x] 门禁：tsc + 全量测试 + 构建部署
+
+## 2026-09-10 · ticket 245：日常时间记录三 QuickAdd 宏整合进 diary 域
+
+**状态：已交付**（issues/245-daily-quickadd-integration.md）
+
+- [x] 新增 `src/diary/daily.ts`：`runTaskCheck`（7 项任务 `openFlowDialog` 逐项打勾 → `updateFileSections` 段级合并写回 `CONFIG/SCRIPTS/每日任务状态.json`，格式沿用原宏零迁移）/ `openReviewDialog`（复盘模板经写日记弹窗 preset 预填，走 addEntry 条目链路）/ `planTomorrow`（明日日记三段日程模板，写前 `diaryDataMap` 为 null 先 `loadAll` 防整文件重写丢数据，`### 代办事项` 重复检测）
+- [x] `selectDueTasks(status, today, hour)` 纯函数：已问过（true/false）跳过、时间限制（accounting≥12、diary/work_summary/review_words/review_index≥16）未到跳过
+- [x] `src/diary/ui/dialogs.ts`：`openAddDialog(preset?: AddDialogPreset)` 支持预选标签/预填正文/覆盖日期时间，无参行为不变
+- [x] `src/diary/config.ts`：DEFAULT_TAGS_CONFIG 加 `复盘: { emoji: '🪞' }`
+- [x] 入口：COMMANDS 表三条 `bz-diary-task-check`/`bz-diary-review`/`bz-diary-plan` + 日记面板头部 📋/🪞/🗓️ 三按钮
+- [x] 测试：daily-tasks.test.ts（12，node）+ daily-flow.test.ts（12，jsdom）+ smoke 命令 id 同步
+- [x] 门禁：tsc 0 错 + 全量 4210 测试绿 + 构建部署

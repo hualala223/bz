@@ -61,6 +61,8 @@ import { applyDirectories } from './diary/config';
 import { loadAll } from './diary/store';
 import { state as diaryState } from './diary/state';
 import { applyUiSettings, init as diaryInit, showDiaryPanel, unregisterEscLayer } from './diary/ui/panel';
+// 日常时间记录（自 CONFIG/SCRIPTS 三个 QuickAdd 宏整合：任务打勾/每日复盘/日程规划）
+import { runTaskCheck, openReviewDialog, planTomorrow } from './diary/daily';
 // 小橘陪伴猫（smartcat 域：桌面宠物 + AI 陪伴；AI 走 bz core/ai，数据单 json smartcat.json）
 import { ensureSmartCat, unloadSmartCat, openSmartCat, openSmartCatChat, hideSmartCat, openSmartcatDashboard, normalizeSmartcatOffMode, applySmartcatPowerState, smartcatMainSettingsSchema } from './smartcat';
 // 上游线（yeshimei/bz）并入新域（第一档加法）：内容首页/今日回顾/回忆墙/数据体检/设置面板
@@ -81,6 +83,10 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-recap-today', name: '今日回顾', icon: 'calendar-heart', callback: () => openRecap(getApp()) },
   // 回忆墙（diary-wall 域，ADR-0081：日记的媒体优先只读视图）
   { id: 'bz-diary-wall-open', name: '回忆墙', icon: 'images', callback: () => openDiaryWall(getApp()) },
+  // 日常时间记录（diary 域 daily：任务打勾状态沿用 CONFIG/SCRIPTS/每日任务状态.json，复盘/规划走日记条目模型）
+  { id: 'bz-diary-task-check', name: '当天任务完成情况', icon: 'list-checks', callback: () => void runTaskCheck() },
+  { id: 'bz-diary-review', name: '每日复盘', icon: 'notebook-pen', callback: () => void openReviewDialog() },
+  { id: 'bz-diary-plan', name: '日程规划（明日日记）', icon: 'calendar-plus', callback: () => void planTomorrow() },
   // 数据体检（checkup 域，D4：全插件数据只读巡检）
   { id: 'bz-data-checkup-open', name: '数据体检', icon: 'stethoscope', callback: () => void openDataCheckup(getApp()) },
   // 设置面板（settings-panel 域，ADR-0080：全域设置聚合入口，与既有设置架构并存不替换）

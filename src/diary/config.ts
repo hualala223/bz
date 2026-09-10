@@ -53,6 +53,7 @@ export function resetTagsConfig() {
 // ===== 默认标签配置 =====
 const DEFAULT_TAGS_CONFIG: Record<string, TagConfig> = {
   日记: { emoji: '📖' },
+  复盘: { emoji: '🪞' }, // 每日复盘条目标签（daily.ts openReviewDialog 预选）
   加密: { emoji: '🔐' },
   念念碎: { emoji: '😶' },
   对谈: { emoji: '🤝' },

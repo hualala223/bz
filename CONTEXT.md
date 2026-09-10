@@ -369,6 +369,10 @@ _Avoid_: 写日记时直接新建加密条目（不提供该入口）
 **日记隐私门 (Diary Privacy Guard)**: 根设置键 `diaryPrivacyGuard`（默认 `true`，仅显式 `false` 关闭，ADR-0106）——开启时日记内容在任何 AI 链路上不可达：smartcat 对 `source === 'diary'` 的观察整条豁免（`addObservation` 新旧签名在路由解析前拦截，不落行为/记忆任何流、不云端打分、不进反思素材与对话注入，与 ADR-0069 加密条目同口径）；recap AI 总结的 `buildRecapDigest` 剔除日记数字段与日记时间轴条目（写回本地的数字行/模板不受影响，本地写盘非上传）。设置页露出：日记本 ⚙️「隐私」组。🔐 加密条目的 ADR-0069 豁免与本开关无关，恒生效；流内存量历史日记条目不追溯清洗（只断新增）。
 _Avoid_: 日记不上传开关（正式名「隐私门」）、隐私模式（指整域行为，非本开关）
 
+**日常时间记录 (Daily Time Log)**: diary 域 `src/diary/daily.ts`（ticket 245，自 vault `CONFIG/SCRIPTS/日常时间记录/` 三个 QuickAdd 宏整合进插件）——三件事：**当天任务完成情况**（7 项每日任务经 `openFlowDialog` 依次打勾，状态沿用 `CONFIG/SCRIPTS/每日任务状态.json`，`{ "YYYY-MM-DD": { taskId: boolean } }` 格式零迁移，路径硬编码不走 storagePath；取消=跳过不计，写回走 `updateFileSections` 段级合并只声明今天一段）、**每日复盘**（`REVIEW_TEMPLATE` 经写日记弹窗 preset 预填，作为日记条目写入）、**日程规划**（为明天 `addEntry` 含 `### 代办事项`/完成情况跟踪/备注 三段的日记条目，`PLAN_MARKER` 重复检测；写前 `diaryDataMap` 为 null 先 `loadAll`）。入口：命令 `bz-diary-task-check`/`bz-diary-review`/`bz-diary-plan` + 日记面板头部 📋/🪞/🗓️。
+_Avoid_: 把复盘/规划写成「往 md 末尾追加」——diary 条目模型是「按日期一个 md、整文件重写」，追加内容会被下一次重写冲掉
+_Avoid_: 把任务状态迁进 `CONFIG/STORAGE/`——沿用户决策沿用原路径，旧数据直接续用
+
 **日记条目还原 (Diary Entry Restore)**: 加密日记降级回普通的语义——解密写回原日期 md 文件的**对应时间点**（merge，按 date+time 重插 `# emoji HH:mm` 块；md 已删则新建），密文取出即删（复用 `restoreNote`）。附件随还原一并写回原 vault 路径。触发双入口：保险箱面板现成「还原」手势，或日记面板改类型选非加密（自动降级）。
 _Avoid_: 整文件覆盖还原（日记条目是日期文件里的一个块，非整篇笔记）
 

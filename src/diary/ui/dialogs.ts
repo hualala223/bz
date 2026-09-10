@@ -559,8 +559,16 @@ export function createAddDialog() {
   document.body.appendChild(mask);
 }
 
-/** 打开添加日记弹窗（原 3348-3426） */
-export function openAddDialog() {
+/** 预填参数（日常时间记录等入口复用写日记弹窗）：预选标签、预填正文、覆盖默认日期时间 */
+export interface AddDialogPreset {
+  tags?: string[];
+  content?: string;
+  date?: string;
+  time?: string;
+}
+
+/** 打开添加日记弹窗（原 3348-3426；preset 供复盘等预填入口，无参行为不变） */
+export function openAddDialog(preset?: AddDialogPreset) {
   const mask = document.getElementById('add-diary-mask');
   const popup = document.getElementById('add-diary-popup');
   if (!mask || !popup) return;
@@ -569,6 +577,7 @@ export function openAddDialog() {
   const typeContainer = document.getElementById('add-diary-type-container');
   if (typeContainer) {
     typeContainer.innerHTML = '';
+    const presetTags = new Set(preset?.tags ?? []);
     const sortedTags = getSortedTagsForAddDialog();
     for (const tag of sortedTags) {
       const btn = createTagOptionButton(tag, true);
@@ -576,17 +585,21 @@ export function openAddDialog() {
         e.preventDefault();
         btn.classList.toggle('diary-active');
       };
+      if (presetTags.has(tag)) btn.classList.add('diary-active');
       typeContainer.appendChild(btn);
     }
 
-    // ----- 不预选任何标签（用户确认：默认全部加载，不选择任何标签） -----
+    // ----- 不预选任何标签（用户确认：默认全部加载，不选择任何标签；preset 场景除外） -----
   }
 
   // 2. 设置日期时间默认值
   let defaultDateStr = moment().format('YYYY-MM-DD');
   let defaultTimeStr = moment().format('HH:mm');
 
-  if (getUseFileDateTimeSetting()) {
+  if (preset?.date && /^\d{4}-\d{2}-\d{2}$/.test(preset.date)) {
+    defaultDateStr = preset.date;
+    if (preset?.time && /^\d{2}:\d{2}$/.test(preset.time)) defaultTimeStr = preset.time;
+  } else if (getUseFileDateTimeSetting()) {
     // 改为判断 toggle
     const activeView = getApp().workspace.getActiveViewOfType(MarkdownViewFromObsidian) as any;
     if (activeView && activeView.file) {
@@ -611,10 +624,10 @@ export function openAddDialog() {
     datetimeInput.value = defaultDateTime;
   }
 
-  // 正文每次打开清空（上一条的正文不应带进下一条）
+  // 正文每次打开清空（上一条的正文不应带进下一条）；preset 有预填正文时例外
   const contentInput = document.getElementById('add-diary-content') as HTMLTextAreaElement | null;
   if (contentInput) {
-    contentInput.value = '';
+    contentInput.value = preset?.content ?? '';
   }
 
   topifyZ(mask, popup); // ADR-0067：显示即发号
