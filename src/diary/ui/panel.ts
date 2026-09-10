@@ -23,6 +23,8 @@ import { createTag, rebuildTags, refreshSubTagsBar } from './filter-shared';
 import { createTagPicker, createAddDialog, createDatePicker, showDatePicker, openAddDialog } from './dialogs';
 import { registerOpenDialogCommand } from './quote';
 import { runTaskCheck, openReviewDialog, planTomorrow } from '../daily';
+// 当日待办事项/日常行为记录（issue 247：QuickAdd 两个 Capture 宏换血，同格式共写当天日记）
+import { openTodoCapture, openActivityCapture } from '../daily-capture';
 import { closePanel } from './panel-close';
 import { openDiaryRepairModal } from './repair-modal';
 
@@ -174,6 +176,8 @@ function createHeader() {
   const taskCheckButton = createButton('📋', '当天任务完成情况', () => void runTaskCheck());
   const reviewButton = createButton('🪞', '每日复盘', () => openReviewDialog());
   const planButton = createButton('🗓️', '日程规划（明日日记）', () => void planTomorrow());
+  const todoCaptureButton = createButton('✅', '当日待办事项', () => openTodoCapture());
+  const activityCaptureButton = createButton('🏃', '日常行为记录', () => openActivityCapture());
 
   const closeButton = createButton('❌', '关闭', () => {
     closePanel();
@@ -183,6 +187,8 @@ function createHeader() {
   buttonContainer.appendChild(taskCheckButton);
   buttonContainer.appendChild(reviewButton);
   buttonContainer.appendChild(planButton);
+  buttonContainer.appendChild(todoCaptureButton);
+  buttonContainer.appendChild(activityCaptureButton);
   buttonContainer.appendChild(searchButton);
   buttonContainer.appendChild(settingsButton);
   buttonContainer.appendChild(closeButton);

@@ -876,3 +876,12 @@ ai-agent 域（ticket 19）解散（域数 21→20），三类跨域自动化按
 - **记忆来源分布（dashboard 记忆页）**：`buildSourceDistribution(stream, dirs?)` 口径升级——① 洞察（type=insight，含周报洞察）按「洞察」单列一行计入（此前完全不计）；② source=note 的引用条目按「记忆目录」配置的追查目录分行（`resolveTrackedDirLabel`：ref 路径/description 路径段前缀匹配首个配置目录 → 标签为该目录字符串；未传目录/未命中回退「记忆目录」旧标签）；③ 行为小结（source=digest）行保留。最近记忆列表 note 行标签同口径（`我的/信` 而非统称「记忆目录」）。
 - **称呼替换**：新增设置 `smartcatUserName`（默认「包仔」，⚙️ 小橘设置「互动」组「小橘对我的称呼」text 行）；`replaceUserReference(text)` 把记忆流/行为流内容里的「你/你们/用户」替换为称呼（单趟正则 `你们|你|用户`，替代回调保证「你们」先匹配；存储格式冻结不写盘，只作用于喂 AI 的 prompt 文本）。应用点：formatMemoriesForPrompt / formatMemoriesForPromptWithRefs（聊天/主动关心/懂你上下文）、反思证据编号行 + 原文摘录、行为小结行为文案行、情绪追标编号行、周报洞察清单行、特质归因洞察行、懂你上下文块生成行（「你通常在…」「你和小橘的关系」）。模板/人物设定句（「你是小橘」、候选块头「你既有的相关洞察」——此处「你」指小橘）不做替换。
 - **测试**：memory.test（getConsolidationConfig maxInsights/getUserNickname/replaceUserReference/证据行替换/5→3 截断+prompt 声明+设置可调）；dashboard.test（洞察单列、note 按追查目录分行、未命中回退、UI 卡与列表标签）；report.test（洞察清单称呼替换）；companion-context.test（作息行包仔）；settings.test（互动 4 项/记忆巩固 3 项徽标）；trait-attribution/adr0069-core 断言同步为称呼文案。全量绿 + tsc 0 错 + 构建部署。
+
+### 当日待办事项/日常行为记录：QuickAdd 两个 Capture 宏换血（issue 247）
+
+> 「quickadd 宏『当日待办事项』『日常行为记录』也跟日程规划、每日复盘一样写进 BZ 插件。」
+
+- src/diary/daily-capture.ts：纯函数 uildTodoLine（- [ ] 内容-HH:mm，task:true 冻结 QuickAdd format）/ uildActivityLine（- HH:mm-活动）/ insertIntoSection（小节末尾插行；未命中文末追加）/ sanitizeCaptureText；薄壳 captureToDiarySection（enqueueFileTask 同路径串行，与 diary writeFile 互斥）；弹窗 openQuickCapture + 两入口 openTodoCapture/openActivityCapture（uiModal 单行输入，遮罩/ESC 无关闭钮，Enter 直提）。
+- 共写（issue 246 先例）：与 QuickAdd 宏同格式共写当天日记 我的/日记/YYYY-MM-DD.md；模板形态（frontmatter+小节）与条目形态（插行进条目正文，parser 重写不丢）都原样插行；文件缺失以「标记+首行」新建，不复制 QuickAdd 模板 frontmatter。
+- 入口：z-diary-todo-capture/z-diary-activity-capture + 日记面板头部 ✅/🏃；样式 .bz-diary-capture 写 src/diary/styles.css。
+- 测试：daily-capture.test.ts（node 16 例）+ daily-capture-ui.test.ts（jsdom 4 例）+ smoke 命令 id 同步；详见 issues/247-diary-daily-capture.md。

@@ -4091,6 +4091,24 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
   background: var(--interactive-accent-hover);
 }
 
+/* ── 当日待办事项/日常行为记录捕获弹窗（issue 247；同款形态参照 collect .bz-collect-cap）──
+   弹窗基座走 core 组件库 uiModal（.bz-overlay-*），这里只管内容排布。 */
+.bz-diary-capture {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bz-diary-capture-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.bz-diary-capture .bz-input {
+  width: 100%;
+}
+
 /* ==================== 入口页域样式（src/launcher/styles.css） ==================== */
 /* 入口页遮罩 z 已动态发号（ADR-0067）：JS open()/buildPicker 创建时分配 */
 /* ---- 长按编辑反馈（ticket 26）：长按计时中轻压 + 微高亮，避免长度不足提前松手误执行命令 ---- */

@@ -493,3 +493,15 @@
 - [x] 测试：tests/collect/data.test.ts（16，node）+ tests/collect/ui.test.ts（9，jsdom）+ smoke 命令 id 全集同步 + tests/home river/ui-river 收集快照用例
 - [x] 文档：ADR-0107/0108、CONTEXT.md 术语（收集条目/非文件收集/收集分类/收集目录）、AGENTS.md 领域清单与命令数、`.scratch/collect` spec
 - [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署
+
+## 2026-09-10 · issue 247：当日待办事项/日常行为记录——QuickAdd「日常时间记录」两个 Capture 宏换血进插件
+
+**状态：已交付**（issues/247-diary-daily-capture.md）
+
+- [x] 新增 `src/diary/daily-capture.ts`（diary 域，与 daily.ts 并列）：纯函数 `buildTodoLine`（`- [ ] 内容-HH:mm`，task:true 冻结）/`buildActivityLine`（`- HH:mm-活动`）/`insertIntoSection`（小节末尾插行：最后一个非空行后 / 小节空紧跟标记行 / 未命中整行追加文末）/`sanitizeCaptureText`；薄壳 IO `captureToDiarySection`（enqueueFileTask 同路径串行，与 diary writeFile 互斥）
+- [x] 共写语义（issue 246 模式）：与 QuickAdd 宏同格式共写当天日记；模板形态（frontmatter+小节）与条目形态（`# emoji HH:mm`，插行进条目正文 parser 重写不丢）都原样插行不动其余行；文件缺失以「标记+首行」新建（不复制 QuickAdd 模板 frontmatter）
+- [x] UI：`openQuickCapture` 单行输入弹窗（uiModal 基座 + 遮罩/ESC 无关闭钮 + Enter 直提）→ `openTodoCapture`/`openActivityCapture`
+- [x] 入口：COMMANDS 两条 `bz-diary-todo-capture`/`bz-diary-activity-capture` + 日记面板头部 ✅/🏃 两按钮
+- [x] 样式：`.bz-diary-capture` 写 `src/diary/styles.css`（基座走 core uiModal）
+- [x] 测试：daily-capture.test.ts（16，node）+ daily-capture-ui.test.ts（4，jsdom）+ smoke 命令 id 同步
+- [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署

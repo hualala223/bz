@@ -619,3 +619,21 @@
   background: var(--interactive-accent-hover);
 }
 
+/* ── 当日待办事项/日常行为记录捕获弹窗（issue 247；同款形态参照 collect .bz-collect-cap）──
+   弹窗基座走 core 组件库 uiModal（.bz-overlay-*），这里只管内容排布。 */
+.bz-diary-capture {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bz-diary-capture-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.bz-diary-capture .bz-input {
+  width: 100%;
+}
+

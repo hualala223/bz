@@ -91,6 +91,8 @@ const EXPECTED_COMMAND_IDS = [
   'bz-diary-open',
   // 日常时间记录（自 CONFIG/SCRIPTS 三个 QuickAdd 宏整合进 diary 域）
   'bz-diary-task-check', 'bz-diary-review', 'bz-diary-plan',
+  // issue 247：当日待办事项/日常行为记录（两个 QuickAdd Capture 宏换血）
+  'bz-diary-todo-capture', 'bz-diary-activity-capture',
 ];
 
 /** 内存"磁盘"存储：模拟 Obsidian 插件的 data.json 持久层 */
