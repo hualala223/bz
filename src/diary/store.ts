@@ -9,7 +9,7 @@ import { emitDomainEvent } from '../core/domain-bus';
 import { enqueueFileTask } from '../core/storage';
 import { getApp } from './app';
 import { BATCH_SIZE, DIARY_DIRECTORY, LETTER_DIRECTORY, MOVIE_DIRECTORY, getTagEmoji } from './config';
-import { isEncryptedEntry, parseFile, parseLetterFile, parseMovieFile } from './parser';
+import { extractPreamble, isEncryptedEntry, parseFile, parseLetterFile, parseMovieFile } from './parser';
 import { loadEncryptedEntries, isUnlocked } from './encrypt';
 import { diaryDataMap, setDiaryDataMap, state } from './state';
 import type { DiaryEntry } from './types';
@@ -256,32 +256,39 @@ function warnUnparsed(msg: string, dedupeKey?: string) {
 }
 
 /**
- * 写/删前守卫（P0 审查修复）：目标文件在磁盘上存在「无法解析的行」时拒处理并提示。
- * writeFile 用内存 map 全量重写整份文件（空条目时整文件删除），磁盘上任何未被解析的行
- * （文件开头游离行、条目内「空行 + # 形似标题」截断后的孤行等）都不在内存 map 里——
+ * 写/删前守卫读（P0 审查修复；ADR-0110 起顺带取出前导区）：
+ * 目标文件在磁盘上存在「条目区内的未解析行」时拒处理并提示。
+ * writeFile 用内存 map 全量重写整份文件（空条目时整文件删除），条目区内任何未被解析的行
+ * （时间越界的条目标题行、条目内「空行 + # 形似标题」截断后的孤行等）都不在内存 map 里——
  * 直接处理会把它们从磁盘永久抹掉。此处在写/删前用 parseFile 的 onUnparsed 口径
  * （与丢失口径严格一致）复读磁盘文件计量，命中即拒并以人话通知引导先用修复工具。
- * 返回 true 表示已拒处理。
+ * 前导区（frontmatter / `## 小节` 骨架等）不计入未解析行：writeFile 会原样写回。
+ *
+ * 返回 refused=true 表示已拒处理；preamble 为本次读到的磁盘前导区（供原样写回）。
  */
-async function refuseIfDiskUnparsed(dateStr: string, action: 'write' | 'delete'): Promise<boolean> {
+async function guardDiskRead(
+  dateStr: string,
+  action: 'write' | 'delete'
+): Promise<{ refused: boolean; preamble: string }> {
   const filePath = `${DIARY_DIRECTORY}/${dateStr}.md`;
   const file = getApp().vault.getAbstractFileByPath(filePath) as any;
-  if (!file) return false; // 新文件：无旧内容可丢
-  let unparsed = 0;
+  if (!file) return { refused: false, preamble: '' }; // 新文件：无旧内容可丢
+  let content = '';
   try {
-    const content = await getApp().vault.read(file);
-    parseFile(content, dateStr, (n) => (unparsed = n));
+    content = await getApp().vault.read(file);
   } catch (e) {
-    return false; // 读失败不拦截写：写路径自身有失败兜底
+    return { refused: false, preamble: '' }; // 读失败不拦截写：写路径自身有失败兜底
   }
-  if (unparsed <= 0) return false;
+  let unparsed = 0;
+  parseFile(content, dateStr, (n) => (unparsed = n));
+  if (unparsed <= 0) return { refused: false, preamble: extractPreamble(content) };
   warnUnparsed(
     `「${dateStr}」有 ${unparsed} 行内容无法解析，${
       action === 'delete' ? '已保留原文件未删除' : '本次修改没有写入文件'
     }（直接处理会丢失这些行）。请先在日记本设置中运行「检测日记解析」修复后再试。`,
     `diary-write-refused-${dateStr}`
   );
-  return true;
+  return { refused: true, preamble: '' };
 }
 
 /**
@@ -296,19 +303,26 @@ export async function writeFile(dateStr: string) {
   if (!diaryDataMap || !diaryDataMap.has(dateStr)) return;
   const filePath = `${DIARY_DIRECTORY}/${dateStr}.md`;
   await enqueueFileTask(filePath, async () => {
-    // P0 写前守卫：磁盘存在未解析行时拒写，引导先用「检测日记解析」修复工具
-    if (await refuseIfDiskUnparsed(dateStr, 'write')) return;
+    // P0 写前守卫 + 前导区同一次读（口径同源）：磁盘条目区存在未解析行时拒写
+    const { refused, preamble } = await guardDiskRead(dateStr, 'write');
+    if (refused) return;
     state.events.isInternalUpdate = true;
     try {
       const entries = diaryDataMap!.get(dateStr)!;
+      const file = getApp().vault.getAbstractFileByPath(filePath) as any;
 
       if (entries.length === 0) {
-        const file = getApp().vault.getAbstractFileByPath(filePath) as any;
-        if (file) await getApp().vault.delete(file);
+        if (file) {
+          // 前导区存在（模板形态文件）→ 保留文件只收回条目区；无前导区（插件自建文件）→ 整文件删除
+          if (preamble) await getApp().vault.modify(file, `${preamble}\n`);
+          else await getApp().vault.delete(file);
+        }
         return;
       }
 
       entries.sort((a, b) => a.timeValue - b.timeValue);
+      // 前导区保留（ADR-0110）：写回内容 = 前导区 + 空行 + 条目块，行号戳须加上前导区偏移
+      const preambleOffset = preamble ? preamble.split('\n').length + 1 : 0;
       // 稳定标识：写盘时把每个 map 条目的行号与磁盘标题行一一对应（P1-12：同 time 多条不再靠 time 唯一定位）
       let headingCursor = 0;
       const fileLines = entries
@@ -318,15 +332,16 @@ export async function writeFile(dateStr: string) {
           const lines = [`# ${emojiSeq} ${entry.time}`, ''];
           if (entry.content.trim()) lines.push(entry.content.trim());
           lines.push('');
-          entry.lineNumber = headingCursor + 1;
+          entry.lineNumber = headingCursor + 1 + preambleOffset;
           headingCursor += lines.length;
           return lines;
         })
         .flat()
         .slice(0, -1);
 
-      const finalContent = fileLines.join('\n');
-      const file = getApp().vault.getAbstractFileByPath(filePath) as any;
+      const finalContent = preamble
+        ? `${preamble}\n\n${fileLines.join('\n')}`
+        : fileLines.join('\n');
 
       try {
         if (file) await getApp().vault.modify(file, finalContent);
@@ -432,11 +447,16 @@ export async function deleteEntry(entryId: string) {
       const file = getApp().vault.getAbstractFileByPath(filePath) as any;
       if (!file) return;
       // P0 守卫：整文件删除同样会丢磁盘上的未解析行——命中时保留文件（同拒写口径）
-      if (await refuseIfDiskUnparsed(dateStr, 'delete')) return;
+      const { refused, preamble } = await guardDiskRead(dateStr, 'delete');
+      if (refused) return;
       state.events.isInternalUpdate = true;
       try {
-        await getApp().vault.delete(file);
-        vacated = true;
+        // 前导区存在（模板形态文件）→ 只收回条目区、文件保留（不删用户模板骨架）
+        if (preamble) await getApp().vault.modify(file, `${preamble}\n`);
+        else {
+          await getApp().vault.delete(file);
+          vacated = true;
+        }
       } finally {
         state.events.isInternalUpdate = false;
       }

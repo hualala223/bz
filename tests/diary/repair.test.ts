@@ -54,11 +54,25 @@ describe('scanUnparsed 规则', () => {
     expect(scan.freeTexts[0]?.reason).toBe('time-oob');
   });
 
-  it('整篇无标题的游离正文 → freeTexts free-text', () => {
+  it('整篇无标题的正文是前导区：不算问题（写回原样保留，不列不可修）', () => {
     const scan = scanUnparsed('今天天气真好\n明天也是\n');
     expect(scan.repairs).toEqual([]);
-    expect(scan.freeTexts).toHaveLength(2);
-    expect(scan.freeTexts[0]).toEqual({ line: 1, text: '今天天气真好', reason: 'free-text' });
+    expect(scan.freeTexts).toEqual([]); // ADR-0110：前导区不丢，故不报
+  });
+
+  it('模板形态整篇（frontmatter + ## 小节）：零修复零不可修', () => {
+    const scan = scanUnparsed('---\ncard_type: 日记\n---\n\n## 随笔\n\n## 日常行为记录\n');
+    expect(scan.repairs).toEqual([]);
+    expect(scan.freeTexts).toEqual([]);
+  });
+
+  it('条目区内的游离正文照旧列入（前导区之后的才是真问题）', () => {
+    // L1 越界标题（条目区起点）→ L2 游离正文：前导区之后，写回会丢 → 必须列出
+    const scan = scanUnparsed('# 📖 25:00\n待归位\n');
+    expect(scan.freeTexts).toEqual([
+      { line: 1, text: '# 📖 25:00', reason: 'time-oob' },
+      { line: 2, text: '待归位', reason: 'free-text' },
+    ]);
   });
 
   it('合法文件零修复零不可修', () => {

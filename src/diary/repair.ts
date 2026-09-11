@@ -2,20 +2,24 @@
  * 日记「未解析行」扫描与修复引擎（ticket 121，ADR-0054）。
  * 纯函数、不碰 DOM/vault：扫描结果与修复动作可单测。
  *
- * 语义与 src/diary/parser.ts 完全同源（headingRegex 同款）：
- * - 游离于首个条目之前的非空行、任意位置的「时间越界」条目标题行 = 未解析行（parseFile 的 onUnparsed 口径）；
+ * 语义与 src/diary/parser.ts 完全同源（三款标题正则 + 前导区边界均自 parser 导入，单源不复制）：
+ * - 前导区（首个疑似条目标题行之前：frontmatter、`## 小节` 骨架等）**不属于未解析行**——
+ *   写回时由 writeFile 原样保留（ADR-0110），不再报「需手动处理」；
+ * - 未解析行 = 条目区内无法归属的行：任意位置的「时间越界」条目标题行（parseFile 的 onUnparsed 口径）、
+ *   以及「位于第一个可修头行之前、修复也无法归位」的条目区游离正文；
  * - 可自动修：仅限「形似标题但不合规」的头行——R1 补空格 / R2 时间补零；
  *   修复仅改动格式局部（行尾其它内容一字不动），修复后该行成为合法条目标题，其下正文自动归位；
- * - 不可自动修：时间越界标题行（值无法推断）、以及「位于第一个可修头行之前、修复也无法归位」的游离正文。
+ * - 不可自动修：时间越界标题行（值无法推断）、条目区内无法归位的游离正文。
  * 修复 ≠ 改数据格式：只把不合规数据修复到既有格式（铁律 1 边界见 ADR-0054）。
  */
 
-/** 与 parser.ts 同款：合法条目标题 `# emoji序列 HH:mm`（emoji 与时间间须有空白、时间恰两位） */
-const HEADING_RE = /^#\s*((?:\S+)+)\s+(\d{2}:\d{2})/u;
-/** 形似标题但 emoji 与时间间缺空白：`# 🤝02:43` */
-const NO_SPACE_RE = /^#\s*((?:\S+)+)(\d{2}:\d{2})/u;
-/** 形似标题但时间非两位：`# 📖 9:33` / `# 📖 09:3` */
-const SHORT_TIME_RE = /^#\s*((?:\S+)+)\s+(\d{1,2}):(\d{1,2})/u;
+// 标题正则与前导区边界均复用 parser（单源，避免两处口径漂移）
+import {
+  findEntryRegionStart,
+  HEADING_RE,
+  NO_SPACE_HEADING_RE as NO_SPACE_RE,
+  SHORT_TIME_HEADING_RE as SHORT_TIME_RE,
+} from './parser';
 
 export type UnparsedRepairKind = 'space' | 'pad-time';
 
@@ -48,14 +52,17 @@ function parseTime(t: string): { h: number; m: number } | null {
 
 /**
  * 扫描一篇日期文件，产出可修复项与不可修复项。全行扫描（不提前退）：
+ * - 前导区（行号 < 首个疑似条目标题行）整段跳过：它是模板形态文件的正常内容，
+ *   写回时原样保留（ADR-0110），既不用修也不会丢；
  * - 任意位置的「时间越界」标题行都计入 freeTexts（parseFile 同口径——正文行不查，
  *   避免把条目内形似标题的句子误报）；
- * - 游离正文仅在「位于第一个可修头行之前」时进入 freeTexts（其后正文修复后自然归位，
+ * - 条目区游离正文仅在「位于第一个可修头行之前」时进入 freeTexts（其后正文修复后自然归位，
  *   不打扰用户；位于不可修头行之后、可修头行之前的游离正文修复后仍无归属，必须列出）。
  */
 export function scanUnparsed(content: string): UnparsedScan {
   // CRLF 归一（行号不变；applyRepairs 侧保留原行尾）
   const lines = content.replace(/\r\n/g, '\n').split('\n');
+  const regionStart = findEntryRegionStart(lines); // 前导区边界（0 = 无前导区）
   const repairs: UnparsedRepair[] = [];
   const freeTexts: UnparsedFreeText[] = [];
   const pendingFree: UnparsedFreeText[] = [];
@@ -63,6 +70,7 @@ export function scanUnparsed(content: string): UnparsedScan {
   let firstRepairLine = Infinity;
 
   for (let i = 0; i < lines.length; i++) {
+    if (i < regionStart) continue; // 前导区：原样保留，不算未解析
     const line = lines[i];
     if (!entered && line.trim() === '') continue;
 

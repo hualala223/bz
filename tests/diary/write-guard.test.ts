@@ -62,12 +62,13 @@ describe('writeFile 写前守卫通知（P0 审查修复）', () => {
 });
 
 describe('loadAll / refreshFile 未解析行警告（UX-9 接线）', () => {
-  it('loadAll 汇总提示存在未解析行的文件数', async () => {
+  it('loadAll 汇总提示存在未解析行的文件数（口径 = 条目区内孤行）', async () => {
     // 用 spy 断言（绕开通知模块跨用例的 30s dedupe 窗口：前面的用例已触发过同键警告）
     const noticeMod = await import('../../src/core/notice');
     const spy = vi.spyOn(noticeMod, 'notify');
     makeVault({
-      '我的/日记/2024-01-01.md': '开头的游离笔记\n\n# 📖 08:00\n正文\n',
+      // 条目内「空行 + # 标题」截断后的孤行：写回会丢 → 计入
+      '我的/日记/2024-01-01.md': '# 📖 08:00\n正文\n\n# 游记标题\n这段会丢\n',
       '我的/日记/2024-01-02.md': '# 📖 09:00\n干净\n',
     });
     await loadAll();
@@ -77,6 +78,19 @@ describe('loadAll / refreshFile 未解析行警告（UX-9 接线）', () => {
     expect(String(call![0])).toContain('1 个日记文件存在无法解析的行');
     expect(String(call![0])).toContain('检测日记解析');
     expect((call![1] as any)?.type).toBe('warning');
+    spy.mockRestore();
+  });
+
+  it('模板形态文件（frontmatter + ## 小节骨架）不算未解析：loadAll 不警告（ADR-0110）', async () => {
+    const noticeMod = await import('../../src/core/notice');
+    const spy = vi.spyOn(noticeMod, 'notify');
+    makeVault({
+      '我的/日记/2026-09-11.md': '---\ncard_type: 日记\n---\n\n## 随笔\n\n## 日常行为记录\n\n## 日程规划\n',
+    });
+    await loadAll();
+    expect(
+      spy.mock.calls.some((c) => String(c[0]).includes('个日记文件存在无法解析的行'))
+    ).toBe(false);
     spy.mockRestore();
   });
 

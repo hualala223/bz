@@ -328,13 +328,25 @@ describe('writeRecapEntry（diary 写入 API 集成）', () => {
     expect(recapCountIn(dayContent())).toBe(1);
   });
 
-  it('磁盘有无法解析的行：拒写并给人话指引，文件一字不动', async () => {
+  it('条目区有无法解析的行：拒写并给人话指引，文件一字不动', async () => {
     seedDay();
-    // 文件开头塞一行游离内容（parseFile 计未解析行的口径）
+    // 条目内「空行 + # 标题」截断产生的孤行（parseFile 计未解析行的口径；前导区不算，见 ADR-0110）
     const before = dayContent();
-    vault.files.set(recapDiaryFilePath(NOW_MS), '游离的一行\n' + before);
+    const poisoned = `${before}\n# 游记标题\n这段会丢\n`;
+    vault.files.set(recapDiaryFilePath(NOW_MS), poisoned);
     await expect(writeRecapEntry({ vault } as never, NEW_CONTENT, NOW_MS)).rejects.toThrow(/无法解析/);
-    expect(dayContent()).toBe('游离的一行\n' + before); // 未写坏
+    expect(dayContent()).toBe(poisoned); // 未写坏
+  });
+
+  it('文件开头是前导区（模板形态骨架）：不再拒写，骨架原样留在文件头（ADR-0110）', async () => {
+    seedDay();
+    const before = dayContent();
+    const skeleton = '---\ncard_type: 日记\n---\n\n## 随笔\n\n';
+    vault.files.set(recapDiaryFilePath(NOW_MS), skeleton + before);
+    const r = await writeRecapEntry({ vault } as never, NEW_CONTENT, NOW_MS);
+    expect(r).toBe('written');
+    expect(dayContent().startsWith(skeleton)).toBe(true); // 前导区一字不动
+    expect(recapCountIn(dayContent())).toBe(1);
   });
 
   it('写盘失败（addEntry 抛错）：错误上抛，旧回顾条目原样保留（不丢用户内容）', async () => {

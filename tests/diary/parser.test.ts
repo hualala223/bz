@@ -2,7 +2,15 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { setApp } from '../../src/diary/app';
 import { buildTagMaps } from '../../src/diary/config';
-import { parseFile, parseMovieFile, parseLetterFile, parseNaturalTime, isEncryptedEntry } from '../../src/diary/parser';
+import {
+  parseFile,
+  parseMovieFile,
+  parseLetterFile,
+  parseNaturalTime,
+  isEncryptedEntry,
+  extractPreamble,
+  findEntryRegionStart,
+} from '../../src/diary/parser';
 
 /** 构造测试用 mock app */
 function mockApp(files: Record<string, string>, frontmatters: Record<string, any>) {
@@ -98,13 +106,13 @@ describe('parseFile 未解析行统计（UX-9）', () => {
     expect(cb).not.toHaveBeenCalled();
   });
 
-  it('首个条目之前游离的非空行计入未解析行，解析结果不变', () => {
+  it('首个条目之前的内容属前导区：不计未解析行（写回时原样保留），解析结果不变', () => {
     const cb = vi.fn();
     const entries = parseFile('游离说明文字\n# 📖 08:00\n内容\n', '2024-01-01', cb);
     expect(entries).toHaveLength(1);
     expect(entries[0].content).toBe('内容');
     expect(entries[0].time).toBe('08:00');
-    expect(cb).toHaveBeenCalledWith(1);
+    expect(cb).not.toHaveBeenCalled(); // ADR-0110：前导区不再计入未解析行
   });
 
   it('时间越界的条目标题行计入未解析行（其后孤儿正文行同样无法归属）', () => {
@@ -115,15 +123,63 @@ describe('parseFile 未解析行统计（UX-9）', () => {
     expect(cb).toHaveBeenCalledWith(2); // 越界标题行 + 孤儿正文行 x
   });
 
-  it('首行空行不计未解析；多处游离行累计', () => {
+  it('首行空行不计未解析；前导区多行同样不累计', () => {
     const cb = vi.fn();
     parseFile('\n\n游离一\n游离二\n# 📖 08:00\n内容\n', '2024-01-01', cb);
-    expect(cb).toHaveBeenCalledWith(2);
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it('整篇模板形态（frontmatter + ## 小节骨架、无条目标题）→ 零条目、零未解析行', () => {
+    const cb = vi.fn();
+    const template = [
+      '---',
+      'card_type: 日记',
+      'title: "电视剧.md"',
+      '---',
+      '',
+      '## 随笔',
+      '',
+      '## 日程规划',
+      '',
+      '### 代办事项',
+      '- [ ] ',
+    ].join('\n');
+    const entries = parseFile(template + '\n', '2026-09-11', cb);
+    expect(entries).toEqual([]);
+    expect(cb).not.toHaveBeenCalled(); // 曾经被整篇计为未解析（写日记因此被守卫拒写）
   });
 
   it('未传回调不统计（兼容旧调用）', () => {
     const entries = parseFile('游离文字\n# 📖 08:00\n内容\n', '2024-01-01');
     expect(entries).toHaveLength(1);
+  });
+});
+
+describe('日记前导区边界与提取（ADR-0110）', () => {
+  it('无前导区：首行即条目标题 → 边界 0、前导区空串', () => {
+    expect(findEntryRegionStart(['# 📖 08:00', '内容', ''])).toBe(0);
+    expect(extractPreamble('# 📖 08:00\n内容\n')).toBe('');
+  });
+
+  it('整篇模板形态：边界 = 行数、前导区 = 全文（去首尾空行）', () => {
+    const tpl = ['---', 'card_type: 日记', '---', '', '## 随笔', '', ''].join('\n');
+    expect(findEntryRegionStart(tpl.split('\n'))).toBe(7);
+    expect(extractPreamble(tpl)).toBe(['---', 'card_type: 日记', '---', '', '## 随笔'].join('\n'));
+  });
+
+  it('可修形态（缺空格 / 时间非两位）同样算边界：其不合格形态交「检测日记解析」修复', () => {
+    const content = '前言\n\n# 🤝02:43\n正文\n';
+    expect(findEntryRegionStart(content.split('\n'))).toBe(2);
+    expect(extractPreamble(content)).toBe('前言');
+    const shortTime = '前言\n# 📖 9:33\n正文\n';
+    expect(extractPreamble(shortTime)).toBe('前言');
+  });
+
+  it('前导区保留 frontmatter 原文，CRLF 归一后提取', () => {
+    expect(extractPreamble('前言\r\n# 📖 08:00\r\n正文\r\n')).toBe('前言');
+    expect(extractPreamble('---\r\ncard_type: 日记\r\n---\r\n\r\n## 随笔\r\n')).toBe(
+      '---\ncard_type: 日记\n---\n\n## 随笔'
+    );
   });
 });
 

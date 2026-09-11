@@ -65,12 +65,13 @@ describe('日记解析检测面板（ticket 121）', () => {
     );
   });
 
-  it('游离正文列为不可修，点击行打开文件并定位到行', async () => {
-    vault.files.set('我的/日记/2023-05-01.md', '今天天气真好\n明天也是\n');
+  it('条目区内游离正文列为不可修，点击行打开文件并定位到行', async () => {
+    // 前导区（首个疑似条目标题行之前）不算问题；条目区内的游离正文才是真问题（写回会丢）
+    vault.files.set('我的/日记/2023-05-01.md', '# 📖 25:00\n今天天气真好\n明天也是\n');
     await openAndSettle();
 
     const summary = document.querySelector('.bz-diary-repair-summary')!.textContent!;
-    expect(summary).toContain('需手动处理（2 行）');
+    expect(summary).toContain('需手动处理（3 行）');
 
     const editorMock = { focus: vi.fn(), setCursor: vi.fn(), scrollIntoView: vi.fn() };
     app.workspace.getLeaf = vi.fn(() => ({
@@ -99,5 +100,35 @@ describe('日记解析检测面板（ticket 121）', () => {
     vault.files.set('我的/日记/2024-01-01.md', '# 📖 08:00\n正常\n');
     await openAndSettle();
     expect(document.querySelector('.bz-diary-repair-summary')!.textContent).toContain('全部正常解析');
+  });
+
+  it('模板形态文件（frontmatter + ## 小节骨架）不再被判为「需手动处理」（ADR-0110）', async () => {
+    vault.files.set(
+      '我的/日记/2026-09-11.md',
+      [
+        '---',
+        'card_type: 日记',
+        '---',
+        '',
+        '## 睡眠相关',
+        '- 起床时间：',
+        '## 随笔',
+        '',
+        '## 日常行为记录',
+        '',
+        '## 日程规划',
+        '',
+        '### 代办事项',
+        '- [ ] ',
+        '',
+        '### 备注',
+        '1. ',
+        '',
+      ].join('\n')
+    );
+    await openAndSettle();
+    const summary = document.querySelector('.bz-diary-repair-summary')!.textContent!;
+    expect(summary).toContain('全部正常解析');
+    expect(summary).not.toContain('需手动处理');
   });
 });

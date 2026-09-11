@@ -339,7 +339,7 @@ describe('writeFile 写前守卫（P0 审查修复）', () => {
     expect(vault.files.get('我的/日记/2024-01-01.md')).toBe(raw);
   });
 
-  it('文件开头游离行：拒写，磁盘不被覆盖', async () => {
+  it('文件开头前导区：不再拒写，前导区原样保留在文件头（ADR-0110）', async () => {
     const raw = '开头的游离笔记\n\n# 📖 08:00\n正文\n';
     makeVault({ '我的/日记/2024-01-01.md': raw });
     await loadAll();
@@ -351,7 +351,42 @@ describe('writeFile 写前守卫（P0 审查修复）', () => {
     });
     const { writeFile } = await import('../../src/diary/store');
     await writeFile('2024-01-01');
-    expect(vault.files.get('我的/日记/2024-01-01.md')).toBe(raw);
+    const onDisk = vault.files.get('我的/日记/2024-01-01.md')!;
+    expect(onDisk.startsWith('开头的游离笔记\n\n')).toBe(true); // 前导区一字不动
+    expect(onDisk).toContain('# 📖 08:00');
+    expect(onDisk).toContain('新增');
+    // 行号戳带前导区偏移：1 行前导 + 1 空行 → 首个条目标题落在第 3 行
+    expect(entries[0].lineNumber).toBe(3);
+  });
+
+  it('模板形态文件（frontmatter + ## 小节骨架）：写日记不再被守卫拒写，骨架留在文件头', async () => {
+    const raw = [
+      '---', 'card_type: 日记', '---', '', '## 随笔', '', '## 日程规划', '',
+      '### 代办事项', '- [ ] ', '',
+    ].join('\n');
+    makeVault({ '我的/日记/2026-09-11.md': raw });
+    await loadAll();
+    // 模板形态不产出条目：整篇曾是「未解析行」，导致写日记被拒
+    expect(diaryDataMap?.get('2026-09-11') ?? []).toHaveLength(0);
+    await addEntry('2026-09-11', '11:05', ['日记'], '今天写日记成功了');
+    const onDisk = vault.files.get('我的/日记/2026-09-11.md')!;
+    expect(onDisk).toContain('card_type: 日记');
+    expect(onDisk).toContain('## 随笔');
+    expect(onDisk).toContain('- [ ] ');
+    expect(onDisk).toContain('# 📖 11:05');
+    expect(onDisk).toContain('今天写日记成功了');
+    // 骨架在前、条目在后
+    expect(onDisk.indexOf('## 日程规划')).toBeLessThan(onDisk.indexOf('# 📖 11:05'));
+  });
+
+  it('模板形态文件删掉最后一条：只收回条目区，文件不整份删除', async () => {
+    makeVault({ '我的/日记/2026-09-11.md': '---\ncard_type: 日记\n---\n\n## 随笔\n' });
+    await loadAll();
+    const created = await addEntry('2026-09-11', '11:05', ['日记'], 'x');
+    await deleteEntry(created.id!);
+    const onDisk = vault.files.get('我的/日记/2026-09-11.md');
+    expect(onDisk).toContain('card_type: 日记'); // 骨架仍在
+    expect(onDisk).not.toContain('# 📖 11:05');
   });
 
   it('删除最后一条触发整文件删除时，磁盘有未解析行则保留文件', async () => {

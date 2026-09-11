@@ -12,10 +12,53 @@ export function isEncryptedEntry(entry: DiaryEntry): boolean {
   return typeof entry.content === 'string' && entry.content.includes('🔐');
 }
 
+/** 合法条目标题：`# emoji序列 HH:mm`（emoji 与时间之间须有空白、时间恰两位） */
+export const HEADING_RE = /^#\s*((?:\S+)+)\s+(\d{2}:\d{2})/u;
+/** 形似标题但 emoji 与时间间缺空白：`# 🤝02:43`（可修，见 repair.ts R1） */
+export const NO_SPACE_HEADING_RE = /^#\s*((?:\S+)+)(\d{2}:\d{2})/u;
+/** 形似标题但时间非两位：`# 📖 9:33`（可修，见 repair.ts R2） */
+export const SHORT_TIME_HEADING_RE = /^#\s*((?:\S+)+)\s+(\d{1,2}):(\d{1,2})/u;
+
+/** 疑似条目标题行：合法标题或两种可修形态（时间是否越界不影响判定） */
+function isEntryHeadingLike(line: string): boolean {
+  return HEADING_RE.test(line) || NO_SPACE_HEADING_RE.test(line) || SHORT_TIME_HEADING_RE.test(line);
+}
+
+/**
+ * 前导区边界：首个「疑似条目标题行」的行号（0-based）。
+ * 全篇无此类行时返回 lines.length——整篇都是前导区（QuickAdd 模板形态文件的典型形态）。
+ * 口径与 repair.ts 的「疑似头行」单源（ADR-0110）：边界行本身属条目区，其不合规形态交
+ * 「检测日记解析」修复（补空格 / 时间补零）。
+ */
+export function findEntryRegionStart(lines: string[]): number {
+  for (let i = 0; i < lines.length; i++) {
+    if (isEntryHeadingLike(lines[i])) return i;
+  }
+  return lines.length;
+}
+
+/**
+ * 前导区文本（首个疑似条目标题行之前的全部内容）；无前导区返回 ''。
+ * 只收掉首尾空行（行内空白不动，尽量「一字不改」）——writeFile 全量重写文件时把它原样写回，
+ * 模板形态文件（frontmatter + `## 小节` 骨架、QuickAdd 宏写入的正文）不再因为插件写条目而丢失（ADR-0110）。
+ */
+export function extractPreamble(content: string): string {
+  const lines = content.replace(/\r\n?/g, '\n').split('\n');
+  const start = findEntryRegionStart(lines);
+  if (start === 0) return '';
+  return lines.slice(0, start).join('\n').replace(/^\n+/, '').replace(/\n+$/, '');
+}
+
 /**
  * 解析日记文件内容（按 `# emoji序列 HH:mm` 标题切分条目）。
- * UX-9：顺带统计「未能解析的行」数（游离于首个条目之前的非空行、时间越界的条目标题行），
- * 不改解析结果、不动数据格式；onUnparsed 收到非零值时由调用方汇总提示。
+ *
+ * 文件分两区（ADR-0110）：
+ *  - 前导区：文件开头到首个疑似条目标题行之前（frontmatter、`## 小节` 骨架、模板正文）。
+ *    解析器不产出条目，但写回时原样保留（extractPreamble），不构成丢失；
+ *  - 条目区：自首个疑似条目标题行起。此区内无法归属任何条目的行才是「未解析行」
+ *    （时间越界的条目标题行、空行 + `# ` 截断后的孤行等），写回会丢，由写前守卫拦截。
+ *
+ * UX-9：onUnparsed 仅统计条目区内的未解析行（前导区免统计）。
  */
 export function parseFile(content: string, dateStr: string, onUnparsed?: (unparsedLineCount: number) => void): DiaryEntry[] {
   const entries: DiaryEntry[] = [];
@@ -24,7 +67,9 @@ export function parseFile(content: string, dateStr: string, onUnparsed?: (unpars
   let contentLines: string[] = [];
   let unparsedLines = 0;
 
-  const headingRegex = /^#\s*((?:\S+)+)\s+(\d{2}:\d{2})/u;
+  const headingRegex = HEADING_RE;
+  // 前导区边界：其前的行由 writeFile 原样保留，不计入未解析行
+  const regionStart = findEntryRegionStart(lines);
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -84,8 +129,9 @@ export function parseFile(content: string, dateStr: string, onUnparsed?: (unpars
         contentLines.push(line);
       }
     } else if (line.trim() !== '') {
-      // 首个条目之前游离的非空行：无法归属任何条目（原行为静默丢弃），计入未解析行
-      unparsedLines++;
+      // 条目区内、首个条目之前游离的非空行：无法归属任何条目（原行为静默丢弃），计入未解析行。
+      // 前导区（i < regionStart）不计：它由 writeFile 原样写回，不会丢。
+      if (i >= regionStart) unparsedLines++;
     }
   }
 
