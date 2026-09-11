@@ -300,8 +300,8 @@ describe('弹窗守卫与搜索命中分支', () => {
 
   it('createAddDialog 自带的类型按钮与保存按钮可用（未选类型提示）', async () => {
     createAddDialog();
-    // 直接点击弹窗自带的保存按钮（非 openAddDialog 重建的）：未选类型 → 提示
-    const saveBtn = [...document.querySelectorAll('#add-diary-popup button')]
+    // 两步化（ADR-0109）：保存按钮在第二步 popup 里，第一步是「下一步」
+    const saveBtn = [...document.querySelectorAll('#add-diary-content-popup button')]
       .find((b) => b.textContent === '保存') as HTMLElement;
     saveBtn.click();
     await new Promise((r) => setTimeout(r, 10));

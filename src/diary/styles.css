@@ -10,6 +10,40 @@
     animation: slideUp 0.3s ease-out;
 }
 
+/* 写日记弹窗两步骨架（ADR-0109）：body 滚动、foot 吸底——
+   无论第一步类型按钮多到多高，按钮行始终贴在可视区底部，不会被挤出屏幕 */
+.bz-diary-add-popup {
+    overflow: hidden;
+}
+
+.bz-diary-add-body {
+    max-height: 52vh;
+    overflow-y: auto;
+}
+
+.bz-diary-add-foot {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    padding-top: 16px;
+}
+
+.bz-diary-add-btn {
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: none;
+    background: var(--interactive-accent);
+    color: var(--background-primary);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.bz-diary-add-btn-ghost {
+    background: var(--background-secondary);
+    color: var(--text-normal);
+}
+
 /* 焦点环统一走 core p3 focus-visible 规则（src/core/styles.css）：此处移除旧 outline:none/box-shadow 环，
    仅保留 border 高亮，避免输入聚焦双环 */
 #add-diary-datetime:focus,
@@ -42,13 +76,15 @@
         padding: 20px;
     }
 
-    /* 移动端写日记弹窗去纵向滚动条（滚动保持） */
-    #add-diary-popup {
+    /* 移动端写日记弹窗去纵向滚动条（滚动保持）：两步后滚动容器是 body（ADR-0109） */
+    #add-diary-popup,
+    .bz-diary-add-body {
         scrollbar-width: none;
         -ms-overflow-style: none;
     }
 
-    #add-diary-popup::-webkit-scrollbar {
+    #add-diary-popup::-webkit-scrollbar,
+    .bz-diary-add-body::-webkit-scrollbar {
         display: none;
     }
 }

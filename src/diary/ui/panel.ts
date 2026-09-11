@@ -20,7 +20,7 @@ import { loadAll, onFullRefresh, onLightRefresh, onProgress, onLoadingChange, on
 import { isUnlocked, onUnlockChange } from '../encrypt';
 import { applyFilter, cancelEdit, updateSticky, initScroll } from './entries';
 import { createTag, rebuildTags, refreshSubTagsBar } from './filter-shared';
-import { createTagPicker, createAddDialog, createDatePicker, showDatePicker, openAddDialog } from './dialogs';
+import { createTagPicker, createAddDialog, createDatePicker, showDatePicker, openAddDialog, closeAddDialog } from './dialogs';
 import { registerOpenDialogCommand } from './quote';
 import { runTaskCheck, openReviewDialog, planTomorrow } from '../daily';
 // 当日待办事项/日常行为记录（issue 247：QuickAdd 两个 Capture 宏换血，同格式共写当天日记）
@@ -522,9 +522,8 @@ function registerEscapeListener() {
       }
       const add = byId('add-diary-mask');
       if (add && add.style.display === 'block') {
-        add.style.display = 'none';
-        const ap = byId('add-diary-popup');
-        if (ap) ap.style.display = 'none';
+        // 两步弹窗（ADR-0109）：ESC 属取消语义，两步一并收起并丢弃草稿
+        closeAddDialog();
         return;
       }
       const date = byId('diary-date-filter-mask');

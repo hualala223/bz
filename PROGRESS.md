@@ -505,3 +505,16 @@
 - [x] 样式：`.bz-diary-capture` 写 `src/diary/styles.css`（基座走 core uiModal）
 - [x] 测试：daily-capture.test.ts（16，node）+ daily-capture-ui.test.ts（4，jsdom）+ smoke 命令 id 同步
 - [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署
+
+## 2026-09-11 · 写日记弹窗两步化（ADR-0109）：移动端正文不再被软键盘吞
+
+**状态：已交付**
+
+- [x] 背景：原单弹窗 `时间→类型→正文→保存`，移动端键盘弹起后正文框与保存按钮被覆盖，无法输入/保存
+- [x] 结构：两步共用一个 mask、两个 popup——第一步 `#add-diary-popup`（时间+类型+吸底「下一步」）、第二步 `#add-diary-content-popup`（正文+吸底「上一步」「保存」）；第一步隐藏不销毁，datetime/类型容器仍是 `saveNewEntry` 数据源
+- [x] 吸底：`.bz-diary-add-body`（限高滚动）+ `.bz-diary-add-foot`（按钮行不随内容滚走），新增类写 `src/diary/styles.css`，不新增内联视觉样式
+- [x] 语义：第一步「下一步」拦截未选类型（冻结文案）；上一步保留草稿、遮罩/ESC/保存丢弃；preset 带分类（每日复盘）跳过第一步；第一步移动端不自动聚焦、第二步自动聚焦正文
+- [x] 同步：panel.ts ESC 关闭改调 `closeAddDialog()`（两步同收 + 草稿清零）；main.ts 卸载清理 id 清单加 `add-diary-content-popup`
+- [x] 测试：新增 `tests/diary/add-dialog-steps.test.ts`（8 例：停在第一步/未选类型拦截/进第二步 DOM 保留/草稿保留/取消丢弃/preset 跳步/两步保存落盘/body-foot 结构）；修 `dialogs-cov.test.ts` 保存按钮查询改到第二步 popup
+- [x] 文档：ADR-0109 + CONTEXT.md 术语「分步写日记」
+- [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署

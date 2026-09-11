@@ -375,6 +375,7 @@ export default class BzPlugin extends Plugin {
       'diary-subtags-container',
       'add-diary-mask',
       'add-diary-popup',
+      'add-diary-content-popup',
       'diary-tag-selector-mask',
       'diary-tag-selector-popup',
       'unified-datetime-picker-mask',
