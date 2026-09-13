@@ -17,13 +17,15 @@ export function getNewsFilePath(): string {
   return storageFile('news.json');
 }
 
-export const DEFAULT_SOURCES = { zhihu: true, guokr: true, bilibili: true };
+export const DEFAULT_SOURCES = { zhihu: true, guokr: true, bilibili: true, rss: true };
 export const DEFAULT_STATS = () => ({ totalRead: 0, totalSaved: 0, totalSkipped: 0, byPlatform: {} as Record<string, number>, byDate: {} as Record<string, number> });
 
 export interface NewsSources {
   zhihu: boolean;
   guokr: boolean;
   bilibili: boolean;
+  /** RSS 订阅源总开关（ADR-0121）：守护按它决定是否拉 rssFeeds 列表 */
+  rss: boolean;
 }
 
 /** UP 主资料（ticket 126：后台抓到消息后回填名字/头像；缺失时 UI 回退显示 uid） */
@@ -32,9 +34,15 @@ export interface BilibiliUpInfo {
   avatar?: string;
 }
 
-/** 四段对象结构（ADR-0060）；articles 为原纯数组内容，stats 由 news-stats.json 并入。
- *  bilibiliUpInfo 为第五段（可选，ticket 126 新增）：uid → {name?, avatar?}，后台回填、插件只读展示；
- *  bilibiliMaxItems/bilibiliCookie 为第六段（可选，ticket 127 新增）：每 UP 最近 N 条 + 用户配置的 B 站 Cookie */
+/** RSS 订阅源（ADR-0121）：title 取 feed 自带标题（试拉/守护回填），缺省回退显示 url */
+export interface RssFeed {
+  url: string;
+  title?: string;
+}
+
+/** 八段对象结构（ADR-0060 起逐步扩张）；articles 为原纯数组内容，stats 由 news-stats.json 并入。
+ *  bilibiliUpInfo/bilibiliMaxItems/bilibiliCookie 为 B 站配套段（ticket 126/127）；
+ *  rssFeeds 为 RSS 订阅列表（ADR-0121）：**插件侧写、数据源守护只读**（守护按 sources.rss 拉取）。*/
 export interface NewsData {
   articles: any[];
   stats: { totalRead: number; totalSaved: number; totalSkipped: number; byPlatform: Record<string, number>; byDate: Record<string, number> };
@@ -43,6 +51,8 @@ export interface NewsData {
   bilibiliMaxItems: number;
   bilibiliCookie: string;
   sources: NewsSources;
+  /** RSS 订阅列表（ADR-0121） */
+  rssFeeds: RssFeed[];
 }
 
 /** 读取失败 / 文件缺失的区分（首用引导 vs 错误态沿用 reader 语义） */
@@ -53,7 +63,45 @@ export interface ReadNewsResult {
 }
 
 function emptyData(): NewsData {
-  return { articles: [], stats: DEFAULT_STATS(), bilibiliUps: [], bilibiliUpInfo: {}, bilibiliMaxItems: 10, bilibiliCookie: '', sources: { ...DEFAULT_SOURCES } };
+  return { articles: [], stats: DEFAULT_STATS(), bilibiliUps: [], bilibiliUpInfo: {}, bilibiliMaxItems: 10, bilibiliCookie: '', sources: { ...DEFAULT_SOURCES }, rssFeeds: [] };
+}
+
+/** 纯函数：RSS 订阅列表容错解析（ADR-0121）：非数组 → []；条目须含合法 url，title 去空白可缺省 */
+export function parseRssFeeds(raw: unknown): RssFeed[] {
+  if (!Array.isArray(raw)) return [];
+  const out: RssFeed[] = [];
+  for (const it of raw) {
+    if (!it || typeof it !== 'object') continue;
+    const url = String((it as any).url ?? '').trim();
+    if (!url) continue;
+    const title = String((it as any).title ?? '').trim();
+    out.push(title ? { url, title } : { url });
+  }
+  return out;
+}
+
+/** 纯函数：文本是否带 feed 结构标记（<rss>/<feed>/<RDF> 根元素）——试拉校验用，
+ *  拦截「恰好含 <title> 的普通 HTML 网页」被误当 RSS 入库 */
+export function looksLikeFeedXml(xml: string): boolean {
+  return /<(rss|feed|RDF)[\s>]/i.test(String(xml || ''));
+}
+
+/** 纯函数：从 RSS/Atom XML 原文提取 feed 标题（试拉校验预取名用）；无 title → null */
+export function extractFeedTitleFromXml(xml: string): string | null {
+  const m = String(xml || '').match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (!m) return null;
+  const t = m[1]
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .trim();
+  return t || null;
+}
+
+/** 纯函数：RSS url 归一（去空白；仅收 http/https）→ 合法返回原串，否则 null */
+export function normalizeRssFeedUrl(text: string): string | null {
+  const t = String(text || '').trim();
+  return /^https?:\/\/\S+$/i.test(t) ? t : null;
 }
 
 /** 纯函数：bilibiliUpInfo 段容错解析（uid → {name?, avatar?}；非对象/数组/空 → {}；头像统一转 https） */
@@ -137,6 +185,7 @@ export function parseNewsFileContent(raw: string): NewsData | null {
       sources: obj.sources && typeof obj.sources === 'object'
         ? { ...DEFAULT_SOURCES, ...(obj.sources as Record<string, boolean>) }
         : { ...DEFAULT_SOURCES },
+      rssFeeds: parseRssFeeds(obj.rssFeeds),
     };
   }
   return null;
@@ -189,7 +238,10 @@ export interface NewsWriteIntent {
  */
 export async function writeNewsDataMerged(intent: NewsWriteIntent): Promise<void> {
   const res = await readNewsData();
-  const base = res.ok ? res.data : emptyData();
+  // F8：损坏（ok=false）直接放弃本次写——以空库为基底落盘会把「不清盘保原文件」的
+  // 恢复现场销毁（原文件坏 JSON 被静默替换成近乎空库）
+  if (!res.ok) return;
+  const base = res.data;
   const next: NewsData = { ...base };
   if (intent.set.articles || intent.removeArticleKeys?.length) {
     const patchList = intent.set.articles || [];
@@ -213,7 +265,7 @@ export async function writeNewsDataMerged(intent: NewsWriteIntent): Promise<void
     }
     next.articles = merged;
   }
-  for (const seg of ['stats', 'bilibiliUps', 'bilibiliUpInfo', 'bilibiliMaxItems', 'bilibiliCookie', 'sources'] as const) {
+  for (const seg of ['stats', 'bilibiliUps', 'bilibiliUpInfo', 'bilibiliMaxItems', 'bilibiliCookie', 'sources', 'rssFeeds'] as const) {
     if (intent.set[seg] !== undefined) {
       (next as any)[seg] = intent.set[seg];
     }
@@ -288,9 +340,10 @@ export async function migrateLegacyStats(data: NewsData): Promise<NewsData> {
 }
 
 /**
- * 保留策略清理（纯函数，插件侧；savedDays=已保存骨架天数，skippedDays=已跳过骨架天数）：
+ * 保留策略清理（纯函数，插件侧；savedDays=已保存保留天数，skippedDays=已跳过保留天数）：
  * - read 非 true → 永不处理（未读保留）
- * - state==='saved'（正文已清空）按 fetchedAt ?? date 超 savedDays 天删除
+ * - state==='saved' 按 fetchedAt ?? date 超 savedDays 天整条删除（issue 274 起含正文；
+ *   已收条目的长期留档由剪藏笔记承接，news.json 只是聚合讯流）
  * - state==='skipped' 或旧数据无 state（保守按已跳过档）按 fetchedAt ?? date 超 skippedDays 天删除
  * - 起算时间解析失败（NaN）→ 保守保留
  */

@@ -3,13 +3,13 @@
  * 检测 news.json 存在性、读/写 sources 开关与 bilibiliUps 名单、最近抓取时间。
  * 纯数据层（无 DOM），供 src/clipbook/news-sources-group.ts 设置组调用。
  */
-import { readNewsData, writeNewsDataMerged, NEWS_JSON_PATH, DEFAULT_SOURCES, type BilibiliUpInfo } from './news-data';
+import { readNewsData, writeNewsDataMerged, DEFAULT_SOURCES, normalizeRssFeedUrl, type BilibiliUpInfo, type RssFeed } from './news-data';
 import { enqueueNewsWrite } from './write-queue';
 
 export interface DataSourceState {
   /** news.json 是否存在（news-watcher 库存在的检测信号） */
   exists: boolean;
-  sources: { zhihu: boolean; guokr: boolean; bilibili: boolean };
+  sources: { zhihu: boolean; guokr: boolean; bilibili: boolean; rss: boolean };
   bilibiliUps: string[];
   /** UP 主资料（后台抓到消息后回填；缺失时 UI 回退显示 uid） */
   bilibiliUpInfo: Record<string, BilibiliUpInfo>;
@@ -20,16 +20,23 @@ export interface DataSourceState {
   /** 最近抓取时间（articles 最新 fetchedAt；无文章返回 null） */
   lastFetchAt: string | null;
   totalArticles: number;
+  /** RSS 订阅列表（ADR-0121：news.json rssFeeds 段，插件写守护读） */
+  rssFeeds: RssFeed[];
+}
+
+/** 空数据源状态（news.json 缺失/损坏时的回退值；schema 构建与测试共用） */
+export function emptyDataSourceState(exists = false): DataSourceState {
+  return { exists, sources: { ...DEFAULT_SOURCES }, bilibiliUps: [], bilibiliUpInfo: {}, bilibiliMaxItems: 10, bilibiliCookie: '', lastFetchAt: null, totalArticles: 0, rssFeeds: [] };
 }
 
 /** 读数据源状态（检测 + sources + 名单 + UP 资料 + B站配置 + 最近抓取时间） */
 export async function readDataSourceState(): Promise<DataSourceState> {
   const res = await readNewsData();
   if (res.missing) {
-    return { exists: false, sources: { ...DEFAULT_SOURCES }, bilibiliUps: [], bilibiliUpInfo: {}, bilibiliMaxItems: 10, bilibiliCookie: '', lastFetchAt: null, totalArticles: 0 };
+    return emptyDataSourceState(false);
   }
   if (!res.ok) {
-    return { exists: true, sources: { ...DEFAULT_SOURCES }, bilibiliUps: [], bilibiliUpInfo: {}, bilibiliMaxItems: 10, bilibiliCookie: '', lastFetchAt: null, totalArticles: 0 };
+    return emptyDataSourceState(true);
   }
   let lastFetchAt: string | null = null;
   for (const a of res.data.articles) {
@@ -44,11 +51,12 @@ export async function readDataSourceState(): Promise<DataSourceState> {
     bilibiliCookie: res.data.bilibiliCookie,
     lastFetchAt,
     totalArticles: res.data.articles.length,
+    rssFeeds: [...res.data.rssFeeds],
   };
 }
 
 /** 写 sources 开关（串行队列 + 段级合并：只声明 sources 段，其余段取磁盘现值）；缺失时合并写落默认骨架 */
-export async function writeSources(sources: { zhihu: boolean; guokr: boolean; bilibili: boolean }): Promise<void> {
+export async function writeSources(sources: { zhihu: boolean; guokr: boolean; bilibili: boolean; rss: boolean }): Promise<void> {
   await enqueueNewsWrite(async () => {
     const res = await readNewsData();
     if (!res.ok) return;
@@ -87,6 +95,34 @@ export async function writeBilibiliCookie(cookie: string): Promise<void> {
     const res = await readNewsData();
     if (!res.ok) return;
     await writeNewsDataMerged({ set: { bilibiliCookie: c } });
+  });
+}
+
+// ===== RSS 订阅列表（ADR-0121：rssFeeds 段）=====
+
+/** 添加 RSS 订阅源（url 归一去重，title 可缺省由试拉/守护回填；返回是否新增） */
+export async function addRssFeed(url: string, title?: string): Promise<boolean> {
+  const u = normalizeRssFeedUrl(url);
+  if (!u) return false;
+  const t = String(title || '').trim();
+  return enqueueNewsWrite(async () => {
+    const res = await readNewsData();
+    if (!res.ok) return false;
+    if (res.data.rssFeeds.some((f) => f.url === u)) return false; // 已存在
+    const feed: RssFeed = t ? { url: u, title: t } : { url: u };
+    await writeNewsDataMerged({ set: { rssFeeds: [...res.data.rssFeeds, feed] } });
+    return true;
+  });
+}
+
+/** 移除 RSS 订阅源（按 url；串行队列 + 段级合并只声明 rssFeeds 段） */
+export async function removeRssFeed(url: string): Promise<void> {
+  const u = String(url || '').trim();
+  if (!u) return;
+  await enqueueNewsWrite(async () => {
+    const res = await readNewsData();
+    if (!res.ok || res.missing) return;
+    await writeNewsDataMerged({ set: { rssFeeds: res.data.rssFeeds.filter((f) => f.url !== u) } });
   });
 }
 

@@ -169,6 +169,22 @@ export function stripMdExt(name: string): string {
   return String(name || '').replace(/\.md$/i, '');
 }
 
+/** localDayKey(ts)：本地时区日期键 YYYY-MM-DD（日记文件名/统计落盘键共用口径；蓝本 clipbook/constants localDayKey） */
+export function localDayKey(ts: number | Date = Date.now()): string {
+  const d = ts instanceof Date ? ts : new Date(ts);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/** stripTitleMarks(s)：剥离首尾书名号《》（各域条目名清洗收口） */
+export function stripTitleMarks(s: string): string {
+  return String(s || '').replace(/^《|》$/g, '');
+}
+
+/** cmpZh(a, b)：中文拼音序比较器（localeCompare 'zh'；条目排序收口） */
+export function cmpZh(a: string, b: string): number {
+  return String(a || '').localeCompare(String(b || ''), 'zh');
+}
+
 /** fetchPageTitle(url)：requestUrl 抓取页面 <title>（失败返回 null） */
 export async function fetchPageTitle(url: string): Promise<string | null> {
   try {

@@ -12,6 +12,7 @@ import { setApp, getApp } from './core/app';
 import { setAISettingsProvider, resetAIProviderCache } from './core/ai';
 import { setSettingsProvider, setSettingsSaver } from './core/settings-provider';
 import { clearDomainEvents } from './core/domain-bus';
+import { cancelActiveFlowDialog } from './core/flow-dialog';
 import { attachObsidianAdapter, detachObsidianAdapter } from './core/obsidian-adapter';
 import { bindMobileViewport, unbindMobileViewport } from './core/viewport';
 import { renderSettingsInto } from './core/settings-schema';
@@ -24,7 +25,7 @@ import BzSettings, { DEFAULT_SETTINGS, migrateSecondBrainSettings } from './sett
 import { openTodoPanel, addTodoItem, unloadTodo, ensureTodoReminders, ensureFileSync, unloadFileSync } from './todo';
 import { addBelongingsItem, openBelongings, unloadBelongings } from './belongings';
 // 剪藏本融合域（clipbook，上游 ADR-0082/issue 177）：聚合讯未读流 + 剪藏笔记一体化工作台
-import { openClipbook, unloadClipbook } from './clipbook';
+import { openClipbook, markAllUnreadRead, unloadClipbook } from './clipbook';
 import { openFavoritesPanel, addFavoriteItem, unloadFavorites } from './favorites';
 // 书架墙（bookshelf 域，上游并存式新域终局换血：数据同源，旧 library 退役）
 import { openBookshelf, openBookshelfReport, unloadBookshelf } from './bookshelf';
@@ -110,6 +111,7 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-belongings-open', name: '归物本', icon: 'package', callback: () => openBelongings(getApp()) },
   // 剪藏本（clipbook 融合域，上游 ADR-0082：聚合讯未读流 + 剪藏笔记一体化工作台）
   { id: 'bz-clipbook-open', name: '剪藏本', icon: 'scissors', callback: () => openClipbook(getApp()) },
+  { id: 'bz-clipbook-mark-all-read', name: '未读全部标为已读', icon: 'check-check', callback: () => markAllUnreadRead() },
   // 收藏本
   { id: 'bz-favorites-open', name: '收藏本', icon: 'star', callback: () => openFavoritesPanel(getApp()) },
   { id: 'bz-favorites-add', name: '加收藏', icon: 'bookmark', callback: () => addFavoriteItem(getApp()) },
@@ -370,6 +372,9 @@ export default class BzPlugin extends Plugin {
     // 域事件总线收口：摘除 vault 订阅点 + 清空全部域事件订阅（总线为进程内单例，随插件卸载全量清空）
     detachObsidianAdapter();
     clearDomainEvents();
+    // C14（issue 265 吸收）：在途确认框（flow-dialog）先按取消语义结算再清 DOM——
+    // 未决 Promise 永久悬挂会让等确认结果的后续操作静默终止
+    cancelActiveFlowDialog();
     if (this.unregisterGestures) {
       this.unregisterGestures();
       this.unregisterGestures = null;

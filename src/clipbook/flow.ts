@@ -2,10 +2,12 @@
  * clipbook（剪藏本融合域，ADR-0082 / issue 177）：动作编排（保存/已读/在读/删除）。
  *
  * 语义对齐旧 news/reader.ts（saveToClip + markAsRead + recordStat + 域事件）：
- * - 保存（save）：B站视频 → 文献盒（ADR-0068，openLiteratureAddTask 不标已读）；
- *   普通文章 → 写剪藏笔记（save.ts），成功后标 news 已处理（read+saved、删 body、
- *   stats +1、发 news:read/saved 域事件——smartcat 行为流三跳 + auto-summary 补全依赖）。
- * - 已读（skip）：标 news 已处理（read+skipped、删 body、stats +1、发 news:read）。
+ * - 保存（save）：B站视频 → 文献盒（ADR-0068，openKnowledgeAddTask 不标已读）；
+ *   普通文章 → 写剪藏笔记（save.ts），成功后标 news 已处理（read+saved、stats +1、
+ *   发 news:read/saved 域事件——smartcat 行为流三跳 + auto-summary 补全依赖）。
+ * - 已读（skip）：标 news 已处理（read+skipped、stats +1、发 news:read）。
+ * - 正文保留（issue 274）：已处理不再删 body——会话目录已读/已收条目点开仍可阅全文；
+ *   超龄条目由保留策略整条清理（news-data applyRetention）。
  * - 在读（reading）：仅落 clipbook.json 侧写（news.json 无在读位）。
  * - 阅读时长：右栏/详情停留会话累计（对齐 ticket 076 openedAt/accumMs 语义，整分钟 ≥1）。
  *
@@ -21,7 +23,6 @@ import type { NewsReadEvent } from '../smartcat/news-source';
 import { writeClipNote } from './save';
 import { articleKeyOf } from './constants';
 import { updateClipbookData } from './data';
-import { readNewsAndSidecar } from './loader';
 import { enqueueNewsWrite } from './write-queue';
 
 // ---------- 阅读会话计时（对齐 ticket 076：当前显示条目 + 累计可视毫秒） ----------
@@ -69,7 +70,8 @@ export function __readingSessionStateForTests(): { curKey: string; accumMs: numb
 // 防「插件多写方互相覆盖 + 对守护进程无合并」——P1 审查项）；此处只封装本域动作。
 
 /** 写单篇已处理 + 统计 +1（合并为一次读改写，旧实现拆两次放大与 daemon 的竞态窗口）：
- *  read + state + 删 body；统计段与 articles 段在同一队列步内声明改动，写盘经
+ *  read + state（issue 274：正文保留不清——已读/已收条目在会话目录点开仍可阅全文）；
+ *  统计段与 articles 段在同一队列步内声明改动，写盘经
  *  writeNewsDataMerged 与磁盘做段级合并（daemon 新增文章不丢）。
  *  返回队列 Promise（enh 包：调用方 await 后再刷新内存面，防读到旧态——原 void 语义下
  *  UI「标记已读 → 重读」存在写盘未完成的竞态窗口） */
@@ -80,14 +82,23 @@ function markHandledAndBump(raw: any, action: 'saved' | 'skipped'): Promise<void
   return enqueueNewsWrite(async () => {
     const res = await readNewsData();
     if (!res.ok || res.missing) return;
+    let touched = false; // F5：条目已被清理/删除（未命中）不加统计、不空写
+    let changed = false; // F3：目标态已达成不改写不计数——重复「标已读」不重复计统计，saved 态不被覆盖成 skipped
+    let upgraded = false; // review：已读未收（skipped）补收进剪藏本 → 只推进状态桶，不重复计已读
     const list = (res.data.articles || []).map((a: any) => {
       if (articleKeyOf(a) !== key) return a;
-      const next: any = { ...a, read: true, state: action };
-      delete next.body; // 已处理 → 清正文（防 news.json 膨胀；保留策略骨架语义）
-      return next;
+      touched = true;
+      if (a.read === true && !(action === 'saved' && a.state !== 'saved')) return a;
+      changed = true;
+      if (a.read === true) {
+        upgraded = true;
+        return { ...a, state: 'saved' };
+      }
+      return { ...a, read: true, state: action };
     });
+    if (!touched || !changed) return;
     const s = res.data.stats || { totalRead: 0, totalSaved: 0, totalSkipped: 0, byPlatform: {}, byDate: {} };
-    s.totalRead = (Number(s.totalRead) || 0) + 1;
+    if (!upgraded) s.totalRead = (Number(s.totalRead) || 0) + 1;
     if (action === 'saved') s.totalSaved = (Number(s.totalSaved) || 0) + 1;
     else s.totalSkipped = (Number(s.totalSkipped) || 0) + 1;
     s.byPlatform[platform] = (s.byPlatform[platform] || 0) + 1;
@@ -123,7 +134,7 @@ export async function flowSave(article: any): Promise<boolean> {
   const isBili = raw.platform === 'B站' && !!String(raw.url || '').trim();
   if (isBili) {
     // ADR-0068：B站视频保存改道文献盒（不写剪藏、不进行为流）。
-    // enh 包 11：分流后回写已处理态（read+saved、清 body、统计 +1）——条目随即出收件流，
+    // enh 包 11：分流后回写已处理态（read+saved、统计 +1）——条目随即出收件流，
     // 防同一视频再次「保存到剪藏本」重复建任务；并给「已转入文献盒」明确反馈。
     const { openLiteratureAddTask } = await import('../literature');
     openLiteratureAddTask(getApp(), { url: raw.url, title: raw.title || null, uploader: raw.author || null });
@@ -212,7 +223,6 @@ export async function flowMarkAllRead(raws: any[]): Promise<void> {
       if (a.read === true || !keys.has(articleKeyOf(a))) return a;
       bumped++;
       const next: any = { ...a, read: true, state: 'skipped' };
-      delete next.body;
       const platform = a.platform || '未知';
       s.byPlatform[platform] = (Number(s.byPlatform[platform]) || 0) + 1;
       s.byDate[today] = (Number(s.byDate[today]) || 0) + 1;

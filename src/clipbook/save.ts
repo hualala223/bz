@@ -31,10 +31,11 @@ export function clipDirOf(): string {
 // C10：原 saveArticle 分流导出已删（无调用方——flow.ts 内联 B站/写剪藏分流）；
 // B站分流逻辑在 flow.flowSave 内实现。
 
-/** 写剪藏笔记（news 原文 raw）。返回是否写盘成功；空标题/取消覆盖/写盘异常均返回 false（调用方不得标已处理） */
-export async function writeClipNote(raw: any): Promise<boolean> {
+/** 写剪藏笔记（news 原文 raw）。返回是否写盘成功；空标题/取消覆盖/写盘异常均返回 false（调用方不得标已处理）。
+ *  dirOverride（ADR-0119）：每日简报保存走专属目录，缺省仍取 articleDirectory。 */
+export async function writeClipNote(raw: any, dirOverride?: string): Promise<boolean> {
   const app = getApp();
-  const dir = clipDirOf();
+  const dir = dirOverride || clipDirOf();
   const cleanTitle = String(raw.title || '').replace(/[\\/:*?"<>|]/g, '').trim();
   if (!cleanTitle) {
     notice('标题为空', 'error');

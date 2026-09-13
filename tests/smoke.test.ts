@@ -71,7 +71,7 @@ const EXPECTED_COMMAND_IDS = [
   'bz-home-open', 'bz-recap-today', 'bz-diary-wall-open', 'bz-data-checkup-open', 'bz-settings-panel-open',
   'bz-todo-open', 'bz-todo-add',
   'bz-belongings-add', 'bz-belongings-open',
-  'bz-clipbook-open',
+  'bz-clipbook-open', 'bz-clipbook-mark-all-read',
   'bz-favorites-open', 'bz-favorites-add',
   'bz-bookshelf-open',
   'bz-reading-report-open',

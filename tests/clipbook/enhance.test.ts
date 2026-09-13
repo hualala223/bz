@@ -11,7 +11,7 @@ import { MockVault, mockAppWithVault } from '../mock-vault';
 import { setApp, getApp } from '../../src/core/app';
 import { setSettingsProvider, setSettingsSaver } from '../../src/core/settings-provider';
 import { openClipbook, unloadClipbook } from '../../src/clipbook';
-import { reloadIfOpen, invalidateClipBodyCache, __autoReadingDelayForTests, revealClipArticle, closePanel } from '../../src/clipbook/ui';
+import { reloadIfOpen, invalidateClipBodyCache, revealClipArticle, closePanel } from '../../src/clipbook/ui';
 import { M } from '../../src/clipbook/state';
 import { drainNewsWritesForTests } from '../../src/clipbook/write-queue';
 
@@ -41,7 +41,7 @@ function boot(settingsPatch: Record<string, any> = {}): { vault: MockVault; sett
   const vault = seedVault();
   const app = mockAppWithVault(vault);
   setApp(app);
-  const settings = { storagePath: 'CONFIG/STORAGE', articleDirectory: '归档/网页剪藏', clipbookMobileDefaultFullscreen: false, ...settingsPatch };
+  const settings = { storagePath: 'CONFIG/STORAGE', articleDirectory: '归档/网页剪藏', ...settingsPatch };
   const saveSpy = vi.fn(async () => {});
   setSettingsProvider(() => settings as any);
   setSettingsSaver(saveSpy);
@@ -65,12 +65,10 @@ async function openContextMenuOn(target: HTMLElement): Promise<HTMLElement> {
 }
 
 beforeEach(() => {
-  __autoReadingDelayForTests(10000);
 });
 
 afterEach(() => {
   try { unloadClipbook(); } catch (e) { /* 幂等 */ }
-  __autoReadingDelayForTests(10000);
   MockPlatform.isMobile = false;
   document.body.innerHTML = '';
 });
@@ -106,10 +104,10 @@ describe('桌面搜索（enh 包 1）', () => {
 });
 
 describe('移动端长按抽屉（enh 包 2）', () => {
-  it('renderMobList 每卡挂 attachItemActions（.bz-item-card），动作与桌面同源', async () => {
+  it('renderMobToc 每卡挂 attachItemActions（.bz-item-card），动作与桌面同源（含已收折叠段内卡片，issue 248）', async () => {
     await openDesktop();
     const cards = [...document.querySelectorAll('.bz-clip-mob-item')] as HTMLElement[];
-    expect(cards.length).toBe(2);
+    expect(cards.length).toBeGreaterThanOrEqual(2);
     for (const card of cards) {
       expect(card.classList.contains('bz-item-card')).toBe(true);
     }
@@ -221,6 +219,26 @@ describe('误标/误删可撤销（enh 包 5）', () => {
     });
   });
 
+  it('删除条目（收件流）确认框：危险主动作挂 bz-flow-dialog--danger（issue 291 评审补），取消不动盘', async () => {
+    const { vault } = await openDesktop();
+    const item = document.querySelector('.bz-clip-item') as HTMLElement;
+    const menu = await openContextMenuOn(item);
+    const delBtn = [...menu.querySelectorAll('.bz-item-menu-item')].find((b) => b.textContent!.trim() === '删除') as HTMLElement;
+    expect(delBtn.title).toBe('从收件流删除'); // 确认点的是收件流分支（非剪藏本删除）
+    delBtn.click();
+    const popup = await vi.waitFor(() => {
+      const el = document.querySelector('#__shared_confirm_popup__') as HTMLElement;
+      expect(el).toBeTruthy();
+      return el;
+    });
+    expect(popup.querySelector('h4')!.textContent).toBe('删除条目');
+    expect(popup.classList.contains('bz-clip-dialog-editorial')).toBe(true); // 域皮在
+    expect(popup.classList.contains('bz-flow-dialog--danger')).toBe(true);   // 删除钮不高亮
+    (document.getElementById('__shared_confirm_cancel__') as HTMLElement).click();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(diskJson(vault).articles).toHaveLength(2);
+  });
+
   it('删除剪藏 → vault.trash 移入系统回收站（确认文案写明），撤销后原路径恢复', async () => {
     const { vault } = await openDesktop();
     const clipRow = [...document.querySelectorAll('.bz-rail-item')].find((r) => r.textContent!.includes('剪藏本')) as HTMLElement;
@@ -239,6 +257,8 @@ describe('误标/误删可撤销（enh 包 5）', () => {
     expect(popup.querySelector('h4')!.textContent).toBe('删除剪藏');
     expect(popup.textContent).toContain('确定删除剪藏「剪藏笔记A」吗？');
     expect(popup.textContent).toContain('系统回收站');
+    // issue 291 评审补：删除剪藏是危险主动作 → 挂危险修饰（编辑部皮另有方角危险态覆写）
+    expect(popup.classList.contains('bz-flow-dialog--danger')).toBe(true);
     (document.querySelector('#__shared_confirm_ok__') as HTMLElement).click();
     await vi.waitFor(() => {
       expect(vault.trashed.some((t) => t.path === '归档/网页剪藏/剪藏笔记A.md' && t.system)).toBe(true);
@@ -259,20 +279,8 @@ describe('误标/误删可撤销（enh 包 5）', () => {
   });
 });
 
-describe('阅读动线（enh 包 6）', () => {
-  it('右栏停留超阈值自动落「在读」（可手动覆盖：手动处理后不生效）', async () => {
-    __autoReadingDelayForTests(30);
-    const { vault } = await openDesktop();
-    // M.cur = 列表第一条（issue 206 倒序后 = 影视飓风视频 09:00）
-    expect(M.cur!.id).toBe('url:https://bilibili.com/video/BV1');
-    await new Promise((r) => setTimeout(r, 130));
-    await drainNewsWritesForTests();
-    const raw = JSON.parse(vault.files.get('CONFIG/STORAGE/clipbook.json')!);
-    const ovs = Object.values(raw.articleOverrides) as Array<{ reading?: boolean }>;
-    expect(ovs.some((o) => o && o.reading === true)).toBe(true);
-  });
-
-  it('标已读后前进到同位置下一篇', async () => {
+describe('阅读动线（冻结序：标已读原位保留 / 键盘切换）', () => {
+  it('标已读后条目原位保留灰显（ADR-0108：会话内不重排；显式标读也等重开面板才沉段）', async () => {
     await openDesktop();
     expect(M.cur!.id).toBe('url:https://bilibili.com/video/BV1'); // 倒序后首篇
     const item = document.querySelector('.bz-clip-item') as HTMLElement;
@@ -280,7 +288,11 @@ describe('阅读动线（enh 包 6）', () => {
     const readBtn = [...menu.querySelectorAll('.bz-item-menu-item')].find((b) => b.textContent!.includes('标记为已读')) as HTMLElement;
     readBtn.click();
     await drainNewsWritesForTests();
-    await vi.waitFor(() => expect(M.cur!.id).toBe('url:https://guokr.com/1')); // 前进到同位置下一篇
+    // 冻结序：条目原位保留（内存位已置，灰显）；cur 不前进——重开面板才重排沉段
+    await vi.waitFor(() => expect(M.cur!.id).toBe('url:https://bilibili.com/video/BV1'));
+    // 列表仍含该条（原位灰显，会话内不消失）
+    const titles = [...document.querySelectorAll('.bz-clip-item')].map((e) => e.textContent);
+    expect(titles.some((t) => t!.includes('影视飓风视频'))).toBe(true);
   });
 
   it('右栏聚焦 ←/→/j/k 切换条目', async () => {
@@ -300,23 +312,10 @@ describe('阅读动线（enh 包 6）', () => {
 });
 
 describe('阅读字号三档（enh 包 7）', () => {
-  it('小/中/大分段切换 → 落设置 saveSettings + 正文 class 跟随', async () => {
-    const { settings, saveSpy } = await openDesktop();
-    const segBtns = [...document.querySelectorAll('[data-clip-fs] .bz-segmented-btn')] as HTMLElement[];
-    expect(segBtns.map((b) => b.textContent)).toEqual(['小', '中', '大']);
-    const body = document.querySelector('.bz-clip-read-body') as HTMLElement;
-    // 默认中档
-    expect(body.classList.contains('fs-sm')).toBe(false);
-    expect(body.classList.contains('fs-lg')).toBe(false);
-    // 切「大」
-    (segBtns.find((b) => b.textContent === '大') as HTMLElement).click();
-    expect(body.classList.contains('fs-lg')).toBe(true);
-    expect(settings.clipbookReaderFontSize).toBe('large');
-    // 切「小」
-    (segBtns.find((b) => b.textContent === '小') as HTMLElement).click();
-    expect(body.classList.contains('fs-sm')).toBe(true);
-    expect(settings.clipbookReaderFontSize).toBe('small');
-    await vi.waitFor(() => expect(saveSpy).toHaveBeenCalled());
+  it('分段控件已退役（改设置面板项），阅读面无 data-clip-fs', async () => {
+    await openDesktop();
+    expect(document.querySelector('[data-clip-fs]')).toBeNull();
+    expect(document.querySelector('.bz-clip-read-body .bz-segmented')).toBeNull();
   });
 
   it('记忆档位打开即生效（large → fs-lg）', async () => {
@@ -324,6 +323,13 @@ describe('阅读字号三档（enh 包 7）', () => {
     const body = document.querySelector('.bz-clip-read-body') as HTMLElement;
     expect(body.classList.contains('fs-lg')).toBe(true);
     expect(body.classList.contains('fs-sm')).toBe(false);
+  });
+
+  it('默认中档无 fs 类', async () => {
+    await openDesktop();
+    const body = document.querySelector('.bz-clip-read-body') as HTMLElement;
+    expect(body.classList.contains('fs-sm')).toBe(false);
+    expect(body.classList.contains('fs-lg')).toBe(false);
   });
 });
 
@@ -338,7 +344,7 @@ describe('面板拖拽缩放 + 尺寸记忆（enh 包 8）', () => {
   it('记忆值越界（超视口 92%）打开即钳制', async () => {
     await openDesktop({ clipbookPanelWidth: 5000, clipbookPanelHeight: 5000 });
     const frame = document.querySelector('.bz-clip-frame') as HTMLElement;
-    // jsdom 视口 1024×768 → 92% = 942×706（与 todo 面板同口径）
+    // jsdom 视口 1024×768 → 92% = 942×706（与 memo 面板同口径）
     expect(frame.style.width).toBe('942px');
     expect(frame.style.height).toBe('706px');
   });
