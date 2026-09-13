@@ -17,6 +17,7 @@ export type {
   BzSwitchOpts, BzSelectOpts, BzCardPickOpts,
   BzSearchOpts, BzMainHeadOpts, BzRailItem, BzRailOpts,
   BzMobStripOpts, BzStatOpts, BzProgressOpts, BzPopoverOpts, BzSuggestOpts,
+  BzSetlistItem, BzSetlistOpts,
 } from './types';
 
 // 组件工厂（每组件一文件）
@@ -36,6 +37,7 @@ export { uiSearch } from './search';
 export { uiMainHead } from './mainhead';
 export { uiRail } from './rail';
 export { uiMobStrip } from './mobstrip';
+export { uiSetlist } from './setlist';
 export { uiStat } from './stat';
 export { uiProgress } from './progress';
 export { uiPopover } from './popover';

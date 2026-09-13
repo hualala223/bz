@@ -5,8 +5,8 @@
  *
  * - 绑定二选一：`{ key }`（keyof BzSettings 泛型收窄，自动读值 + 落盘 data.json）或
  *   `{ get, set, save }` 外部数据三函数逃生口（news.json 等域内数据）。
- * - 行类型十类：toggle / text / path / select / slider（基准五类）+ custom 插槽 /
- *   button（actionRow 豁免组徽标）/ info / number / textarea。
+ * - 行类型十二类：toggle / text / path / select / slider（基准五类）+ custom 插槽 /
+ *   button（actionRow 豁免组徽标）/ info / number / textarea / list（issue 263，uiSetlist 单源）。
  * - text/textarea/number 行沿用原 main.ts textSetting 语义（f1）：800ms 防抖 + 失焦/回车立即
  *   落盘 + onCommit 一次性提示（值相对初始值有变更才提示、同一次编辑会话至多一次、
  *   改回原值后复位可再次提示——warnedInitial 细节逐字保留）。
@@ -19,7 +19,8 @@ import type BzSettings from '../settings';
 import { getSettings, saveSettings, tryGetSettings } from './settings-provider';
 import { renderPathSettingRow } from './path-picker';
 import { createSettingsGroup, markSettingSplitRows, refreshSettingsGroupCounts } from './settings-modal';
-import { uiCardChoice } from './ui';
+import { uiCardChoice, uiSetlist } from './ui';
+import { notifySaveError } from './notice';
 
 /** 设置快照：visibleWhen 条件函数的入参（键直绑行的当前值；外部数据行请自行闭包捕获）。 */
 export type SettingsSnapshot = Readonly<BzSettings>;
@@ -90,6 +91,14 @@ interface TextualCommit {
   refreshKey?: string | ((snapshot: SettingsSnapshot) => string);
 }
 
+/** 行内附加按钮（issue 263：text/number 行「添加」动作、slider「试听」类动作的声明位） */
+export interface RowAction {
+  text: string;
+  /** 强调色按钮 */
+  cta?: boolean;
+  onClick: (value: string | undefined, ctx: SettingsRowContext) => void | Promise<void>;
+}
+
 interface TextRow extends RowBase, TextualCommit {
   type: 'text';
   name: string;
@@ -100,6 +109,8 @@ interface TextRow extends RowBase, TextualCommit {
   onChange?: (value: string, ctx: SettingsRowContext) => void;
   /** 数字型文本行修饰（issue 187 采样参数）：右对齐窄框（设置面板渲染器消费；core 渲染器忽略） */
   num?: boolean;
+  /** 行内附加按钮（渲染于输入框左侧） */
+  actions?: RowAction[];
 }
 
 interface TextAreaRow extends RowBase, TextualCommit {
@@ -123,6 +134,8 @@ export interface NumberRow extends RowBase, TextualCommit {
   /** 占位提示；函数形式 = 随快照联动（ticket 172） */
   placeholder?: string | ((snapshot: SettingsSnapshot) => string);
   onChange?: (value: number, ctx: SettingsRowContext) => void;
+  /** 行内附加按钮（渲染于输入框左侧） */
+  actions?: RowAction[];
 }
 
 export interface SelectRow extends RowBase {
@@ -142,6 +155,8 @@ interface SliderRow extends RowBase {
   max: number;
   step?: number;
   onChange?: (value: number, ctx: SettingsRowContext) => void;
+  /** 行内附加按钮（渲染于滑条右侧，如「试听」） */
+  actions?: RowAction[];
 }
 
 interface PathRow extends RowBase {
@@ -180,10 +195,11 @@ interface ButtonRow extends RowBase {
   onClick: (ctx: SettingsRowContext) => void;
 }
 
-/** 纯展示行（名称 + 描述，无控件；如影视「海报抓取」指引行） */
+/** 纯展示行（名称 + 描述，无控件；如影视「海报抓取」指引行）；actions 供展示行附带操作按钮 */
 interface InfoRow extends RowBase {
   type: 'info';
   name: string;
+  actions?: RowAction[];
 }
 
 /** 非常规内容唯一出口：render 插槽（内容渲染进独立包装容器，visibleWhen 作用于包装容器） */
@@ -204,7 +220,30 @@ interface ChoiceCardsRow extends RowBase {
   onChange?: (value: string, ctx: SettingsRowContext) => void;
 }
 
-/** 十一类行判别联合（Q5；issue 210 增 choiceCards） */
+/** 列表行条目：key 为移除判定身份，label 主文案，sub 副文案（灰字），imageUrl 头像（加载失败不占位） */
+export interface SettingsListItem {
+  key: string;
+  label: string;
+  sub?: string;
+  imageUrl?: string;
+}
+
+/** 通用列表行（推翻UP名单/排除名单等 chips 自绘 DOM）：移除按钮逐条触发 onChange 传回剩余键集。
+ *  items 支持函数形式（每次移除后重读重建，域侧以磁盘/字盒为基底）；空数组渲染 emptyText 空态。 */
+interface ListRow extends RowBase {
+  type: 'list';
+  name: string;
+  items: SettingsListItem[] | (() => SettingsListItem[]);
+  emptyText?: string;
+  /** 移除按钮文案（默认「移除」） */
+  removeLabel?: string;
+  /** 布局变体（通用组件 .bz-setlist 修饰类，两渲染器同口径；缺省 = chips 流式胶囊，2026-09-12 拍板）：
+   *  rows = 全宽行列表 / grid = 卡片网格 / dense = 紧密分隔行 */
+  variant?: 'rows' | 'grid' | 'chips' | 'dense';
+  onChange?: (keys: string[], ctx: SettingsRowContext) => void;
+}
+
+/** 十二类行判别联合（Q5；issue 210 增 choiceCards，issue 263 增 list） */
 export type SettingsRow =
   | ToggleRow
   | TextRow
@@ -216,7 +255,8 @@ export type SettingsRow =
   | ButtonRow
   | InfoRow
   | CustomRow
-  | ChoiceCardsRow;
+  | ChoiceCardsRow
+  | ListRow;
 
 /** 分组声明：有 icon = 分组卡片（createSettingsGroup）；无 icon = 区块标题 + 平铺行
  *  （主设置页 ADR-0009 单页形态，DOM 契约 .bz-setting-section-title 不破）。 */
@@ -444,6 +484,26 @@ export function renderSettingsInto(container: HTMLElement, schema: SettingsSchem
         });
       }
     };
+    // 行内附加按钮（先注册 → 渲染于输入框左侧，2026-09-08 拍板换位的对齐口径）：
+    // onClick 完成后重读本行绑定值回填显示（不置脏）+ 重求值——供「填入/拉取回填」类动作即时回显
+    const actions = (row as TextRow | NumberRow).actions;
+    if (actions) {
+      for (const a of actions) {
+        setting.addButton((b) => {
+          if (a.cta) b.setCta();
+          b.setButtonText(a.text).onClick(() => {
+            void (async () => {
+              await a.onClick(last, ctx);
+              if (currentText && currentText.setValue) {
+                dirty = false;
+                currentText.setValue(String(acc.read() ?? ''));
+              }
+              reevaluate();
+            })();
+          });
+        });
+      }
+    }
     if (row.type === 'text') setting.addText(addInto);
     else if (row.type === 'textarea') setting.addTextArea(addInto);
     else setting.addText(addInto);
@@ -471,6 +531,44 @@ export function renderSettingsInto(container: HTMLElement, schema: SettingsSchem
         if (row.visibleWhen) entries.push({ el: wrap, visibleWhen: row.visibleWhen });
         row.render(wrap, { rowEl: wrap, refreshVisibility: reevaluate });
         if (row.onRefresh) customRefreshes.push(() => row.onRefresh!({ rowEl: wrap, refreshVisibility: reevaluate }));
+        return;
+      }
+      case 'list': {
+        // 通用列表行：条目 markup/行为 = 组件库 uiSetlist（唯一源，与面板渲染器同调）；
+        // 包装容器作 visibleWhen 宿主；items 函数形式在每次移除后重读重建（域侧以磁盘为基底）
+        const wrap = document.createElement('div');
+        wrap.className = 'bz-setlist-wrap';
+        body.appendChild(wrap);
+        const setting = new Setting(wrap).setName(row.name);
+        if (row.desc) setting.setDesc(row.desc);
+        if (row.visibleWhen) entries.push({ el: wrap, visibleWhen: row.visibleWhen });
+        const readItems = () => (typeof row.items === 'function' ? row.items() : row.items);
+        const renderItems = (): void => {
+          wrap.querySelector('.bz-setlist')?.remove();
+          wrap.appendChild(uiSetlist({
+            items: readItems(),
+            variant: row.variant,
+            removeLabel: row.removeLabel,
+            emptyText: row.emptyText,
+            onRemove: (key) => {
+              void (async () => {
+                const remaining = readItems().map((x) => x.key).filter((k) => k !== key);
+                try {
+                  await row.onChange?.(remaining, ctx);
+                } catch (e) {
+                  // C10：移除回调抛错 → 通知 + 回滚重绘（原先 unhandled rejection：
+                  // UI 停在已删假象、无提示，renderItems/reevaluate 被跳过）
+                  notifySaveError(e, row.name || '列表项');
+                } finally {
+                  reevaluate(); // 经 customRefreshes 重读重建（含本行）——与添加同路径
+                }
+              })();
+            },
+          }));
+        };
+        renderItems();
+        // 列表行随任意行变更重读重建（添加按钮/输入提交后即时可见；否则要重开弹窗——2026-09-12 修）
+        customRefreshes.push(renderItems);
         return;
       }
       case 'path': {
@@ -589,6 +687,13 @@ export function renderSettingsInto(container: HTMLElement, schema: SettingsSchem
             row.onChange?.(v, ctx);
           });
         });
+        // 行内附加按钮（滑条右侧，如「试听」）
+        for (const a of row.actions ?? []) {
+          setting.addButton((b) => {
+            if (a.cta) b.setCta();
+            b.setButtonText(a.text).onClick(() => void a.onClick(undefined, ctx));
+          });
+        }
         return;
       }
       case 'button': {
@@ -603,10 +708,16 @@ export function renderSettingsInto(container: HTMLElement, schema: SettingsSchem
         return;
       }
       case 'info': {
-        // 纯展示：仅名称 + 描述，无控件
+        // 纯展示：名称 + 描述（actions 在场时附操作按钮）
         const setting = new Setting(body).setName(row.name);
         if (row.desc) setting.setDesc(row.desc);
         if (row.visibleWhen) entries.push({ el: setting.settingEl, visibleWhen: row.visibleWhen });
+        for (const a of row.actions ?? []) {
+          setting.addButton((b) => {
+            if (a.cta) b.setCta();
+            b.setButtonText(a.text).onClick(() => void a.onClick(undefined, ctx));
+          });
+        }
         return;
       }
       case 'text':

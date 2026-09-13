@@ -16,9 +16,10 @@
  *    运行期动态节点（下拉菜单勾标）就地 setIcon。
  */
 import { getSettings, saveSettings } from '../core/settings-provider';
-import type { SettingsSchema, SettingsRow, SettingsSnapshot, SettingsRowContext } from '../core/settings-schema';
+import type { SettingsSchema, SettingsRow, SettingsSnapshot, SettingsRowContext, SettingsListItem } from '../core/settings-schema';
 import { setIcon } from 'obsidian';
 import { mountIcons } from '../core/ui/icons';
+import { uiSetlist } from '../core/ui';
 import { openDirPicker } from './dir-picker';
 import { notice } from '../core/notice';
 import {
@@ -272,6 +273,24 @@ function renderRow(
           if (input.value !== f) input.value = f;
         });
       }
+      // 行内附加按钮（按钮在左、输入框右，2026-09-08 拍板口径）：onClick 传当前输入值，
+      // 完成后重读绑定回填显示（不置脏）+ 刷新显隐——供「填入/回填」类动作（issue 263）
+      const litActions = (row as { actions?: Array<{ text: string; cta?: boolean; onClick: (value: string | undefined, ctx: SettingsRowContext) => void | Promise<void> }> }).actions;
+      for (const a of litActions ?? []) {
+        const holder = document.createElement('div');
+        holder.innerHTML = rowBtnHtml(a.text, a.cta);
+        const btn = holder.firstElementChild as HTMLElement;
+        btn.addEventListener('click', () => {
+          void (async () => {
+            await a.onClick(input.value, ctx);
+            dirty = false;
+            const f = String(acc.read() ?? '');
+            if (input.value !== f) input.value = f;
+            refresh();
+          })();
+        });
+        input.parentElement?.insertBefore(btn, input);
+      }
       break;
     }
     case 'textarea': {
@@ -466,6 +485,42 @@ function renderRow(
         const onRefresh = (row as { onRefresh: (c: SettingsRowContext) => void }).onRefresh;
         regRefresh(() => onRefresh(ctx));
       }
+      return el;
+    }
+    case 'list': {
+      // 通用列表行：条目 markup/行为 = 组件库 uiSetlist（唯一源，与 core 渲染器同调）；
+      // 行宿主挂 --list modifier（名称/描述一行在上，列表占满行宽在下）；items 函数形式移除后重读重建
+      const lr = row as unknown as {
+        name: string;
+        items: SettingsListItem[] | (() => SettingsListItem[]);
+        emptyText?: string;
+        removeLabel?: string;
+        variant?: 'rows' | 'grid' | 'chips' | 'dense';
+        onChange?: (keys: string[], ctx: SettingsRowContext) => void;
+      };
+      vm.isList = true;
+      el.innerHTML = rowHtml(vm);
+      const ctrlEl = el.querySelector<HTMLElement>('.bz-sp-set-ctrl')!;
+      const readItems = () => (typeof lr.items === 'function' ? lr.items() : lr.items);
+      const renderItems = () => {
+        ctrlEl.innerHTML = '';
+        ctrlEl.appendChild(uiSetlist({
+          items: readItems(),
+          variant: lr.variant,
+          removeLabel: lr.removeLabel,
+          emptyText: lr.emptyText,
+          onRemove: (key) => {
+            void (async () => {
+              const cur = readItems().map((x) => x.key);
+              await lr.onChange?.(cur.filter((k) => k !== key), ctx);
+              refresh(); // 经 refresh 链重读重建（含本行）——与添加同路径
+            })();
+          },
+        }));
+      };
+      renderItems();
+      // 列表行随任意行变更重读重建（添加按钮/输入提交后即时可见；否则要重开弹窗——2026-09-12 修）
+      regRefresh?.(renderItems);
       return el;
     }
     default:

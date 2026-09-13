@@ -407,6 +407,11 @@
 }
 .bz-sp-set-row--cards { flex-direction: column; align-items: stretch; gap: 8px; }
 .bz-sp-set-row--cards > .bz-sp-set-name { font-weight: 600; }
+/* 列表行（通用 .bz-setlist 的行宿主，issue 263）：名称/描述一行在上，列表占满行宽在下——与 core ⚙️
+   弹窗 ListRow 同构；行体不挂 hover 底（条目自带底），控件区放开整宽防条目横铺出界 */
+.bz-sp-set-row--list { flex-direction: column; align-items: stretch; gap: var(--bz-space-sm); }
+.bz-sp-set-row--list:hover { background: transparent; }
+.bz-sp-set-row--list .bz-sp-set-ctrl { margin-left: 0; width: 100%; min-width: 0; flex-wrap: wrap; }
 /* 设置子项层级降级（enh-sweep-a）：isChild 行弱化、hover 恢复 */
 .bz-sp-desk .bz-sp-set-row.child,
 .bz-sp-mobile .bz-sp-set-row.child,

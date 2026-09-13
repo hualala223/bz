@@ -127,6 +127,8 @@ export interface SpRowVm {
   ctrlHtml?: string;
   isCards?: boolean;
   isCustom?: boolean;
+  /** 列表行（issue 263）：行宿主挂 --list modifier（名称/描述在上，列表占满行宽在下） */
+  isList?: boolean;
 }
 
 /** 单行骨架（返回完整行串；契约类 .bz-sp-set-ctrl / .bz-sp-set-cards / .bz-sp-custom-slot 供事件层定位） */
@@ -135,6 +137,7 @@ export function rowHtml(vm: SpRowVm): string {
   if (vm.cls) cls.push(vm.cls);
   if (vm.isCards) cls.push('bz-sp-set-row--cards');
   if (vm.isCustom) cls.push('bz-sp-set-row--custom');
+  if (vm.isList) cls.push('bz-sp-set-row--list');
   if (vm.isCustom) {
     // custom 行：内容插槽自带标题/描述（各域 new Setting().setName/setDesc），面板不渲 info 区，
     // 插槽占满整行（避免标题描述两遍——ticket 设置面板内容重复 a/c）
