@@ -18,7 +18,10 @@
  *   创建 / 修改 / 队列消费三条自动路径对 **related 非空** 的笔记一律跳过（`skipped-related`，队列条目顺带移除）；
  *   手动命令 bz-secondbrain-rebuild-links 传 respectRelated:false 豁免（显式意图强制重跑）；
  * - 死链清理：关联范围（linkAgentScopes）各笔记 related 中指向不存在文件的条目移除；encrypt 锁定文件一律跳过。
+ * - 文献笔记生成即跑（issue 298）：知识盒生成视频/术语文献笔记后经 'knowledge:tasks' 域事件调
+ *   processNoteNow 立即建链（不等约 60 秒批次防抖、不受 linkAgentScopes 限制，串行锁排队）。
  */
+import { stripMdExt } from '../../core/utils';
 import type { App, TFile } from 'obsidian';
 import { notice, notify, NoticeHandle } from '../../core/notice';
 import { tryGetSettings } from '../../core/settings-provider';
@@ -37,7 +40,6 @@ import {
   loadLinkState,
   matchesScope,
   mergeRelated,
-  normalizeRelatedEntry,
   parseRelatedEntries,
   parseJudgeOutput,
   planRemovals,
@@ -47,7 +49,6 @@ import {
   upsertLinkState,
   isUnderFolder,
 } from './data';
-
 /** embedding 可达性探测超时（spec：短超时 ~1.5s） */
 export const LINK_PROBE_TIMEOUT_MS = 1500;
 
@@ -61,6 +62,8 @@ export function __setLinkBatchMsForTests(ms: number): void {
 export const LINK_BATCH_NOTICE_KEY = 'bz-sb-link-agent-batch';
 /** 失败合并提示的 dedupeKey（连续多次失败只提示一次） */
 export const LINK_ERROR_NOTICE_KEY = 'bz-sb-link-agent-error';
+/** 文献笔记生成即跑的即时反馈 dedupeKey（与批次分槽，同键单框动态更新） */
+export const LINK_NOTE_NOW_NOTICE_KEY = 'bz-sb-link-agent-note';
 
 /** 管线依赖的向量库最小面（只调用公开方法，不修改 vector-store） */
 export interface LinkStoreLike {
@@ -150,11 +153,15 @@ export async function probeEmbeddingReachable(baseUrl?: string): Promise<boolean
   }
 }
 
+/** encrypt 根目录（设置 encryptRoot 可配，缺省 CONFIG/.ENCRYPT；尾斜杠归一） */
+function encryptRoot(): string {
+  const s = tryGetSettings() as any;
+  return String(s.encryptRoot || 'CONFIG/.ENCRYPT').replace(/\/+$/, '');
+}
+
 /** encryptRoot 内的文件一律跳过（spec「错误处理与边界」） */
 function isEncryptLockedPath(app: App, path: string): boolean {
-  const s = tryGetSettings() as any;
-  const root = String(s.encryptRoot || 'CONFIG/.ENCRYPT').replace(/\/+$/, '');
-  return isUnderFolder(root, path);
+  return isUnderFolder(encryptRoot(), path);
 }
 
 export class LinkAgent {
@@ -258,6 +265,33 @@ export class LinkAgent {
     // 自写触发的 modify 事件后续经基准过滤掉，防止自触发死循环）
     await this.recordLinkBaseline(path);
     return { status: 'done', created };
+  }
+
+  /**
+   * 单篇即时建链（issue 298）：知识盒生成文献笔记后**立刻**跑，不经批次防抖、不受关联范围限制
+   * （生成即显式目标，语义同手动重跑「显式意图」）。经串行锁执行——与监听批次 / 存量补链排队互斥，
+   * 避免并发 refresh 与裁判请求交错。
+   * 通知受 linkAgentNotify 门控（同键合并单条）：N>0 报新建条数；不可达报入队；失败报错；N=0 静默。
+   */
+  async processNoteNow(path: string, opts?: { silent?: boolean }): Promise<ProcessOutcome> {
+    const outcome = await this.runSerial(() => this.processNote(path));
+    if (!this.notifyEnabled || opts?.silent) return outcome;
+    if (outcome.status === 'done') {
+      if (outcome.created > 0) {
+        notify(`自动双链：已为文献笔记新建关联 ${outcome.created} 条`, {
+          type: 'success',
+          dedupeKey: LINK_NOTE_NOW_NOTICE_KEY,
+        });
+      }
+    } else if (outcome.status === 'queued') {
+      notify('自动双链：embedding 服务不可达，已入队待服务恢复后自动处理', {
+        type: 'info',
+        dedupeKey: LINK_NOTE_NOW_NOTICE_KEY,
+      });
+    } else if (outcome.status === 'failed') {
+      notify(`自动双链处理失败：${outcome.error}`, { type: 'warning', dedupeKey: LINK_ERROR_NOTICE_KEY });
+    }
+    return outcome;
   }
 
   /**
@@ -615,7 +649,7 @@ export class LinkAgent {
     // 有清单但锁定态无法区分「已删除」与「已加密移入」→ 整体跳过本次（encrypt 域锁定文件一律跳过）
     let encryptedPaths: Set<string> | null = null;
     try {
-      const root = String((tryGetSettings() as any).encryptRoot || 'CONFIG/.ENCRYPT').replace(/\/+$/, '');
+      const root = encryptRoot();
       let safeExists = false;
       try {
         const existsFn = (this.app.vault.adapter as any)?.exists;
@@ -647,7 +681,7 @@ export class LinkAgent {
       const full = target.endsWith('.md') ? target : `${target}.md`;
       if (this.app.vault.getAbstractFileByPath(full)) return true;
       if ((encryptedPaths?.has(full) || encryptedPaths?.has(target)) === true) return true;
-      const base = full.split('/').pop()?.replace(/\.md$/i, '') || '';
+      const base = stripMdExt(full.split('/').pop() || '');
       return (basenameCounts.get(base) || 0) > 0;
     };
 

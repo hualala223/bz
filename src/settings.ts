@@ -484,6 +484,10 @@ export default interface BzSettings {
   settingsPanelLayout: string;
   /** 设置面板主题：'chenhun' = 晨昏（跟随 Obsidian 亮暗，ADR-0080） */
   settingsPanelSkin: string;
+  /** 🎨 第二大脑面板布局（issue 246 占位单卡；未知值回落 default） */
+  secondbrainSkin: string;
+  /** 🎨 第二大脑面板主题（未知值回落 graphite） */
+  secondbrainSkinTheme: string;
   /** 回忆墙：移动端默认全屏（默认开——媒体优先瀑布流真全屏，ADR-0081） */
   diaryWallMobileDefaultFullscreen: boolean;
 }
@@ -732,6 +736,8 @@ export const DEFAULT_SETTINGS: BzSettings = {
   settingsPanelMobileDefaultFullscreen: true,
   settingsPanelLayout: 'jingwei',
   settingsPanelSkin: 'chenhun',
+  secondbrainSkin: 'default',
+  secondbrainSkinTheme: 'graphite',
   // 回忆墙（diary-wall 域，ADR-0081）：移动端默认全屏（默认开——媒体优先瀑布流真全屏）
   diaryWallMobileDefaultFullscreen: true,
 

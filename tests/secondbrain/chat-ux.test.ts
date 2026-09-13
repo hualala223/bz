@@ -7,7 +7,7 @@
  * - 流式增量渲染：onDelta 增量写入占位气泡，完成后整段 markdown 重渲；
  * - 历史持久化：secondbrain.json chatHistory 段每轮写盘 / 打开读回渲染 /
  *   旧数据无段兼容（零迁移）；「清空对话」flow 确认后清空并写盘；
- * - 概括移除：主面板无概括区块、无残留导出，设置「AI 通道」描述不再提概括。
+ * - 概括移除：主面板无概括区块、无残留导出；设置 schema 已无「AI 通道」跳转行。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { MockVault, mockAppWithVault } from '../mock-vault';
@@ -131,7 +131,7 @@ describe('第二大脑对话：请求可取消（ticket 141）', () => {
 
     chat.input.value = '会取消的问题';
     chat.sendBtn.click();
-    await until(() => chat.sendBtn.textContent === '停止');
+    await until(() => chat.sendBtn.getAttribute('data-state') === 'stop'); // 图标钮：态走 data-state（issue 251）
     expect(chat.sendBtn.disabled).toBe(false); // 停止态可点击
 
     // 请求中 Enter 不触发新一轮（user 气泡不重复）
@@ -139,7 +139,7 @@ describe('第二大脑对话：请求可取消（ticket 141）', () => {
     expect(chat.messagesDiv.querySelectorAll('.bz-sb-chat-msg.user')).toHaveLength(1);
 
     chat.sendBtn.click(); // 停止
-    await until(() => chat.sendBtn.textContent === '发送');
+    await until(() => chat.sendBtn.getAttribute('data-state') === null);
     expect(chat.messagesDiv.textContent).toContain('已停止生成。');
     expect(chat.messagesDiv.textContent).not.toContain('出错了');
 
@@ -156,7 +156,7 @@ describe('第二大脑对话：请求可取消（ticket 141）', () => {
     chat.input.value = '测试问题';
     await chat.sendChatMessage();
     await until(() => chat.messagesDiv.textContent!.includes('出错了：服务商不可用'));
-    expect(chat.sendBtn.textContent).toBe('发送');
+    expect(chat.sendBtn.getAttribute('data-state')).toBeNull();
     expect(chat.sendBtn.disabled).toBe(false);
     chat.destroy();
   });
@@ -191,7 +191,7 @@ describe('第二大脑对话：流式增量渲染（ticket 141）', () => {
     // 占位气泡被最终 markdown 消息取代（mock MarkdownRenderer 直接 textContent = md）
     const msgs = chat.messagesDiv.querySelectorAll('.bz-sb-chat-msg.assistant');
     expect(msgs[msgs.length - 1].textContent).toContain('完整回答正文');
-    expect(chat.sendBtn.textContent).toBe('发送');
+    expect(chat.sendBtn.getAttribute('data-state')).toBeNull();
     // 一轮问答写盘两条
     await until(async () => (await persisted()).length === 2);
     chat.destroy();
@@ -269,6 +269,14 @@ describe('第二大脑对话：历史持久化与清空（ticket 141）', () => 
     // 取消路径：历史不动
     clearBtn.click();
     await until(() => document.getElementById('__shared_confirm_popup__') !== null);
+    // issue 291：确认框挂 body，须带域皮肤类才拿到 --sb-*（否则掉回 core 裸样式）
+    expect(
+      document.getElementById('__shared_confirm_popup__')!.classList.contains('bz-sb-flow-dialog')
+    ).toBe(true);
+    // issue 291 评审补：清空对话是破坏性主动作 → 挂危险修饰（主钮中性底 + 红字，手册 §9/§10）
+    expect(
+      document.getElementById('__shared_confirm_popup__')!.classList.contains('bz-flow-dialog--danger')
+    ).toBe(true);
     (document.getElementById('__shared_confirm_cancel__') as HTMLElement).click();
     await until(() => document.getElementById('__shared_confirm_popup__') === null);
     expect((await persisted()).length).toBe(2);
@@ -335,17 +343,14 @@ describe('第二大脑：AI 生成概括移除（ticket 141）', () => {
     expect((panelModule as any).buildSummaryPrompt).toBeUndefined();
   });
 
-  it('设置「AI 通道」描述不再提概括（对话保留）', async () => {
+  it('设置 schema 已无「AI 通道」跳转行；对话组仅留「最大历史记录」（2026-09-12 拍板删除）', async () => {
     const { secondBrainSettingsSchema } = await import('../../src/secondbrain/panel');
     const schema = secondBrainSettingsSchema();
-    let aiRow: any;
-    for (const g of schema.groups) {
-      for (const r of g.rows as any[]) {
-        if (r.name === 'AI 通道') aiRow = r;
-      }
-    }
-    expect(aiRow).toBeTruthy();
-    expect(aiRow.desc).not.toContain('概括');
-    expect(aiRow.desc).toContain('对话');
+    const allRows = schema.groups.flatMap((g) => g.rows as any[]);
+    expect(allRows.some((r) => r.name === 'AI 通道')).toBe(false);
+    // 对话组仍在：只留最大历史记录（跳转类按钮行不留在设置面板）
+    const chat = schema.groups.find((g) => g.name === '对话')!;
+    expect(chat).toBeTruthy();
+    expect(chat.rows.map((r: any) => r.name)).toEqual(['最大历史记录']);
   });
 });

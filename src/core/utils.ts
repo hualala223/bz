@@ -184,6 +184,12 @@ export function stripTitleMarks(s: string): string {
 export function cmpZh(a: string, b: string): number {
   return String(a || '').localeCompare(String(b || ''), 'zh');
 }
+/** isUnderFolder(folder, path)：目录边界判定——path 恰为 folder 或位于其下（递归语义；蓝本 review/watch.ts；票 273 自上游收口，link-agent data.ts 转发壳用） */
+export function isUnderFolder(folder: string, path: string): boolean {
+  const f = (folder || '').trim().replace(/\/+$/, '');
+  if (!f) return false;
+  return path === f || path.startsWith(f + '/');
+}
 
 /** fetchPageTitle(url)：requestUrl 抓取页面 <title>（失败返回 null） */
 export async function fetchPageTitle(url: string): Promise<string | null> {

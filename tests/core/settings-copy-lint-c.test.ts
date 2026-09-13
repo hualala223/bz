@@ -16,11 +16,12 @@ import { secondBrainSettingsSchema } from '../../src/secondbrain/panel';
 import { smartcatSettingsSchema } from '../../src/smartcat/ui';
 
 const WHITELIST = new Set<string>([
+  // secondbrain 本机局域网 IP：desc 为探测到的 IP/接口列表（ticket 122 自查信息本体，符号不可避免；票 273 随上游 panel schema 吸收）
+  'secondbrain#本机局域网 IP:*',
   // 复习「每篇笔记出题数量」desc「固定每篇笔记出题的数量，留空/0=自动」：f8-quiz 用户拍板文案
   //（「留空/0=自动」语义），既有 UI 测试锁定该描述子串（review/ui.test.ts），改动需主会话评审——局部豁免。
   'review#每篇笔记出题数量:desc-symbol',
-  // 第二大脑「启用」标题：2 字短标题为既有用户约定（测试以 dataset.name 锁定），行为不动，豁免长度。
-  'secondbrain#启用:title-length',
+  // 2026-09-13（票 273）：「启用」行已随上游 panel schema 退役（secondBrainEnabled 仅剩启动自动加载门），豁免一并删除
 ]);
 
 const TARGETS = [
