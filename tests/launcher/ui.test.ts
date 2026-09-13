@@ -432,6 +432,8 @@ describe('入口页 UI', () => {
     expect(rows.some((r) => r.textContent!.includes('删除磁贴'))).toBe(true);
     rows.find((r) => r.textContent!.includes('删除磁贴'))!.click();
     expect(gridTiles().length).toBe(0);
+    // P1-33 写前留底使 saveLauncherData 多一个微任务，落盘断言前先让微任务队列走完
+    await new Promise((r) => setTimeout(r, 0));
     const saved = JSON.parse(vault.files.get(LAUNCHER_PATH)!);
     expect(saved.desktop.tiles.length).toBe(0);
   });

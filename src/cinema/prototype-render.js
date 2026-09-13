@@ -161,9 +161,9 @@ var BZR_cinema = (() => {
     if (!url) return ph;
     return `<img loading="lazy" src="${esc(url)}" onerror="this.outerHTML='<div class=\\'ph\\'>${esc((_b = item.name[0]) != null ? _b : "")}</div>'">`;
   }
-  function pcardHtml(it, posterUrl) {
+  function pcardHtml(it, posterUrl, fetching = false) {
     const r = it.rating;
-    return `<div class="pcard" data-cinema-key="${esc(itemKey(it))}"><div class="pw">${posterInner(it, posterUrl)}
+    return `<div class="pcard" data-cinema-key="${esc(itemKey(it))}"><div class="pw">${posterInner(it, posterUrl)}${fetching ? '<div class="pw-fetch"><span class="pw-spin"></span></div>' : ""}
     ${(() => {
       const st = statusNum(it.status);
       return st !== STATUS_WATCHED ? `<span class="badge" style="background:${statusColor(st)}">${statusText(st)}</span>` : "";
@@ -351,29 +351,31 @@ var BZR_cinema = (() => {
   }
   var railRow = (on, attr, color, name, n) => `<button class="rail-item${on ? " is-on" : ""}" ${attr}><span class="dot" style="background:${color}"></span>${esc(name)}<span class="n">${n}</span></button>`;
   function railHtml(items, view) {
+    const listOn = view.view === "list";
     const g = {};
     const c = { 想看: 0, 在看: 0, 已看: 0 };
     items.forEach((it) => {
       g[it.group] = (g[it.group] || 0) + 1;
       c[statusText(it.status)]++;
     });
-    let groups = railRow(!view.typeFilter && !view.statusFilter, 'data-g="全部"', "var(--gold)", "全部", items.length);
+    let groups = railRow(listOn && !view.typeFilter && !view.statusFilter, 'data-g="全部"', "var(--gold)", "全部", items.length);
     for (const name of GROUP_ORDER) {
-      groups += railRow(view.typeFilter === name && !view.statusFilter, `data-g="${name}"`, typeColor(name), name, g[name] || 0);
+      groups += railRow(listOn && view.typeFilter === name && !view.statusFilter, `data-g="${name}"`, typeColor(name), name, g[name] || 0);
     }
     let status = "";
     for (const s of ["想看", "在看", "已看"]) {
-      status += railRow(view.statusFilter === s, `data-s="${s}"`, ST_COLOR[s], s, c[s]);
+      status += railRow(listOn && view.statusFilter === s, `data-s="${s}"`, ST_COLOR[s], s, c[s]);
     }
     return { groups, status };
   }
   function chipsHtml(view) {
-    let html = `<button class="chip${!view.typeFilter && !view.statusFilter ? " is-on" : ""}" data-c="all">${iconSpan(ICON.grid)}全部</button>`;
+    const listOn = view.view === "list";
+    let html = `<button class="chip${listOn && !view.typeFilter && !view.statusFilter ? " is-on" : ""}" data-c="all">${iconSpan(ICON.grid)}全部</button>`;
     for (const name of GROUP_ORDER) {
-      html += `<button class="chip${view.typeFilter === name && !view.statusFilter ? " is-on" : ""}" data-c="${name}">${name}</button>`;
+      html += `<button class="chip${listOn && view.typeFilter === name && !view.statusFilter ? " is-on" : ""}" data-c="${name}">${name}</button>`;
     }
     for (const s of ["想看", "在看", "已看"]) {
-      html += `<button class="chip${view.statusFilter === s ? " is-on" : ""}" data-s="${s}">${s}</button>`;
+      html += `<button class="chip${listOn && view.statusFilter === s ? " is-on" : ""}" data-s="${s}">${s}</button>`;
     }
     return html;
   }
@@ -406,7 +408,7 @@ var BZR_cinema = (() => {
     } else if (v.view === "stat") {
       view.innerHTML = spHeadHtml("观影分析", `· ${inp.watchedCount} 部已看`) + `<div class="sp-body">${inp.statHtml}</div>`;
     } else {
-      const body = inp.list.length ? `<div class="d-scroll"><div class="grid" style="grid-template-columns:repeat(${inp.cols},1fr)">${inp.list.map((it) => pcardHtml(it, inp.poster(it))).join("")}</div></div>` : emptyPageHtml(viewFiltered(v));
+      const body = inp.list.length ? `<div class="d-scroll"><div class="grid" style="grid-template-columns:repeat(${inp.cols},1fr)">${inp.list.map((it) => pcardHtml(it, inp.poster(it), inp.fetching(it))).join("")}</div></div>` : emptyPageHtml(viewFiltered(v));
       view.innerHTML = listHeadHtml(inp) + listToolsHtml(v) + body;
     }
   }
@@ -421,7 +423,7 @@ var BZR_cinema = (() => {
     if (mv) {
       if (v.view === "list") {
         mv.className = "m-scroll j-mview";
-        mv.innerHTML = `<div class="m-grid">${inp.list.map((it) => pcardHtml(it, inp.poster(it))).join("")}</div>`;
+        mv.innerHTML = `<div class="m-grid">${inp.list.map((it) => pcardHtml(it, inp.poster(it), inp.fetching(it))).join("")}</div>`;
       } else if (v.view === "ai") {
         mv.className = "sp-body j-mview";
         mv.innerHTML = inp.aiHtml;

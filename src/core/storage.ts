@@ -2,8 +2,11 @@
  * 统一 JSON 数据读写层（统一数据读写重构）
  *
  * 语义统一为 jsonStore 现状（P1-31 并发首建竞态 / P1-32 损坏留档，语义保留、留档位置升级为 D1 契约）：
- *  - read：不存在 → 建目录建初始值文件（默认 []）；解析失败 → 原文件原样留档 CONFIG/.CORRUPT/<名>.<yyyymmdd-hhmmss>.bak 后重建初始值
- *  - write：存在 modify / 不存在 create（建目录）；并发首建竞态（create 撞「已存在」）降级为重读/modify，数据不丢；写失败先把盘上原内容留档再照抛原错误
+ *  - read：不存在 → 建目录建初始值文件（默认 []）；解析失败 → 原文件原样留档 CONFIG/.CORRUPT/<名>.<yyyymmdd-hhmmss>.bak 后重建初始值；
+ *    空内容/解析失败先重试 READ_MAX_ATTEMPTS 次（P1-33：映射盘/同步盘偶发空读或半截读，不重试会把读抖动当损坏清掉好数据）；
+ *    重试耗尽后区分：空内容 → 抛错且不动盘上文件（疑似抖动，绝不留档重建清库）；非空解析失败 → 照旧留档+重建
+ *  - write：存在 modify / 不存在 create（建目录）；写前把盘上现内容轮换留底 CONFIG/.CORRUPT/<名>.prev.bak（每文件一份，
+ *    P1-33，留底失败不阻塞）；并发首建竞态（create 撞「已存在」）降级为重读/modify，数据不丢；写失败先把盘上原内容留档再照抛原错误
  *
  * D1 可靠写契约（三原语，全部域数据层统一走；D2/D3 迁移依据，词条见 CONTEXT.md「可靠写契约」）：
  *  1. enqueueFileTask(path, task)——同文件「读→改→写」任务 FIFO 串行（消灭并发互相覆盖）、异文件并行；
@@ -213,6 +216,39 @@ function serialize(v: unknown): string {
   return JSON.stringify(v, null, 2);
 }
 
+// ---------- 读重试与空读防护（P1-33：N 盘/同步盘偶发空读不得清库） ----------
+
+/** 读盘重试次数（含首次）：空内容/解析失败时重试，专治映射盘/同步盘偶发返回空或半截内容 */
+const READ_MAX_ATTEMPTS = 3;
+/** 重试间隔（ms）：给磁盘/同步层一个恢复窗口 */
+const READ_RETRY_DELAY_MS = 150;
+/** 空读告警去重窗口：与留档通知去重对齐，重试风暴不刷屏 */
+const EMPTY_READ_NOTIFY_MS = 30000;
+/** 文件路径 → 上次空读告警时刻 */
+const emptyReadNotifyAt = new Map<string, number>();
+
+/** 测试钩子：清空空读告警去重状态（跨用例隔离） */
+export function __resetEmptyReadNotifyForTests(): void {
+  emptyReadNotifyAt.clear();
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 空读人话化告警（warning）：说明已拒绝重建、盘上文件未动。无 DOM 环境静默。
+ */
+function notifyEmptyRead(filePath: string): void {
+  const now = Date.now();
+  if (now - (emptyReadNotifyAt.get(filePath) ?? 0) < EMPTY_READ_NOTIFY_MS) return;
+  emptyReadNotifyAt.set(filePath, now);
+  try {
+    notify(
+      `数据文件 ${baseNameOf(filePath)} 连续读到空内容（疑似磁盘/同步抖动），已暂停读取以防误清数据，盘上文件未改动`,
+      { type: 'warning' }
+    );
+  } catch { /* 无 DOM 环境静默 */ }
+}
+
 export function jsonFileStore<T>(filePath: string, opts: JsonFileStoreOptions<T> = {}): JsonFileStore<T> {
   /** app 解析：注入优先，回退模块级 getApp()（域传 app 参数时显式注入） */
   const resolveApp = () => opts.app || getApp();
@@ -277,6 +313,30 @@ export function jsonFileStore<T>(filePath: string, opts: JsonFileStoreOptions<T>
     }
   }
 
+  /**
+   * 写前留底（P1-33）：把盘上现内容轮换存为 CONFIG/.CORRUPT/<原文件名>.prev.bak（每文件只留
+   * 一份，每次写前覆盖）——写坏了/误写了有上一版可手工回滚。留底失败只告警，不阻塞本次写入。
+   */
+  async function rotatePrevBackup(app: any, f: any): Promise<void> {
+    try {
+      const cur = await app.vault.read(f);
+      if (!cur) return; // 空内容无留底价值
+      const bakPath = `${CORRUPT_BACKUP_DIR}/${baseNameOf(filePath)}-prev.bak`;
+      const bf = app.vault.getAbstractFileByPath(bakPath);
+      if (bf) await app.vault.modify(bf, cur);
+      else {
+        if (!app.vault.getAbstractFileByPath(CORRUPT_BACKUP_DIR)) {
+          try {
+            await app.vault.createFolder(CORRUPT_BACKUP_DIR);
+          } catch { /* 并发建目录竞态：已建则继续 */ }
+        }
+        await app.vault.create(bakPath, cur);
+      }
+    } catch (e) {
+      console.warn('[storage] ' + filePath + ' 写前留底失败（不影响本次写入）', e);
+    }
+  }
+
   return {
     async read() {
       const app = resolveApp();
@@ -288,12 +348,30 @@ export function jsonFileStore<T>(filePath: string, opts: JsonFileStoreOptions<T>
         f = app.vault.getAbstractFileByPath(filePath);
         if (!f) return resolveDefault();
       }
-      const raw = await app.vault.read(f as any);
-      try {
-        return JSON.parse(raw) as T;
-      } catch (e) {
-        return (await handleCorrupt(app, e, raw)) as T;
+      // 读重试（P1-33）：空内容/解析失败先重试再定论——映射盘/同步盘偶发返回空或半截内容，
+      // 不重试会把「读抖动」当「文件损坏」，触发留档+重建把好数据清成默认值
+      let lastRaw = '';
+      let lastErr: unknown = null;
+      for (let attempt = 1; attempt <= READ_MAX_ATTEMPTS; attempt++) {
+        const raw = await app.vault.read(f as any);
+        lastRaw = raw;
+        try {
+          return JSON.parse(raw) as T;
+        } catch (e) {
+          lastErr = e;
+          if (attempt < READ_MAX_ATTEMPTS) await sleep(READ_RETRY_DELAY_MS);
+        }
       }
+      // 重试耗尽：区分「空读抖动」与「真损坏」
+      if (lastRaw.trim() === '') {
+        // 空内容 ≠ 文件损坏：盘上文件可能完好（读层撒谎）。绝不走留档+重建（那会把好数据
+        // 清成默认值——2026-09-11 review.json 清库事故根因），抛错让调用方感知，盘上原样保留。
+        notifyEmptyRead(filePath);
+        throw new Error(
+          `storage: ${filePath} 连续 ${READ_MAX_ATTEMPTS} 次读到空内容（疑似磁盘/同步抖动），已放弃读取且不改动盘上文件`
+        );
+      }
+      return (await handleCorrupt(app, lastErr, lastRaw)) as T;
     },
     async write(data) {
       const app = resolveApp();
@@ -307,6 +385,7 @@ export function jsonFileStore<T>(filePath: string, opts: JsonFileStoreOptions<T>
             if (cur === c) return;
           } catch (e) { /* 读盘失败照常写 */ }
         }
+        await rotatePrevBackup(app, f); // 写前留底（P1-33，失败不阻塞）
         await modifyWithBackup(app, f, c);
         return;
       }

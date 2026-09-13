@@ -122,7 +122,9 @@ describe('动作事件埋点（UI 确认回调处）', () => {
 
     expect(added.received).toHaveLength(1);
     expect(added.received[0]).toEqual({ date: '2024-01-03', time: '10:30', tags: ['日记'], content: '' });
-    expect(vault.files.get('我的/日记/2024-01-03.md')).toContain('# 📖 10:30');
+    // 落点是 `# 随笔` 小节、块首行为加粗行（不是条目标题）——ADR-0114
+    expect(vault.files.get('我的/日记/2024-01-03.md')).toContain('# 随笔');
+    expect(vault.files.get('我的/日记/2024-01-03.md')).toContain('**📖 10:30**');
   });
 
   it('updateTags 写盘成功 → diary:tags-changed {entryId,date,time,from,to}', async () => {

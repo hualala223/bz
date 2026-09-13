@@ -55,10 +55,6 @@ const WHITELIST: Array<{ file: RegExp; reason: string; /** 防回归哨兵：预
     reason: '文献/笔记类用户文档写：视频转文献笔记生成与 frontmatter 回填（md 用户笔记，非插件私有数据）',
   },
   {
-    file: /^src\/diary\/ui\/repair-modal\.ts$/,
-    reason: '日记修复工具的 md 结构修复写（旧域冻结区 UI 不投资；修复流自带守卫与用户确认）',
-  },
-  {
     file: /^src\/clipbook\/save\.ts$/,
     reason: '剪藏 md 用户文档写（归档/网页剪藏/*.md）；news.json/clipbook.json 数据写已 D2 收编',
   },

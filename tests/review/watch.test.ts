@@ -309,4 +309,99 @@ describe('ReviewWatcher 自动加入', () => {
     expect(cleared2).toBe(0);
     expect(settings.reviewWatchedFolders).toEqual(['卡片盒']);
   });
+
+  // ===== ADR-0115 挪动兜底：rename 事件丢失（Obsidian 关闭期间/外部工具挪动）→ 同名唯一自动接回 =====
+
+  /** 造一条挂起条目（filePath 指向 vault 中不存在的旧路径） */
+  function missingItem(id: string, filePath: string): any {
+    const now = new Date();
+    return { id, filePath, reviewStart: now.toISOString(), stage: 0, phase: 'ladder', stability: 1, difficulty: 0.3, reviewHistory: [], totalReviews: 0, averageConfidence: 0, nextReviewDate: new Date(now.getTime() - 86400000).toISOString(), lastReviewed: null, lastDifficulty: null, completed: false };
+  }
+
+  it('relinkMissingByBasename：路径失效 × 同名唯一 → 自动接回 + 通知；无失效 → 0 且静默', async () => {
+    const vault = new MockVault();
+    // 模拟：笔记被挪到别的目录（旧路径已不存在），计划条目还指向旧路径
+    vault.files.set('卡片盒/文献/A.md', '正文');
+    vault.files.set('卡片盒/文献/B.md', '正文');
+    vault.files.set(REVIEW_FILE_PATH, JSON.stringify([
+      missingItem('1', '卡片盒/笔记盒/A.md'),
+      missingItem('2', '卡片盒/笔记盒/B.md'),
+    ]));
+    const app = makeApp(vault);
+    setApp(app);
+    const dm = new ReviewDataManager(app);
+    setSettingsProvider(() => ({ reviewWatchedFolders: ['卡片盒/笔记盒'], reviewExcludedNotes: [] } as any));
+    const w = new ReviewWatcher(app, dm);
+
+    const n = await w.relinkMissingByBasename();
+    expect(n).toBe(2);
+    const paths = (await dm.loadItems()).map((i) => i.filePath);
+    expect(paths).toContain('卡片盒/文献/A.md');
+    expect(paths).toContain('卡片盒/文献/B.md');
+    expect(paths).not.toContain('卡片盒/笔记盒/A.md');
+    expect(lastNoticeText()).toContain('已重新关联 2 篇被移动笔记的复习路径');
+
+    // 无失效条目 → 0 且无新通知
+    const before = document.querySelectorAll('.bz-notice').length;
+    expect(await w.relinkMissingByBasename()).toBe(0);
+    expect(document.querySelectorAll('.bz-notice').length).toBe(before);
+  });
+
+  it('relinkMissingByBasename：歧义一律不动——vault 重名 / 挂起条目同名 / 目标已被计划占用', async () => {
+    const vault = new MockVault();
+    vault.files.set('卡片盒/文献/重名.md', '正文A');
+    vault.files.set('其他/重名.md', '正文B');
+    vault.files.set('卡片盒/文献/占用.md', '正文');
+    vault.files.set(REVIEW_FILE_PATH, JSON.stringify([
+      missingItem('1', '卡片盒/笔记盒/重名.md'), // vault 有两个同名 → 不动
+      missingItem('2', '卡片盒/笔记盒/同名.md'), // 挂起条目同名 ×2 → 不动
+      missingItem('3', '卡片盒/笔记盒/同名.md'),
+      missingItem('4', '卡片盒/笔记盒/占用.md'), // 唯一同名文件已在计划 → 不动
+      { id: '5', filePath: '卡片盒/文献/占用.md', reviewStart: new Date().toISOString(), stage: 0, phase: 'ladder', stability: 1, difficulty: 0.3, reviewHistory: [], totalReviews: 0, averageConfidence: 0, nextReviewDate: new Date().toISOString(), lastReviewed: null, lastDifficulty: null, completed: false },
+    ]));
+    const app = makeApp(vault);
+    setApp(app);
+    const dm = new ReviewDataManager(app);
+    setSettingsProvider(() => ({ reviewWatchedFolders: [], reviewExcludedNotes: [] } as any));
+    const w = new ReviewWatcher(app, dm);
+
+    const n = await w.relinkMissingByBasename();
+    expect(n).toBe(0);
+    const paths = (await dm.loadItems()).map((i) => i.filePath);
+    expect(paths).toContain('卡片盒/笔记盒/重名.md');
+    expect(paths.filter((p) => p === '卡片盒/笔记盒/同名.md').length).toBe(2);
+    expect(paths).toContain('卡片盒/笔记盒/占用.md');
+  });
+
+  it('onVaultCreate：外部挪动以 created 补发 → 同名挂起接回（不限监听目录），且不再走自动加入', async () => {
+    const vault = new MockVault();
+    vault.files.set('卡片盒/文献/A.md', '正文');
+    vault.files.set(REVIEW_FILE_PATH, JSON.stringify([
+      missingItem('1', '卡片盒/笔记盒/A.md'),
+    ]));
+    const app = makeApp(vault);
+    setApp(app);
+    const dm = new ReviewDataManager(app);
+    setSettingsProvider(() => ({ reviewWatchedFolders: ['卡片盒/笔记盒'], reviewExcludedNotes: [] } as any));
+    const w = new ReviewWatcher(app, dm);
+
+    // 文件出现在非监听目录（文献），同名挂起唯一 → 接回而非新增
+    await w.onVaultCreate({ path: '卡片盒/文献/A.md', extension: 'md', basename: 'A' } as any);
+    const items = await dm.loadItems();
+    expect(items.some((i) => i.filePath === '卡片盒/文献/A.md')).toBe(true);
+    expect(items.some((i) => i.filePath === '卡片盒/笔记盒/A.md')).toBe(false);
+    expect(items.length).toBe(1);
+    expect(lastNoticeText()).toContain('已重新关联被移动笔记的复习路径：A');
+
+    // 新建与挂起条目同名但 vault 另有同名 → 歧义，接回不动（也不自动加入：非监听目录）
+    vault.files.set('卡片盒/文献/D.md', '正文');
+    vault.files.set('其他/D.md', '正文D');
+    vault.files.set(REVIEW_FILE_PATH, JSON.stringify([
+      missingItem('1', '卡片盒/笔记盒/D.md'),
+    ]));
+    await w.onVaultCreate({ path: '卡片盒/文献/D2.md', extension: 'md', basename: 'D2' } as any);
+    const items2 = await dm.loadItems();
+    expect(items2.some((i) => i.filePath === '卡片盒/笔记盒/D.md')).toBe(true);
+    expect(items2.some((i) => i.filePath === '卡片盒/文献/D2.md')).toBe(false);
+  });
 });

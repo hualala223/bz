@@ -54,6 +54,7 @@ function makeApp(vault: MockVault) {
 }
 
 beforeEach(() => {
+  vi.restoreAllMocks(); // reviewApp 是模块级单例：不清 mock 会让上个用例的 spy 调用历史泄进下个用例
   resetObsidianMocks();
   document.body.innerHTML = '';
   unloadReview();
@@ -61,18 +62,44 @@ beforeEach(() => {
 });
 
 describe('ensureReview', () => {
-  it('幂等初始化 + 2s 后首次逾期检查 + 60s 周期', async () => {
+  it('幂等初始化 + resolved/15s 兜底后首次逾期检查 + 60s 周期（ADR-0116：首查等索引就绪）', async () => {
     const vault = new MockVault();
     seed(vault);
     const app = makeApp(vault);
     const spy = vi.spyOn(reviewApp, 'checkOverdueAndNotify').mockResolvedValue(undefined);
     vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
-    ensureReview(app);
-    ensureReview(app); // 幂等：不重复初始化
-    await vi.advanceTimersByTimeAsync(2100);
-    expect(spy).toHaveBeenCalled();
-    vi.useRealTimers();
-    unloadReview();
+    try {
+      ensureReview(app);
+      ensureReview(app); // 幂等：不重复初始化
+      await vi.advanceTimersByTimeAsync(15100); // 15s 兜底超时触发首查
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      unloadReview();
+    }
+  }, 10000);
+
+  it('ADR-0116：metadataCache resolved 先到 → 立即首查（不等 15s 兜底），且只触发一次', async () => {
+    const vault = new MockVault();
+    seed(vault);
+    const app = makeApp(vault);
+    const spy = vi.spyOn(reviewApp, 'checkOverdueAndNotify').mockResolvedValue(undefined);
+    // 同步 mock 染色：resolved 监听器会跑真实 applyReviewStyles → getSettings（本组未注入 provider 会抛未处理 rejection）
+    vi.spyOn(reviewApp, 'applyReviewStyles').mockResolvedValue(undefined);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
+    try {
+      ensureReview(app);
+      app.emitMeta('resolved');
+      await vi.advanceTimersByTimeAsync(20);
+      expect(spy).toHaveBeenCalledTimes(1); // resolved 触发
+      app.emitMeta('resolved'); // 二次 resolved 不重复首查
+      await vi.advanceTimersByTimeAsync(15100); // 兜底超时也不再触发
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      // 断言失败也必须还原真实定时器：假定时器泄漏会让后续用例的真实 setTimeout 永不解析（级联超时）
+      vi.useRealTimers();
+      unloadReview();
+    }
   }, 10000);
 
   it('metadataCache resolved → applyReviewStyles', async () => {
@@ -143,11 +170,14 @@ describe('ensureReview', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
     const clearSpy = vi.spyOn(globalThis, 'clearInterval');
     ensureReview(app);
-    await vi.advanceTimersByTimeAsync(2100); // 让 setInterval 注册
-    app.emitWs('quit');
-    expect(clearSpy).toHaveBeenCalled();
-    vi.useRealTimers();
-    unloadReview();
+    try {
+      await vi.advanceTimersByTimeAsync(15100); // 让 setInterval 注册（15s 兜底超时后）
+      app.emitWs('quit');
+      expect(clearSpy).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      unloadReview();
+    }
   }, 10000);
 });
 
@@ -158,8 +188,11 @@ describe('unloadReview', () => {
     const app = makeApp(vault);
     vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
     ensureReview(app);
-    await vi.advanceTimersByTimeAsync(2100);
-    vi.useRealTimers();
+    try {
+      await vi.advanceTimersByTimeAsync(15100);
+    } finally {
+      vi.useRealTimers();
+    }
     unloadReview();
     expect(dataManager).toBeNull();
     expect(uiManager).toBeNull();
@@ -171,7 +204,7 @@ describe('unloadReview', () => {
     const app = makeApp(vault);
     ensureReview(app);
     expect(vault.listeners.modify!.length).toBe(1); // modify 仍走原生 vault 订阅
-    expect(app.metaListeners.resolved!.length).toBe(1);
+    expect(app.metaListeners.resolved!.length).toBe(2); // 染色刷新 + ADR-0116 首查就绪门（各一份）
     expect(app.wsListeners.quit!.length).toBe(1);
     // created/deleted/renamed 已迁总线：不再占用原生 vault 订阅位
     expect(vault.listeners.create ?? []).toHaveLength(0);
@@ -197,7 +230,7 @@ describe('unloadReview', () => {
     expect(rSpy).toHaveBeenCalledTimes(1);
     // 再 ensure：同一事件只触发一次（新实例无历史残留双触发）
     const styleSpy = vi.spyOn(reviewApp, 'applyReviewStyles').mockResolvedValue(undefined);
-    vi.spyOn(reviewApp, 'checkOverdueAndNotify').mockResolvedValue(undefined); // 屏蔽陈旧 2s 首查定时器
+    vi.spyOn(reviewApp, 'checkOverdueAndNotify').mockResolvedValue(undefined); // 屏蔽陈旧首查兜底定时器
     ensureReview(app);
     const c2Spy = vi.spyOn(reviewWatcher!, 'onVaultCreate').mockResolvedValue(undefined);
     app.emitMeta('resolved');

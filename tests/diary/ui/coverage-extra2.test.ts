@@ -110,8 +110,8 @@ describe('saveNewEntry 分支', () => {
     expect(vault.files.has(`我的/日记/${today}.md`)).toBe(true);
   });
 
-  it('保存失败（addEntry 抛错）→ 「保存日记失败: ...」', async () => {
-    const spy = vi.spyOn(storeModule, 'addEntry').mockRejectedValue(new Error('boom'));
+  it('保存失败（写盘抛错）→ 「保存日记失败: ...」', async () => {
+    const spy = vi.spyOn(vault, 'create').mockRejectedValue(new Error('boom'));
     openAddDialog();
     selectTag('日记');
     await saveNewEntry();
@@ -119,13 +119,15 @@ describe('saveNewEntry 分支', () => {
     spy.mockRestore();
   });
 
-  it('保存成功且无 currentDateFilter → 写入 currentFilteredEntries + insertCard', async () => {
+  it('保存成功 → 内容落 `# 随笔`，不进 currentFilteredEntries（ADR-0114 块模型）', async () => {
     openAddDialog();
     selectTag('日记');
     const dt = document.getElementById('add-diary-datetime') as HTMLInputElement;
     dt.value = '2024-01-03 10:30';
     await saveNewEntry();
-    expect(state.data.currentFilteredEntries.some((e) => e.date === '2024-01-03')).toBe(true);
+    // 块模型不再插卡：面板列表与当前视图一律不动
+    expect(state.data.currentFilteredEntries.some((e) => e.date === '2024-01-03')).toBe(false);
+    expect(vault.files.get('我的/日记/2024-01-03.md')).toContain('# 随笔');
   });
 
   it('diaryJumpToEditAfterSave=false → 保存后不进入编辑模式', async () => {
@@ -292,45 +294,27 @@ describe('panel toggle/加载态', () => {
 // ===== 修复回归（fx-diary-review） =====
 
 describe('saveNewEntry 插入条件求值（P1-14 回归）', () => {
-  it('标签筛选不匹配不入 filteredEntries；匹配（含二级标签展开）与无筛选才插入', async () => {
+  it('块模型下不受标签筛选与搜索影响：内容只落 `# 随笔`、不进当前列表（ADR-0114）', async () => {
     openAddDialog();
     selectTag('日记');
     const dt = document.getElementById('add-diary-datetime') as HTMLInputElement;
     state.data.currentFilteredEntries = [];
 
-    // 选中「书」筛选：新条目标签为 日记 → 不插入
+    // 标签筛选不匹配（选「书」、写「日记」）：照常落盘，但面板列表不动
     state.data.selectedTags.clear();
     state.data.selectedTags.add('书');
     dt.value = '2024-01-05 10:30';
     await saveNewEntry();
     expect(state.data.currentFilteredEntries.some((e) => e.date === '2024-01-05')).toBe(false);
+    expect(vault.files.get('我的/日记/2024-01-05.md')).toContain('# 随笔');
 
-    // 选中「日记」→ 匹配插入
-    state.data.selectedTags.clear();
-    state.data.selectedTags.add('日记');
-    dt.value = '2024-01-06 10:30';
-    await saveNewEntry();
-    expect(state.data.currentFilteredEntries.some((e) => e.date === '2024-01-06')).toBe(true);
-
-    // 主标签「旅游」筛选 + 二级标签「四川」条目 → 展开匹配，插入
-    selectTag('日记'); // 取消
-    selectTag('四川');
-    state.data.selectedTags.clear();
-    state.data.selectedTags.add('旅游');
-    dt.value = '2024-01-07 10:30';
-    await saveNewEntry();
-    expect(state.data.currentFilteredEntries.some((e) => e.date === '2024-01-07')).toBe(true);
-
-    // 搜索关键词不匹配 → 不插入；清空关键词恢复插入
+    // 搜索关键词不匹配：同样只落盘、不进列表
     state.data.selectedTags.clear();
     state.data.currentSearchKeyword = '绝不匹配的暗号XYZ';
-    dt.value = '2024-01-08 10:30';
+    dt.value = '2024-01-06 10:30';
     await saveNewEntry();
-    expect(state.data.currentFilteredEntries.some((e) => e.date === '2024-01-08')).toBe(false);
-    state.data.currentSearchKeyword = '';
-    dt.value = '2024-01-09 10:30';
-    await saveNewEntry();
-    expect(state.data.currentFilteredEntries.some((e) => e.date === '2024-01-09')).toBe(true);
+    expect(state.data.currentFilteredEntries.some((e) => e.date === '2024-01-06')).toBe(false);
+    expect(vault.files.get('我的/日记/2024-01-06.md')).toContain('# 随笔');
   });
 });
 

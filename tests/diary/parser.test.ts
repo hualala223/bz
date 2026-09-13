@@ -167,7 +167,7 @@ describe('日记前导区边界与提取（ADR-0110）', () => {
     expect(extractPreamble(tpl)).toBe(['---', 'card_type: 日记', '---', '', '## 随笔'].join('\n'));
   });
 
-  it('可修形态（缺空格 / 时间非两位）同样算边界：其不合格形态交「检测日记解析」修复', () => {
+  it('不合规形态（缺空格 / 时间非两位）同样算前导区边界：其行归条目区、解析不出条目', () => {
     const content = '前言\n\n# 🤝02:43\n正文\n';
     expect(findEntryRegionStart(content.split('\n'))).toBe(2);
     expect(extractPreamble(content)).toBe('前言');

@@ -1,6 +1,7 @@
 /**
  * 写前守卫与未解析行警告（P0 审查修复）——jsdom 环境断言人话通知。
- * - writeFile 拒写时以 warning 通知引导「检测日记解析」；
+ * - writeFile 拒写时以 warning 通知给出人话指引（手工把不合规头行补成 `# emoji HH:mm`；
+ *   指向已退役的「检测日记解析」工具的旧文案已随 ADR-0114 摘除）；
  * - loadAll / refreshFile 的 onUnparsed 接上警告入口（UX-9）。
  * 磁盘状态断言在 tests/diary/store.test.ts（node 环境）。
  */
@@ -34,7 +35,7 @@ beforeEach(() => {
 });
 
 describe('writeFile 写前守卫通知（P0 审查修复）', () => {
-  it('拒写时弹 warning 通知：点明日期、行数与修复入口，正文不带 emoji', async () => {
+  it('拒写时弹 warning 通知：点明日期、行数与手工修复指引，正文不带 emoji', async () => {
     makeVault({ '我的/日记/2024-01-01.md': '# 📖 08:00\n第一条\n\n# 游记标题\n这段会丢\n' });
     await loadAll();
     clearNotices();
@@ -43,7 +44,7 @@ describe('writeFile 写前守卫通知（P0 审查修复）', () => {
     const msgs = getNoticeMessages().join('\n');
     expect(msgs).toContain('2024-01-01');
     expect(msgs).toContain('2 行内容无法解析');
-    expect(msgs).toContain('检测日记解析');
+    expect(msgs).toContain('emoji HH:mm');
     expect(msgs).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
   });
 
@@ -76,7 +77,7 @@ describe('loadAll / refreshFile 未解析行警告（UX-9 接线）', () => {
     const call = spy.mock.calls.find((c) => String(c[0]).includes('个日记文件存在无法解析的行'));
     expect(call).toBeTruthy();
     expect(String(call![0])).toContain('1 个日记文件存在无法解析的行');
-    expect(String(call![0])).toContain('检测日记解析');
+    expect(String(call![0])).toContain('涉及这些文件的改动会被拦下');
     expect((call![1] as any)?.type).toBe('warning');
     spy.mockRestore();
   });

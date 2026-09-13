@@ -79,6 +79,8 @@ const EXPECTED_COMMAND_IDS = [
   'bz-review-count', 'bz-review-add-current', 'bz-review-add-current-with-links',
   // 上游线 P2/P3：复习统计报告 + 快速复制密码
   'bz-review-report', 'bz-encrypt-copy-password',
+  // ticket 276：今日已复习列表（点击打开原文，强制阅读模式）
+  'bz-review-today',
   'bz-secondbrain-panel', 'bz-secondbrain-open', 'bz-secondbrain-chat', 'bz-secondbrain-rebuild-links', 'bz-secondbrain-link-all', 'bz-secondbrain-rebuild-index',
   'bz-pomodoro-open',
   'bz-literature-open', 'bz-literature-note-term',
@@ -91,8 +93,8 @@ const EXPECTED_COMMAND_IDS = [
   'bz-diary-open',
   // 日常时间记录（自 CONFIG/SCRIPTS 三个 QuickAdd 宏整合进 diary 域）
   'bz-diary-task-check', 'bz-diary-review', 'bz-diary-plan',
-  // issue 247：当日待办事项/日常行为记录（两个 QuickAdd Capture 宏换血）
-  'bz-diary-todo-capture', 'bz-diary-activity-capture',
+  // issue 247：日常行为记录（QuickAdd Capture 宏换血）；当日待办事项捕获已退役（ADR-0122）
+  'bz-diary-activity-capture',
 ];
 
 /** 内存"磁盘"存储：模拟 Obsidian 插件的 data.json 持久层 */
@@ -157,6 +159,8 @@ describe('bz 骨架冒烟', () => {
     // ticket 170：「批量加入复习计划」——当前文档及一级出链一起加入
     expect(byId('bz-review-add-current-with-links').name).toBe('批量加入复习计划');
     expect(typeof byId('bz-review-add-current-with-links').editorCallback).toBe('function');
+    // ticket 276：今日已复习——独立命令，弹窗罗列当天复习过的文档
+    expect(byId('bz-review-today').name).toBe('今日已复习');
     // f7：第二大脑面板与第二大脑参考区分（不再与功能名歧义）
     expect(byId('bz-secondbrain-panel').name).toBe('第二大脑面板');
     expect(byId('bz-secondbrain-open').name).toBe('第二大脑参考');

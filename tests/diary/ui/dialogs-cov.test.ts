@@ -312,30 +312,25 @@ describe('弹窗守卫与搜索命中分支', () => {
     expect(diaryBtn.classList.contains('diary-active')).toBe(true);
   });
 
-  it('搜索关键词命中时间 → 新条目插入当前列表', async () => {
-    state.data.currentSearchKeyword = '09:00';
-    openAddDialog();
-    (document.querySelector('#add-diary-type-container [data-tag="日记"]') as HTMLElement).click();
-    (document.getElementById('add-diary-datetime') as HTMLInputElement).value = '2024-02-01 09:00';
-    await saveNewEntry();
-    expect(state.data.currentFilteredEntries.some((e) => e.time === '09:00' && e.date === '2024-02-01')).toBe(true);
-  });
-
-  it('搜索关键词命中标签名 → 插入', async () => {
-    state.data.currentSearchKeyword = '书';
-    openAddDialog();
-    (document.querySelector('#add-diary-type-container [data-tag="书"]') as HTMLElement).click();
-    (document.getElementById('add-diary-datetime') as HTMLInputElement).value = '2024-02-02 08:00';
-    await saveNewEntry();
-    expect(state.data.currentFilteredEntries.some((e) => e.tags.includes('书'))).toBe(true);
-  });
-
-  it('搜索关键词命中日期 → 插入', async () => {
-    state.data.currentSearchKeyword = '2024-02-14';
-    openAddDialog();
-    (document.querySelector('#add-diary-type-container [data-tag="日记"]') as HTMLElement).click();
-    (document.getElementById('add-diary-datetime') as HTMLInputElement).value = '2024-02-14 10:00';
-    await saveNewEntry();
-    expect(state.data.currentFilteredEntries.some((e) => e.date === '2024-02-14')).toBe(true);
+  it('保存后不插卡：无论搜索命中时间/标签/日期，内容都只落 `# 随笔`、不进当前列表（ADR-0114）', async () => {
+    const cases = [
+      { keyword: '09:00', tag: '日记', dt: '2024-02-01 09:00' },
+      { keyword: '书', tag: '书', dt: '2024-02-02 08:00' },
+      { keyword: '2024-02-14', tag: '日记', dt: '2024-02-14 10:00' },
+    ];
+    for (const c of cases) {
+      state.data.currentSearchKeyword = c.keyword;
+      const before = state.data.currentFilteredEntries.length;
+      openAddDialog();
+      (document.querySelector(`#add-diary-type-container [data-tag="${c.tag}"]`) as HTMLElement).click();
+      (document.getElementById('add-diary-datetime') as HTMLInputElement).value = c.dt;
+      await saveNewEntry();
+      // 不再插卡：命中条件与否都不进面板列表（这些内容不是条目）
+      expect(state.data.currentFilteredEntries).toHaveLength(before);
+      expect(state.data.currentFilteredEntries.some((e) => e.date === c.dt.slice(0, 10))).toBe(false);
+    }
+    expect(vault.files.get('我的/日记/2024-02-01.md')).toContain('# 随笔');
+    expect(vault.files.get('我的/日记/2024-02-01.md')).toContain('**📖 09:00**');
+    expect(vault.files.get('我的/日记/2024-02-14.md')).toContain('# 随笔');
   });
 });

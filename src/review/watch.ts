@@ -4,6 +4,8 @@
  *  - 删除计划内文件 → 确认「是否同步移除复习记录？」
  *  - 重命名/移动计划内文件 → 自动更新路径（不再确认，ticket 099）
  *  - 监听文件夹添加：选择弹窗后立即确认存量收编（取消=什么都不做，不再写排除名单，ticket 099）
+ *  - 挪动兜底（ADR-0115）：rename 事件丢失（Obsidian 关闭期间/外部工具挪动）→ 同名双向唯一自动接回
+ *    （启动批量收敛 relinkMissingByBasename + created 实时接回 relinkOneByBasename）；歧义不动
  * 依赖方向：store 层（confirm 为 core，无其它域 DOM）；经 index.ts 事件接线；refresh 函数体延迟解析。
  */
 import type { App, TFile } from 'obsidian';
@@ -17,6 +19,11 @@ export function isUnderFolder(folder: string, path: string): boolean {
   const f = (folder || '').trim().replace(/\/+$/, '');
   if (!f) return false;
   return path === f || path.startsWith(f + '/');
+}
+
+/** ADR-0115：路径末段文件名（去 .md 后缀），与 TFile.basename 同口径，供同名比对 */
+export function baseNameOf(path: string): string {
+  return (path.split('/').pop() || '').replace(/\.md$/, '');
 }
 
 /** ticket 100：自动加入提醒合并窗口（3 秒；测试可注入短值） */
@@ -97,9 +104,11 @@ export class ReviewWatcher {
     await saveSettings();
   }
 
-  /** vault create：监听目录内新建 md → 自动加入（未排除、未在计划）；ticket 100：3 秒窗口合并提醒 + 开关 */
+  /** vault create：监听目录内新建 md → 自动加入（未排除、未在计划）；ticket 100：3 秒窗口合并提醒 + 开关。
+   *  ADR-0115：先试同名挂起接回（外部挪动的文件会以 created 出现，不限监听目录）——接回成功即返回，不再走自动加入 */
   async onVaultCreate(file: TFile): Promise<void> {
     if (file.extension !== 'md') return;
+    if (await this.relinkOneByBasename(file)) return;
     if (!this.isWatched(file.path)) return;
     if (this.isExcluded(file.path)) return;
     const items = await this.dataManager.loadItems();
@@ -119,6 +128,70 @@ export class ReviewWatcher {
       const tail = batch.length > 3 ? ` 等 ${batch.length - 3} 篇` : '';
       notice(batch.length > 1 ? `已自动加入复习计划：${shown}${tail}` : `已自动加入复习计划：${shown}`, 'success');
     }, REVIEW_AUTO_ADD_MERGE_MS);
+  }
+
+  /** ADR-0115 挪动兜底（实时）：新建文件与同名挂起条目双向唯一 → 自动接回原排期（不限监听目录）。
+   *  适用：Obsidian 关闭期间/外部工具挪动（rename 事件丢失，Obsidian 以 delete+created 补发）。
+   *  正文是否变动无从校验，以「同名 × 挂起条目 × vault 全库」双向唯一为充分条件；歧义一律不动。 */
+  private async relinkOneByBasename(file: TFile): Promise<boolean> {
+    const base = file.basename;
+    if (!base) return false;
+    const items = await this.dataManager.loadItems();
+    const matches = items.filter((i) => i.isMissing && baseNameOf(i.filePath) === base);
+    if (matches.length !== 1) return false;
+    if (items.some((i) => i.filePath === file.path)) return false;
+    if (this.isExcluded(file.path)) return false;
+    // vault 内同名唯一才接（另有同名文件 → 歧义不动）
+    const others = this.app.vault.getMarkdownFiles().filter((f) => f.basename === base && f.path !== file.path);
+    if (others.length > 0) return false;
+    const ok = await this.dataManager.updateFilePath(matches[0].filePath, file.path, base);
+    if (ok) {
+      notice(`已重新关联被移动笔记的复习路径：${base}`, 'success');
+      await this.refresh();
+    }
+    return ok;
+  }
+
+  /** ADR-0115 挪动兜底（启动收敛）：全部路径失效条目 × vault 同名文件 双向唯一 → 批量接回原排期。
+   *  返回接回条数；0 条静默。覆盖 Obsidian 未运行期间发生的挪动（启动时不补发事件，只能主动收敛）。 */
+  async relinkMissingByBasename(): Promise<number> {
+    const items = await this.dataManager.loadItems();
+    const missing = items.filter((i) => i.isMissing);
+    if (!missing.length) return 0;
+    // vault 同名索引
+    const byBase = new Map<string, number>();
+    for (const f of this.app.vault.getMarkdownFiles()) {
+      byBase.set(f.basename, (byBase.get(f.basename) || 0) + 1);
+    }
+    // 挂起条目同名计数（同名 > 1 → 目标歧义）
+    const missingByBase = new Map<string, number>();
+    for (const m of missing) {
+      const base = baseNameOf(m.filePath);
+      missingByBase.set(base, (missingByBase.get(base) || 0) + 1);
+    }
+    const planPaths = new Set(items.map((i) => i.filePath));
+    let relinked = 0;
+    for (const m of missing) {
+      const base = baseNameOf(m.filePath);
+      if (!base || (missingByBase.get(base) || 0) > 1) continue;
+      if ((byBase.get(base) || 0) !== 1) continue; // vault 无同名 / 重名歧义
+      const target = this.app.vault.getMarkdownFiles().find((f) => f.basename === base);
+      if (!target || target.path === m.filePath || planPaths.has(target.path) || this.isExcluded(target.path)) continue;
+      const ok = await this.dataManager.updateFilePath(m.filePath, target.path, base);
+      if (ok) {
+        planPaths.add(target.path);
+        relinked++;
+      }
+    }
+    if (missing.length > 0 || relinked > 0) {
+      // 诊断锚点：无论接回与否，有挂起就留痕（控制台可查「跑没跑、跑了多少」）
+      console.info(`[bz][review] 挪动兜底: 挂起 ${missing.length}，接回 ${relinked}`);
+    }
+    if (relinked > 0) {
+      notice(`已重新关联 ${relinked} 篇被移动笔记的复习路径`, 'success');
+      await this.refresh();
+    }
+    return relinked;
   }
 
   /** vault delete：计划内文件删除 → 防抖合并确认「同步移除复习记录？」 */

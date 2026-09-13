@@ -88,23 +88,24 @@ describe('任务定义', () => {
 });
 
 describe('模板', () => {
-  it('复盘模板：当日复盘 + 触动点三问', () => {
-    expect(REVIEW_TEMPLATE.startsWith('## 当日复盘')).toBe(true);
-    expect(REVIEW_TEMPLATE).toContain('### 触动点');
+  it('复盘模板：内层三问（小节名由落点提供，ADR-0114）', () => {
+    // 自 ADR-0114 起模板不含小节名：块落在 `# 当日复盘` 小节内，模板再带一行就会出现两个同名标题
+    expect(REVIEW_TEMPLATE.startsWith('### 触动点')).toBe(true);
+    expect(REVIEW_TEMPLATE).not.toContain('当日复盘');
     expect(REVIEW_TEMPLATE).toContain('#### 描述经过（具体场景）');
     expect(REVIEW_TEMPLATE).toContain('#### 分析原因（why→启发）');
     expect(REVIEW_TEMPLATE).toContain('#### 改进措施（提炼认知点或行动点）');
     expect(REVIEW_TAG).toBe('复盘');
   });
 
-  it('明日日程模板：代办事项/完成情况跟踪/备注 三段齐全', () => {
+  it('日程模板：代办事项/完成情况跟踪/备注 三段齐全（二级标题，ADR-0113）', () => {
     const content = buildPlanContent();
     expect(content).toContain(PLAN_MARKER);
-    expect(content).toContain('### 完成情况跟踪');
+    expect(content).toContain('## 完成情况跟踪');
     expect(content).toContain('| 计划完成 | 实际完成 |');
-    expect(content).toContain('### 备注');
+    expect(content).toContain('## 备注');
     // 顺序：代办 → 跟踪 → 备注
-    expect(content.indexOf(PLAN_MARKER)).toBeLessThan(content.indexOf('### 完成情况跟踪'));
-    expect(content.indexOf('### 完成情况跟踪')).toBeLessThan(content.indexOf('### 备注'));
+    expect(content.indexOf(PLAN_MARKER)).toBeLessThan(content.indexOf('## 完成情况跟踪'));
+    expect(content.indexOf('## 完成情况跟踪')).toBeLessThan(content.indexOf('## 备注'));
   });
 });

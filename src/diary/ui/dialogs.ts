@@ -12,18 +12,18 @@ import { getApp } from '../app';
 import {
   DIARY_DIRECTORY,
   getSortedTagsForAddDialog,
-  getSubTagsOfPrimary,
   getTagEmoji,
   getParentPrimaryTag,
   isSubTag,
 } from '../config';
 import { parseFlexibleDateTime } from '../parser';
-import { addEntry, writeFile, reloadWithEncrypted } from '../store';
+import { writeFile, reloadWithEncrypted } from '../store';
 import { ENCRYPT_TAG, reclassifyEntry } from '../encrypt';
 import { diaryDataMap, state } from '../state';
+import { ESSAY_HEADING, writeDiaryEntry } from '../daily-write';
 import { getJumpToEditAfterSaveSetting, getTagShowEmojiSetting, getUseFileDateTimeSetting } from './ui-settings';
 import { rebuildTags, updateTitleSuffix } from './filter-shared';
-import { applyFilter as applyFilterFromDialogs, insertCard, jumpToEntry, removeCard, showConfirm as showConfirmFromDialogs } from './entries';
+import { applyFilter as applyFilterFromDialogs, insertCard, removeCard, showConfirm as showConfirmFromDialogs } from './entries';
 import { createDateTimeControl, resetDateTimeControl } from './datetime-picker';
 
 // ===== 类型选择按钮（类型选择器与写日记弹窗共用） =====
@@ -572,11 +572,11 @@ export function createAddDialog() {
   contentLabel.textContent = '内容';
   contentLabel.style.cssText = 'display:block;margin-bottom:6px;font-size:14px;color:var(--text-muted);font-weight:500;';
 
-  // 正文输入框：弹窗内直写正文，保存即落盘，不再保存后跳进日记文件编辑
+  // 正文输入框：弹窗内直写正文，保存即落盘（留空则只写一行时间标题，并按设置打开当天日记）
   const contentInput = document.createElement('textarea');
   contentInput.id = 'add-diary-content';
   contentInput.className = 'bz-diary-add-content';
-  contentInput.placeholder = '写点什么…（留空则保存后进入编辑）';
+  contentInput.placeholder = '写点什么…（留空则保存后打开当天日记）';
   contentInput.rows = 4;
 
   const contentBody = document.createElement('div');
@@ -612,9 +612,17 @@ export function createAddDialog() {
 /** 第二步正文草稿：仅「上一步」返回时保留，取消/保存后清空（ADR-0109 草稿语义） */
 let addDialogDraft = '';
 
+/**
+ * 本次打开弹窗的落点小节（ADR-0114）：默认 `# 随笔`；每日复盘入口经 preset.section
+ * 指到 `# 当日复盘`。与草稿同生命周期（openAddDialog 重置、closeAddDialog 归位），
+ * 且不经由「上一步/下一步」发生改变，故跨步保存仍取到入口决定的那一个。
+ */
+let addDialogSection: string = ESSAY_HEADING;
+
 /** 测试钩子：清空跨步草稿（跨用例隔离；与 __resetCorruptNotifyForTests 同款先例） */
 export function __resetAddDialogDraftForTests(): void {
   addDialogDraft = '';
+  addDialogSection = ESSAY_HEADING;
 }
 
 function addDialogParts() {
@@ -660,10 +668,11 @@ export function backToTypeStep(): void {
   showAddStep(1);
 }
 
-/** 关闭写日记弹窗（取消语义：遮罩点击/保存完成）：两步都隐藏并丢弃草稿 */
+/** 关闭写日记弹窗（取消语义：遮罩点击/保存完成）：两步都隐藏并丢弃草稿与落点 */
 export function closeAddDialog(): void {
   const { mask, typePopup, contentPopup } = addDialogParts();
   addDialogDraft = '';
+  addDialogSection = ESSAY_HEADING;
   if (mask) mask.style.display = 'none';
   if (typePopup) typePopup.style.display = 'none';
   if (contentPopup) contentPopup.style.display = 'none';
@@ -681,12 +690,14 @@ function readSelectedAddTags(): string[] {
   return tags;
 }
 
-/** 预填参数（日常时间记录等入口复用写日记弹窗）：预选标签、预填正文、覆盖默认日期时间 */
+/** 预填参数（日常时间记录等入口复用写日记弹窗）：预选标签、预填正文、覆盖默认日期时间、指定落点小节 */
 export interface AddDialogPreset {
   tags?: string[];
   content?: string;
   date?: string;
   time?: string;
+  /** 落点小节标题（默认 `# 随笔`；每日复盘传 `# 当日复盘`，见 daily-write / ADR-0114） */
+  section?: string;
 }
 
 /** 打开添加日记弹窗（原 3348-3426；preset 供复盘等预填入口，无参行为不变） */
@@ -695,8 +706,10 @@ export function openAddDialog(preset?: AddDialogPreset) {
   const popup = document.getElementById('add-diary-popup');
   const contentPopup = document.getElementById('add-diary-content-popup');
   if (!mask || !popup || !contentPopup) return;
-  // 每次从外部打开都是全新一条：丢弃上一条留下的草稿（「上一步」不经由此处，故草稿得以保留）
+  // 每次从外部打开都是全新一条：丢弃上一条留下的草稿与落点
+  // （「上一步」不经由此处，故草稿与落点得以保留）
   addDialogDraft = '';
+  addDialogSection = preset?.section ?? ESSAY_HEADING;
 
   // 1. 刷新类型按钮（按排序规则）
   const typeContainer = document.getElementById('add-diary-type-container');
@@ -765,34 +778,15 @@ export function openAddDialog(preset?: AddDialogPreset) {
   }
 }
 
-/** 保存新日记条目（原 3428-3478） */
+/** 保存新日记内容（原 3428-3478；ADR-0114 起按小节落盘，不再建条目） */
 
-// P1-14：插入当前视图的条件与 applyFilter 同源求值——
-// 标签筛选（含主标签→二级标签展开）+ 日期筛选 + 搜索关键词
-function matchesCurrentTagFilter(tags: string[]): boolean {
-  if (state.data.selectedTags.size === 0) return true;
-  for (const tag of state.data.selectedTags) {
-    const subTags = getSubTagsOfPrimary(tag);
-    if (subTags && subTags.length > 0) {
-      if (tags.includes(tag) || tags.some((t) => subTags.some((sub) => sub.tag === t))) return true;
-    } else if (tags.includes(tag)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function matchesCurrentSearch(entry: { content: string; tags: string[]; time: string; date: string }): boolean {
-  if (!state.data.currentSearchKeyword) return true;
-  const lowerKeyword = state.data.currentSearchKeyword.toLowerCase();
-  return (
-    entry.content.toLowerCase().includes(lowerKeyword) ||
-    entry.tags.some((tag) => tag.toLowerCase().includes(lowerKeyword)) ||
-    entry.time.toLowerCase().includes(lowerKeyword) ||
-    entry.date.includes(state.data.currentSearchKeyword)
-  );
-}
-
+/**
+ * 保存：把弹窗正文按本次落点写进日记小节，不建条目。
+ * - 落点 = `addDialogSection`（写日记 `# 随笔` / 每日复盘 `# 当日复盘`），块形态与建节规则见 daily-write；
+ * - 通知文案随落点走（命中小节 / 现场新建 / 追加文末）由 daily-write 统一给出，这里不再自己拼；
+ * - 面板列表不插卡：新内容不是条目，标签筛选 / 日期筛选 / 索引 / 回忆墙 / 智能猫都看不到它（用户裁定）；
+ * - 「保存后进入编辑」降级为**打开该日期日记文件**（设置项名与开关保留，块模型下无条目可跳）。
+ */
 export async function saveNewEntry() {
   const datetimeInput = document.getElementById('add-diary-datetime') as HTMLInputElement | null;
   const mask = document.getElementById('add-diary-mask');
@@ -816,47 +810,31 @@ export async function saveNewEntry() {
   const dateStr = targetMoment.format('YYYY-MM-DD');
   const timeStr = targetMoment.format('HH:mm');
 
-  // 弹窗正文：非空即随条目直接落盘（保存后不跳文件编辑）
+  // 弹窗正文：非空即随块直接落盘（校验失败在下方 catch 兜底）
   const contentInput = document.getElementById('add-diary-content') as HTMLTextAreaElement | null;
   const content = contentInput ? contentInput.value.trim() : '';
 
   try {
-    const newEntry = await addEntry(dateStr, timeStr, selTagNames, content);
-    // 动作埋点：新增保存成功（本期无消费者，emit 即可）
+    const res = await writeDiaryEntry(dateStr, addDialogSection, selTagNames, timeStr, content);
+    // 动作埋点：新增保存成功（载荷形状不变：date/time/tags/content；本期无消费者，emit 即可）
     emitDomainEvent('diary:entry-added', { date: dateStr, time: timeStr, tags: selTagNames, content });
-    // UX-7：保存成功确认（正文不带 emoji，类型图标即视觉前缀）
-    notice('已保存日记', 'success');
     // 两步都收起并丢弃草稿（ADR-0109）
     closeAddDialog();
 
     // 保存后立即进入编辑（设置项 diaryJumpToEditAfterSave，关=仅关闭弹窗）；
-    // 弹窗里已写正文时跳转失去意义——正文已落盘，保持不打开日记文件
-    if (getJumpToEditAfterSaveSetting() && newEntry && !content) {
-      jumpToEntry(newEntry, 'edit');
-    }
-
-    if (
-      newEntry &&
-      matchesCurrentTagFilter(newEntry.tags) &&
-      matchesCurrentSearch(newEntry) &&
-      (!state.data.currentDateFilter ||
-        (state.data.currentDateFilter.month
-          ? newEntry.date.startsWith(`${state.data.currentDateFilter.year}-${state.data.currentDateFilter.month}`)
-          : newEntry.date.startsWith(state.data.currentDateFilter.year)))
-    ) {
-      state.data.currentFilteredEntries.push(newEntry);
-      state.data.currentFilteredEntries.sort((a, b) => {
-        const dateCmp = b.date.localeCompare(a.date);
-        return dateCmp !== 0 ? dateCmp : b.timeValue - a.timeValue;
-      });
-      insertCard(newEntry);
-      // P2 审查修复：插卡后前移显示计数——新卡片已渲染进 DOM，滚动加载下一批
-      // 从其后开始，否则滚到底时尾部条目重复渲染
-      state.data.currentDisplayCount += 1;
-    }
+    // 弹窗里已写正文时不打开——沿用旧行为「写完不打扰」
+    if (getJumpToEditAfterSaveSetting() && !content) void openDiaryFile(res.path);
   } catch (error: any) {
     console.error('保存日记失败:', error);
     notice('保存日记失败：' + error.message, 'error');
   }
+}
+
+/** 打开日记文件（「保存后进入编辑」的落点；块模型下没有条目可跳，改为打开当天文件） */
+async function openDiaryFile(path: string): Promise<void> {
+  const app = getApp();
+  const file = app?.vault?.getAbstractFileByPath?.(path) ?? null;
+  if (!file) return;
+  await app.workspace?.getLeaf?.()?.openFile?.(file as any);
 }
 

@@ -15,6 +15,9 @@ export function getReviewFilePath(): string {
   return storageFile('review.json', (s && (s.storagePath || s.reviewStoragePath)) || 'CONFIG/STORAGE');
 }
 
+/** 运行时字段（loadItems 现算 / TFile 引用）：saveItems 落盘前剥离，永不清写入 review.json */
+const RUNTIME_FIELDS = ['file', 'isMissing', 'isCompleted', 'isOverdue', 'currentStage', 'totalStages'] as const;
+
 export interface ReviewItem {
   id: string;
   filePath: string;
@@ -93,78 +96,95 @@ export class ReviewDataManager {
     return valid;
   }
 
-  /** 保存（剥离运行时 file 字段；走模块级 getApp——见 loadItems 注释） */
+  /** 保存（剥离运行时字段；走模块级 getApp——见 loadItems 注释）。
+   *  P1-33：loadItems 现算的运行时字段（isMissing/isCompleted/isOverdue/currentStage/totalStages/file）
+   *  一律不落盘——旧实现全量写回导致 review.json 无限膨胀（~5MB），且多端旧基线回写时把陈旧
+   *  运行时态放大成持久数据。白名单外字段保留（reviewStage 等旧字段兼容不动）。 */
   async saveItems(items: ReviewItem[]): Promise<void> {
-    const data = items.map(({ file, ...rest }) => rest);
-    await jsonFileStore<any[]>(getReviewFilePath()).write(data);
+    const data = items.map((it) => {
+      const clone: Record<string, unknown> = { ...it };
+      for (const k of RUNTIME_FIELDS) delete clone[k];
+      return clone;
+    });
+    await jsonFileStore<any[]>(getReviewFilePath()).write(data as any[]);
   }
 
-  /** 新增条目 */
+  /** 新增条目（P1-33：读→改→写整体入 per-path 串行队列，防并发互覆） */
   async addItem(filePath: string, fileName: string): Promise<ReviewItem> {
-    const items = await this.loadItems();
-    if (items.some((i) => i.filePath === filePath)) throw new Error('该笔记已在复习计划中');
-    const now = new Date();
-    const newItem: ReviewItem = {
-      id: `review_${now.getTime()}_${Math.random().toString(36).slice(2, 8)}`,
-      filePath,
-      name: fileName,
-      reviewStart: now.toISOString(),
-      stage: 0,
-      phase: 'ladder',
-      stability: 1,
-      difficulty: 0.3,
-      reviewHistory: [],
-      totalReviews: 0,
-      averageConfidence: 0,
-      nextReviewDate: new Date(now.getTime() + FSRS_FIRST_INTERVALS[0] * 86400000).toISOString(),
-      lastReviewed: null,
-      lastDifficulty: null,
-      completed: false,
-    };
-    items.push(newItem);
-    await this.saveItems(items);
-    return newItem;
+    return enqueueFileTask(getReviewFilePath(), async () => {
+      const items = await this.loadItems();
+      if (items.some((i) => i.filePath === filePath)) throw new Error('该笔记已在复习计划中');
+      const now = new Date();
+      const newItem: ReviewItem = {
+        id: `review_${now.getTime()}_${Math.random().toString(36).slice(2, 8)}`,
+        filePath,
+        name: fileName,
+        reviewStart: now.toISOString(),
+        stage: 0,
+        phase: 'ladder',
+        stability: 1,
+        difficulty: 0.3,
+        reviewHistory: [],
+        totalReviews: 0,
+        averageConfidence: 0,
+        nextReviewDate: new Date(now.getTime() + FSRS_FIRST_INTERVALS[0] * 86400000).toISOString(),
+        lastReviewed: null,
+        lastDifficulty: null,
+        completed: false,
+      };
+      items.push(newItem);
+      await this.saveItems(items);
+      return newItem;
+    });
   }
 
-  /** 更新条目（按 filePath 定位 + 就地修改 + 落盘） */
+  /** 更新条目（按 filePath 定位 + 就地修改 + 落盘；P1-33：整体入串行队列） */
   async updateItem(filePath: string, updateFn: (item: ReviewItem) => void): Promise<void> {
-    const items = await this.loadItems();
-    const idx = items.findIndex((i) => i.filePath === filePath);
-    if (idx === -1) throw new Error('条目不存在');
-    updateFn(items[idx]);
-    await this.saveItems(items);
+    await enqueueFileTask(getReviewFilePath(), async () => {
+      const items = await this.loadItems();
+      const idx = items.findIndex((i) => i.filePath === filePath);
+      if (idx === -1) throw new Error('条目不存在');
+      updateFn(items[idx]);
+      await this.saveItems(items);
+    });
   }
 
-  /** 移除条目 */
+  /** 移除条目（P1-33：整体入串行队列） */
   async removeItem(filePath: string): Promise<void> {
-    let items = await this.loadItems();
-    items = items.filter((i) => i.filePath !== filePath);
-    await this.saveItems(items);
+    await enqueueFileTask(getReviewFilePath(), async () => {
+      const items = await this.loadItems();
+      const next = items.filter((i) => i.filePath !== filePath);
+      await this.saveItems(next);
+    });
   }
 
-  /** 撤销移出（ticket 141 通病 1）：原条目（含阶段/排期/历史）原样插回，不走 addItem 重置进度 */
+  /** 撤销移出（ticket 141 通病 1）：原条目（含阶段/排期/历史）原样插回，不走 addItem 重置进度（P1-33：整体入串行队列） */
   async restoreItem(item: ReviewItem): Promise<void> {
-    const items = await this.loadItems();
-    if (items.some((i) => i.filePath === item.filePath)) return;
-    const { file: _file, ...rest } = item; // 运行时 TFile 不落盘（saveItems 同口径）
-    items.push(rest as ReviewItem);
-    await this.saveItems(items);
+    await enqueueFileTask(getReviewFilePath(), async () => {
+      const items = await this.loadItems();
+      if (items.some((i) => i.filePath === item.filePath)) return;
+      const { file: _file, isMissing: _m, isCompleted: _c, isOverdue: _o, currentStage: _cs, totalStages: _ts, ...rest } = item; // 运行时字段不落盘（saveItems 同口径）
+      items.push(rest as ReviewItem);
+      await this.saveItems(items);
+    });
   }
 
   getOverdueCount(items: ReviewItem[]): number {
     return items.filter((i) => i.isOverdue && !i.isCompleted).length;
   }
 
-  /** 文件重命名时更新路径 */
+  /** 文件重命名时更新路径（P1-33：整体入串行队列——挪动兜底与复习评级并发时不再互相覆盖） */
   async updateFilePath(oldPath: string, newPath: string, newName: string): Promise<boolean> {
-    const items = await this.loadItems();
-    const item = items.find((i) => i.filePath === oldPath);
-    if (!item) return false;
-    if (items.some((i) => i.filePath === newPath && i.filePath !== oldPath)) return false;
-    item.filePath = newPath;
-    item.name = newName;
-    await this.saveItems(items);
-    return true;
+    return enqueueFileTask(getReviewFilePath(), async () => {
+      const items = await this.loadItems();
+      const item = items.find((i) => i.filePath === oldPath);
+      if (!item) return false;
+      if (items.some((i) => i.filePath === newPath && i.filePath !== oldPath)) return false;
+      item.filePath = newPath;
+      item.name = newName;
+      await this.saveItems(items);
+      return true;
+    });
   }
 }
 

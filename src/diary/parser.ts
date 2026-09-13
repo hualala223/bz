@@ -14,12 +14,12 @@ export function isEncryptedEntry(entry: DiaryEntry): boolean {
 
 /** 合法条目标题：`# emoji序列 HH:mm`（emoji 与时间之间须有空白、时间恰两位） */
 export const HEADING_RE = /^#\s*((?:\S+)+)\s+(\d{2}:\d{2})/u;
-/** 形似标题但 emoji 与时间间缺空白：`# 🤝02:43`（可修，见 repair.ts R1） */
+/** 形似标题但 emoji 与时间间缺空白：`# 🤝02:43`（不合规，解析不出条目） */
 export const NO_SPACE_HEADING_RE = /^#\s*((?:\S+)+)(\d{2}:\d{2})/u;
-/** 形似标题但时间非两位：`# 📖 9:33`（可修，见 repair.ts R2） */
+/** 形似标题但时间非两位：`# 📖 9:33`（不合规，解析不出条目） */
 export const SHORT_TIME_HEADING_RE = /^#\s*((?:\S+)+)\s+(\d{1,2}):(\d{1,2})/u;
 
-/** 疑似条目标题行：合法标题或两种可修形态（时间是否越界不影响判定） */
+/** 疑似条目标题行：合法标题或两种不合规形态（时间是否越界不影响判定） */
 function isEntryHeadingLike(line: string): boolean {
   return HEADING_RE.test(line) || NO_SPACE_HEADING_RE.test(line) || SHORT_TIME_HEADING_RE.test(line);
 }
@@ -27,8 +27,8 @@ function isEntryHeadingLike(line: string): boolean {
 /**
  * 前导区边界：首个「疑似条目标题行」的行号（0-based）。
  * 全篇无此类行时返回 lines.length——整篇都是前导区（QuickAdd 模板形态文件的典型形态）。
- * 口径与 repair.ts 的「疑似头行」单源（ADR-0110）：边界行本身属条目区，其不合规形态交
- * 「检测日记解析」修复（补空格 / 时间补零）。
+ * 口径（ADR-0110）：边界行本身属条目区——它虽解析不出条目（onUnparsed 口径里计为未解析行），
+ * 但前导区到此为止，其前的骨架与正文不会被写盘抹掉。
  */
 export function findEntryRegionStart(lines: string[]): number {
   for (let i = 0; i < lines.length; i++) {

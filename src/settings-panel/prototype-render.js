@@ -123,6 +123,7 @@ var BZR_settings_panel = (() => {
     if (vm.cls) cls.push(vm.cls);
     if (vm.isCards) cls.push("bz-sp-set-row--cards");
     if (vm.isCustom) cls.push("bz-sp-set-row--custom");
+    if (vm.isList) cls.push("bz-sp-set-row--list");
     if (vm.isCustom) {
       return `<div class="${cls.join(" ")}"><div class="bz-sp-custom-slot bz-sp-custom-slot--full">${(_a = vm.ctrlHtml) != null ? _a : ""}</div></div>`;
     }

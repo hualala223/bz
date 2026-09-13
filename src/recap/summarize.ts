@@ -215,7 +215,7 @@ export async function writeRecapEntry(app: App, content: string, now: number = D
     }
     if (unparsed > 0) {
       throw new Error(
-        `「${dateStr}」有 ${unparsed} 行内容无法解析，本次没有写入。请先在日记本设置中运行「检测日记解析」修复后再试。`
+        `「${dateStr}」有 ${unparsed} 行内容无法解析，本次没有写入。请先手工把不合规的标题行补成 \`# emoji HH:mm\` 格式后再试。`
       );
     }
   }

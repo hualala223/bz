@@ -101,13 +101,14 @@ describe('插卡后 currentDisplayCount 前移（P2 审查修复）', () => {
     expect(state.ui.scrollContainer!.querySelector('#diary-entry-e1')).toBeTruthy();
   });
 
-  it('saveNewEntry：插卡后计数 +1，滚动下一批不重复渲染', async () => {
+  it('saveNewEntry：块模型不插卡（ADR-0114），计数与 DOM 均不动', async () => {
     makeVault({ '我的/日记/2024-01-01.md': '' });
     const past = mkEntry({ id: 'p1', date: '2023-12-31', time: '09:00', timeValue: 900, lineNumber: 0 });
     state.data.originalDiaryEntries = [past];
     state.data.currentFilteredEntries = [past];
     setDiaryDataMap(new Map([['2023-12-31', [past]]]));
     setupRenderedWindow();
+    const before = state.data.currentDisplayCount;
 
     createAddDialog();
     openAddDialog();
@@ -115,11 +116,12 @@ describe('插卡后 currentDisplayCount 前移（P2 审查修复）', () => {
     const typeBtn = document.querySelector<HTMLElement>('#add-diary-type-container .diary-tag-selector-btn')!;
     expect(typeBtn).toBeTruthy();
     typeBtn.click();
+    (document.getElementById('add-diary-datetime') as HTMLInputElement).value = '2024-01-01 10:00';
     await saveNewEntry();
 
-    expect(state.data.currentDisplayCount).toBe(3);
-    // 新条目卡片已插入 DOM（窗口未预置旧卡 DOM，此处只应出现新卡这一张）
-    const cards = state.ui.scrollContainer!.querySelectorAll('.diary-entry-card');
-    expect(cards.length).toBe(1);
+    // 内容写进 `# 随笔` 块，不进面板列表 → 显示计数与卡片 DOM 都不变
+    expect(state.data.currentDisplayCount).toBe(before);
+    expect(state.ui.scrollContainer!.querySelectorAll('.diary-entry-card').length).toBe(0);
+    expect(vault.files.get('我的/日记/2024-01-01.md')).toContain('# 随笔');
   });
 });

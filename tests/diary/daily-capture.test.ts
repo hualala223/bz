@@ -1,11 +1,14 @@
 // @vitest-environment node
 /**
- * 当日待办事项 / 日常行为记录（diary/daily-capture，issue 247）数据层测试：
+ * 日常行为记录（diary/daily-capture，issue 247）数据层测试：
+ * （当日待办事项捕获已随 ADR-0122 退役，其行构建测试一并移除）
  * - 纯函数：冻结格式行构建（QuickAdd data.json format 展开形态）、insertIntoSection
  *   小节末尾插入（命中小节 / 小节为空 / 未命中追加文末 / CRLF 归一 / 空文件起头）；
  * - 薄壳 IO：captureToDiarySection——文件缺失新建（标记+行起头）、模板形态在
- *   `## 日常行为记录` 末尾插入且 frontmatter 等其余行原样保留、条目形态在正文
- *   `### 代办事项` 小节插入且 parser 原样回读、未命中小节追加文末。
+ *   `# 日常行为记录` 末尾插入且 frontmatter 等其余行原样保留、条目形态在正文
+ *   `## 代办事项` 小节插入且 parser 原样回读、未命中小节追加文末；
+ * - 旧层级兼容（ADR-0113）：旧日记里的 `## 日常行为记录` / `### 代办事项` 仍按命中行
+ *   实际层级切分，插行结果与改动前逐字一致。
  */
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { setApp as setCoreApp } from '../../src/core/app';
@@ -16,7 +19,6 @@ import {
   insertIntoSection,
   captureToDiarySection,
   sanitizeCaptureText,
-  buildTodoLine,
   buildActivityLine,
 } from '../../src/diary/daily-capture';
 import { MockVault, mockAppWithVault } from '../mock-vault';
@@ -42,21 +44,13 @@ afterEach(() => {
 });
 
 describe('冻结格式行（QuickAdd format 展开形态，task:true 冻结）', () => {
-  it('待办：`- [ ] 内容-HH:mm`', () => {
-    expect(buildTodoLine('买牛奶', '10:30')).toBe('- [ ] 买牛奶-10:30');
-  });
-
-  it('待办：输入换行折叠空格', () => {
-    expect(buildTodoLine('买\n牛奶', '10:30')).toBe('- [ ] 买 牛奶-10:30');
-  });
-
   it('行为：`- HH:mm-活动`（时间在前、活动在后）', () => {
     expect(buildActivityLine('123', '10:20')).toBe('- 10:20-123');
   });
 });
 
 describe('insertIntoSection（纯函数）', () => {
-  it('模板形态：插到「## 日常行为记录」小节末尾，其余小节原样保留', () => {
+  it('模板形态（旧层级兼容，ADR-0113）：插到「## 日常行为记录」小节末尾，其余小节原样保留', () => {
     const tpl = [
       '## 睡眠相关',
       '- 起床时间：',
@@ -81,7 +75,7 @@ describe('insertIntoSection（纯函数）', () => {
     expect(content.endsWith('## 日程规划\n')).toBe(true);
   });
 
-  it('条目形态(todo)：插进条目正文「### 代办事项」与「### 完成情况跟踪」之间', () => {
+  it('条目形态（旧层级兼容，ADR-0113）：插进条目正文「### 代办事项」与「### 完成情况跟踪」之间', () => {
     const entryFile = [
       '# 📖 10:18',
       '',
@@ -123,10 +117,33 @@ describe('insertIntoSection（纯函数）', () => {
     expect(content).toBe('## 日常行为记录\n- 07:11-打球\n\n## 日程规划\n');
   });
 
-  it('空内容视为空文件：标记+行 起头', () => {
+  it('空内容视为空文件：标记+行 起头（用新层级标记）', () => {
     const { content, placed } = insertIntoSection('', ACTIVITY_HEADING, '- 08:00-晨跑');
     expect(placed).toBe('section');
-    expect(content).toBe('## 日常行为记录\n- 08:00-晨跑\n');
+    expect(content).toBe('# 日常行为记录\n- 08:00-晨跑\n');
+  });
+
+  it('新层级（ADR-0113）：`# 日常行为记录` 命中，按命中行层级切分（遇 `# 日程规划` 收尾）', () => {
+    const tpl = ['# 睡眠相关', '- 起床时间：', '# 日常行为记录', '', '# 日程规划', ''].join('\n');
+    const { content, placed } = insertIntoSection(tpl, ACTIVITY_HEADING, '- 21:04-跑步');
+    expect(placed).toBe('section');
+    expect(content).toContain('# 日常行为记录\n- 21:04-跑步\n\n# 日程规划');
+  });
+
+  it('新层级（ADR-0113）：插进条目正文 `## 代办事项` 与 `## 完成情况跟踪` 之间', () => {
+    const entryFile = [
+      '# 📖 10:18',
+      '',
+      '## 代办事项',
+      '- [ ] ',
+      '- [ ] ',
+      '',
+      '## 完成情况跟踪',
+      '| 计划完成 | 实际完成 |',
+    ].join('\n');
+    const { content, placed } = insertIntoSection(entryFile, TODO_HEADING, '- [ ] 买牛奶-10:30');
+    expect(placed).toBe('section');
+    expect(content).toContain('- [ ] \n- [ ] 买牛奶-10:30\n\n## 完成情况跟踪');
   });
 });
 
@@ -139,12 +156,34 @@ describe('sanitizeCaptureText', () => {
 });
 
 describe('captureToDiarySection（薄壳 IO）', () => {
-  it('文件缺失：以「标记 + 行」新建', async () => {
+  it('文件缺失：以「标记 + 行」新建（新层级标记）', async () => {
     const { v, app } = setup();
     const res = await captureToDiarySection(app, '2026-09-10', ACTIVITY_HEADING, '- 20:00-复盘');
     expect(res.created).toBe(true);
     expect(res.placed).toBe('section');
-    expect(v.files.get('我的/日记/2026-09-10.md')).toBe('## 日常行为记录\n- 20:00-复盘\n');
+    expect(v.files.get('我的/日记/2026-09-10.md')).toBe('# 日常行为记录\n- 20:00-复盘\n');
+  });
+
+  it('新层级模板文件（ADR-0113）：其余行原样保留，插进 `# 日常行为记录` 末尾', async () => {
+    const tpl = [
+      '---',
+      'card_type: 日记',
+      '---',
+      '# 睡眠相关',
+      '- 起床时间：',
+      '# 日常行为记录',
+      '',
+      '# 日程规划',
+    ].join('\n');
+    const { v, app } = setup({ '我的/日记/2026-09-10.md': tpl });
+    const res = await captureToDiarySection(app, '2026-09-10', ACTIVITY_HEADING, '- 21:00-健身');
+    expect(res.created).toBe(false);
+    expect(res.placed).toBe('section');
+    const out = v.files.get('我的/日记/2026-09-10.md')!;
+    expect(out).toContain('card_type: 日记');
+    expect(out).toContain('# 日常行为记录\n- 21:00-健身');
+    expect(out).toContain('- 起床时间：');
+    expect(out).toContain('# 日程规划');
   });
 
   it('模板形态文件：其余行原样保留，插进小节末尾', async () => {

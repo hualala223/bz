@@ -22,11 +22,10 @@ import { applyFilter, cancelEdit, updateSticky, initScroll } from './entries';
 import { createTag, rebuildTags, refreshSubTagsBar } from './filter-shared';
 import { createTagPicker, createAddDialog, createDatePicker, showDatePicker, openAddDialog, closeAddDialog } from './dialogs';
 import { registerOpenDialogCommand } from './quote';
-import { runTaskCheck, openReviewDialog, planTomorrow } from '../daily';
+import { runTaskCheck, openReviewDialog, openPlanPicker } from '../daily';
 // 当日待办事项/日常行为记录（issue 247：QuickAdd 两个 Capture 宏换血，同格式共写当天日记）
-import { openTodoCapture, openActivityCapture } from '../daily-capture';
+import { openActivityCapture } from '../daily-capture';
 import { closePanel } from './panel-close';
-import { openDiaryRepairModal } from './repair-modal';
 
 // ===== 进度条（原 202-237） =====
 
@@ -175,8 +174,8 @@ function createHeader() {
   const addButton = createButton('✏️', '写日记', () => openAddDialog());
   const taskCheckButton = createButton('📋', '当天任务完成情况', () => void runTaskCheck());
   const reviewButton = createButton('🪞', '每日复盘', () => openReviewDialog());
-  const planButton = createButton('🗓️', '日程规划（明日日记）', () => void planTomorrow());
-  const todoCaptureButton = createButton('✅', '当日待办事项', () => openTodoCapture());
+  const planButton = createButton('🗓️', '日程规划', () => void openPlanPicker());
+  // 当日待办事项按钮已退役（ADR-0122：日记「## 代办事项」由 todo 域日记同步接管）
   const activityCaptureButton = createButton('🏃', '日常行为记录', () => openActivityCapture());
 
   const closeButton = createButton('❌', '关闭', () => {
@@ -187,7 +186,6 @@ function createHeader() {
   buttonContainer.appendChild(taskCheckButton);
   buttonContainer.appendChild(reviewButton);
   buttonContainer.appendChild(planButton);
-  buttonContainer.appendChild(todoCaptureButton);
   buttonContainer.appendChild(activityCaptureButton);
   buttonContainer.appendChild(searchButton);
   buttonContainer.appendChild(settingsButton);
@@ -242,12 +240,6 @@ export function diarySettingsSchema(): SettingsSchema {
         icon: 'shield', name: '隐私',
         rows: [
           { type: 'toggle', name: '日记隐私门', desc: '开启后日记内容绝不发送给在线AI', binding: { key: 'diaryPrivacyGuard' } },
-        ],
-      },
-      {
-        icon: 'wrench', name: '维护',
-        rows: [
-          { type: 'button', name: '日记解析检测', desc: '扫描所有日记文件，定位未能解析的行，可一键修复标题格式问题', buttonText: '检测日记解析', cta: true, onClick: () => openDiaryRepairModal() },
         ],
       },
     ],

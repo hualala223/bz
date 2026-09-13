@@ -34,7 +34,7 @@ import { unloadReadingReport } from './reading-report';
 // 影院（cinema 域，上游 ADR-0087 起接管影视；旧 movie 域已退役。ADR-0090：报告窗并入影院内嵌分析页）
 import { openCinema, addCinemaItem, openCinemaAnalysis, pickRandomCinema, unloadCinema } from './cinema';
 // 复习（ticket 168 单一入口：仅「复习（按数量）」命令；ticket 169 加回「加入复习计划」；ensureReview/unloadReview 为常驻监控与卸载所需）
-import { reviewCountStart, reviewAddCurrent, reviewAddCurrentWithLinks, openReviewReport, ensureReview, unloadReview } from './review';
+import { reviewCountStart, reviewAddCurrent, reviewAddCurrentWithLinks, openReviewReport, openTodayReviewed, ensureReview, unloadReview } from './review';
 // 第二大脑（ticket 103 起原闪念正名接管，ADR-0051——flash 域已删除）
 import {
   openSecondBrainPanel,
@@ -65,9 +65,10 @@ import { loadAll } from './diary/store';
 import { state as diaryState } from './diary/state';
 import { applyUiSettings, init as diaryInit, showDiaryPanel, unregisterEscLayer } from './diary/ui/panel';
 // 日常时间记录（自 CONFIG/SCRIPTS 三个 QuickAdd 宏整合：任务打勾/每日复盘/日程规划）
-import { runTaskCheck, openReviewDialog, planTomorrow } from './diary/daily';
-// 当日待办事项/日常行为记录（issue 247：QuickAdd「日常时间记录」两个 Capture 宏换血进插件，同格式共写）
-import { openTodoCapture, openActivityCapture } from './diary/daily-capture';
+import { runTaskCheck, openReviewDialog, openPlanPicker } from './diary/daily';
+// 日常行为记录（issue 247 QuickAdd Capture 换血；当日待办事项捕获已随 ADR-0122 退役，
+// 日记「## 代办事项」由 todo 域日记同步模块接管）
+import { openActivityCapture } from './diary/daily-capture';
 // 小橘陪伴猫（smartcat 域：桌面宠物 + AI 陪伴；AI 走 bz core/ai，数据单 json smartcat.json）
 import { ensureSmartCat, unloadSmartCat, openSmartCat, openSmartCatChat, hideSmartCat, openSmartcatDashboard, normalizeSmartcatOffMode, applySmartcatPowerState, smartcatMainSettingsSchema } from './smartcat';
 // 上游线（yeshimei/bz）并入新域（第一档加法）：内容首页/今日回顾/回忆墙/数据体检/设置面板
@@ -96,9 +97,8 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   // 日常时间记录（diary 域 daily：任务打勾状态沿用 CONFIG/SCRIPTS/每日任务状态.json，复盘/规划走日记条目模型）
   { id: 'bz-diary-task-check', name: '当天任务完成情况', icon: 'list-checks', callback: () => void runTaskCheck() },
   { id: 'bz-diary-review', name: '每日复盘', icon: 'notebook-pen', callback: () => void openReviewDialog() },
-  { id: 'bz-diary-plan', name: '日程规划（明日日记）', icon: 'calendar-plus', callback: () => void planTomorrow() },
-  // 当日待办事项/日常行为记录（issue 247：两个 QuickAdd Capture 宏，同格式共写当天日记小节）
-  { id: 'bz-diary-todo-capture', name: '当日待办事项', icon: 'clipboard-check', callback: () => openTodoCapture() },
+  { id: 'bz-diary-plan', name: '日程规划', icon: 'calendar-plus', callback: () => void openPlanPicker() },
+  // 日常行为记录（issue 247 QuickAdd Capture；当日待办事项捕获退役，ADR-0122）
   { id: 'bz-diary-activity-capture', name: '日常行为记录', icon: 'footprints', callback: () => openActivityCapture() },
   // 数据体检（checkup 域，D4：全插件数据只读巡检）
   { id: 'bz-data-checkup-open', name: '数据体检', icon: 'stethoscope', callback: () => void openDataCheckup(getApp()) },
@@ -141,6 +141,8 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   },
   // 复习计划分析报告（上游线 P2 移植：统计弹窗——streak/负载热力图/单条时间线，只读 review.json）
   { id: 'bz-review-report', name: '复习计划分析报告', icon: 'calendar-check', callback: () => openReviewReport(getApp()) },
+  // 今日已复习（ticket 276）：弹窗罗列当天复习过的文档，点击新标签页打开原文（强制阅读模式）
+  { id: 'bz-review-today', name: '今日已复习', icon: 'history', callback: () => openTodayReviewed(getApp()) },
   // 第二大脑（ticket 103：原闪念正名接管，主面板为统一入口）
   { id: 'bz-secondbrain-panel', name: '第二大脑面板', icon: 'brain', callback: () => openSecondBrainPanel(getApp()) },
   // f7：与「第二大脑面板」区分——本命令打开参考侧边栏（右侧窄窗/移动端抽屉参考 tab）
@@ -150,7 +152,7 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-secondbrain-rebuild-links', name: '重跑当前笔记关联', icon: 'link', callback: () => rebuildSecondBrainLinks(getApp()) },
   // 自动双链（ticket 115）：存量未连接笔记手动批量补链（启动自动补链的显式兜底）
   { id: 'bz-secondbrain-link-all', name: '为未关联笔记批量补链', icon: 'link-2', callback: () => runSecondBrainLinkAll(getApp()) },
-  // 重建索引（票 276，上游 2026-09-11 首页入口菜单）：全库重建向量索引（函数早已存在，此前无命令入口；与票 173 增量指纹判定互不影响——重建是手动清空重嵌，指纹管自动增量）
+  // 重建索引（票 278，原编 276，上游 2026-09-11 首页入口菜单）：全库重建向量索引（函数早已存在，此前无命令入口；与票 173 增量指纹判定互不影响——重建是手动清空重嵌，指纹管自动增量）
   { id: 'bz-secondbrain-rebuild-index', name: '重建索引', icon: 'refresh-cw', callback: () => rebuildSecondBrainIndex(getApp()) },
   // 番茄钟（ticket 26-32 新域）
   { id: 'bz-pomodoro-open', name: '番茄钟', icon: 'timer', callback: () => openPomodoro(getApp()) },

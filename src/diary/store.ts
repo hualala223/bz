@@ -224,7 +224,7 @@ export async function loadAll() {
     // UX-9 警告接线：有文件存在未解析行时汇总提示（这些行未进列表，重写会丢）
     if (unparsedFiles > 0) {
       warnUnparsed(
-        `${unparsedFiles} 个日记文件存在无法解析的行，这些行没有加载。可在日记本设置中运行「检测日记解析」定位修复。`,
+        `${unparsedFiles} 个日记文件存在无法解析的行，这些行没有加载（涉及这些文件的改动会被拦下）。`,
         'diary-loadall-unparsed'
       );
     }
@@ -285,7 +285,7 @@ async function guardDiskRead(
   warnUnparsed(
     `「${dateStr}」有 ${unparsed} 行内容无法解析，${
       action === 'delete' ? '已保留原文件未删除' : '本次修改没有写入文件'
-    }（直接处理会丢失这些行）。请先在日记本设置中运行「检测日记解析」修复后再试。`,
+    }（直接处理会丢失这些行）。请先手工把不合规的标题行补成 \`# emoji HH:mm\` 格式后再试。`,
     `diary-write-refused-${dateStr}`
   );
   return { refused: true, preamble: '' };
@@ -524,7 +524,7 @@ export async function refreshFile(filePath: string) {
   const newEntries = parseFile(content, dateStr, (n) => (unparsed = n));
   if (unparsed > 0) {
     warnUnparsed(
-      `「${dateStr}」有 ${unparsed} 行内容无法解析，这些行没有加载。可在日记本设置中运行「检测日记解析」定位修复。`,
+      `「${dateStr}」有 ${unparsed} 行内容无法解析，这些行没有加载。`,
       `diary-refresh-unparsed-${dateStr}`
     );
   }

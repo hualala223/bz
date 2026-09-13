@@ -14,6 +14,7 @@ import {
   updateFileSections,
   jsonFileStore,
   __resetCorruptNotifyForTests,
+  __resetEmptyReadNotifyForTests,
 } from '../../src/core/storage';
 import { MockVault } from '../mock-vault';
 import { setApp } from '../../src/core/app';
@@ -146,10 +147,11 @@ describe('updateFileSections / mergeWriteSections（D1 原语 2：段级合并�
 
 // ---------- 冲突留档（D1 原语 3） ----------
 
-/** 通知侧隔离：清 toast DOM 与两级去重状态（notice 30s 窗口 + storage 留档通知 30s 窗口） */
+/** 通知侧隔离：清 toast DOM 与三级去重状态（notice 30s 窗口 + 留档通知 30s 窗口 + 空读告警 30s 窗口） */
 function resetNoticeSide(): void {
   __resetNoticeForTests();
   __resetCorruptNotifyForTests();
+  __resetEmptyReadNotifyForTests();
   document.getElementById('bz-notice-container')?.remove();
 }
 
@@ -338,6 +340,89 @@ describe('留档通知：人话文案 + 同文件去重（D1 原语 3）', () =>
     } finally {
       vi.useRealTimers();
       resetNoticeSide();
+    }
+  });
+});
+
+describe('读重试与空读防护（P1-33：映射盘/同步盘空读不得清库）', () => {
+  let vault: MockVault;
+
+  beforeEach(() => {
+    vault = new MockVault();
+    setApp({ vault } as any);
+    setSettingsProvider(() => ({ storagePath: 'CONFIG/STORAGE' } as any));
+    resetNoticeSide();
+  });
+
+  it('空读抖动自愈：前两次读空、第三次恢复 → 返回数据且盘上文件未被改动', async () => {
+    const good = JSON.stringify({ n: 1 });
+    vault.files.set('CONFIG/STORAGE/flaky.json', good);
+    const origRead = vault.read.bind(vault);
+    let calls = 0;
+    vault.read = async (f: any) => {
+      calls++;
+      return calls <= 2 ? '' : origRead(f);
+    };
+    expect(await jsonFileStore<unknown>('CONFIG/STORAGE/flaky.json').read()).toEqual({ n: 1 });
+    expect(vault.files.get('CONFIG/STORAGE/flaky.json')).toBe(good); // 盘上原样
+    expect([...vault.files.keys()].filter((p) => p.startsWith('CONFIG/.CORRUPT/'))).toHaveLength(0);
+  });
+
+  it('空读耗尽 → 抛错且不动盘上文件：绝不留档重建把好数据清成默认值', async () => {
+    const good = JSON.stringify({ keep: true });
+    vault.files.set('CONFIG/STORAGE/void.json', good);
+    vault.read = async () => '';
+    await expect(jsonFileStore<unknown>('CONFIG/STORAGE/void.json').read()).rejects.toThrow('空内容');
+    expect(vault.files.get('CONFIG/STORAGE/void.json')).toBe(good); // 盘上原样保留
+    expect(vault.dirs.has('CONFIG/.CORRUPT')).toBe(false); // 无留档重建发生
+  });
+
+  it('解析失败抖动：第一次半截、重试读到正常 → 返回数据、不留档不重建', async () => {
+    const good = JSON.stringify({ ok: 1 });
+    vault.files.set('CONFIG/STORAGE/half.json', good);
+    const origRead = vault.read.bind(vault);
+    let calls = 0;
+    vault.read = async (f: any) => {
+      calls++;
+      return calls === 1 ? '{"half' : origRead(f);
+    };
+    expect(await jsonFileStore<unknown>('CONFIG/STORAGE/half.json').read()).toEqual({ ok: 1 });
+    expect(vault.dirs.has('CONFIG/.CORRUPT')).toBe(false);
+    expect(vault.files.get('CONFIG/STORAGE/half.json')).toBe(good);
+  });
+
+  it('写前留底：modify 前 <名>-prev.bak 保存上一版盘上内容，连续写轮换更新', async () => {
+    vault.files.set('CONFIG/STORAGE/bak.json', JSON.stringify({ v: 1 }));
+    const store = jsonFileStore<{ v: number }>('CONFIG/STORAGE/bak.json');
+    await store.write({ v: 2 });
+    const bak = 'CONFIG/.CORRUPT/bak.json-prev.bak';
+    expect(vault.files.get(bak)).toBe(JSON.stringify({ v: 1 })); // 写前内容
+    await store.write({ v: 3 });
+    expect(vault.files.get(bak)).toBe(JSON.stringify({ v: 2 }, null, 2)); // 轮换：本次写前的盘上内容
+    expect(JSON.parse(vault.files.get('CONFIG/STORAGE/bak.json')!)).toEqual({ v: 3 });
+  });
+
+  it('首建（文件原不存在）不产生写前留底', async () => {
+    await jsonFileStore<unknown[]>('CONFIG/STORAGE/fresh-p33.json', { defaultValue: [] }).write([1]);
+    expect([...vault.files.keys()].filter((p) => p.startsWith('CONFIG/.CORRUPT/'))).toHaveLength(0);
+    expect(vault.files.get('CONFIG/STORAGE/fresh-p33.json')).toBe('[\n  1\n]');
+  });
+
+  it('留底失败（.CORRUPT create 抛错）→ 只告警不阻塞本次写入', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const origCreate = vault.create.bind(vault);
+    vault.create = async (path: string, content: string) => {
+      if (path.includes('-prev.bak')) throw new Error('disk full');
+      return origCreate(path, content);
+    };
+    try {
+      vault.files.set('CONFIG/STORAGE/rb.json', JSON.stringify({ v: 1 }));
+      await jsonFileStore<{ v: number }>('CONFIG/STORAGE/rb.json').write({ v: 2 });
+      expect(JSON.parse(vault.files.get('CONFIG/STORAGE/rb.json')!)).toEqual({ v: 2 }); // 写入照常完成
+      expect(warnSpy).toHaveBeenCalled(); // 留底失败留了告警痕迹
+    } finally {
+      vault.create = origCreate;
+      warnSpy.mockRestore();
     }
   });
 });

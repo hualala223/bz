@@ -1,7 +1,9 @@
 /**
  * 日常时间记录（diary/daily）流程层测试：
  * - runTaskCheck：逐项问答 → 段级合并写回 CONFIG/SCRIPTS/每日任务状态.json（取消跳过、无待问不写、其他日期段保留）；
- * - planTomorrow：为明天建含日程模板的日记条目（重复检测、未加载时先 loadAll 防整文件重写丢数据）；
+ * - openPlanPicker / planDiary：流程框选「当日 / 明日」→ 按日记模板为目标日期建文件并补日程三段
+ *   （两目标共用同一模板、取消不写、模板缺失走内置兜底、双标记判重、已存在则原样补写，ADR-0112；
+ *   标题层级上提一级且读侧兼容旧层级，ADR-0113）；
  * - openReviewDialog：预选「复盘」标签 + 预填复盘模板（写日记弹窗 preset）。
  */
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
@@ -150,55 +152,205 @@ describe('runTaskCheck', () => {
   });
 });
 
-describe('planTomorrow', () => {
-  it('为明天创建含三段日程模板的日记条目', async () => {
-    setupVault();
-    setDiaryDataMap(new Map());
-    const { planTomorrow } = await import('../../src/diary/daily');
-    await planTomorrow();
-    const file = vault.files.get(`我的/日记/${tomorrow()}.md`)!;
-    expect(file).toBeTruthy();
-    expect(file).toContain('### 代办事项');
-    expect(file).toContain('### 完成情况跟踪');
-    expect(file).toContain('### 备注');
+// ===== 日程规划（ADR-0112：按日记模板建文件）=====
+
+/** 模板路径（与 QuickAdd 宏「日程规划.js」同源） */
+const TEMPLATE_PATH = 'CONFIG/TEMPLATE/模板-日记.md';
+
+/** vault 模板文件当前内容（Q3-B 清理后：无 title、date_creation 由插件填），末尾无换行 */
+const TEMPLATE_FILE = [
+  '---',
+  'card_type: 日记',
+  '---',
+  '',
+  '# 睡眠相关',
+  '- 起床时间：',
+  '- 睡觉时间：',
+  '- 睡眠情况：',
+  '- 做梦情况：',
+  '# 随笔',
+  '',
+  '# 新闻联播内容记录',
+  '',
+  '# 日常行为记录',
+  '',
+  '# 日程规划',
+].join('\n');
+
+/** 日程三段（与 buildPlanContent 同形；ADR-0113 起为二级标题） */
+const PLAN_BODY = [
+  '## 代办事项',
+  '- [ ] ',
+  '- [ ] ',
+  '- [ ] ',
+  '',
+  '## 完成情况跟踪',
+  '| 计划完成 | 实际完成 |',
+  '| -------- | -------- |',
+  '|  |  |',
+  '|  |  |',
+  '|  |  |',
+  '',
+  '## 备注',
+  '1. ',
+  '2. ',
+  '3. ',
+].join('\n');
+
+/**
+ * 基准：用户点名要的日记样式（骨架一级、日程三段二级，ADR-0113 各级上提一级）。
+ * frontmatter 两行脏字段保留旧真文件原样，用于验证 ADR-0112 决策 3 的规整口径：
+ * 删 `title`（模板占位残留）、`date_creation` 填目标日期。
+ */
+const REFERENCE_DIARY =
+  [
+    '---',
+    'card_type: 日记',
+    'title: "电视剧.md"',
+    'date_creation: 2025-11-06 23:11:89',
+    '---',
+    '',
+    '# 睡眠相关',
+    '- 起床时间：',
+    '- 睡觉时间：',
+    '- 睡眠情况：',
+    '- 做梦情况：',
+    '# 随笔',
+    '',
+    '# 新闻联播内容记录',
+    '',
+    '# 日常行为记录',
+    '',
+    '# 日程规划',
+  ].join('\n') +
+  '\n\n' +
+  PLAN_BODY +
+  '\n\n';
+
+/** 基准文件在目标日期下的期望产物（只有 frontmatter 两处不同） */
+function expectedFor(date: string): string {
+  return REFERENCE_DIARY.replace(
+    'title: "电视剧.md"\ndate_creation: 2025-11-06 23:11:89\n',
+    `date_creation: ${date} 00:00:00\n`
+  );
+}
+
+function pick(label: 'today' | 'tomorrow'): void {
+  answerByLabel({ '为哪一天的日记创建日程规划？': label });
+}
+
+describe('planDiary / openPlanPicker', () => {
+  it('选「明日」→ 明天文件与 2026-09-11.md 样式逐字节一致（frontmatter 按 Q3-B 规整）', async () => {
+    setupVault({ [TEMPLATE_PATH]: TEMPLATE_FILE });
+    const { openPlanPicker } = await import('../../src/diary/daily');
+    pick('tomorrow');
+    await openPlanPicker();
+    expect(vault.files.get(`我的/日记/${tomorrow()}.md`)).toBe(expectedFor(tomorrow()));
     expect(hasNotice(`已在 ${tomorrow()} 日记中创建日程规划`)).toBe(true);
   });
 
-  it('已存在日程规划 → 提示不重复创建，文件不变', async () => {
-    setupVault();
-    setDiaryDataMap(
-      new Map([
-        [
-          tomorrow(),
-          [
-            {
-              date: tomorrow(),
-              time: '08:00',
-              timeValue: 800,
-              tags: ['日记'],
-              emoji: '📖',
-              content: '### 代办事项\n- [ ] 旧',
-              filename: tomorrow(),
-              lineNumber: 1,
-            } as any,
-          ],
-        ],
-      ])
-    );
-    const { planTomorrow } = await import('../../src/diary/daily');
-    await planTomorrow();
+  it('选「当日」→ 同一模板落盘在今天，明天文件不建', async () => {
+    setupVault({ [TEMPLATE_PATH]: TEMPLATE_FILE });
+    const { openPlanPicker } = await import('../../src/diary/daily');
+    pick('today');
+    await openPlanPicker();
+    expect(vault.files.get(`我的/日记/${today()}.md`)).toBe(expectedFor(today()));
     expect(vault.files.has(`我的/日记/${tomorrow()}.md`)).toBe(false);
-    expect(hasNotice(`明天（${tomorrow()}）已有日程规划，不再重复创建`)).toBe(true);
+    expect(hasNotice(`已在 ${today()} 日记中创建日程规划`)).toBe(true);
   });
 
-  it('内存映射未加载 → 先 loadAll，既有日记内容不被整文件重写冲掉', async () => {
-    setupVault({ [`我的/日记/${tomorrow()}.md`]: '# 📖 08:00\n早读\n' });
-    setDiaryDataMap(null);
-    const { planTomorrow } = await import('../../src/diary/daily');
-    await planTomorrow();
+  it('取消（遮罩 / ESC）→ 不创建任何文件', async () => {
+    setupVault({ [TEMPLATE_PATH]: TEMPLATE_FILE });
+    mocks.dialog.mockResolvedValue(undefined);
+    const { openPlanPicker } = await import('../../src/diary/daily');
+    await openPlanPicker();
+    expect(vault.files.has(`我的/日记/${today()}.md`)).toBe(false);
+    expect(vault.files.has(`我的/日记/${tomorrow()}.md`)).toBe(false);
+  });
+
+  it('模板文件缺失 → 内置兜底骨架仍能建出同形文件', async () => {
+    setupVault();
+    const { openPlanPicker } = await import('../../src/diary/daily');
+    pick('tomorrow');
+    await openPlanPicker();
     const file = vault.files.get(`我的/日记/${tomorrow()}.md`)!;
-    expect(file).toContain('早读');
-    expect(file).toContain('### 代办事项');
+    expect(file).toContain('# 睡眠相关');
+    expect(file).toContain('# 新闻联播内容记录');
+    expect(file).toContain('# 日程规划');
+    expect(file).toContain('date_creation: ' + tomorrow() + ' 00:00:00');
+    expect(file.endsWith(PLAN_BODY + '\n\n')).toBe(true);
+  });
+
+  it('目标文件已存在且原文已有日程规划 → 提示不重复创建，一个字节不写', async () => {
+    const existing = expectedFor(today());
+    setupVault({ [TEMPLATE_PATH]: TEMPLATE_FILE, [`我的/日记/${today()}.md`]: existing });
+    const { openPlanPicker } = await import('../../src/diary/daily');
+    pick('today');
+    await openPlanPicker();
+    expect(vault.files.get(`我的/日记/${today()}.md`)).toBe(existing);
+    expect(vault.modifiedPaths).toHaveLength(0);
+    expect(hasNotice(`当天（${today()}）已有日程规划，不再重复创建`)).toBe(true);
+  });
+
+  it('兼容（ADR-0113）：旧层级 `### 代办事项` + `### 完成情况跟踪` 仍判为已有规划，不重复创建', async () => {
+    const existing =
+      '---\ncard_type: 日记\n---\n\n## 日程规划\n\n### 代办事项\n- [ ] 旧\n\n### 完成情况跟踪\n| 计划完成 | 实际完成 |\n';
+    setupVault({ [TEMPLATE_PATH]: TEMPLATE_FILE, [`我的/日记/${today()}.md`]: existing });
+    const { openPlanPicker } = await import('../../src/diary/daily');
+    pick('today');
+    await openPlanPicker();
+    expect(vault.files.get(`我的/日记/${today()}.md`)).toBe(existing);
+    expect(vault.modifiedPaths).toHaveLength(0);
+    expect(hasNotice(`当天（${today()}）已有日程规划，不再重复创建`)).toBe(true);
+  });
+
+  it('目标文件已存在但没有日程规划 → 末尾补一级标题 + 三段，原有内容一字不动', async () => {
+    const src = '# 📖 08:00\n\n早读\n';
+    setupVault({ [TEMPLATE_PATH]: TEMPLATE_FILE, [`我的/日记/${tomorrow()}.md`]: src });
+    const { openPlanPicker } = await import('../../src/diary/daily');
+    pick('tomorrow');
+    await openPlanPicker();
+    expect(vault.files.get(`我的/日记/${tomorrow()}.md`)).toBe(
+      '# 📖 08:00\n\n早读\n\n# 日程规划\n\n' + PLAN_BODY + '\n\n'
+    );
+    expect(hasNotice(`已在 ${tomorrow()} 日记中补充日程规划`)).toBe(true);
+  });
+
+  it('兼容（ADR-0113）：旧文件已有 `## 日程规划` 标题但内容空 → 只补三段，标题不重复', async () => {
+    setupVault({
+      [TEMPLATE_PATH]: TEMPLATE_FILE,
+      [`我的/日记/${today()}.md`]: '## 随笔\n\n## 日程规划',
+    });
+    const { openPlanPicker } = await import('../../src/diary/daily');
+    pick('today');
+    await openPlanPicker();
+    const file = vault.files.get(`我的/日记/${today()}.md`)!;
+    expect(file.match(/^## 日程规划$/gm)).toHaveLength(1);
+    expect(file).toBe('## 随笔\n\n## 日程规划\n\n' + PLAN_BODY + '\n\n');
+  });
+
+  it('新层级文件已有 `# 日程规划` 标题但内容空 → 只补三段，标题不重复', async () => {
+    setupVault({
+      [TEMPLATE_PATH]: TEMPLATE_FILE,
+      [`我的/日记/${today()}.md`]: '# 随笔\n\n# 日程规划',
+    });
+    const { openPlanPicker } = await import('../../src/diary/daily');
+    pick('today');
+    await openPlanPicker();
+    const file = vault.files.get(`我的/日记/${today()}.md`)!;
+    expect(file.match(/^# 日程规划$/gm)).toHaveLength(1);
+    expect(file).toBe('# 随笔\n\n# 日程规划\n\n' + PLAN_BODY + '\n\n');
+  });
+
+  it('回归（ADR-0111）：只有「代办事项」小节（待办捕获写入的同名标记）不算已规划，仍补写', async () => {
+    const src = '# 日常行为记录\n\n## 代办事项\n- [ ] 买牛奶-09:00\n';
+    setupVault({ [TEMPLATE_PATH]: TEMPLATE_FILE, [`我的/日记/${today()}.md`]: src });
+    const { openPlanPicker } = await import('../../src/diary/daily');
+    pick('today');
+    await openPlanPicker();
+    expect(vault.files.get(`我的/日记/${today()}.md`)).toBe(
+      src.replace(/\s+$/, '') + '\n\n# 日程规划\n\n' + PLAN_BODY + '\n\n'
+    );
   });
 });
 

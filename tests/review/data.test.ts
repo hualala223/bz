@@ -232,3 +232,70 @@ describe('ticket 098：pendingRedo / 挂起记录语义', () => {
     expect(dm.getOverdueCount(items)).toBe(1); // 仅 A.md 计逾期
   });
 });
+
+describe('P1-33：运行时字段不落盘 + 写入走串行队列', () => {
+  beforeEach(() => {
+    resetObsidianMocks();
+    setApp(null as any);
+    document.body.innerHTML = '';
+  });
+
+  it('saveItems 剥离运行时字段：loadItems 现算字段不再写回 review.json（膨胀根治）', async () => {
+    const vault = new MockVault();
+    vault.files.set('A.md', '正文');
+    const now = new Date();
+    vault.files.set(REVIEW_FILE_PATH, JSON.stringify([
+      { id: '1', filePath: 'A.md', reviewStart: now.toISOString(), stage: 0, reviewHistory: [], totalReviews: 0, averageConfidence: 0, nextReviewDate: new Date(now.getTime() - 1000).toISOString(), lastReviewed: null, lastDifficulty: null, completed: false },
+      { id: '2', filePath: 'GONE.md', reviewStart: now.toISOString(), stage: 0, reviewHistory: [], totalReviews: 0, averageConfidence: 0, nextReviewDate: now.toISOString(), lastReviewed: null, lastDifficulty: null, completed: false },
+    ]));
+    const app = makeApp(vault);
+    setApp(app);
+    const dm = new ReviewDataManager(app);
+    const items = await dm.loadItems();
+    expect(items[0].isOverdue).toBe(true); // 运行时字段确已现算
+    expect(items[1].isMissing).toBe(true);
+    await dm.saveItems(items);
+    const raw = JSON.parse(vault.files.get(REVIEW_FILE_PATH)!);
+    for (const it of raw) {
+      expect(it.file).toBeUndefined();
+      expect(it.isMissing).toBeUndefined();
+      expect(it.isCompleted).toBeUndefined();
+      expect(it.isOverdue).toBeUndefined();
+      expect(it.currentStage).toBeUndefined();
+      expect(it.totalStages).toBeUndefined();
+    }
+    expect(raw[0].stage).toBe(0); // 持久字段原样保留
+    expect(raw[0].nextReviewDate).toBe(items[0].nextReviewDate);
+  });
+
+  it('并发 updateItem 走串行队列：两次并发评级都落盘（裸读改写会互相覆盖丢一次）', async () => {
+    const vault = new MockVault();
+    vault.files.set('A.md', '正文');
+    const app = makeApp(vault);
+    setApp(app);
+    const dm = new ReviewDataManager(app);
+    await dm.addItem('A.md', 'A');
+    const p1 = dm.updateItem('A.md', (it) => { it.totalReviews += 1; });
+    const p2 = dm.updateItem('A.md', (it) => { it.totalReviews += 1; });
+    await Promise.all([p1, p2]);
+    const raw = JSON.parse(vault.files.get(REVIEW_FILE_PATH)!);
+    expect(raw[0].totalReviews).toBe(2);
+  });
+
+  it('updateFilePath 与 updateItem 并发：挪动接回先入队先执行，评级按旧路径定位失败而不回写旧路径', async () => {
+    const vault = new MockVault();
+    vault.files.set('A.md', '正文');
+    const app = makeApp(vault);
+    setApp(app);
+    const dm = new ReviewDataManager(app);
+    await dm.addItem('A.md', 'A');
+    const pf = dm.updateFilePath('A.md', 'B.md', 'B');
+    const pu = dm.updateItem('A.md', (it) => { it.totalReviews = 5; });
+    await expect(pu).rejects.toThrow('条目不存在'); // 排在其后执行时条目已在 B.md
+    expect(await pf).toBe(true);
+    const raw = JSON.parse(vault.files.get(REVIEW_FILE_PATH)!);
+    expect(raw).toHaveLength(1);
+    expect(raw[0].filePath).toBe('B.md'); // 接回结果不被旧基线盖回
+    expect(raw[0].totalReviews).toBe(0);  // 评级未误写到已挪走的条目上
+  });
+});

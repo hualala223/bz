@@ -12,6 +12,8 @@ import { setApp } from '../../src/diary/app';
 import { applyDirectories, resetTagsConfig } from '../../src/diary/config';
 import { setDiaryDataMap, state } from '../../src/diary/state';
 import { createAddDialog, openAddDialog, __resetAddDialogDraftForTests } from '../../src/diary/ui/dialogs';
+import { REVIEW_TEMPLATE } from '../../src/diary/daily';
+import { REVIEW_HEADING } from '../../src/diary/daily-write';
 import { MockVault, mockAppWithVault } from '../mock-vault';
 import { clearNotices, hasNotice } from '../mock-obsidian-entry';
 
@@ -128,12 +130,14 @@ describe('写日记弹窗两步化', () => {
     expect(contentInput().value).toBe('');
   });
 
-  it('preset 带分类（每日复盘）跳过第一步，正文预填', () => {
+  it('preset 带分类（每日复盘）跳过第一步，正文预填内层模板', () => {
     setup();
-    openAddDialog({ tags: ['复盘'], content: '## 当日复盘' });
+    openAddDialog({ tags: ['复盘'], content: REVIEW_TEMPLATE, section: REVIEW_HEADING });
     expect(visible(step1())).toBe(false);
     expect(visible(step2())).toBe(true);
-    expect(contentInput().value).toBe('## 当日复盘');
+    expect(contentInput().value).toBe(REVIEW_TEMPLATE);
+    // 复盘内层模板不再自带小节名（ADR-0114：小节名由落点提供，避免文件里出现两个「当日复盘」）
+    expect(REVIEW_TEMPLATE).not.toContain('当日复盘');
   });
 
   it('两步保存：条目按第一步的日期与类型落盘，两步都收起', async () => {
@@ -147,7 +151,7 @@ describe('写日记弹窗两步化', () => {
     const today = moment().format('YYYY-MM-DD');
     const file = vault.files.get(`我的/日记/${today}.md`)!;
     expect(file).toContain('今天的正文');
-    expect(hasNotice('已保存日记')).toBe(true);
+    expect(hasNotice(/已保存日记/)).toBe(true);
     expect(visible(mask())).toBe(false);
     expect(visible(step1())).toBe(false);
     expect(visible(step2())).toBe(false);

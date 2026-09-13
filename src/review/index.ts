@@ -37,7 +37,7 @@ function pseudoMdFile(path: string): any {
   return { path, basename: base.replace(/\.md$/, ''), extension: 'md' };
 }
 
-/** 幂等初始化（对齐源码 entry：UI 构建 + 事件监听 + 2s 后首查 + 60s 周期） */
+/** 幂等初始化（对齐源码 entry：UI 构建 + 事件监听 + 索引就绪后首查 + 60s 周期） */
 export function ensureReview(app: App): void {
   if (initialized) return;
   initialized = true;
@@ -46,10 +46,50 @@ export function ensureReview(app: App): void {
   uiManager = new UIManager(app, dataManager);
   reviewWatcher = new ReviewWatcher(app, dataManager);
 
-  setTimeout(() => {
+  // 首查等索引就绪（ADR-0116 追加，金丝雀门）：网络盘上 resolved/固定延时都可能早于 vault 文件扫描
+  // 完成——彼时复习条目文件「全员路径失效」，首查拿到偏小逾期快照、挪动兜底也接不回
+  // （2026-09-11「挂起 23/接回 0」事故）。就绪判据（任一满足即执行）：
+  //   ① 复习条目文件全部能被 vault 索引命中（最直接）；② 索引 md 数连续两次采样一致（扫描已结束，
+  // 剩余失效是真实缺失）；③ 60s 硬兜底。等待期间被卸载（插件重载）则放弃启动。
+  let checksStarted = false;
+  const startPeriodicChecks = (): void => {
+    if (checksStarted) return;
+    checksStarted = true;
+    void startChecksWhenIndexReady(app);
+  };
+  const startChecksWhenIndexReady = async (appRef: App): Promise<void> => {
+    const t0 = Date.now();
+    let prevCount = -1;
+    while (Date.now() - t0 < 60000) {
+      if (!initialized) return; // 等待期间被卸载：不再启动周期检查（防卸载后补挂 interval）
+      let ready = true;
+      let miss = 0;
+      try {
+        const items = await dataManager!.loadItems();
+        miss = items.filter((i) => !appRef.vault.getAbstractFileByPath(i.filePath)).length;
+        ready = miss === 0;
+        if (!ready) console.log(`[bz][review] 金丝雀: 条目 ${items.length}，索引未命中 ${miss}，继续等扫描`);
+      } catch {
+        ready = false; // 计划读取失败不再放行（空读抛错=盘抖动）：视为未就绪继续等，60s 硬兜底保底
+        console.log('[bz][review] 金丝雀: 计划读取失败，继续等重试');
+      }
+      if (ready) {
+        console.log(`[bz][review] 金丝雀通过（${((Date.now() - t0) / 1000).toFixed(1)}s，未命中 0）`);
+        break;
+      }
+      const count = appRef.vault.getMarkdownFiles().length;
+      if (count > 0 && count === prevCount) break; // 扫描结束：剩余失效是真实缺失
+      prevCount = count;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    console.log(`[bz][review] 首查执行（索引就绪等待 ${((Date.now() - t0) / 1000).toFixed(1)}s）`);
     reviewApp.checkOverdueAndNotify();
     checkInterval = setInterval(() => reviewApp.checkOverdueAndNotify(), 60000);
-  }, 2000);
+    // ADR-0115 挪动兜底：启动收敛——上次会话中被挪动（rename 事件丢失）的挂起条目按同名唯一自动接回
+    void reviewWatcher?.relinkMissingByBasename();
+  };
+  listen(app.metadataCache as any, 'resolved', startPeriodicChecks);
+  setTimeout(startPeriodicChecks, 15000);
 
   // 文件树懒渲染：展开/折叠/节点出现即触发染色（根治 60s 轮询错过渲染时机就不染色）
   void reviewApp.startFileTreeWatch(app);
@@ -137,4 +177,11 @@ export async function openReviewReport(app: App): Promise<void> {
   ensureReview(app);
   const { showStatsModal } = await import('./stats-ui');
   await showStatsModal(app, dataManager!);
+}
+
+/** 今日已复习（ticket 276，bz-review-today）：独立命令，弹窗罗列当天复习过的文档，点击新标签页打开原文（强制阅读模式） */
+export async function openTodayReviewed(app: App): Promise<void> {
+  ensureReview(app);
+  const { showTodayReviewed } = await import('./today');
+  await showTodayReviewed(app, dataManager!);
 }

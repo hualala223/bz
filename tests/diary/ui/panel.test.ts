@@ -173,7 +173,9 @@ describe('添加日记弹窗（ticket 07）', () => {
     document.getElementById('add-diary-popup')!.dispatchEvent(new Event('input'));
     await saveNewEntry();
     expect(vault.files.has('我的/日记/2024-01-03.md')).toBe(true);
-    expect(vault.files.get('我的/日记/2024-01-03.md')).toContain('# 📖 10:30');
+    // 块模型（ADR-0114）：内容落 `# 随笔`，块首行为加粗行（非条目标题）
+    expect(vault.files.get('我的/日记/2024-01-03.md')).toContain('# 随笔');
+    expect(vault.files.get('我的/日记/2024-01-03.md')).toContain('**📖 10:30**');
   });
 
   it('无类型时提示', async () => {
@@ -263,12 +265,12 @@ describe('设置读取（ticket 09 前置）', () => {
     (settingsBtn as HTMLElement).click();
     const popup = document.getElementById('bz-settings-modal-popup')!;
     expect(popup.textContent).toContain('日记本设置');
-    // 分组卡片结构：5 组可见（目录/显示/默认视图/隐私/维护；移动端组挂 bz-setting-hidden 整组隐藏——ticket 131），原生图标 + 徽标回填项数
+    // 分组卡片结构：4 组可见（目录/显示/默认视图/隐私；移动端组挂 bz-setting-hidden 整组隐藏——ticket 131），原生图标 + 徽标回填项数
     const isHiddenGroup = (el: Element) =>
       Boolean((el.closest('.bz-settings-group') as HTMLElement | null)?.classList.contains('bz-setting-hidden'));
     const heads = [...popup.querySelectorAll('.bz-settings-group-head')].filter((el) => !isHiddenGroup(el));
-    expect(heads.map((el) => (el as HTMLElement).textContent!.trim())).toEqual(['目录4 项', '显示5 项', '默认视图3 项', '隐私1 项', '维护0 项']);
-    expect(heads.map((el) => el.querySelector('.bz-settings-group-icon')!.getAttribute('data-icon'))).toEqual(['folder-open', 'eye', 'monitor', 'shield', 'wrench']);
+    expect(heads.map((el) => (el as HTMLElement).textContent!.trim())).toEqual(['目录4 项', '显示5 项', '默认视图3 项', '隐私1 项']);
+    expect(heads.map((el) => el.querySelector('.bz-settings-group-icon')!.getAttribute('data-icon'))).toEqual(['folder-open', 'eye', 'monitor', 'shield']);
     const names = [...popup.querySelectorAll('.bz-settings-group-body .setting-item')]
       .filter((el) => !el.classList.contains('bz-setting-hidden'))
       .map((el) => (el as HTMLElement).dataset.name);
@@ -277,8 +279,9 @@ describe('设置读取（ticket 09 前置）', () => {
       '显示标签计数', '默认日期取自文件', '标签按钮显示表情', '卡片内容渲染方式', '标签排序',
       '面板默认日期筛选', '默认选中标签', '保存后进入编辑',
       '日记隐私门',
-      '日记解析检测',
     ]);
+    // 「维护」组（日记解析检测）已随工具退役删除（ADR-0114）
+    expect(popup.textContent).not.toContain('日记解析检测');
   });
 
   it('默认视图：diaryDefaultDateFilter=this-month + diaryDefaultSelectedTag → init 应用', async () => {

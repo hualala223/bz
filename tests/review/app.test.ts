@@ -277,11 +277,13 @@ describe('ticket 100：到期提醒 / 每日上限 / 间隔缩放', () => {
     (reviewApp as any).dataManager = null;
     (reviewApp as any)._notifiedOverdue = new Set();
     (reviewApp as any)._overdueNotice = null;
+    (reviewApp as any)._lastOverdueCount = -1;
   });
   afterEach(() => {
     vi.restoreAllMocks();
     (reviewApp as any)._notifiedOverdue = new Set();
     (reviewApp as any)._overdueNotice = null;
+    (reviewApp as any)._lastOverdueCount = -1;
   });
 
   function seedOverdueWith(vault: MockVault, paths: string[]) {

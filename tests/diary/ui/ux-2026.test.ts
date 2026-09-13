@@ -65,18 +65,20 @@ describe('UX-7 保存成功确认', () => {
     const dt = document.getElementById('add-diary-datetime') as HTMLInputElement;
     dt.value = '2024-01-31 10:30';
     await saveNewEntry();
-    expect(hasNotice('已保存日记')).toBe(true);
+    // 块模型（ADR-0114）：成功文案带落点说明，前缀仍是「已保存日记」
+    expect(hasNotice(/已保存日记/)).toBe(true);
     expect(vault.files.has('我的/日记/2024-01-31.md')).toBe(true);
   });
 
   it('保存失败只弹错误提示，不弹成功提示', async () => {
-    const spy = vi.spyOn(storeModule, 'addEntry').mockRejectedValue(new Error('boom'));
+    // 写盘失败即失败（块模型不再经 addEntry，改从 vault.create 注入错误）
+    const spy = vi.spyOn(vault, 'create').mockRejectedValue(new Error('boom'));
     try {
       openAddDialog();
       (document.querySelector('#add-diary-type-container [data-tag="书"]') as HTMLElement).click();
       await saveNewEntry();
       expect(hasNotice(/保存日记失败：boom/)).toBe(true);
-      expect(hasNotice('已保存日记')).toBe(false);
+      expect(hasNotice(/已保存日记/)).toBe(false);
     } finally {
       spy.mockRestore();
     }
@@ -143,8 +145,9 @@ describe('UX-8 加密改分类提示', () => {
   });
 });
 
-// ===== 9 未解析行检测（ticket 121 契约变更：loadAll 不再弹启动 toast，
-//      检测入口迁移至日记⚙️设置弹窗「检测日记解析」面板——行为见 repair-modal.test.ts） =====
+// ===== 9 未解析行检测（ticket 121 契约变更：loadAll 不再弹启动 toast；
+//      启动/刷新只提示「有无法解析的行」，写前守卫负责拦下改动——原「检测日记解析」
+//      修复工具已随 ADR-0114 退役） =====
 
 describe('UX-9 未解析行（ticket 121）', () => {
   it('存在未解析行 → loadAll 不弹启动 warning，解析结果不受影响', async () => {

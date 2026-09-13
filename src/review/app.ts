@@ -51,6 +51,8 @@ export const reviewApp = {
   _stainRetries: 0,
   /** 逾期常驻通知句柄：同键合并时 notify 返回空操作，留存真句柄供逾期清零时主动收起 */
   _overdueNotice: null as NoticeHandle | null,
+  /** ADR-0116 追加：上次通知展示的逾期篇数（-1=未展示过）——数字自纠的对比基准 */
+  _lastOverdueCount: -1,
   /** ticket 48：已染色/挂徽章的文件路径（移出计划后据此回退；仅提交计划路径 + 曾染色路径，不再全库扫描） */
   _styledPaths: new Set<string>(),
 
@@ -785,42 +787,54 @@ for (const path of paths) {
       this.ensure(getApp());
       const dm = this.dataManager!;
       const items = await dm.loadItems();
-      // 染色刷新保留（原 60s 轮询职责：逾期文件实时变红；是否染色由 reviewTreeBadge 决定）
-      await this.applyReviewStyles(getApp(), undefined, items);
-      if ((getSettings() as any).enableAutoNotify === false) return; // 通知开关关 → 不弹通知
-      const overdueMap = new Map<string, ReviewItem>(
-        items.filter((i) => i.isOverdue && !i.completed && !i.isMissing).map((i) => [i.filePath, i])
-      );
-      const newly = [...overdueMap.entries()].filter(([p]) => !this._notifiedOverdue.has(p));
-      // 清掉已不再逾期的（评级/完成/挂起后）
-      for (const p of this._notifiedOverdue) {
-        if (!overdueMap.has(p)) this._notifiedOverdue.delete(p);
-      }
-      if (newly.length) {
-        for (const [p] of newly) this._notifiedOverdue.add(p);
-        // 通知只报当前逾期篇数，不列具体题目（用户拍板 2026-08-29）；duration 0 = 常驻（通知系统语义）
-        // ticket 153/168：「去复习」不再只打开单篇（旧 ticket 58/修 #1 语义），
-        // ticket 168 起走「全 vault 逾期按数量会话」（startOverdueCountSession，见该节），
-        // 通知名单仍只报 newly（diff 记忆语义保留，见上方过滤）。
-        const handle = notify(`有 ${overdueMap.size} 篇笔记逾期`, {
-          type: 'info',
-          duration: 0, // 常驻不自动消失，靠点击「去复习」/本体收起
-          dedupeKey: 'review-overdue-notice',
-          action: {
-            label: '去复习', // action 文案不带 emoji（通知规范）
-            onClick: () => {
-              // ticket 168：走统一按数量复习会话（全 vault 逾期、每日上限截断），不再裸开最早逾期笔记
-              void reviewApp.startOverdueCountSession();
+      // 诊断锚点（ADR-0116）：每轮报三个数——条目/挂起/逾期，与金丝雀、挪动兜底日志对时序
+      console.log(`[bz][review] 逾期检查: 条目 ${items.length}，挂起 ${items.filter((i) => i.isMissing).length}，逾期 ${items.filter((i) => i.isOverdue && !i.completed && !i.isMissing).length}`);
+      if ((getSettings() as any).enableAutoNotify !== false) {
+        const overdueMap = new Map<string, ReviewItem>(
+          items.filter((i) => i.isOverdue && !i.completed && !i.isMissing).map((i) => [i.filePath, i])
+        );
+        const newly = [...overdueMap.entries()].filter(([p]) => !this._notifiedOverdue.has(p));
+        // 清掉已不再逾期的（评级/完成/挂起后）
+        for (const p of this._notifiedOverdue) {
+          if (!overdueMap.has(p)) this._notifiedOverdue.delete(p);
+        }
+        // 数字自纠（ADR-0116 追加）：当前逾期数与上次展示不同也重发——首查在索引未就绪时可能拿到
+        // 偏小快照，仅靠 newly diff 触发会让常驻通知把旧数字钉死在屏上（2026-09-11「1 篇」事故）
+        const countChanged = overdueMap.size !== this._lastOverdueCount;
+        if (newly.length || (countChanged && overdueMap.size > 0)) {
+          this._lastOverdueCount = overdueMap.size;
+          for (const [p] of newly) this._notifiedOverdue.add(p);
+          // 通知只报当前逾期篇数，不列具体题目（用户拍板 2026-08-29）；duration 0 = 常驻（通知系统语义）
+          // ticket 153/168：「去复习」不再只打开单篇（旧 ticket 58/修 #1 语义），
+          // ticket 168 起走「全 vault 逾期按数量会话」（startOverdueCountSession，见该节），
+          // 通知名单仍只报 newly（diff 记忆语义保留，见上方过滤）。
+          const handle = notify(`有 ${overdueMap.size} 篇笔记逾期`, {
+            type: 'info',
+            duration: 0, // 常驻不自动消失，靠点击「去复习」/本体收起
+            dedupeKey: 'review-overdue-notice',
+            action: {
+              label: '去复习', // action 文案不带 emoji（通知规范）
+              onClick: () => {
+                // ticket 168：走统一按数量复习会话（全 vault 逾期、每日上限截断），不再裸开最早逾期笔记
+                void reviewApp.startOverdueCountSession();
+              },
             },
-          },
-        });
-        // 同键合并返回空操作句柄：仅当旧句柄已失联（被消费）时才换存新句柄，保证清零收起有效
-        const cur = this._overdueNotice;
-        if (!cur || !cur.el.isConnected) this._overdueNotice = handle;
-      } else if (!overdueMap.size) {
-        // 逾期清零：常驻通知失去时效，主动收起（句柄已被点击消费时 hide 幂等无害）
-        this._overdueNotice?.hide();
-        this._overdueNotice = null;
+          });
+          // 同键合并返回空操作句柄：仅当旧句柄已失联（被消费）时才换存新句柄，保证清零收起有效
+          const cur = this._overdueNotice;
+          if (!cur || !cur.el.isConnected) this._overdueNotice = handle;
+        } else if (!overdueMap.size) {
+          // 逾期清零：常驻通知失去时效，主动收起（句柄已被点击消费时 hide 幂等无害）
+          this._overdueNotice?.hide();
+          this._overdueNotice = null;
+        }
+      }
+      // 染色刷新保留（原 60s 轮询职责：逾期文件实时变红；是否染色由 reviewTreeBadge 决定）。
+      // ADR-0116 追加：置于通知之后 + 独立容错——染色环节任何异常不得阻断逾期通知。
+      try {
+        await this.applyReviewStyles(getApp(), undefined, items);
+      } catch (e) {
+        console.error('复习计划染色刷新出错:', e);
       }
     } catch (e) {
       console.error('复习计划检查出错:', e);
