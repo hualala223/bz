@@ -95,13 +95,16 @@ export function getSafeManager(): import('./data').SafeManager {
 }
 
 /**
- * 确保保险库已解锁（供日记域复用）：未解锁则弹主密码（首设两次确认+警告；与保险库同一把密码）。
+ * 确保保险库已解锁（供日记 / 回忆墙复用）：未解锁则弹主密码（首设两次确认 + 警告；与保险库同一把密码）。
+ *
+ * 走 **'legacy' 旧弹窗**：日记 / 回忆墙属 ADR-0121 冻结段位，解锁 UI 不得因上游吸收而变；
+ * 保险库面板自身的解锁走共享解锁屏（ADR-0124，见 UIManager.showPasswordDialog）。
  * @returns 解锁成功返回 true
  */
 export async function ensureSafeUnlocked(): Promise<boolean> {
   const controller = getController();
   if (controller.dataManager.unlocked) return true;
-  const ok = await controller.uiManager.showPasswordDialog();
+  const ok = await controller.uiManager.showPasswordDialog('legacy');
   return ok;
 }
 

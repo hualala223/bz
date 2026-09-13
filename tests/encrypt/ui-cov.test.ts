@@ -76,9 +76,21 @@ function makeUI(dm: SafeManager, config = BASE_CONFIG) {
 }
 
 function findDialog(): HTMLElement | null {
-  return [...document.querySelectorAll('div')].find(
-    (d) => d.classList.contains('bz-encrypt-dialog-mask') && d.style.display === 'flex'
+  // 双路径：旧主密码弹窗（legacy）优先；否则共享解锁屏（ADR-0124，全屏遮罩实例）
+  return (
+    [...document.querySelectorAll('div')].find((d) => d.classList.contains('bz-encrypt-dialog-mask') && d.style.display === 'flex') ||
+    [...document.querySelectorAll('div')].find((d) => d.classList.contains('bz-lockscreen--mask') && d.style.display === 'flex')
   ) as HTMLElement | null;
+}
+
+/** 主按钮：旧弹窗「确认」；共享解锁屏 .bz-lockscreen-action（解锁 / 设置并解锁） */
+function findConfirmBtn(dialog: HTMLElement): HTMLElement {
+  return [...dialog.querySelectorAll('button')].find((b) => b.textContent === '确认' || b.classList.contains('bz-lockscreen-action'))!;
+}
+
+/** 首设风险勾选：旧弹窗 .bz-encrypt-dialog-ack；共享解锁屏 .bz-lockscreen-ack */
+function findAckInput(dialog: HTMLElement): HTMLInputElement | null {
+  return (dialog.querySelector('.bz-encrypt-dialog-ack input') || dialog.querySelector('.bz-lockscreen-ack input')) as HTMLInputElement | null;
 }
 
 function cleanupDom() {
@@ -330,12 +342,12 @@ describe('解锁弹窗覆盖补测', () => {
     const ui = makePwUi(dm);
     const p = ui.showPasswordDialog();
     await waitFor(() => !!findDialog());
-    ([...findDialog()!.querySelectorAll('button')].find((b) => b.textContent === '确认') as HTMLElement).click();
+    (findConfirmBtn(findDialog()!) as HTMLElement).click();
     await new Promise((r) => setTimeout(r, 10));
     expect(hasNotice('请输入密码')).toBe(true);
     expect(dm.unlock).not.toHaveBeenCalled();
-    // 取消按钮收场
-    ([...findDialog()!.querySelectorAll('button')].find((b) => b.textContent === '取消') as HTMLElement).click();
+    // 新解锁屏无「取消」按钮：点遮罩收场（ADR-0124 决策 5）
+    (findDialog() as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await expect(p).resolves.toBe(false);
   });
 
@@ -346,7 +358,7 @@ describe('解锁弹窗覆盖补测', () => {
     await waitFor(() => !!findDialog());
     const dialog = findDialog()!;
     const input = dialog.querySelectorAll('input[type="password"]')[0] as HTMLInputElement;
-    const confirmBtn = [...dialog.querySelectorAll('button')].find((b) => b.textContent === '确认')!;
+    const confirmBtn = findConfirmBtn(dialog);
     input.value = 'wrong';
     confirmBtn.click();
     // 同时等两条通知都出现（失败后生产会清空输入框，重试前需重新填入）
@@ -370,7 +382,7 @@ describe('解锁弹窗覆盖补测', () => {
     const dialog = findDialog()!;
     const input = dialog.querySelectorAll('input[type="password"]')[0] as HTMLInputElement;
     input.value = 'newpw';
-    ([...dialog.querySelectorAll('button')].find((b) => b.textContent === '确认') as HTMLElement).click();
+    (findConfirmBtn(dialog) as HTMLElement).click();
     await waitFor(() => !!document.getElementById('__shared_confirm_mask__'));
     expect(document.getElementById('__shared_confirm_mask__')!.textContent).toContain('清单疑似损坏');
     // 先取消
@@ -379,7 +391,7 @@ describe('解锁弹窗覆盖补测', () => {
     expect(findDialog()).toBeTruthy(); // 弹窗仍在，可继续操作
 
     // 再确认 → 重设成功
-    ([...dialog.querySelectorAll('button')].find((b) => b.textContent === '确认') as HTMLElement).click();
+    (findConfirmBtn(dialog) as HTMLElement).click();
     await waitFor(() => !!document.getElementById('__shared_confirm_ok__'));
     (document.getElementById('__shared_confirm_ok__') as HTMLElement).click();
     await p;
@@ -396,7 +408,7 @@ describe('解锁弹窗覆盖补测', () => {
     await waitFor(() => !!findDialog());
     const dialog = findDialog()!;
     (dialog.querySelectorAll('input[type="password"]')[0] as HTMLInputElement).value = 'newpw';
-    ([...dialog.querySelectorAll('button')].find((b) => b.textContent === '确认') as HTMLElement).click();
+    (findConfirmBtn(dialog) as HTMLElement).click();
     await waitFor(() => !!document.getElementById('__shared_confirm_ok__'));
     (document.getElementById('__shared_confirm_ok__') as HTMLElement).click();
     await new Promise((r) => setTimeout(r, 30));
@@ -418,7 +430,7 @@ describe('解锁弹窗覆盖补测', () => {
     const inputs = dialog.querySelectorAll('input[type="password"]');
     (inputs[0] as HTMLInputElement).value = 'master';
     (inputs[1] as HTMLInputElement).value = 'master';
-    const ack = dialog.querySelector('.bz-encrypt-dialog-ack input') as HTMLInputElement;
+    const ack = findAckInput(dialog) as HTMLInputElement;
     ack.checked = true;
     // 用 Enter 键触发确认（键盘路径）
     inputs[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));

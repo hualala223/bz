@@ -30,6 +30,9 @@ import { openSettingsModal } from '../core/settings-modal';
 import { applyMobileWindowFullscreen } from '../core/mobile';
 import { mobileFullscreenGroup, makeReloadWarnOnce, numStrBinding } from '../core/settings-common';
 import type { SettingsSchema } from '../core/settings-schema';
+import { uiLockScreen } from '../core/ui/lock-screen';
+import type { LockScreenKind, LockScreenStat } from '../core/ui/lock-screen';
+import { readLockStats, writeLockStats } from '../core/lock-stats';
 import { SafeManager, base64ToBytes, bytesToBase64, type SafeNote, type SafeAttachment, type HealthReport, type HealthItem, type LockAttachmentInput } from './data';
 import { compressImage, videoFrame } from './preview';
 import { PasswordVaultDataManager, type PasswordVaultEntry, type PlatformGroup } from './vault-data';
@@ -57,6 +60,25 @@ export interface EncryptUIConfig {
 /** 默认生成字符集（与旧密码本同款） */
 export const DEFAULT_PW_CHARSET =
   '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ~!@$%^&*()_+';
+
+/**
+ * 解锁屏口径元数据（ADR-0124 共享骨架；本地只接「保险库」一档）。
+ * 裁剪说明：上游该屏为 encrypt / password-vault / diary 三域共用，本地——
+ *   ①密码资产已并入保险库面板（ADR-0085），不再有独立密码本锁屏；
+ *   ②日记 / 回忆墙复用 `ensureSafeUnlocked()` 无参路径，走旧弹窗（红线段位冻结，ADR-0121）。
+ * 统计口径与 captureLockStats 的 vault 档一致：笔记条目 / 随库附件 / 附件密文。
+ */
+const VAULT_LOCK_META = {
+  icon: 'shield' as const,
+  title: '保险库已上锁',
+  sub: '解锁前，笔记正文与附件均以密文保存',
+  action: '解锁',
+  stats: [
+    { num: '—', label: '笔记条目' },
+    { num: '—', label: '随库附件' },
+    { num: '—', label: '附件密文' },
+  ] as LockScreenStat[],
+};
 
 /** 加密安全随机密码（拒绝采样，与旧密码本同款） */
 export function secureRandomPassword(length: number, charset: string): string {
@@ -1028,12 +1050,159 @@ export class UIManager {
     }
   }
 
+
   // ---------- 解锁弹窗 ----------
   /**
-   * 主密码弹窗（首设两次确认 + 损坏清单重设确认）。视觉样式已收敛至 styles.css
-   * （铁律 9：.bz-encrypt-dialog-* 类）；内联仅保留功能性 zIndex/显隐（display）。
+   * 解锁输入类失败：行内报错 + 通知双通道（ADR-0124；原型为行内红字，插件既有语义保留 notice）。
+   * 输入内容变化后自动清行内报错，避免旧提示压着新输入。
    */
-  async showPasswordDialog(): Promise<boolean> {
+  private rejectInput(msg: string, setErr: (m: string) => void, tone?: 'error' | 'warning'): void {
+    setErr(msg);
+    notice(msg, tone || undefined);
+  }
+
+  /**
+   * 解锁弹窗调度：'vault'（默认）= 共享解锁屏（core/ui/lock-screen，ADR-0124）；
+   * 'legacy' = 旧主密码弹窗，**仅供日记 / 回忆墙复用路径**（ADR-0121 冻结域 UI 不得变）。
+   */
+  async showPasswordDialog(kind: 'vault' | 'legacy' = 'vault'): Promise<boolean> {
+    if (kind === 'legacy') return this.showLegacyPasswordDialog();
+    return this.showVaultLockScreen();
+  }
+
+  /**
+   * 保险库解锁屏：三域共用骨架的本地实例（印章徽 + 标题 + 副题 + 三张统计卡 + 主密码 + 主按钮 + 安全提示行）。
+   * 统计项：会话快照优先，冷启动回落 lock-stats.json 上次快照（ADR-0124 决策 4 修订），都没有才「—」。
+   * 无「取消」按钮（ADR-0124 决策 5）：点遮罩 / ESC 即取消，功能入口不丢。
+   */
+  private async showVaultLockScreen(): Promise<boolean> {
+    const exists = await this.dataManager.exists();
+    const meta = VAULT_LOCK_META;
+    const stats =
+      this.lockStatsCache.vault || (await readLockStats('vault')) || meta.stats.map((s) => ({ ...s, num: '—' }));
+    return new Promise((resolve) => {
+      const ls = uiLockScreen({
+        kind: 'vault',
+        icon: meta.icon,
+        title: exists ? meta.title : '设置主密码',
+        sub: exists ? meta.sub : '请设置一个主密码（用于加密所有数据）',
+        stats,
+        action: exists ? meta.action : '设置并解锁',
+        firstSetup: !exists,
+        warningHtml: `${vIc('triangle-alert', 14)} <strong>重要提醒</strong><br>• 主密码 <b>不会存储</b>，也无法找回，请务必牢记！<br>• 若遗忘密码，加密笔记及其附件将永久丢失。<br>• 建议使用密码本（如 Bitwarden）保存此密码。`,
+        ackText: '我已了解：主密码无法找回，遗忘将导致密文永久无法恢复',
+        secText: exists ? '主密码不会存储 · 遗忘将无法恢复密文' : '',
+        secTone: 'warn',
+        hint: exists ? '' : '建议使用密码本保存此密码',
+      });
+      topifyZ(ls.el); // ADR-0067：一次性弹窗，创建即显示即发号
+      document.body.appendChild(ls.el);
+      // 挂 body 弹层自声明 ESC 层（兜底链）：解锁屏开着时 ESC 只关解锁屏，不穿透主面板
+      const esc = escManager.register('bz-vault-unlock', {
+        isVisible: () => ls.el.isConnected,
+        close: () => done(false),
+      });
+      const done = (ok: boolean) => { esc.unregister(); ls.close(); resolve(ok); };
+      const setErr = (m: string) => {
+        ls.setError(m);
+        setTimeout(() => { if (ls.input.value) ls.setError(''); }, 2600);
+      };
+      ls.actionBtn.onclick = async () => {
+        const pw = ls.input.value;
+        if (!pw) { this.rejectInput('请输入密码', setErr); return; }
+        if (!exists) {
+          // 首设：第二遍确认（功能性显隐）+ 风险勾选
+          if (ls.input2.style.display === 'none') {
+            ls.showSecondInput(true);
+            ls.input2.value = '';
+            ls.setMessage('请再次输入主密码确认');
+            ls.focus();
+            return;
+          }
+          if (pw !== ls.input2.value) { this.rejectInput('两次密码不一致', setErr); return; }
+          // 首设至少 4 位（与本地密码本同规则；此前加密侧无下限）
+          if (pw.length < 4) { this.rejectInput('主密码至少 4 位', setErr); return; }
+          if (!ls.ackBox || !ls.ackBox.checked) { this.rejectInput('请先勾选风险确认', setErr); return; }
+          try {
+            const ok = await this.dataManager.unlock(pw);
+            if (ok) {
+              done(true);
+              notice('密码已设置，数据已加密', 'success');
+            } else {
+              // 数据层已回滚解锁态；写盘失败必须明示并收场（不再假装成功、也不把用户困在弹窗里）
+              notice('设置失败：无法写入清单，请检查磁盘空间后重试', 'error');
+              done(false);
+            }
+          } catch (e: any) {
+            notifyActionError(e, '设置主密码');
+            done(false);
+          }
+          return;
+        }
+        // 冷却期内（P2 节流）：拒绝本次尝试并提示剩余等待
+        const remainMs = this.unlockCooldownUntil - Date.now();
+        if (remainMs > 0) { this.rejectInput(`尝试过于频繁，请再等 ${Math.ceil(remainMs / 1000)} 秒`, setErr, 'warning'); return; }
+        const success = await this.dataManager.unlock(pw);
+        if (success) {
+          this.resetUnlockThrottle();
+          done(true);
+          // 自愈回滚提示（ticket 6）：上次未完成的加密已被自动回滚，原文全程未被删过（原文未动）
+          const healMsg = this.dataManager.selfHealRolledBack > 0 ? '；上次未完成的加密已自动回滚，原文未动' : '';
+          notice('解锁成功' + healMsg, 'success');
+        } else {
+          // 区分「清单损坏」与「密码错误」：损坏必须显式确认后才能重设，绝不静默
+          const issue = this.dataManager.manifestIssue;
+          if (issue === 'empty' || issue === 'corrupt') {
+            void openFlowDialog({
+              title: '清单疑似损坏',
+              message:
+                '保险库清单文件为空或无法解析（可能因写入中断/同步冲突损坏）。' +
+                '重设主密码将生成全新空清单，旧加密数据将永久无法恢复。确定重设吗？',
+              actions: [
+                { label: '暂不重设', value: 'cancel' },
+                { label: '仍要重设', value: 'ok', cta: true },
+              ],
+            }).then((v) => {
+              if (v === 'ok') {
+                void this.dataManager.unlock(pw, true).then((ok) => {
+                  if (ok) {
+                    this.resetUnlockThrottle();
+                    done(true);
+                    notice('已重设主密码（旧数据不可恢复）', 'warning');
+                  } else {
+                    this.rejectInput('重设失败：无法写入清单', setErr, 'error');
+                  }
+                });
+              } else {
+                notice('未重设：请先检查或备份数据文件', 'warning');
+              }
+            });
+          } else {
+            this.rejectInput('密码错误，请重试', setErr, 'error');
+            // 连续失败递增冷却（1s/2s/4s…封顶 8s；成功复位）
+            const delaySec = this.registerUnlockFailure();
+            notice(`${delaySec} 秒后可再次尝试`, 'warning');
+            ls.input.value = '';
+            ls.focus();
+          }
+        }
+      };
+      ls.input.addEventListener('keydown', (e) => { if (e.key === 'Enter') ls.actionBtn.click(); });
+      ls.input2.addEventListener('keydown', (e) => { if (e.key === 'Enter') ls.actionBtn.click(); });
+      // 点遮罩（非内容区）关闭弹窗 = 取消
+      ls.el.addEventListener('click', (e) => { if (e.target === ls.el) done(false); });
+      // 焦点：元素挂载后再聚焦才生效；移动端 WebView 需二次聚焦才弹键盘
+      ls.focus();
+      setTimeout(() => ls.focus(), 150);
+    });
+  }
+
+  /**
+   * 旧主密码弹窗（首设两次确认 + 损坏清单重设确认）。**仅供 `ensureSafeUnlocked()` 无参路径**
+   * （日记 / 回忆墙复用）—— 红线段位冻结：结构、类名、文案、按钮一律不得改动（ADR-0121）。
+   * 视觉样式已收敛至 styles.css（铁律 9：.bz-encrypt-dialog-* 类）；内联仅保留功能性 zIndex/显隐（display）。
+   */
+  private async showLegacyPasswordDialog(): Promise<boolean> {
     const exists = await this.dataManager.exists();
     return new Promise((resolve) => {
       const mask = document.createElement('div');
@@ -1233,6 +1402,8 @@ export class UIManager {
   /** 全量重绘：导航计数 + 概览/资产内容 + 移动端 + 健康卡 + 顶栏标题 */
   renderAll() {
     if (!this.rootVisible()) return;
+    // 解锁态下刷新统计快照（供下次上锁后的解锁屏显示；锁定态清单不可读）
+    if (this.dataManager.unlocked) this.captureLockStats();
     this.renderNav();
     this.renderDesktop();
     this.renderMobile();
@@ -1250,6 +1421,33 @@ export class UIManager {
       note: notes.filter((n) => n.kind !== 'diary-entry' && n.kind !== 'password-vault').length,
       diary: notes.filter((n) => n.kind === 'diary-entry').length,
     };
+  }
+
+  /** 解锁屏统计快照（会话内缓存；冷启动回落 lock-stats.json 上次快照，见 core/lock-stats） */
+  private lockStatsCache: Partial<Record<LockScreenKind, LockScreenStat[]>> = {};
+
+  /**
+   * 快照解锁屏统计项（本地只算「保险库」一档）。
+   * 清单本身是密文，锁定态无法读计数 —— 故只在解锁期间快照，供下次上锁后的解锁屏显示；
+   * 快照同时写明文档 lock-stats.json（core/lock-stats），冷启动回落上次快照而非「—」。
+   * 口径与 overviewStats 一致：密码本整表（kind='password-vault'）不计入，附件只算库内笔记。
+   */
+  private captureLockStats(): void {
+    try {
+      const all = this.dataManager.manifest?.notes || [];
+      const list = all.filter((n) => n.kind !== 'diary-entry' && n.kind !== 'password-vault');
+      const atts = list.reduce((s, n) => s + n.attachments.length, 0);
+      const bytes = list.reduce((s, n) => s + n.attachments.reduce((b, a) => b + (a.blobSize || 0), 0), 0);
+      this.lockStatsCache.vault = [
+        { num: String(list.length), label: '笔记条目' },
+        { num: String(atts), label: '随库附件' },
+        { num: bytes > 0 ? (bytes / 1024).toFixed(1) + ' KB' : '—', label: '附件密文' },
+      ];
+      // 快照即落明文档（fire-and-forget：统计丢一拍不伤数据，下次解锁会重写）
+      void writeLockStats('vault', this.lockStatsCache.vault).catch(() => {});
+    } catch (e) {
+      /* 清单不可读时保持上一次快照 */
+    }
   }
 
   private renderNav() {
