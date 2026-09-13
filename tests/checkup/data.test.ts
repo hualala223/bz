@@ -293,26 +293,27 @@ describe('检查三：孤儿条目', () => {
 });
 
 describe('检查四：同源一致性', () => {
-  it('全绿样本：字段形态与约定一致，计数正确', async () => {
+  it('全绿样本：双链条数/完成数一致', async () => {
     const items = [fullMemoItem(), fullMemoItem({ id: 'item-2', completed: '2026-01-02 00:00:00' })];
     const { app } = makeApp({ [`${DIR}/memo.json`]: JSON.stringify(items) });
     const sec = await checkSameSourceConsistency(app);
     expect(sec!.issues).toEqual([]);
-    expect(sec!.summary).toContain('字段形态与约定一致');
+    expect(sec!.summary).toContain('双链口径一致');
     expect(sec!.summary).toContain('完成 1');
   });
 
-  it('consistencyIssuesOf：非数组形态直接报红', () => {
+  it('双链不一致样本：计数分叉报红', () => {
     const { issues } = consistencyIssuesOf({
-      total: -1, nonObject: 0, missingId: 0, duplicateId: 0, missingTitle: 0,
-      memoView: { total: 0, done: 0 },
+      total: 3, nonObject: 0, missingId: 0, duplicateId: 0, missingTitle: 0,
+      storeView: { total: 3, done: 2 },
+      rawView: { total: 2, done: 1 },
     });
     const err = issues.find((i) => i.severity === 'error');
     expect(err).toBeTruthy();
-    expect(err!.title).toContain('不是条目数组形态');
+    expect(err!.title).toContain('双链计数不一致');
   });
 
-  it('非对象条目报红（备忘录读取会中断）', async () => {
+  it('非对象条目报红（两条读取链都会中断）', async () => {
     const { app } = makeApp({ [`${DIR}/memo.json`]: JSON.stringify(['oops']) });
     const sec = await checkSameSourceConsistency(app);
     expect(sec!.issues.some((i) => i.severity === 'error' && i.title.includes('非对象条目'))).toBe(true);

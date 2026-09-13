@@ -226,6 +226,15 @@
 .bz-bs-d-ledger td:first-child { color: var(--bsw-muted); white-space: nowrap; width: 96px; letter-spacing: 1px; }
 .bz-bs-d-ledger td:last-child { font-weight: 600; }
 .bz-bs-d-stdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+/* 状态行整体不折行：「继续」永远跟在「在读」同排（窄屏值列窄也不拆） */
+.bz-bs-d-nowrap { white-space: nowrap; }
+/* 「继续」：在读条目行内跳书钮（强调色 + 下划线，融台账行内） */
+.bz-bs-d-go {
+  background: none; border: none; padding: 0 0 0 8px;
+  color: var(--bsw-accent); cursor: pointer; font: inherit;
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px;
+}
+.bz-bs-d-go:hover { filter: brightness(1.1); }
 .bz-bs-d-meter { margin: 4px 0 8px; }
 .bz-bs-d-meter .cap { font-size: 12px; color: var(--bsw-muted); display: flex; align-items: baseline; justify-content: space-between; }
 .bz-bs-d-meter .cap .bz-bs-d-prognum { color: var(--bsw-accent); font-weight: 700; }
@@ -265,6 +274,67 @@
 .bz-bs-confirm-ic { width: 30px; height: 30px; color: var(--bz-text-3); display: inline-flex; }
 .bz-bs-confirm p { margin-top: var(--bz-space-md); font-size: var(--bz-font-body); color: var(--bz-text-1); line-height: 1.6; }
 .bz-bs-confirm-sub { margin-top: var(--bz-space-xs); font-size: var(--bz-font-meta); color: var(--bz-text-3); }
+
+/* ==================== 确认流程框（core/flow-dialog，issue 291：全域子弹窗统一） ====================
+   删除划线确认框（md / EPUB 两处，notes-ui.ts）经 openFlowDialog({ className: 'bz-bs-flow-dialog ' + bsSkinClass() })
+   挂 skin 类。为什么必须是这个类：
+     · `bz-bs-flow-dialog` = 本域确认框专属类，承载下面这套「确认框专属」纸卡形制；
+     · `bsSkinClass()`（如 `bz-bs-skin-nordic bz-bs-mode-light`）= 五肤×(亮|暗) token 层，
+       就近定义在 popup 自身上，于是共享壳 `.bz-overlay-popup` 消费的 --bz-surface-3/--bz-border/
+       --bz-text-*/--bz-brand 与 --bsw-paper/--bsw-ink/--bsw-muted/--bsw-line 自动跟随 —— 壳层
+       （底色/描边/圆角/阴影/限高）不必在此重写，按钮配色也随 token 走。
+   下面三条 = 视觉映射：套用「同域借书卡详情弹窗」那套纸卡取值，让「删除划线确认」与
+   「点书脊打开的借书卡详情」看起来是同一套东西。暗色无需另写变体：skin 类的
+   `.bz-bs-skin-* .bz-bs-mode-dark` 变体整组换掉 --bsw-*，本块全部引用变量，自动反转。 */
+#__shared_confirm_popup__.bz-bs-flow-dialog {
+  /* 纸卡底/墨线：逐值对齐 `.bz-bs-d-popup.bz-overlay-popup` + `.bz-bs-d-card`（纸面 var(--bsw-paper)、
+     描边 1px var(--bsw-line)）；圆角/阴影沿用共享壳 .bz-overlay-popup 的 --bz-radius-md/--bz-shadow-lg
+     （与借书卡弹窗同一壳源，只换底与描边，不动几何）。 */
+  background: var(--bsw-paper);
+  border-color: var(--bsw-line);
+  /* 字体栈在 .bz-bs-panel 作用域定义，流程框挂 body 取不到 → 在 popup 自带一份，
+     值同 styles.css:24-25 与借书卡标题 `.bz-bs-d-title`。 */
+  --bsw-serif: "Songti SC", "SimSun", "Noto Serif SC", serif;
+  --bsw-sans: "Microsoft YaHei", "PingFang SC", sans-serif;
+}
+/* 标题回归纸张语言：衬线 + 深墨 + 字重 700（借书卡标题 .bz-bs-d-title 同套字体与墨色） */
+#__shared_confirm_popup__.bz-bs-flow-dialog h4 {
+  font-family: var(--bsw-serif);
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--bsw-ink);
+}
+/* 正文/按钮用无衬线正文字（借书卡正文 .bz-bs-detail 同 --bsw-sans 取值）；
+   「此操作不可撤销」的行内提示仍走 core 的 danger 文案色，此处不改语义色。 */
+#__shared_confirm_popup__.bz-bs-flow-dialog p {
+  font-family: var(--bsw-sans);
+  color: var(--bsw-muted);
+}
+/* 按钮形制向纸卡靠：纸面方角（沿用 .bz-bs-d-card 的无圆角纸卡语言），墨=var(--bsw-ink)。
+   只动形制不动几何——高度/内边距/字号仍与组件库 .bz-btn 同源（core/styles.css #__shared_confirm_* 段），
+   保证与借书卡弹窗内的 .bz-btn 长得一样。 */
+#__shared_confirm_popup__.bz-bs-flow-dialog #__shared_confirm_cancel__,
+#__shared_confirm_popup__.bz-bs-flow-dialog #__shared_confirm_ok__ {
+  border-radius: var(--bz-radius-xs);
+  border-color: var(--bsw-line);
+}
+#__shared_confirm_popup__.bz-bs-flow-dialog #__shared_confirm_ok__ {
+  border-color: var(--bsw-ink);
+  font-family: var(--bsw-serif);
+  letter-spacing: 2px;
+}
+/* 危险主动作（删除划线，issue 291 评审补）：core 的 `.bz-flow-dialog--danger` 会把主钮整套压回
+   中性次级形制（描边 transparent + radius-sm + 去阴影），而本域两钮共用同一纸卡形制
+   （radius-xs + var(--bsw-line) 描边，见上一条）——不复位就会与同框「取消」一圆一方。
+   故按 core 注释指明的口径用 `.bz-flow-dialog--danger` 限定覆写：保纸卡方角与描边档，
+   底/字色回到与取消钮同档的次级态（底 = --bz-surface-2，本域 token 组已映射成纸面），文字危险色。
+   `.bz-overlay-popup` 是为提特异性到 (2,3,0)：不写则与 core 危险规则同级 (2,2,0)，只靠聚合序取胜。 */
+#__shared_confirm_popup__.bz-overlay-popup.bz-bs-flow-dialog.bz-flow-dialog--danger #__shared_confirm_ok__ {
+  background: var(--bz-surface-2);
+  border-radius: var(--bz-radius-xs);
+  border-color: var(--bsw-line);
+  color: var(--bz-danger);
+}
 
 /* ==================== 报告视图（命令 bz-reading-report-open 专用；墙面无入口） ====================
    头行/关闭钮/内容区样式归 reading-report/styles.css（walkthrough C-4 单一事实源），本域只留容器。 */

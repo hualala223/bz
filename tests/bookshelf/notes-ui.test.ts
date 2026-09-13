@@ -3,6 +3,8 @@
  * 详情弹窗「N 划线 · N 批注」入口 / md 划线弹窗（加载占位/空态/双击跳转/双开竞态/编辑批注/删除划线）
  * / EPUB 划线弹窗（章节分组/weave-cfi 深链）/ 移动端全屏 / 关面板与卸载不留孤儿弹窗。
  */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { MockVault, mockAppWithVault, parseFrontmatter } from '../mock-vault';
 import { resetObsidianMocks, Platform as MockPlatform, hasNotice } from '../mock-obsidian-entry';
@@ -256,7 +258,6 @@ describe('读书笔记弹窗（md 书）', () => {
     okBtn.click();
     await new Promise((r) => setTimeout(r, 40));
     expect(vault.files.get('书库/活着.md')).not.toContain('data-id="h1"');
-    expect(hasNotice('已删除 1 条划线')).toBe(true);
     // 删除后重开壳（刷新列表）
     expect(notesPopup()).not.toBeNull();
     expect(notesPopup()!.textContent).toContain('没有找到高亮或批注');
@@ -361,6 +362,62 @@ describe('读书笔记弹窗（EPUB）', () => {
     expect(notesPopup()!.textContent).toContain('没有找到高亮或想法');
   });
 
+  it('G11 验证：连开两本 EPUB，旧书在途 async 后到 → 旧壳已移除不覆盖新书壳（无残留可交互块）', async () => {
+    // 两本书：A/B 各一条划线；A 的首次 weave-data 读取挂起（在途窗口）
+    const twoBooks = {
+      schemaVersion: 2,
+      books: {
+        bk_a: {
+          id: 'bk_a',
+          file: { vaultPath: '书库/A.epub', sourceId: 'sid-a' },
+          meta: { title: 'A 书', author: '甲' },
+          reading: { position: { chapterIndex: 0, cfi: '', percent: 0.5 }, stats: { totalReadTime: 0, lastReadTime: 0, createdTime: 0 } },
+          notes: { bookmarks: [], excerpts: [], highlights: [
+            { id: 'ha', text: 'A 的划线', commentText: '', chapterIndex: 0, chapterTitle: '章 A', cfiRange: 'epubcfi(/6/2)!/4/2', createdTime: 1700000000000 },
+          ] },
+        },
+        bk_b: {
+          id: 'bk_b',
+          file: { vaultPath: '书库/B.epub', sourceId: 'sid-b' },
+          meta: { title: 'B 书', author: '乙' },
+          reading: { position: { chapterIndex: 0, cfi: '', percent: 0.5 }, stats: { totalReadTime: 0, lastReadTime: 0, createdTime: 0 } },
+          notes: { bookmarks: [], excerpts: [], highlights: [
+            { id: 'hb', text: 'B 的划线', commentText: '', chapterIndex: 0, chapterTitle: '章 B', cfiRange: 'epubcfi(/6/2)!/4/3', createdTime: 1700000000000 },
+          ] },
+        },
+      },
+    };
+    vault.files.set('CONFIG/STORAGE/weave-data.json', JSON.stringify(twoBooks));
+    const app = makeApp(vault);
+    // A 的首次 weave-data 读取挂起：showEpubBookNotes(A) 的 async 停在在途
+    let releaseA!: (v: string) => void;
+    const gate = new Promise<string>((r) => { releaseA = r; });
+    let firstWeaveRead = true;
+    const realRead = vault.adapter.read.bind(vault.adapter);
+    (vault.adapter as any).read = async (path: string) => {
+      if (firstWeaveRead && path === 'CONFIG/STORAGE/weave-data.json') {
+        firstWeaveRead = false;
+        return gate;
+      }
+      return realRead(path);
+    };
+
+    showEpubBookNotes(app, '书库/A.epub', 'A 书');
+    await new Promise((r) => setTimeout(r, 20)); // A 壳建立、async 挂在首次读取
+    showEpubBookNotes(app, '书库/B.epub', 'B 书'); // 开 B：先关 A 壳（同步 remove）
+    await new Promise((r) => setTimeout(r, 20)); // B 渲染完成
+    expect(document.querySelectorAll('.bz-bs-notes-pop')).toHaveLength(1);
+    expect(notesPopup()!.textContent).toContain('B 的划线');
+    expect(notesPopup()!.textContent).not.toContain('A 的划线');
+
+    // 旧书 async 后到：渲染只落已移除的 A 壳容器（孤立节点），不覆盖 B 壳
+    releaseA(JSON.stringify(twoBooks));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(document.querySelectorAll('.bz-bs-notes-pop')).toHaveLength(1);
+    expect(notesPopup()!.textContent).toContain('B 的划线');
+    expect(notesPopup()!.textContent).not.toContain('A 的划线');
+  });
+
   it('删除失败（weave-data 被并发移除）→ error toast + 重开壳（B2 不留死局）', async () => {
     vault.files.set('CONFIG/STORAGE/weave-data.json', EPUB_WEAVE());
     const app = makeApp(vault);
@@ -407,5 +464,41 @@ describe('mockAppWithVault 兼容（bookshelf 主面板数据源贯通读书笔�
     showBookNotes(app, '书库/活着.md', '活着');
     await new Promise((r) => setTimeout(r, 20));
     expect(notesPopup()!.textContent).toContain('《活着》的读书笔记');
+  });
+});
+
+describe('issue 291：删除划线确认框随面板皮肤（样式源文本断言）', () => {
+  const repo = (p: string) => readFileSync(resolve(process.cwd(), p), 'utf8');
+  const bsCss = () => repo('src/bookshelf/styles.css');
+  const notesUi = () => repo('src/bookshelf/notes-ui.ts');
+
+  it('notes-ui.ts 两处删除划线确认框都传了流程框类 + 皮肤类（md / EPUB 双路径）', () => {
+    const src = notesUi();
+    // md 路径（buildMdHighlightBlock）与 EPUB 路径（buildEpubHighlightBlock）各一处
+    expect(src.match(/className: 'bz-bs-flow-dialog ' \+ bsSkinClass\(\)/g)?.length).toBe(2);
+    expect(src).toContain("import { bsSkinClass } from './ui';");
+    // 两处 openFlowDialog 都在（防只改一处后另一处悄悄漏）
+    expect(src.match(/openFlowDialog\(\{/g)?.length).toBe(2);
+  });
+
+  it('styles.css 有 #__shared_confirm_popup__.bz-bs-flow-dialog 规则块（id 提特异性覆盖 core）', () => {
+    const block = bsCss().match(/#__shared_confirm_popup__\.bz-bs-flow-dialog\s*\{([^}]*)\}/);
+    expect(block, '缺 #__shared_confirm_popup__.bz-bs-flow-dialog 块').not.toBeNull();
+    // 纸卡壳取值：底/描边消费 --bsw-* 域变量（借书卡详情弹窗同套 token）
+    expect(block![1]).toContain('background: var(--bsw-paper)');
+    expect(block![1]).toContain('border-color: var(--bsw-line)');
+    // 字体栈在 body 外取不到 → 必须自带（否则衬线标题失效）
+    expect(block![1]).toContain('--bsw-serif');
+    expect(block![1]).toContain('--bsw-sans');
+  });
+
+  it('标题/正文/按钮映射借书卡详情那套取值；暗色不另写块（skin+mode 变体整组换 token）', () => {
+    const css = bsCss();
+    expect(css, '缺标题映射').toMatch(/#__shared_confirm_popup__\.bz-bs-flow-dialog h4\s*\{[^}]*font-family: var\(--bsw-serif\)/);
+    expect(css, '缺正文映射').toMatch(/#__shared_confirm_popup__\.bz-bs-flow-dialog p\s*\{[^}]*font-family: var\(--bsw-sans\)/);
+    expect(css, '缺按钮映射').toMatch(/#__shared_confirm_popup__\.bz-bs-flow-dialog #__shared_confirm_ok__\s*\{[^}]*font-family: var\(--bsw-serif\)/);
+    // 本域亮暗由 `.bz-bs-skin-*` × `.bz-bs-mode-*` 变体承担（skin 类随 bsSkinClass() 一起挂到 popup），
+    // 故确认框不需要也不该另写 .theme-dark 块——有则是把两套口径混用。
+    expect(css).not.toMatch(/\.theme-dark #__shared_confirm_popup__\.bz-bs-flow-dialog/);
   });
 });

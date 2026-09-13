@@ -30,6 +30,7 @@ export function jsonScanTargets(app: App): JsonScanTarget[] {
     { file: storageFile('memo.json', storageDir()), label: '备忘录 / 待办' },
     { file: getStoragePath(s.storagePath), label: '收藏本' },
     { file: storageFile('belongings.json'), label: '归物本' },
+    { file: storageFile('clipbook.json'), label: '剪藏本侧写' },
     { file: storageFile('news.json'), label: '聚合讯（未读流）' },
     { file: storageFile('pomodoro.json'), label: '番茄钟' },
     { file: storageFile('review.json'), label: '复习计划' },

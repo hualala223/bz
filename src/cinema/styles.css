@@ -164,7 +164,7 @@
 /* ---- 移动端（≤768px）：真全屏 + 右上角工具 + 3 列海报 + 横滑分类 ---- */
 @media (max-width: 768px) {
   .bz-cinema-panel {
-    width: 100vw; height: 100vh; max-width: none; max-height: none;
+    width: 100vw; height: var(--bz-vvh, 100vh); max-width: none; max-height: none;
     border-radius: 0; border: none;
   }
   .bz-cinema-mob-only { display: inline-flex; }

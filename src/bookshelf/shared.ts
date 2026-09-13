@@ -110,6 +110,10 @@ export function detailBodyHtml(it: BookshelfItem, coverSrc: string | null): stri
     : '<div class="bz-bs-d-quote dim">——尚无书评——</div>';
   const dense = it.highlights + it.thinks;
   const seal = it.status === '已读' ? '讫' : it.status === '在读' ? '阅' : '藏';
+  /* 「继续」：在读条目行内跳书钮（点击回到原文；行为接线在 ui.ts openBookDetail） */
+  const go = it.status === '在读'
+    ? ` <button type="button" class="bz-bs-d-go" data-bs-d-continue title="继续阅读">继续</button>`
+    : '';
   const hoursText = it.readingTimeFormat || (it.readingTimeMs > 0 ? (it.readingTimeMs / 3600000).toFixed(1) + ' 小时' : '—');
   const prog = Math.round(it.progress);
   return `
@@ -122,7 +126,7 @@ export function detailBodyHtml(it: BookshelfItem, coverSrc: string | null): stri
         <div class="bz-bs-d-sub">${esc(it.author)} · ${esc(it.category || '未分类')}${it.isEpub ? ' · EPUB' : ''}</div>
         ${review}
         <table class="bz-bs-d-ledger">
-          <tr><td>状 态</td><td><span class="bz-bs-d-stdot" style="background:${statusColor(it.status)}"></span>${esc(it.status)}</td></tr>
+          <tr><td>状 态</td><td><span class="bz-bs-d-nowrap"><span class="bz-bs-d-stdot" style="background:${statusColor(it.status)}"></span>${esc(it.status)}${go}</span></td></tr>
           <tr><td>累计时长</td><td>${esc(hoursText)}</td></tr>
           <tr><td>起读 · 读完</td><td>${esc(it.readingDate || '—')} · ${esc(it.completionDate || '—')}</td></tr>
           <tr><td>划线 / 想法</td><td>${it.highlights} 条 / ${it.thinks} 条</td></tr>

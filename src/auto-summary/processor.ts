@@ -35,7 +35,7 @@ export interface ProcessOptions {
 /** 缺失字段 → JSON 模板定义（规则文案逐字保留；不含 author；ticket 124：summary 按长度档位） */
 const FIELD_DEFS: Record<string, string> = {
   title:
-    '"title": "生成中文标题，15-30字，完整陈述句或疑问句。禁止冒号、破折号、句中句号问号，需要连接时用逗号"',
+    '"title": "生成中文标题，15-30字，完整陈述句，不得使用疑问句或疑问语气（为何/为什么/怎么/如何/吗/呢）。禁止冒号、破折号、句中句号问号，需要连接时用逗号"',
   summary:
     '"summary": "150-250字的详细摘要。包含核心观点、关键事实、重要数据和结论。直接陈述内容，绝对禁止使用\'本文\'、\'本文章\'、\'这篇文章\'、\'文章指出\'、\'作者认为\'等前缀词"',
   tags: '"tags": ["标签1", "标签2", "标签3"]',
@@ -188,7 +188,11 @@ export async function processFile(app: any, ai: AIService, file: any, opts: Proc
         e.stopPropagation();
         retryBtn.remove();
         errHandle.hide();
-        void processFile(app, ai, file, { force }); // 重试保留 force 语义（手动重跑失败重试仍不吞标题）
+        // F9：重试改走域队列（retrySummaryWithAI 复用 processingPaths 去重）——直调 processFile
+        // 绕过去重，双击并发跑两次 AI 双倍花费；函数级动态 import 解 processor←→index 环（ADR-0002）
+        void import('./index')
+          .then((m) => m.retrySummaryWithAI(app, ai, file, force))
+          .catch(() => { /* 队列入口不可用（卸载中）时放弃重试 */ });
       });
       errHandle.el.appendChild(retryBtn);
       return;
