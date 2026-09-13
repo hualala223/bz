@@ -7,6 +7,14 @@
 
 /* 全局按钮基线已迁至 src/core/reset.css（全局覆盖层，issue 196） */
 
+/* ===== 移动端可视视口高度令牌 --bz-vvh（issue 260 剥离吸收上游 ADR-0120） ===== */
+/* JS（src/core/viewport.ts 的 bindMobileViewport）把 visualViewport.height 写进
+   --bz-vvh 精修到 px；此处是 JS 未接管时的 CSS 基线：100vh 打底，支持 dvh 的内核
+   升级为 100dvh。域内面板高度消费该变量随各域吸收票另行接线。 */
+:root { --bz-vvh: 100vh; }
+@supports (height: 100dvh) { :root { --bz-vvh: 100dvh; } }
+
+
 /* ===== 设置页顶部分页（参考 obsidian-linter 设置页） ===== */
 /* 设置区块标题（ADR-0009 单页平铺：🤖 AI / 📂 数据存储路径） */
 .bz-setting-section-title {

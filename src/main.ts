@@ -13,6 +13,7 @@ import { setAISettingsProvider, resetAIProviderCache } from './core/ai';
 import { setSettingsProvider, setSettingsSaver } from './core/settings-provider';
 import { clearDomainEvents } from './core/domain-bus';
 import { attachObsidianAdapter, detachObsidianAdapter } from './core/obsidian-adapter';
+import { bindMobileViewport, unbindMobileViewport } from './core/viewport';
 import { renderSettingsInto } from './core/settings-schema';
 import { mainSettingsSchema } from './core/settings-main-schema';
 
@@ -256,6 +257,10 @@ export default class BzPlugin extends Plugin {
     // 域事件总线地基：全插件唯一 vault 订阅点挂载（registerEvent 保证插件卸载时 Obsidian 自动清理引用）
     attachObsidianAdapter(this.app, (ref) => this.registerEvent(ref as any));
 
+    // 移动端可视视口高度（issue 260 剥离吸收上游 ADR-0120）：visualViewport.height → --bz-vvh。
+    // 桌面端无害（变量不改变布局）；卸载时 onunload 解绑。本地面板暂无消费方，消费接线随各域吸收票。
+    bindMobileViewport();
+
     // 命令裸注册（ADR-0004：app.commands.addCommand 原样 id 注册——plugin.addCommand 会被 Obsidian 自动加插件前缀，主页.js 等外部裸 id 调用会失效）
     for (const c of COMMANDS) {
       const cmd: Record<string, unknown> = { id: c.id, name: c.name, icon: c.icon, callback: c.callback };
@@ -319,6 +324,8 @@ export default class BzPlugin extends Plugin {
     closeItemMenu();
     // toast 卸载清理（UX 整改 l2-toast）：清空通知容器 DOM + 存活/去重状态
     cleanupNotices();
+    // 移动端视口监听解绑 + --bz-vvh 清理（issue 260）
+    unbindMobileViewport();
     // 清理裸注册命令（统一 bz- 前缀，必须显式 removeCommand）
     for (const id of this.registeredCommandIds) {
       try {
