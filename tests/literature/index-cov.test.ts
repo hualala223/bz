@@ -117,4 +117,32 @@ describe('openTermNote（bz-literature-note-term 命令：MarkdownView 类右值
     expect((document.getElementById('lit-term-input') as HTMLInputElement).value).toBe('');
     expect(noteGen.generateTermDraft).not.toHaveBeenCalled();
   });
+
+  it('命令入口带当前笔记 → 来源预填为内部笔记（chip「内 部」+ 笔记名，输入框收起）（上游 ADR-0116）', async () => {
+    const app = setupApp({
+      editor: { getSelection: () => '  心流  ' },
+      file: { path: '我的/日记/心流体验.md', extension: 'md' },
+    });
+
+    openTermNote(app);
+
+    await vi.waitFor(() => expect(document.getElementById('literature-term-popup')!.style.display).toBe('flex'));
+    const chip = document.getElementById('lit-term-src-chip') as HTMLElement;
+    expect(chip.style.display).toBe('inline-flex');
+    expect(chip.textContent).toContain('内 部');
+    expect(chip.textContent).toContain('心流体验'); // noteSourceName：去目录去 .md
+    expect((document.getElementById('lit-term-src') as HTMLInputElement).style.display).toBe('none');
+  });
+
+  it('当前视图非 md（如 canvas）→ 不预填来源', async () => {
+    const app = setupApp({
+      editor: { getSelection: () => '  心流  ' },
+      file: { path: '白板.canvas', extension: 'canvas' },
+    });
+
+    openTermNote(app);
+
+    await vi.waitFor(() => expect(document.getElementById('literature-term-popup')!.style.display).toBe('flex'));
+    expect((document.getElementById('lit-term-src-chip') as HTMLElement).style.display).toBe('none');
+  });
 });

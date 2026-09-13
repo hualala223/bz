@@ -53,13 +53,14 @@ import { attachItemActions, type ItemAction } from '../core/item-actions';
 import { patchKeyedCards } from '../core/list-patch';
 import { openFlowDialog } from '../core/flow-dialog';
 import { notice } from '../core/notice';
-import { formatRelativeTime } from '../core/utils';
+import { uiSuggest } from '../core/ui/suggest';
+import { fetchPageTitle, formatRelativeTime } from '../core/utils';
 import { topifyZ } from '../core/z-order';
 import { emitDomainEvent, onDomainEvent } from '../core/domain-bus';
 import { getApp } from '../core/app';
 import type BzSettings from '../settings';
 import { LiteratureData, normalizeLooseTime } from './data';
-import { normalizeSourceUrl } from './source';
+import { cleanSourceTitle, isUrlLikeSourceText, normalizeSourceUrl, noteSourceName, type TermSource } from './source';
 import { fetchVideoMeta } from './video-meta';
 import type { LiteratureTask } from './types';
 import { BatchRunner, type BatchEvents } from './processor';
@@ -291,6 +292,12 @@ export class UIManager {
   private termSummarizing = false;
   /** 本轮是否已有生成结果（ticket 155：有则输入行按钮文案为「重新生成」） */
   private termHasDraft = false;
+  /** 术语来源（上游 ADR-0116；null = 未填）——内部笔记双链或外部链接，确认写入时随 frontmatter 落库 */
+  private termSource: TermSource | null = null;
+  /** 来源输入防抖（整串 URL 字样惰性认领为外部来源；450ms） */
+  private termSrcTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 来源联想层（vault 全部 .md；点选回填内部笔记来源） */
+  private termSrcSuggest: ReturnType<typeof uiSuggest> | null = null;
 
   private editingId: string | null = null;
   /** 录入 URL 防抖解析（issue 262，上游 issue 278 同款）：定时器 + 序列号失效在途响应 */
@@ -1590,12 +1597,18 @@ export class UIManager {
         <input id="lit-term-input" type="text" autocomplete="off">
         <button id="lit-term-generate" class="bz-lit-accent-btn">生成</button>
       </div>
+      <div class="bz-lit-term-srcrow">
+        <span class="bz-lit-term-src-k">来源</span>
+        <input id="lit-term-src" type="text" autocomplete="off">
+        <span id="lit-term-src-chip" class="bz-lit-srcchip" style="display:none;"></span>
+      </div>
       <div id="lit-term-preview" style="display:none;">
         <div class="bz-lit-term-card">
           <div class="bz-lit-term-meta">
             <div class="bz-lit-term-meta-row"><span class="bz-lit-term-meta-k">术语</span><span id="lit-term-meta-term" class="bz-lit-term-meta-v"></span></div>
             <div class="bz-lit-term-meta-row"><span class="bz-lit-term-meta-k">领域</span><span id="lit-term-meta-domain" class="bz-lit-term-meta-v"></span></div>
             <div class="bz-lit-term-meta-row"><span class="bz-lit-term-meta-k">日期</span><span id="lit-term-meta-date" class="bz-lit-term-meta-v"></span></div>
+            <div class="bz-lit-term-meta-row" id="lit-term-meta-srcrow" style="display:none;"><span class="bz-lit-term-meta-k">来源</span><span id="lit-term-meta-src" class="bz-lit-term-meta-v bz-lit-srcopen" data-term-src-open="1"></span></div>
           </div>
         </div>
         <div class="bz-lit-term-card">
@@ -1619,16 +1632,62 @@ export class UIManager {
     q<HTMLInputElement>(popup, '#lit-term-input')?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); void this.onTermGenerate(); }
     });
+    // 来源行（上游 ADR-0116）：输入惰性认领外部链接 / 联想回填内部笔记 / chip 与 meta 行
+    const srcInput = q<HTMLInputElement>(popup, '#lit-term-src');
+    if (srcInput) {
+      srcInput.addEventListener('input', () => {
+        if (this.termSrcTimer) clearTimeout(this.termSrcTimer);
+        this.termSrcTimer = setTimeout(() => this.termSrcTryCommit(srcInput), 450);
+      });
+      srcInput.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        const raw = (srcInput.value || '').trim();
+        if (raw && isUrlLikeSourceText(raw)) {
+          // URL 字样整串 → 直接落外部 chip（回车即确认）；非 URL 交给联想层选中回填
+          e.preventDefault();
+          this.termSrcSet({ kind: 'external', url: normalizeSourceUrl(raw) }, srcInput);
+        }
+      });
+      // 联想源：vault 全部 .md（现值过滤、上限 12）；空输入不弹空壳
+      this.termSrcSuggest = uiSuggest({
+        anchor: srcInput,
+        max: 12,
+        iconOf: () => '📄',
+        labelOf: (p: string) => noteSourceName(p),
+        source: () => {
+          if (!srcInput.value.trim()) return [];
+          return (getApp().vault.getFiles() || []).filter((f: any) => f.extension === 'md').map((f: any) => f.path);
+        },
+        onPick: (p: string) => this.termSrcSet({ kind: 'note', path: p }, srcInput),
+      });
+    }
+    // 委托：chip ✕ 清除 / meta 行点击打开（动态渲染元素，委托一次）
+    popup.addEventListener('click', (e) => {
+      const t = (e.target as HTMLElement).closest('[data-term-src-clear],[data-term-src-open]') as HTMLElement | null;
+      if (!t) return;
+      e.stopPropagation();
+      if (t.hasAttribute('data-term-src-clear')) {
+        this.termSrcClear(q<HTMLInputElement>(popup, '#lit-term-src'));
+      } else if (this.termSource) {
+        // meta 行点击：内部笔记 → 打开笔记；外部链接 → 系统浏览器
+        if (this.termSource.kind === 'note') this.openNote(this.termSource.path);
+        else this._openExternal(this.termSource.url);
+      }
+    });
   }
 
-  /** 打开术语生成面板；term 预填输入框（命令入口带编辑器选中词；主面板入口不带）。
-   *  ticket 155：带词入口（选中文字打开）自动触发生成，无需再点按钮。 */
-  showTermEntry(term?: string): void {
+  /**
+   * 打开术语生成面板；term 预填输入框（命令入口带编辑器选中词；主面板入口不带）；
+   * src 预填来源（上游 ADR-0116——仅命令入口带当前笔记，主窗按钮入口不预填）。
+   * ticket 155：带词入口（选中文字打开）自动触发生成，无需再点按钮。 */
+  showTermEntry(term?: string, src?: TermSource | null): void {
     if (!this.termPopup || !this.termMask) return;
     this.termPreview = null;
     this.termHasDraft = false;
     const input = q<HTMLInputElement>(this.termPopup, '#lit-term-input');
     if (input) input.value = (term ?? '').trim();
+    this.termSrcReset(q<HTMLInputElement>(this.termPopup, '#lit-term-src'));
+    if (src) this.termSrcSet(src, q<HTMLInputElement>(this.termPopup, '#lit-term-src'));
     this.setTermPreviewVisible(false);
     this.setTermGenLoading(false);
     topifyZ(this.termMask, this.termPopup);
@@ -1636,6 +1695,87 @@ export class UIManager {
     this.termPopup.style.display = 'flex';
     if (input && !input.value) setTimeout(() => input.focus(), 100);
     if (input && input.value) void this.onTermGenerate();
+  }
+
+  /** 来源状态清空（chip 收起、输入框复位、计时器归零）——每次打开弹层即全新（上游 ADR-0116） */
+  private termSrcReset(input: HTMLInputElement | null): void {
+    if (this.termSrcTimer) { clearTimeout(this.termSrcTimer); this.termSrcTimer = null; }
+    this.termSource = null;
+    if (input) {
+      input.value = '';
+      input.style.display = '';
+    }
+    this.renderTermSrcChip(input);
+    this.termSrcRefreshMeta();
+  }
+
+  private termSrcClear(input: HTMLInputElement | null): void {
+    this.termSrcReset(input);
+    if (input) setTimeout(() => input.focus(), 0);
+  }
+
+  /** 输入惰性提交：整串 URL 字样 → 外部 chip；其余文本等联想点选（不自动认领） */
+  private termSrcTryCommit(input: HTMLInputElement): void {
+    this.termSrcTimer = null;
+    const raw = (input.value || '').trim();
+    if (!raw || !isUrlLikeSourceText(raw)) return;
+    this.termSrcSet({ kind: 'external', url: normalizeSourceUrl(raw) }, input);
+  }
+
+  /** 落来源：记录 + chip 渲染 + meta 行同步；外部来源异步抓标题（失败静默降级为纯链接） */
+  private termSrcSet(src: TermSource, input: HTMLInputElement | null): void {
+    this.termSource = src;
+    this.renderTermSrcChip(input);
+    this.termSrcRefreshMeta();
+    if (src.kind === 'external') void this.termSrcFetchTitle(src);
+  }
+
+  private async termSrcFetchTitle(src: Extract<TermSource, { kind: 'external' }>): Promise<void> {
+    try {
+      const t = await fetchPageTitle(src.url);
+      if (!t || this.termSource !== src) return; // 期间已被清除/更换 → 丢弃
+      src.title = cleanSourceTitle(t); // 剥站点尾巴（_哔哩哔哩_bilibili / - 知乎 系）+ 实体解码
+      const inp = this.termPopup ? q<HTMLInputElement>(this.termPopup, '#lit-term-src') : null;
+      this.renderTermSrcChip(inp);
+      this.termSrcRefreshMeta();
+    } catch { /* 抓标题失败静默：chip 保持纯链接 */ }
+  }
+
+  /** chip 渲染：有来源 → 徽标（内/外）+ 名称 + ✕；无 → 输入框可见 */
+  private renderTermSrcChip(input: HTMLInputElement | null): void {
+    const popup = this.termPopup;
+    if (!popup) return;
+    const chip = q<HTMLElement>(popup, '#lit-term-src-chip');
+    if (!chip) return;
+    const src = this.termSource;
+    if (!src) {
+      chip.style.display = 'none';
+      chip.textContent = '';
+      if (input) input.style.display = '';
+      return;
+    }
+    const isNote = src.kind === 'note';
+    const label = isNote ? noteSourceName(src.path) : src.title || shortUrlText(src.url);
+    chip.title = isNote ? src.path : src.url;
+    chip.style.display = 'inline-flex';
+    chip.innerHTML = `<b>${isNote ? '内 部' : '外 部'}</b><span>${esc(label)}</span><button type="button" data-term-src-clear title="清除来源" aria-label="清除来源">✕</button>`;
+    if (input) input.style.display = 'none';
+  }
+
+  /** 预览属性卡来源行：有来源显行（可点开），无来源隐行 */
+  private termSrcRefreshMeta(): void {
+    const popup = this.termPopup;
+    if (!popup) return;
+    const row = q<HTMLElement>(popup, '#lit-term-meta-srcrow');
+    const val = q<HTMLElement>(popup, '#lit-term-meta-src');
+    if (!row || !val) return;
+    const src = this.termSource;
+    if (!src) { row.style.display = 'none'; val.textContent = ''; return; }
+    row.style.display = '';
+    val.textContent = src.kind === 'note'
+      ? noteSourceName(src.path)
+      : src.title || src.url;
+    val.title = src.kind === 'note' ? src.path : src.url;
   }
 
   private setTermPreviewVisible(v: boolean): void {
@@ -1746,7 +1886,7 @@ export class UIManager {
     this.setTermGenLoading(true);
     try {
       // 1) 以面板当前术语/领域/正文落盘一次（预览只读纯内存，无手改值；无草稿/旧稿需要删除）
-      const path = await generateTermNote({ term, summary: this.termPreview.body, domain: this.termPreview.domain });
+      const path = await generateTermNote({ term, summary: this.termPreview.body, domain: this.termPreview.domain, source: this.termSource });
       // 2) 自动打开新笔记
       this.openNote(path);
       // 3) 行为流观察（ticket 136 §10：term-generated，载荷 term/title）
@@ -1822,6 +1962,11 @@ export class UIManager {
     document.removeEventListener('keydown', this.onKeydown);
     // 术语预览纯内存（ticket 138 §2.1），无草稿文件清理
     this.termPreview = null;
+    // 来源态（上游 ADR-0116）：计时器与联想层一并归零，避免残留定时器/浮层
+    if (this.termSrcTimer) { clearTimeout(this.termSrcTimer); this.termSrcTimer = null; }
+    this.termSrcSuggest?.detach();
+    this.termSrcSuggest = null;
+    this.termSource = null;
     for (const el of [this.mask, this.popup, this.videoMask, this.videoPopup, this.addMask, this.addPopup, this.historyMask, this.historyPopup, this.termMask, this.termPopup]) {
       if (el && el.parentNode) el.parentNode.removeChild(el);
     }

@@ -151,6 +151,11 @@ describe('generateVideoNote（视频文献：九键 frontmatter + 润色正文�
     expect(path).toBe('文献盒/T.md'); // 文件名取 AI title：sanitizeMdTitle('T')
     expect(aiStub.json).toHaveBeenCalledTimes(1);
     expect(String(aiStub.json.mock.calls[0][0])).toContain('心理、计算机'); // 领域词表进入判定指令
+    // 上游 issue 276：标题指令收敛为完整陈述句（禁疑问语气），旧口径「陈述句或疑问句」移除
+    const metaPrompt = String(aiStub.json.mock.calls[0][0]);
+    expect(metaPrompt).toContain('完整陈述句');
+    expect(metaPrompt).toContain('不得使用疑问句或疑问语气');
+    expect(metaPrompt).not.toContain('陈述句或疑问句');
     expect(aiStub.chat).toHaveBeenCalledTimes(2); // 两块转录 → 两次润色
 
     const content = vault.files.get(path)!;
@@ -255,7 +260,7 @@ describe('summarizeTermSummary（术语简介 AI 精简，ticket 155）', () => 
   });
 });
 
-describe('generateTermNote（术语文献：五键 frontmatter + 一段简介）', () => {
+describe('generateTermNote（术语文献：五键 frontmatter（+可选来源 source/sourceTitle）+ 一段简介）', () => {
   let vault: MockVault;
 
   beforeEach(() => {
@@ -328,6 +333,59 @@ describe('generateTermNote（术语文献：五键 frontmatter + 一段简介）
     const content = vault.files.get(path)!;
     expect(content).toContain('domain: "物理"');
     expect(content).not.toContain('\n\n'); // 空正文不产生空段
+  });
+
+  // ---- 上游 ADR-0116：术语来源（可选 source/sourceTitle 键） ----
+  it('来源=内部笔记 → source 写原生双链 [[路径|名]]（无 sourceTitle，不碰 related）', async () => {
+    const path = await generateTermNote({
+      term: '心流', summary: 's', domain: '心理',
+      source: { kind: 'note', path: '我的/日记/心流体验.md' },
+    });
+    const content = vault.files.get(path)!;
+    const fm = vaultParseFrontmatter(content)!;
+    expect(fm.source).toBe('[[我的/日记/心流体验.md|心流体验]]');
+    expect(fm.sourceTitle).toBeUndefined();
+    expect(fm.related).toBeUndefined(); // 来源≠关联：不落 related
+    expect(content).not.toContain('related:');
+  });
+
+  it('来源=内部笔记带显式名 → 双链取显式名', async () => {
+    const path = await generateTermNote({
+      term: '心流', summary: 's', domain: '心理',
+      source: { kind: 'note', path: '我的/日记/心流体验.md', name: '体验心流' },
+    });
+    const fm = vaultParseFrontmatter(vault.files.get(path)!)!;
+    expect(fm.source).toBe('[[我的/日记/心流体验.md|体验心流]]');
+  });
+
+  it('来源=外部链接 → source 落 URL 原文；带抓到的标题 → sourceTitle；键序在 date 之后', async () => {
+    const path = await generateTermNote({
+      term: '心流', summary: 's', domain: '心理',
+      source: { kind: 'external', url: 'https://zhuanlan.zhihu.com/p/123456', title: '心流是什么' },
+    });
+    const content = vault.files.get(path)!;
+    const fm = vaultParseFrontmatter(content)!;
+    expect(fm.source).toBe('https://zhuanlan.zhihu.com/p/123456');
+    expect(fm.sourceTitle).toBe('心流是什么');
+    expect(content).toContain('date:');
+    expect(content.indexOf('date:')).toBeLessThan(content.indexOf('source:')); // 五键顺序不变，来源追加在后
+  });
+
+  it('外部链接不带标题 → 只有 source 无 sourceTitle；URL 尾随标点（粘贴带入）落库前净化', async () => {
+    const path = await generateTermNote({
+      term: '心流', summary: 's', domain: '心理',
+      source: { kind: 'external', url: 'https://b23.tv/abcDEF，' },
+    });
+    const fm = vaultParseFrontmatter(vault.files.get(path)!)!;
+    expect(fm.source).toBe('https://b23.tv/abcDEF');
+    expect(fm.sourceTitle).toBeUndefined();
+  });
+
+  it('source 为 null/缺省 → 不写来源键（五键原样）', async () => {
+    const path = await generateTermNote({ term: '心流', summary: 's', domain: '心理', source: null });
+    const content = vault.files.get(path)!;
+    expect(content).not.toContain('source:');
+    expect(content).not.toContain('sourceTitle:');
   });
 });
 

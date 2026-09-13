@@ -3,12 +3,13 @@
  * - 视频文献（type: video，frontmatter 九键：title/tags/summary/url/date/author/videoTitle/type/domain，
  *   正文 = 润色转录 + 视频双链——ticket 151 补回：videoPath 非空时正文尾部嵌 `![[路径]]`，
  *   ADR-0066「保留视频原件」关（keepVideo=false）时 videoPath 为 null，无视频段）
- * - 术语文献（type: term，frontmatter 五键：title/type/domain/term/date，正文=一段百科式简介）
+ * - 术语文献（type: term，frontmatter 五键：title/type/domain/term/date + 可选 source/sourceTitle（术语来源，上游 ADR-0116），正文=一段百科式简介）
  * - 旧笔记自动补全（type 启发式 + domain AI，补过落库不重复）
  */
 import { createAI } from '../core/ai';
 import { getApp } from '../core/app';
 import { tryGetSettings } from '../core/settings-provider';
+import { serializeTermSource, type TermSource } from './source';
 
 /** 领域词表解析（逗号/顿号分隔、去空、去重）；空 → [] = AI 自由写 */
 export function parseDomainList(raw: string | undefined | null): string[] {
@@ -116,7 +117,7 @@ export async function generateVideoNote(opts: {
   // 元数据（一次 JSON 调用：标题/标签/简介/领域）
   const metaRaw = await ai.json(
     `你是文献整理助手。基于下方 B站视频《${opts.videoTitle || '未命名'}》的转写文稿片段，生成文献笔记元数据。只输出 JSON，不要任何解释：
-{"title":"15-30字的中文完整陈述句或疑问句，禁止冒号、破折号、句中句号问号，需要连接时用逗号","tags":["3-6个中文标签，每个不超过5个字，涵盖主题领域、关键概念、应用场景"],"summary":"一句话简介，不超过60字",${domainInstruction(list)}}
+{"title":"15-30字的中文完整陈述句，不得使用疑问句或疑问语气（为何/为什么/怎么/如何/吗/呢），禁止冒号、破折号、句中句号问号，需要连接时用逗号","tags":["3-6个中文标签，每个不超过5个字，涵盖主题领域、关键概念、应用场景"],"summary":"一句话简介，不超过60字",${domainInstruction(list)}}
 所有字段一律使用简体中文。
 
 【转写文稿片段】
@@ -209,11 +210,19 @@ ${t}`,
 }
 
 /**
- * 生成术语文献笔记：五键 frontmatter（title/type/domain/term/date）+ 简介正文落盘。返回 vault 相对笔记路径。
+ * 生成术语文献笔记：frontmatter（title/type/domain/term/date + 可选 source/sourceTitle）+ 简介正文落盘。
+ * 返回 vault 相对笔记路径。
  * 可选 summary/domain：传入即**跳过 AI、所见即所得**（终审 P1-4——术语面板确认写入传面板当前值，
  * 不再重跑一次 AI 造成与预览不一致、也不浪费一次调用）；不传则走 generateTermDraft（AI 生成）。
+ * 可选 source：术语来源（上游 ADR-0116）——内部笔记写原生双链 `[[路径|名]]`（Obsidian 反向链接原生可溯），
+ * 外部链接写 url 原文 + 抓到的页面标题落 sourceTitle；仅记录不参与生成、不回写任何笔记。
  */
-export async function generateTermNote(opts: { term: string; summary?: string; domain?: string }): Promise<string> {
+export async function generateTermNote(opts: {
+  term: string;
+  summary?: string;
+  domain?: string;
+  source?: TermSource | null;
+}): Promise<string> {
   const s = tryGetSettings();
   const term = String(opts.term || '').trim();
   if (!term) throw new Error('术语为空');
@@ -235,9 +244,14 @@ export async function generateTermNote(opts: { term: string; summary?: string; d
     `domain: ${quoteYaml(domain)}`,
     `term: ${quoteYaml(term)}`,
     `date: ${quoteYaml(nowStamp())}`,
-    '---',
-  ].join('\n');
-  const body = [fm, summary].filter(Boolean).join('\n\n');
+  ];
+  const src = serializeTermSource(opts.source);
+  if (src) {
+    fm.push(`source: ${quoteYaml(src.source)}`);
+    if (src.sourceTitle) fm.push(`sourceTitle: ${quoteYaml(src.sourceTitle)}`);
+  }
+  fm.push('---');
+  const body = [fm.join('\n'), summary].filter(Boolean).join('\n\n');
   return writeUniqueNote(String(s.literatureDirectory || '文献盒'), sanitizeMdTitle(term), body);
 }
 

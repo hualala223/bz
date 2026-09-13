@@ -666,7 +666,7 @@ describe('文献盒 UI（ticket 136）', () => {
 
   it('术语流程（ticket 138 §2.1）：生成 → 纯 AI 预览（未确认不落盘）；确认写入 → generateTermNote 传面板值落盘 + 自动打开 + term-generated + 面板关闭', async () => {
     noteGen.generateTermDraft.mockImplementation(async (term: string) => ({ summary: `${term}的百科式简介`, domain: '物理' }));
-    noteGen.generateTermNote.mockImplementation(async ({ term, summary, domain }: { term: string; summary?: string; domain?: string }) => {
+    noteGen.generateTermNote.mockImplementation(async ({ term, summary, domain, source }: { term: string; summary?: string; domain?: string; source?: unknown }) => {
       const path = `文献盒/${term}.md`;
       vault.files.set(path, `---
 title: "${term}"
@@ -698,7 +698,7 @@ ${summary ?? `${term}的百科式简介`}`);
       // 确认写入 → 此刻才落盘一次，且传的是面板当前值（所见即所得，P1-4 不重跑 AI）
       (document.getElementById('lit-term-save') as HTMLButtonElement).click();
       await vi.waitFor(() => expect(noteGen.generateTermNote).toHaveBeenCalledTimes(1));
-      expect(noteGen.generateTermNote).toHaveBeenCalledWith({ term: '黑洞', summary: '黑洞的百科式简介', domain: '物理' });
+      expect(noteGen.generateTermNote).toHaveBeenCalledWith({ term: '黑洞', summary: '黑洞的百科式简介', domain: '物理', source: null });
       await vi.waitFor(() => expect(openFile).toHaveBeenCalledTimes(1));
       // term-generated 行为流事件
       expect(events).toContainEqual(expect.objectContaining({ kind: 'term-generated', term: '黑洞' }));
@@ -714,7 +714,7 @@ ${summary ?? `${term}的百科式简介`}`);
 
   it('术语流程：预览只读所见即所得——无领域/正文输入框，确认写入传 AI 预览值（不重跑 AI、无二次覆盖）', async () => {
     noteGen.generateTermDraft.mockResolvedValue({ summary: 'AI 生成的简介', domain: '物理' });
-    noteGen.generateTermNote.mockImplementation(async ({ term, summary, domain }: { term: string; summary?: string; domain?: string }) => {
+    noteGen.generateTermNote.mockImplementation(async ({ term, summary, domain, source }: { term: string; summary?: string; domain?: string; source?: unknown }) => {
       const path = `文献盒/${term}.md`;
       vault.files.set(path, `---
 title: "${term}"
@@ -740,7 +740,7 @@ ${summary ?? 'AI 生成的简介'}`);
     await vi.waitFor(() => expect(openFile).toHaveBeenCalledTimes(1));
     expect(noteGen.generateTermNote).toHaveBeenCalledTimes(1); // 预览不落盘，确认仅落一次
     // 所见即所得：确认写入直接用 AI 预览值，不重跑 AI、无二次覆盖
-    expect(noteGen.generateTermNote).toHaveBeenCalledWith({ term: '黑洞', summary: 'AI 生成的简介', domain: '物理' });
+    expect(noteGen.generateTermNote).toHaveBeenCalledWith({ term: '黑洞', summary: 'AI 生成的简介', domain: '物理', source: null });
     const content = vault.files.get('文献盒/黑洞.md')!;
     expect(content).toContain('domain: "物理"');
     expect(content).toContain('AI 生成的简介');
@@ -788,7 +788,7 @@ ${summary ?? 'AI 生成的简介'}`);
   it('术语流程（ticket 155）：总结后确认写入传精简正文；无预览点总结提示先生成', async () => {
     noteGen.generateTermDraft.mockResolvedValue({ summary: 'AI 生成的简介', domain: '物理' });
     noteGen.summarizeTermSummary.mockResolvedValue('精简后的简介');
-    noteGen.generateTermNote.mockImplementation(async ({ term, summary, domain }: { term: string; summary?: string; domain?: string }) => {
+    noteGen.generateTermNote.mockImplementation(async ({ term, summary, domain, source }: { term: string; summary?: string; domain?: string; source?: unknown }) => {
       const path = `文献盒/${term}.md`;
       vault.files.set(path, `---
 title: "${term}"
@@ -810,7 +810,7 @@ ${summary ?? ''}`);
     await vi.waitFor(() => expect((document.getElementById('lit-term-content') as HTMLElement).textContent).toContain('精简后的简介'));
     (document.getElementById('lit-term-save') as HTMLButtonElement).click();
     await vi.waitFor(() => expect(noteGen.generateTermNote).toHaveBeenCalledTimes(1));
-    expect(noteGen.generateTermNote).toHaveBeenCalledWith({ term: '黑洞', summary: '精简后的简介', domain: '物理' });
+    expect(noteGen.generateTermNote).toHaveBeenCalledWith({ term: '黑洞', summary: '精简后的简介', domain: '物理', source: null });
     // 重开面板无预览：总结按钮提示先生成
     ui.showTermEntry();
     (document.getElementById('lit-term-regenerate') as HTMLButtonElement).click();
@@ -829,6 +829,57 @@ ${summary ?? ''}`);
     // 生成按钮恢复可用，文案回到「生成」（无预览结果不显示「重新生成」）
     expect((document.getElementById('lit-term-generate') as HTMLButtonElement).disabled).toBe(false);
     expect((document.getElementById('lit-term-generate') as HTMLButtonElement).textContent).toBe('生成');
+  });
+
+  // ==================== 术语来源（上游 ADR-0116） ====================
+
+  it('术语来源：URL 回车 → 外部 chip + 属性卡来源行（净化尾标点）；点来源行开浏览器；确认写入落 source', async () => {
+    noteGen.generateTermDraft.mockResolvedValue({ summary: 'AI 生成的简介', domain: '物理' });
+    noteGen.generateTermNote.mockResolvedValue('文献盒/心流.md');
+    ui.showTermEntry();
+    (document.getElementById('lit-term-input') as HTMLInputElement).value = '心流';
+    (document.getElementById('lit-term-generate') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(document.getElementById('lit-term-preview')!.style.display).toBe('flex'));
+    // 输入整串 URL（带尾随标点）+ 回车 → 外部 chip（输入框收起）
+    const srcInput = document.getElementById('lit-term-src') as HTMLInputElement;
+    srcInput.value = 'https://zhuanlan.zhihu.com/p/123456，';
+    srcInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    const chip = document.getElementById('lit-term-src-chip')!;
+    expect(chip.style.display).toBe('inline-flex');
+    expect(chip.textContent).toContain('外 部');
+    expect(srcInput.style.display).toBe('none');
+    // 属性卡来源行：净化后的 URL（尾随标点已剥）
+    expect((document.getElementById('lit-term-meta-srcrow') as HTMLElement).style.display).toBe('');
+    const metaSrc = document.getElementById('lit-term-meta-src') as HTMLElement;
+    expect(metaSrc.textContent).toBe('https://zhuanlan.zhihu.com/p/123456');
+    // 点来源行 → 系统浏览器
+    metaSrc.click();
+    expect(app.openUrl).toHaveBeenCalledWith('https://zhuanlan.zhihu.com/p/123456');
+    // 确认写入 → source 随载荷落库
+    (document.getElementById('lit-term-save') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(noteGen.generateTermNote).toHaveBeenCalledTimes(1));
+    expect((noteGen.generateTermNote.mock.calls[0][0] as any).source)
+      .toMatchObject({ kind: 'external', url: 'https://zhuanlan.zhihu.com/p/123456' });
+  });
+
+  it('术语来源：内部笔记 chip（内 部 + 笔记名）；✕ 清除还原输入框；无来源重开不复带上次', async () => {
+    noteGen.generateTermDraft.mockResolvedValue({ summary: '', domain: '' });
+    const noteSrc = { kind: 'note' as const, path: '我的/日记/心流体验.md' };
+    ui.showTermEntry('心流', noteSrc);
+    await vi.waitFor(() => expect(document.getElementById('literature-term-popup')!.style.display).toBe('flex'));
+    const chip = document.getElementById('lit-term-src-chip')!;
+    expect(chip.style.display).toBe('inline-flex');
+    expect(chip.textContent).toContain('内 部');
+    expect(chip.textContent).toContain('心流体验'); // noteSourceName：去目录去 .md
+    expect((document.getElementById('lit-term-src') as HTMLInputElement).style.display).toBe('none');
+    // ✕ 清除 → chip 收起、输入框复现、属性卡来源行隐去
+    (chip.querySelector('[data-term-src-clear]') as HTMLElement).click();
+    expect(chip.style.display).toBe('none');
+    expect((document.getElementById('lit-term-src') as HTMLInputElement).style.display).toBe('');
+    expect((document.getElementById('lit-term-meta-srcrow') as HTMLElement).style.display).toBe('none');
+    // 无来源重开 → 不复带上一次
+    ui.showTermEntry('心流');
+    expect(document.getElementById('lit-term-src-chip')!.style.display).toBe('none');
   });
 
   // ==================== 设置 schema 与设置弹窗 ====================
