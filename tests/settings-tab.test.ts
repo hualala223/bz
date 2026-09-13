@@ -1,6 +1,6 @@
 /**
- * 设置页测试（覆盖 main.ts BzSettingTab，ADR-0009）：单页三区块（🤖 AI / 📂 数据存储路径 /
- * 🐱 小橘电力电源）渲染 + 控件交互保存持久化 + storagePath 迁移（旧 7 字段 → 共享路径）。
+ * 设置页测试（覆盖 main.ts BzSettingTab，ADR-0009）：单页四区块（🤖 AI / 📂 数据存储路径 /
+ * 🔔 通知 / 🐱 小橘电力电源）渲染 + 控件交互保存持久化 + storagePath 迁移（旧 7 字段 → 共享路径）。
  * ticket 128：数据存储路径行改为统一路径选择器（chips + 选择…按钮，无手输文本框），
  * 交互经选择器录入；onCommit 提示语义（有变更才提示、同一次会话至多一次、改回原值复位）保留。
  * ticket 131：两区块 schema 化（ADR-0064 渲染器）；AI 服务商切换 → 密钥行显隐走 visibleWhen；
@@ -77,10 +77,10 @@ describe('设置页 BzSettingTab（ADR-0009 单页）', () => {
     if (plugin && plugin.unregisterGestures) plugin.unregisterGestures();
   });
 
-  it('单页平铺：无 tab，只有 🤖 AI、📂 数据存储路径、🐱 小橘 三个区块标题', () => {
+  it('单页平铺：无 tab，只有 🤖 AI、📂 数据存储路径、🔔 通知、🐱 小橘 四个区块标题', () => {
     expect(tab.containerEl.querySelectorAll('.bz-tab').length).toBe(0);
     const titles = [...tab.containerEl.querySelectorAll('.bz-setting-section-title')].map((t) => t.textContent);
-    expect(titles).toEqual(['🤖 AI', '📂 数据存储路径', '🐱 小橘']);
+    expect(titles).toEqual(['🤖 AI', '📂 数据存储路径', '🔔 通知', '🐱 小橘']);
   });
 
   it('AI 区块：服务商下拉 + 两个密钥行；数据存储路径区块：路径选择行（已选态 chip + ✕，无按钮/手输框）', () => {

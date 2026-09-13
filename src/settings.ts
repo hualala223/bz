@@ -35,6 +35,21 @@ export default interface BzSettings {
   /** 共享 JSON 数据目录（memo/belongings/passwords/favorites/review/quiz/闪念 meta+vec 统一存放） */
   storagePath: string;
 
+  // ===== 🔔 通知（core notice toast 横切偏好，issue 258）=====
+  // 与上游同名同值，故沿用上游键名（ADR-0118 例外：两侧无命名分歧）。
+  // 缺省值 = 加入偏好之前的既有行为，四项均未改时通知行为与旧版逐条一致。
+  /** 🔔 通知级别：all（全部）/ important（仅警告与错误）/ error（仅错误）；带操作按钮的通知与
+   *  进度类型不受影响（撤销/查看是交互出口，进度是长任务状态框，静默掉会让用户无从反悔） */
+  noticeLevel: string;
+  /** ⏱️ 停留时长档位：quick（2 秒）/ standard（3 秒）/ relaxed（5 秒）/ persistent（常驻点击才关）；
+   *  只作用于未显式指定时长的默认停留——撤销类 6 秒反悔窗口与长文案动态延长不受缩放 */
+  noticeDuration: string;
+  /** 🧭 弹出位置：top-right（默认）/ top-left / bottom-right / bottom-left；
+   *  仅在桌面端生效，移动端恒为顶部居中 */
+  noticePosition: string;
+  /** 📚 同屏上限：3 / 5 / 8（字符串存值）；超出时挤掉最旧一条，常驻进度帧不被挤出 */
+  noticeMaxVisible: string;
+
   // ===== 📎 附件搬移（ticket 65，运行时记忆，不暴露设置）=====
   /** 上次选择的目标文件夹（文件夹选择器默认值） */
   attachLastFolder: string;
@@ -469,6 +484,12 @@ export const DEFAULT_SETTINGS: BzSettings = {
 
   // 共享数据路径（ADR-0009）
   storagePath: 'CONFIG/STORAGE',
+
+  // 通知横切偏好（issue 258；缺省 = 既有行为）
+  noticeLevel: 'all',
+  noticeDuration: 'standard',
+  noticePosition: 'top-right',
+  noticeMaxVisible: '5',
 
   // 附件搬移（ticket 65，运行时记忆）
   attachLastFolder: '',

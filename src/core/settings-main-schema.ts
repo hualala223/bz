@@ -1,7 +1,8 @@
 /**
- * 主设置页 schema（ticket 131，ADR-0064）：BzSettingTab.display() 两区块（🤖 AI / 📂 数据存储
- * 路径）的声明式定义。归属 core 的理由：两区块均为跨域全局项（ADR-0009 设置所有权），且文案
- * lint（ticket 100）需以纯数据方式全量断言（本模块只依赖 core 与设置类型，node 环境可安全加载）。
+ * 主设置页 schema（ticket 131，ADR-0064）：BzSettingTab.display() 的区块声明（🤖 AI / 📂 数据存储
+ * 路径，issue 258 起追加「🔔 通知」组）。归属 core 的理由：各区块均为跨域全局项（ADR-0009 设置
+ * 所有权），且文案 lint（ticket 100）需以纯数据方式全量断言（本模块只依赖 core 与设置类型，
+ * node 环境可安全加载）。
  *
  * 行为零变化锚点：
  * - AI 服务商切换 → 密钥/模型行显隐由 visibleWhen 按所选服务商声明（ticket 175 扩为五家统一
@@ -161,6 +162,60 @@ export function mainSettingsSchema(): SettingsSchema {
             onCommit: () => {
               notice(STORAGE_PATH_COMMIT_NOTICE, 'warning');
             },
+          },
+        ],
+      },
+      // 通知横切偏好（issue 258，吸收上游 issue 297）：core notice toast 的全局偏好，不建业务域，
+      // 因此进主设置页而不进设置面板导航。按本地既有形态接入——无 icon = 区块标题平铺（与 🤖 AI 同），
+      // 不引 icon 字段改变既有组头版式；行型全 select，四项缺省值均等于加入偏好之前的既有行为。
+      {
+        name: '🔔 通知',
+        rows: [
+          {
+            type: 'select',
+            name: '通知级别',
+            desc: '低档位静默常规通知，带撤销按钮的通知不受影响',
+            binding: { key: 'noticeLevel' },
+            options: [
+              { value: 'all', label: '全部' },
+              { value: 'important', label: '仅警告与错误' },
+              { value: 'error', label: '仅错误' },
+            ],
+          },
+          {
+            type: 'select',
+            name: '停留时长',
+            desc: '长文案自动延长，撤销类通知不受影响',
+            binding: { key: 'noticeDuration' },
+            options: [
+              { value: 'quick', label: '干脆（2 秒）' },
+              { value: 'standard', label: '标准（3 秒）' },
+              { value: 'relaxed', label: '从容（5 秒）' },
+              { value: 'persistent', label: '常驻（点击才关）' },
+            ],
+          },
+          {
+            type: 'select',
+            name: '弹出位置',
+            desc: '桌面端四角任选，移动端恒顶部居中',
+            binding: { key: 'noticePosition' },
+            options: [
+              { value: 'top-right', label: '右上（默认）' },
+              { value: 'bottom-right', label: '右下' },
+              { value: 'bottom-left', label: '左下' },
+              { value: 'top-left', label: '左上' },
+            ],
+          },
+          {
+            type: 'select',
+            name: '同屏上限',
+            desc: '超出时挤掉最旧的一条',
+            binding: { key: 'noticeMaxVisible' },
+            options: [
+              { value: '3', label: '3 条' },
+              { value: '5', label: '5 条（默认）' },
+              { value: '8', label: '8 条' },
+            ],
           },
         ],
       },

@@ -20,11 +20,12 @@ function snapOf(partial: Partial<SettingsSnapshot>): SettingsSnapshot {
   return partial as SettingsSnapshot;
 }
 
-describe('mainSettingsSchema：主设置页两区块', () => {
+describe('mainSettingsSchema：主设置页区块', () => {
   const schema = mainSettingsSchema();
 
-  it('两区块均为无 icon 分组（区块标题平铺形态），标题 DOM 契约保持', () => {
-    expect(schema.groups.map((g) => g.name)).toEqual(['🤖 AI', '📂 数据存储路径']);
+  it('三区块均为无 icon 分组（区块标题平铺形态），标题 DOM 契约保持', () => {
+    // issue 258：新增「🔔 通知」组（core 横切偏好），仍为无 icon 平铺形态，既有两组的结构与顺序不变
+    expect(schema.groups.map((g) => g.name)).toEqual(['🤖 AI', '📂 数据存储路径', '🔔 通知']);
     expect(schema.groups.every((g) => g.icon === undefined)).toBe(true);
   });
 

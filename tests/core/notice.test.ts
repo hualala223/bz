@@ -1,9 +1,11 @@
 /**
  * 通知系统（ticket 25）核心测试——自绘 toast 替代原生 Notice。
  * 覆盖：四种类型 / 时长规则 / 点击关闭 / 动态消息 / 进度条 / 操作按钮 / 堆叠上限。
+ * issue 258 追加：四项横切偏好的测试缝隙（见文件末段——经公共入口 + 设置快照注入驱动）。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { notify, notifyUndo, notifySaveError, notifyActionError, __resetNoticeForTests, cleanupNotices } from '../../src/core/notice';
+import { setSettingsProvider } from '../../src/core/settings-provider';
 
 function visibleNotices(): HTMLElement[] {
   return Array.from(document.querySelectorAll('.bz-notice')) as HTMLElement[];
@@ -411,5 +413,268 @@ describe('通知系统', () => {
       notifyActionError(42, '还原');
       expect(visibleNotices()[1].querySelector('.bz-notice-msg')!.textContent).toBe('还原失败：42，请重试');
     });
+  });
+});
+
+/* ==================== 四项横切偏好（issue 258，吸收上游 issue 297） ====================
+ * 测试缝隙：复用公共入口（notify/notice/notifyUndo）+ 设置快照注入，不新增 seam、不触模块内部。
+ * 四项偏好的缺省值均等于「加入偏好之前」的既有行为——每组先锁缺省回归，再逐项驱动偏好。
+ */
+
+/** 注入只含所需键的假设置（未给的键 = 未设置，走缺省分支） */
+function usePrefs(prefs: Record<string, unknown>): void {
+  setSettingsProvider(() => prefs as never);
+}
+
+/** 未设置任何偏好 = 加入偏好之前的既有环境 */
+function useNoPrefs(): void {
+  usePrefs({});
+}
+
+/** 通知正文文本清单（按 DOM 顺序 = 弹出顺序） */
+function messages(): Array<string | null> {
+  return visibleNotices().map((el) => el.querySelector('.bz-notice-msg')!.textContent);
+}
+
+describe('通知偏好：级别降噪（noticeLevel，issue 258）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    __resetNoticeForTests();
+    document.body.innerHTML = '';
+    useNoPrefs();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    document.body.innerHTML = '';
+    useNoPrefs();
+  });
+
+  it('缺省 all（未设置）：四类常规通知照常弹出（原行为）', () => {
+    notify('常规');
+    notify('成功', { type: 'success' });
+    notify('警告', { type: 'warning' });
+    notify('错误', { type: 'error' });
+    expect(messages()).toEqual(['常规', '成功', '警告', '错误']);
+  });
+
+  it('important：仅警告与错误放行，info/success 静默', () => {
+    usePrefs({ noticeLevel: 'important' });
+    notify('常规');
+    notify('成功', { type: 'success' });
+    notify('警告', { type: 'warning' });
+    notify('错误', { type: 'error' });
+    expect(messages()).toEqual(['警告', '错误']);
+  });
+
+  it('error：仅错误放行（警告同样静默）', () => {
+    usePrefs({ noticeLevel: 'error' });
+    notify('警告', { type: 'warning' });
+    notify('错误', { type: 'error' });
+    expect(messages()).toEqual(['错误']);
+  });
+
+  it('带操作按钮的通知永不静默（撤销/查看是交互出口），同档无按钮者静默', () => {
+    usePrefs({ noticeLevel: 'error' });
+    notifyUndo('已删除', () => {});
+    notify('成功', { type: 'success' });
+    notify('带动作的成功', { type: 'success', action: { label: '查看', onClick: () => {} } });
+    expect(messages()).toEqual(['已删除', '带动作的成功']);
+  });
+
+  it('progress 不受级别影响（长任务状态框始终在）', () => {
+    usePrefs({ noticeLevel: 'error' });
+    notify('索引进度', { type: 'progress' });
+    expect(messages()).toEqual(['索引进度']);
+  });
+
+  it('静默调用返回空操作 handle：setMessage/setType/setProgress/hide 均可安全调用', () => {
+    usePrefs({ noticeLevel: 'error' });
+    const h = notify('被静默', { type: 'success' });
+    expect(visibleNotices()).toHaveLength(0);
+    expect(() => {
+      h.setMessage('改文');
+      h.setType('error');
+      h.setProgress(50);
+      h.hide();
+    }).not.toThrow();
+    expect(visibleNotices()).toHaveLength(0);
+  });
+
+  it('被静默的调用视同未发生：不占用去重窗口', () => {
+    usePrefs({ noticeLevel: 'error' });
+    notify('同键通知', { type: 'success', dedupeKey: 'k258' });
+    useNoPrefs();
+    notify('同键通知', { type: 'success', dedupeKey: 'k258' });
+    expect(messages()).toEqual(['同键通知']);
+  });
+
+  it('设置读取失败（provider 抛错）不炸通知：按缺省行为弹出（通知是最后兜底通道）', () => {
+    setSettingsProvider(() => {
+      throw new Error('设置尚未就绪');
+    });
+    expect(() => notify('兜底提示')).not.toThrow();
+    expect(messages()).toEqual(['兜底提示']);
+    useNoPrefs();
+  });
+});
+
+describe('通知偏好：停留档位（noticeDuration，issue 258）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    __resetNoticeForTests();
+    document.body.innerHTML = '';
+    useNoPrefs();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    document.body.innerHTML = '';
+    useNoPrefs();
+  });
+
+  it('缺省 standard（未设置）：info 3s、error 5s 消失（原行为）', async () => {
+    notify('信息');
+    notify('错误', { type: 'error' });
+    await vi.advanceTimersByTimeAsync(3300);
+    expect(messages()).toEqual(['错误']);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(visibleNotices()).toHaveLength(0);
+  });
+
+  it('quick：常规 2s、错误 4s 消失', async () => {
+    usePrefs({ noticeDuration: 'quick' });
+    notify('信息');
+    notify('错误', { type: 'error' });
+    await vi.advanceTimersByTimeAsync(2300);
+    expect(messages()).toEqual(['错误']);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(visibleNotices()).toHaveLength(0);
+  });
+
+  it('relaxed：3.5s 时仍在（标准档 3s 早已收），5.4s 消失', async () => {
+    usePrefs({ noticeDuration: 'relaxed' });
+    notify('信息');
+    await vi.advanceTimersByTimeAsync(3500);
+    expect(visibleNotices()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1900);
+    expect(visibleNotices()).toHaveLength(0);
+  });
+
+  it('显式时长不缩放：quick 档下撤销类 6 秒反悔窗口原样', async () => {
+    usePrefs({ noticeDuration: 'quick' });
+    notifyUndo('已删除', () => {});
+    await vi.advanceTimersByTimeAsync(5900);
+    expect(visibleNotices()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(visibleNotices()).toHaveLength(0);
+  });
+
+  it('persistent：常规通知不自动消失（60s 后仍在）', async () => {
+    usePrefs({ noticeDuration: 'persistent' });
+    notify('信息');
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(visibleNotices()).toHaveLength(1);
+  });
+
+  it('persistent 档普通帧仍参与堆叠驱逐（区别于 progress 常驻帧的免疫）', () => {
+    usePrefs({ noticeDuration: 'persistent' });
+    for (let i = 0; i < 6; i++) notify(`第 ${i} 条`);
+    expect(visibleNotices()).toHaveLength(5);
+    expect(messages()[0]).toBe('第 1 条');
+  });
+
+  it('常驻进度帧不被挤出（P1-33 语义不因档位变化而松动）', () => {
+    usePrefs({ noticeDuration: 'quick' });
+    const h = notify('索引进度', { type: 'progress' });
+    for (let i = 0; i < 6; i++) notify(`第 ${i} 条`);
+    expect(document.body.contains(h.el)).toBe(true);
+    expect(h.el.querySelector('.bz-notice-msg')!.textContent).toBe('索引进度');
+  });
+});
+
+describe('通知偏好：弹出位置（noticePosition，issue 258）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    __resetNoticeForTests();
+    document.body.innerHTML = '';
+    useNoPrefs();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    document.body.innerHTML = '';
+    useNoPrefs();
+  });
+
+  it('缺省 top-right（未设置）：容器不挂任何位置类（走基底样式）', () => {
+    notify('默认');
+    const c = document.getElementById('bz-notice-container')!;
+    expect(c.classList.length).toBe(0);
+  });
+
+  it('角位类挂容器；换角先清旧类；改回默认则不挂类', () => {
+    usePrefs({ noticePosition: 'bottom-right' });
+    notify('右下');
+    const c = document.getElementById('bz-notice-container')!;
+    expect(c.classList.contains('bz-notice-pos--bottom-right')).toBe(true);
+
+    usePrefs({ noticePosition: 'top-left' });
+    notify('左上');
+    expect(c.classList.contains('bz-notice-pos--top-left')).toBe(true);
+    expect(c.classList.contains('bz-notice-pos--bottom-right')).toBe(false);
+
+    usePrefs({ noticePosition: 'top-right' });
+    notify('回默认');
+    expect(c.classList.length).toBe(0);
+  });
+
+  it('左列角位默认变体换 slide-left（从左滑入）；右列保持 slide-right', () => {
+    usePrefs({ noticePosition: 'bottom-left' });
+    notify('左下');
+    expect(visibleNotices()[0].classList.contains('bz-notice--in-slide-left')).toBe(true);
+
+    usePrefs({ noticePosition: 'bottom-right' });
+    notify('右下');
+    expect(visibleNotices()[1].classList.contains('bz-notice--in-slide-right')).toBe(true);
+  });
+});
+
+describe('通知偏好：同屏上限（noticeMaxVisible，issue 258）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    __resetNoticeForTests();
+    document.body.innerHTML = '';
+    useNoPrefs();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    document.body.innerHTML = '';
+    useNoPrefs();
+  });
+
+  it('缺省 5（未设置）：第 6 条挤出最旧（原行为）', () => {
+    for (let i = 0; i < 6; i++) notify(`第 ${i} 条`);
+    expect(messages()).toEqual(['第 1 条', '第 2 条', '第 3 条', '第 4 条', '第 5 条']);
+  });
+
+  it('3 条：第 4 条起挤出最旧', () => {
+    usePrefs({ noticeMaxVisible: '3' });
+    for (let i = 0; i < 4; i++) notify(`第 ${i} 条`);
+    expect(messages()).toEqual(['第 1 条', '第 2 条', '第 3 条']);
+  });
+
+  it('8 条：第 9 条才挤出最旧', () => {
+    usePrefs({ noticeMaxVisible: '8' });
+    for (let i = 0; i < 9; i++) notify(`第 ${i} 条`);
+    expect(visibleNotices()).toHaveLength(8);
+    expect(messages()[0]).toBe('第 1 条');
+  });
+
+  it('非法值回落 5', () => {
+    usePrefs({ noticeMaxVisible: '不是数字' });
+    for (let i = 0; i < 6; i++) notify(`第 ${i} 条`);
+    expect(visibleNotices()).toHaveLength(5);
   });
 });
