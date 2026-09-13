@@ -472,6 +472,12 @@ export default interface BzSettings {
   // ===== 上游线（yeshimei/bz）并入新域设置键（第一档加法） =====
   /** 📦 归物本：默认状态筛选（空串=全部，其余 using/idle/sold/discard；非法值回落全部。上游 issue 194） */
   belongingsDefaultStatus: string;
+  /** 📦 归物本：默认排序（recent 最近购入 / price 投入最高 / daily 日均最高；非法值回落 recent。上游 issue 294） */
+  belongingsDefaultSort: string;
+  /** 📦 归物本：新记条目默认状态（使用中/闲置；非法值回落「使用中」。上游 issue 294） */
+  belongingsNewStatus: string;
+  /** 📦 归物本：金额单位（cny=￥ 前缀默认 / yuan=元 后缀 / usd=$ / none=无符号；非法值回落 cny。上游 issue 294） */
+  belongingsCurrency: string;
   /** 设置面板主窗口：移动端默认全屏（默认开；主面板全屏 + 关闭按钮，子面板一律弹窗。ADR-0080） */
   settingsPanelMobileDefaultFullscreen: boolean;
   /** 设置面板布局：'jingwei' = 经纬（当前唯一布局，ADR-0080） */
@@ -718,6 +724,10 @@ export const DEFAULT_SETTINGS: BzSettings = {
   // 上游线（yeshimei/bz）并入新域设置键默认值（第一档加法）
   // 归物本默认状态筛选（空串=全部，上游 issue 194）
   belongingsDefaultStatus: '',
+  // 归物本默认排序 / 新记默认状态 / 金额单位（上游 issue 294）
+  belongingsDefaultSort: 'recent',
+  belongingsNewStatus: '使用中',
+  belongingsCurrency: 'cny',
   // 设置面板（ADR-0080）：移动端默认全屏（默认开）；布局默认经纬；主题默认晨昏（跟随亮暗）
   settingsPanelMobileDefaultFullscreen: true,
   settingsPanelLayout: 'jingwei',

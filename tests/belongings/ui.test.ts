@@ -81,6 +81,15 @@ function rightClick(cell: HTMLElement, x = 60, y = 60) {
 function clickCell(cell: HTMLElement) {
   cell.click();
 }
+/** 触屏按压（core/dom.longPress 手势）：touchstart → 停留 ms → touchend；越过 500ms 即长按。
+ *  jsdom 不自动合成 click，故短按不会误走「点卡开抽屉」路径，断言只反映长按入口本身 */
+async function touchPress(el: HTMLElement, ms: number): Promise<void> {
+  const ts = new TouchEvent('touchstart', { bubbles: true, cancelable: true });
+  Object.defineProperty(ts, 'touches', { value: [{ clientX: 10, clientY: 10 }] });
+  el.dispatchEvent(ts);
+  await tick(ms);
+  el.dispatchEvent(new TouchEvent('touchend', { bubbles: true }));
+}
 /** 当前浮层动作项文案列表（桌面菜单 / 移动抽屉共用 label 断言） */
 function actionLabels(): string[] {
   return [...document.querySelectorAll('.bz-item-menu-label, .bz-item-sheet-label')].map((e) => e.textContent || '');
@@ -319,7 +328,7 @@ describe('归物本面板：开合 / 空态 / 清理', () => {
     expect(Number.isFinite(zForm) && zForm > zDetail).toBe(true);
     // 收尾：取消关表单 + 关详情
     (mask.querySelector('[data-bm-cancel]') as HTMLElement).click();
-    (detailMask()!.querySelector('[data-bd-close]') as HTMLElement).click();
+    (detailMask()!.querySelector('[data-bd-close]') as HTMLElement).click(); // 本地保留：详情右上 × 钮关闭
     expect(detailMask()).toBeNull();
     cleanupBelongings();
   });
@@ -792,7 +801,7 @@ describe('归物本详情弹窗（P20）', () => {
     }
   });
 
-  it('详情流转条：点闲置 → 落盘 + status 事件 + notice + 流转条高亮刷新；×钮关闭', async () => {
+  it('详情流转条：点闲置 → 落盘 + status 事件 + notice + 流转条高亮刷新；× 钮关闭（本地保留入口）', async () => {
     seed(vault, { item_1: makeItem({ id: 'item_1', name: '键盘' }) });
     await open(vault);
     clickCell(cells()[0]);
@@ -807,7 +816,7 @@ describe('归物本详情弹窗（P20）', () => {
     expect(flows.find((b) => b.dataset.bdFlow === '闲置')!.classList.contains('is-cur')).toBe(true);
     // 网格卡徽章同步
     expect(cells()[0].querySelector('.bz-bel-tag')!.textContent).toContain('闲置');
-    // × 关闭
+    // × 钮关闭（本地保留入口；遮罩 mousedown 关闭由下一条用例覆盖）
     (detailBox()!.querySelector('[data-bd-close]') as HTMLElement).click();
     expect(detailMask()).toBeNull();
   });
@@ -825,6 +834,10 @@ describe('归物本详情弹窗（P20）', () => {
     (detailBox()!.querySelector('[data-bd-del]') as HTMLElement).click();
     await flush();
     expect(document.getElementById('__shared_confirm_popup__')).not.toBeNull();
+    // issue 291：确认框挂 body，须带域皮肤类才拿到海报 token（与详情/表单同皮）
+    expect(
+      document.getElementById('__shared_confirm_popup__')!.classList.contains('bz-bel-flow-dialog')
+    ).toBe(true);
     (document.getElementById('__shared_confirm_cancel__') as HTMLButtonElement).click();
     await flush();
     expect(detailBox()).not.toBeNull(); // 取消：详情保持
@@ -940,6 +953,23 @@ describe('归物本行操作（桌面菜单 / 移动抽屉 / 动作集）', () =
     } finally {
       Platform.isMobile = false;
     }
+  });
+
+  it('长按卡 → .bz-item-sheet（统一手势 core/dom.longPress）：桌面长按不弹、移动端短按不弹、移动端长按弹', async () => {
+    seed(vault, { item_1: makeItem({ id: 'item_1', name: '机械键盘', purchase_price: 399 }) });
+    await open(vault);
+    // 桌面（Platform.isMobile=false）：手势过滤不放行
+    await touchPress(cells()[0], 550);
+    expect(document.querySelector('.bz-item-sheet')).toBeNull();
+    // 移动端短按（未到 500ms）：不弹
+    Platform.isMobile = true;
+    await touchPress(cells()[0], 100);
+    expect(document.querySelector('.bz-item-sheet')).toBeNull();
+    // 移动端长按：弹抽屉，头部名称正确（与点卡入口同一 openMobSheet）
+    await touchPress(cells()[0], 550);
+    await flush();
+    expect(document.querySelector('.bz-item-sheet-mask')).not.toBeNull();
+    expect(document.querySelector('.bz-item-sheet-title')!.textContent).toBe('机械键盘');
   });
 });
 
@@ -1343,7 +1373,7 @@ describe('归物本表单（记一笔 / 编辑）', () => {
     expect(item.current_status).toBe('闲置');
   });
 
-  it('正常保存：8 字段 items 落盘（保存结构零冗余）+ add 事件载荷 + notice + 表单关 + 列表出现', async () => {
+  it('正常保存：8 字段 items 落盘（保存结构零冗余）+ add 事件载荷 + 表单关 + 列表出现', async () => {
     await open(vault);
     openAddForm(panel()!);
     nameInp().value = '新显示器';
@@ -1360,14 +1390,14 @@ describe('归物本表单（记一笔 / 编辑）', () => {
       name: '新显示器', category: '🖥 显示器', purchase_price: 1299,
       purchase_date: '2024-06-15', current_status: '使用中', description: '',
     });
-    expect(item.id).toMatch(/^item_\d+$/);
+    expect(item.id).toMatch(/^item_\d+(_[a-z0-9]+)?$/); // H18：id 拼随机后缀防同毫秒覆盖
     expect(item.created_date).toBeTruthy();
     expect(item.last_updated).toBeTruthy();
     expect(events).toHaveLength(1);
     expect(events[0].kind).toBe('add');
     expect(events[0].item).toMatchObject({ name: '新显示器', purchase_price: 1299, current_status: '使用中' });
     expect(events[0].item.id).toBeTruthy();
-    expect(hasNotice('物品「新显示器」已添加')).toBe(true);
+    expect(hasNotice('物品「新显示器」已添加')).toBe(true); // 本地保留：入库成功提示
     expect(content()!.textContent).toContain('新显示器');
   });
 
@@ -1409,7 +1439,7 @@ describe('归物本表单（记一笔 / 编辑）', () => {
     expect(hasNotice('数据加载失败：设置读取失败')).toBe(true);
   });
 
-  it('编辑：菜单「编辑」→ 回填 → 改名改价保存 → 落盘 + edit 事件（belongingsEditChanges）+ notice 已更新', async () => {
+  it('编辑：菜单「编辑」→ 回填 → 改名改价保存 → 落盘 + edit 事件（belongingsEditChanges）+ 表单关', async () => {
     seed(vault, {
       item_1: makeItem({ id: 'item_1', name: '机械键盘', purchase_price: 399, description: '红轴', purchase_date: '2024-06-01' }),
     });
@@ -1437,7 +1467,7 @@ describe('归物本表单（记一笔 / 编辑）', () => {
     expect(saved.items.item_1.created_date).toBe('2024-06-01T10:00:00.000Z'); // created 保留
     expect(events).toHaveLength(1);
     expect(events[0]).toEqual({ kind: 'edit', title: '红轴机械键盘', changes: ['改了名称', '改了价格'] });
-    expect(hasNotice('物品「红轴机械键盘」已更新')).toBe(true);
+    expect(hasNotice('物品「红轴机械键盘」已更新')).toBe(true); // 本地保留：更新成功提示
     expect(document.querySelector('.bz-bel-form-mask')).toBeNull();
     expect(cells()[0].textContent).toContain('红轴机械键盘');
   });
@@ -1482,7 +1512,6 @@ describe('归物本表单（记一笔 / 编辑）', () => {
     expect(document.querySelector('.bz-item-sheet')).toBeNull();
     expect(JSON.parse(vault.files.get(DATA_PATH)!).items.item_1.name).toBe('改后手机');
     expect(events[0]).toEqual({ kind: 'edit', title: '改后手机', changes: ['改了名称'] });
-    expect(hasNotice('物品「改后手机」已更新')).toBe(true);
   });
 
   it('编辑表单点取消：脏表单走 confirmDiscard（放弃才关）；不改动直接关', async () => {
@@ -1497,6 +1526,12 @@ describe('归物本表单（记一笔 / 编辑）', () => {
     // 脏拦截：confirm 弹出，表单保持
     expect(document.getElementById('__shared_confirm_popup__')).not.toBeNull();
     expect(document.querySelector('.bz-bel-form-mask')).not.toBeNull();
+    // issue 291：confirmDiscard 的确认框同样带域皮肤类（否则与刚被拦住的表单弹窗两张脸）
+    expect(
+      document.getElementById('__shared_confirm_popup__')!.classList.contains('bz-bel-flow-dialog')
+    ).toBe(true);
+    // 标准双动作按钮不加类（冻结契约，core/flow-dialog 契约测试同口径）
+    expect((document.getElementById('__shared_confirm_ok__') as HTMLElement).className).toBe('');
     // 放弃（confirmDiscard 第一动作 = __shared_confirm_cancel__）→ 表单关，数据未动
     (document.getElementById('__shared_confirm_cancel__') as HTMLButtonElement).click();
     await flush();
@@ -1514,7 +1549,7 @@ describe('归物本表单（记一笔 / 编辑）', () => {
     expect(document.getElementById('__shared_confirm_popup__')).toBeNull();
   });
 
-  it('外部 modify 换库后表单保存：按 id 重取写入当前库（修复前弹已更新但改动落不进新库）', async () => {
+  it('外部 modify 换库后表单保存：按 id 重取写入当前库（修复前改动落不进新库）', async () => {
     seed(vault, { item_1: makeItem({ id: 'item_1', name: '键盘', description: '红轴', purchase_date: '2024-06-01' }) });
     await open(vault);
     rightClick(cells()[0]);
@@ -1535,7 +1570,6 @@ describe('归物本表单（记一笔 / 编辑）', () => {
     expect(saved.items.item_1.name).toBe('本地改名');
     expect(saved.items.item_1.created_date).toBe('2024-06-01T10:00:00.000Z'); // 当前库对象字段保留（非新建）
     expect(events).toEqual([{ kind: 'edit', title: '本地改名', changes: ['改了名称'] }]);
-    expect(hasNotice('物品「本地改名」已更新')).toBe(true);
   });
 });
 
@@ -1630,20 +1664,32 @@ describe('归物本自动刷新 / 事件载荷 / schema / XSS', () => {
     expect(events[2]).toEqual({ kind: 'delete', title: '键盘' });
   });
 
-  it('belongingSettingsSchema：显示组（默认状态筛选）+ 移动端组；桌面移动组门控 false / 移动 true', () => {
+  it('belongingSettingsSchema：显示组（默认状态+排序+金额单位）+ 记一笔组 + 移动端组；桌面移动组门控 false / 移动 true', () => {
     const settings = { belongingsDataFolder: 'CONFIG/STORAGE' };
     setSettingsProvider(() => settings as any);
     const schema = belongingSettingsSchema();
-    expect(schema.groups).toHaveLength(2);
-    // 显示组（issue 194）：默认状态筛选 select，常显（无组级门控）
+    expect(schema.groups).toHaveLength(3); // 显示 + 记一笔（issue 294）+ 移动端（本地独有）
+    // 显示组（issue 194 / issue 294）：默认状态筛选 + 默认排序 + 金额单位，常显（无组级门控）
     const view = schema.groups[0];
     expect(view.name).toBe('显示');
     expect(view.visibleWhen).toBeUndefined();
     const vrow = view.rows[0] as any;
     expect(vrow.type).toBe('select');
     expect(vrow.binding).toMatchObject({ key: 'belongingsDefaultStatus' });
-    // 移动端组：桌面整组隐藏 / 移动可见
-    const g = schema.groups[1];
+    const sortRow = view.rows[1] as any;
+    expect(sortRow.binding).toMatchObject({ key: 'belongingsDefaultSort' });
+    expect(sortRow.options.map((o: any) => o.value)).toEqual(['recent', 'price', 'daily']);
+    const curRow = view.rows[2] as any;
+    expect(curRow.binding).toMatchObject({ key: 'belongingsCurrency' });
+    expect(curRow.options.map((o: any) => o.value)).toEqual(['cny', 'yuan', 'usd', 'none']);
+    // 记一笔组（issue 294）：新增物品默认状态
+    const form = schema.groups[1];
+    expect(form.name).toBe('记一笔');
+    const nrow = form.rows[0] as any;
+    expect(nrow.binding).toMatchObject({ key: 'belongingsNewStatus' });
+    expect(nrow.options.map((o: any) => o.value)).toEqual(['使用中', '闲置']);
+    // 移动端组（本地独有 belongingsMobileDefaultFullscreen）：桌面整组隐藏 / 移动可见
+    const g = schema.groups[2];
     expect(g.name).toBe('移动端');
     expect(g.visibleWhen!(settings as any)).toBe(false);
     expect(g.rows).toHaveLength(1);
@@ -2025,6 +2071,110 @@ describe('默认状态筛选接线（issue 194）', () => {
     expect(row.type).toBe('select');
     expect(row.binding).toMatchObject({ key: 'belongingsDefaultStatus' });
     expect(row.options.map((o: any) => o.value)).toEqual(['', 'using', 'idle', 'sold', 'discard']);
+  });
+});
+
+describe('默认排序接线（issue 294）', () => {
+  beforeEach(() => {
+    setupDom(); // 本文件约定：每个 describe 自清 DOM（前序用例可能留表单/浮层）
+  });
+
+  it('belongingsDefaultSort=price → 打开即按投入最高排列且排序段选中该档', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2024-08-01T12:00:00'));
+    try {
+      const vault = new MockVault();
+      seed(vault, {
+        a: makeItem({ id: 'a', name: '老贵物', purchase_price: 5000, purchase_date: '2023-01-01T12:00:00' }),
+        b: makeItem({ id: 'b', name: '新便宜物', purchase_price: 99, purchase_date: '2024-08-01T12:00:00' }),
+      });
+      await open(vault, { belongingsDefaultSort: 'price' });
+      expect(cells()[0].dataset.belId).toBe('a'); // 5000 > 99（默认 recent 时首位应为 b）
+      const onBtn = [...document.querySelectorAll('[data-bel-sort] .bz-segmented-btn')].find((b) => b.classList.contains('is-on'));
+      expect(onBtn!.textContent).toBe('投入最高');
+      close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('非法值 → 回落最近购入', async () => {
+    const vault = new MockVault();
+    seed(vault, {
+      a: makeItem({ id: 'a', name: '老贵物', purchase_price: 5000, purchase_date: '2023-01-01T12:00:00' }),
+      b: makeItem({ id: 'b', name: '新便宜物', purchase_price: 99, purchase_date: '2024-08-01T12:00:00' }),
+    });
+    await open(vault, { belongingsDefaultSort: 'bogus' });
+    expect(cells()[0].dataset.belId).toBe('b');
+    close();
+  });
+});
+
+describe('新增物品默认状态（issue 294）', () => {
+  beforeEach(() => {
+    setupDom();
+  });
+
+  it('belongingsNewStatus=闲置 → 记一笔表单状态预设「闲置」并入库；编辑回填不受影响', async () => {
+    const vault = new MockVault();
+    seed(vault, { old: makeItem({ id: 'old', name: '旧相机', current_status: '使用中' }) });
+    const panelEl = await open(vault, { belongingsNewStatus: '闲置' });
+    openAddForm(panelEl);
+    await flush();
+    expect((formMask().querySelector('#bm-status .bz-choice-btn.is-on') as HTMLElement).dataset.status).toBe('闲置');
+    nameInp().value = '新键盘';
+    catInp().value = '数码';
+    priceInp().value = '100';
+    saveBtn().click();
+    await flush();
+    const saved = Object.values(JSON.parse(vault.files.get(DATA_PATH)!).items) as any[];
+    expect(saved.find((i) => i.name === '新键盘').current_status).toBe('闲置');
+    // 编辑既有条目：状态按条目自身回填（默认值只管新记）
+    (cells().find((c) => c.textContent?.includes('旧相机')) as HTMLElement).click();
+    await flush();
+    (document.querySelector('.bz-bel-detail-mask [data-bd-edit]') as HTMLElement)?.click();
+    await flush();
+    expect((formMask().querySelector('#bm-status .bz-choice-btn.is-on') as HTMLElement).dataset.status).toBe('使用中');
+    close();
+  });
+});
+
+describe('金额单位（issue 294）', () => {
+  beforeEach(() => {
+    setupDom();
+  });
+
+  it('belongingsCurrency=yuan → KPI 与卡片「数字 元」后缀、表单字段名带「元」', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2024-08-01T12:00:00'));
+    try {
+      const vault = new MockVault();
+      seed(vault, { a: makeItem({ id: 'a', name: '键盘', purchase_price: 500, purchase_date: '2024-07-01T12:00:00' }) });
+      const panelEl = await open(vault, { belongingsCurrency: 'yuan' });
+      expect(kpiVal('在库投入')).toBe('500 元');
+      expect(kpiVal('日均成本')).toBe('16.13 元'); // 500/31
+      expect(cells()[0].querySelector('.bz-bel-price')!.textContent).toBe('500 元');
+      expect(cells()[0].querySelector('.bz-bel-mut')!.textContent).toContain('日均 16.13 元');
+      openAddForm(panelEl);
+      await drain(); // 假时钟下 flush 的 setTimeout 永不触发，用微任务排空
+      expect(formMask().textContent).toContain('购买价格（元）');
+      close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('belongingsCurrency=none → 裸数字；非法值回落 ￥', async () => {
+    const vault = new MockVault();
+    seed(vault, { a: makeItem({ id: 'a', name: '键盘', purchase_price: 500, purchase_date: '2024-07-01T12:00:00' }) });
+    await open(vault, { belongingsCurrency: 'none' });
+    expect(cells()[0].querySelector('.bz-bel-price')!.textContent).toBe('500');
+    close();
+    const vault2 = new MockVault();
+    seed(vault2, { a: makeItem({ id: 'a', name: '键盘', purchase_price: 500, purchase_date: '2024-07-01T12:00:00' }) });
+    await open(vault2, { belongingsCurrency: 'bogus' });
+    expect(cells()[0].querySelector('.bz-bel-price')!.textContent).toBe('￥500');
+    close();
   });
 });
 

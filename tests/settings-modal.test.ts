@@ -450,7 +450,7 @@ describe('归物本设置 schema（⚙️ 收敛设置面板，ticket 177）', (
 
   it('桌面端：显示组暴露「默认状态筛选」select（五态，直绑 belongingsDefaultStatus）', () => {
     const schema = belongingSettingsSchema();
-    expect(schema.groups).toHaveLength(2);
+    expect(schema.groups).toHaveLength(3); // 显示 + 记一笔（上游 issue 294）+ 移动端（本地独有）
     expect(schema.groups[0].name).toBe('显示');
     const row = schema.groups[0].rows[0] as any;
     expect(row.type).toBe('select');
@@ -464,8 +464,8 @@ describe('归物本设置 schema（⚙️ 收敛设置面板，ticket 177）', (
     try {
       MockPlatform.isMobile = true;
       const schema = belongingSettingsSchema();
-      expect(schema.groups[1].visibleWhen!(settings as any)).toBe(true);
-      const row = schema.groups[1].rows[0] as any;
+      expect(schema.groups[2].visibleWhen!(settings as any)).toBe(true);
+      const row = schema.groups[2].rows[0] as any;
       expect(row.name).toBe('移动端默认全屏');
       expect(row.binding).toMatchObject({ key: 'belongingsMobileDefaultFullscreen' });
     } finally {

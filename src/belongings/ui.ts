@@ -15,7 +15,7 @@
  *   emoji-icon-map 全量映射（issue 231 拍板全转），未入表 emoji 原样兜底。
  *
  * 契约保留：belongings.json 零迁移；smartcat 事件（add/edit/status/delete + belongingsEditChanges）；
- *   belongingsDefaultStatus / belongingsMobileDefaultFullscreen 设置键；命令路径 openForm（面板未开可弹）；
+ *   belongingsDefaultStatus 设置键；命令路径 openForm（面板未开可弹）；
  *   自动刷新（数据文件 modify，自写短路）；主题变化重渲染；ESC 分层（详情→表单→主面板）；
  *   脏表单 confirmDiscard；notifyUndo 撤销；topifyZ 动态发号（ADR-0067）。
  * 视觉换血按 ADR-0097 判例：.bz-bel--poster 域内 token 作用域覆盖 + .bz-bel-* 装饰类，
@@ -26,6 +26,7 @@ import { topifyZ } from '../core/z-order';
 import { getApp } from '../core/app';
 import { escManager } from '../core/esc-manager';
 import { applyMobileWindowFullscreen, isMobileEnv } from '../core/mobile';
+import { longPress } from '../core/dom';
 import { tryGetSettings } from '../core/settings-provider';
 import { mobileFullscreenGroup } from '../core/settings-common';
 import { openFlowDialog, confirmDiscard } from '../core/flow-dialog';
@@ -38,12 +39,16 @@ import { loadDatabase, saveDatabase, getDataFilePath } from './data';
 import {
   renderPanelView, panelHtml,
   belDetailHtml, flowBtnsHtml, belFormHtml, belFormInit, statusPickHtml, sheetHeadHtml,
-  actionSpecs, todayStr, isExited, exitedStatus,
+  actionSpecs, todayStr, isExited, exitedStatus, SORT_OPTS,
+  type MoneyUnit,
 } from './render';
 import type { BelongingsDatabase, BelongingsItem } from './types';
 import { aiSuggestCategory } from './ai';
 
 const THEME_CLASSES = new Set(['theme-dark', 'theme-light']);
+
+/** 搜索防抖（对齐剪藏本/保险库/备忘录） */
+const SEARCH_DEBOUNCE_MS = 180;
 
 // ==================== 模块状态 ====================
 
@@ -85,6 +90,17 @@ export function resetBelongingsState(): void {
 
 // ==================== 设置 schema ====================
 
+/** 金额单位读取（belongingsCurrency，issue 294；非法值回落 cny）——纯层显式入参，设置只在本层读 */
+function currencyUnit(): MoneyUnit {
+  const v = (tryGetSettings() as Record<string, unknown>).belongingsCurrency;
+  return v === 'yuan' || v === 'usd' || v === 'none' || v === 'cny' ? v : 'cny';
+}
+
+/** 新记条目默认状态（belongingsNewStatus，issue 294；非法值回落「使用中」；编辑回填不受影响） */
+function newItemStatus(): string {
+  return (tryGetSettings() as Record<string, unknown>).belongingsNewStatus === '闲置' ? '闲置' : '使用中';
+}
+
 /** 默认状态筛选合法值（与 chips 同源；空串=全部） */
 const DEFAULT_STATUS_VALUES = ['', 'using', 'idle', 'sold', 'discard'];
 
@@ -106,6 +122,45 @@ export function belongingSettingsSchema(): SettingsSchema {
               { value: 'idle', label: '闲置' },
               { value: 'sold', label: '已转卖' },
               { value: 'discard', label: '已丢弃' },
+            ],
+          },
+          {
+            type: 'select',
+            name: '默认排序',
+            desc: '打开面板时物品的排列方式',
+            binding: { key: 'belongingsDefaultSort' },
+            options: [
+              { value: 'recent', label: '最近购入' },
+              { value: 'price', label: '投入最高' },
+              { value: 'daily', label: '日均最高' },
+            ],
+          },
+          {
+            type: 'select',
+            name: '金额单位',
+            desc: '价格与统计的金额显示方式',
+            binding: { key: 'belongingsCurrency' },
+            options: [
+              { value: 'cny', label: '￥' },
+              { value: 'yuan', label: '元' },
+              { value: 'usd', label: '$' },
+              { value: 'none', label: '无符号' },
+            ],
+          },
+        ],
+      },
+      {
+        icon: 'pencil-line',
+        name: '记一笔',
+        rows: [
+          {
+            type: 'select',
+            name: '新增物品默认状态',
+            desc: '记一笔时物品的初始状态',
+            binding: { key: 'belongingsNewStatus' },
+            options: [
+              { value: '使用中', label: '使用中' },
+              { value: '闲置', label: '闲置' },
             ],
           },
         ],
@@ -178,6 +233,9 @@ async function openPanelInner(): Promise<void> {
   // 面板内改选为会话内临时态，同收藏本 openPanel 语义）
   const st = (tryGetSettings() as Record<string, unknown>).belongingsDefaultStatus;
   M.status = typeof st === 'string' && DEFAULT_STATUS_VALUES.includes(st) && st !== '' ? st : null;
+  // 默认排序接线（belongingsDefaultSort，issue 294）：每次打开读设置，非法值回「最近购入」
+  const srt = (tryGetSettings() as Record<string, unknown>).belongingsDefaultSort;
+  M.sort = SORT_OPTS.some((o) => o.v === srt) ? (srt as BelState['sort']) : 'recent';
   M.db = await loadDatabase();
   const overlay = document.createElement('div');
   overlay.className = 'bz-panel-overlay';
@@ -260,13 +318,14 @@ async function openPanelInner(): Promise<void> {
   // 搜索（B3：防抖定时器在面板关闭后仍会触发——首行守卫 overlay 存活；渲染序列含 hero，
   // 副题「N 件在列」计数随搜索刷新）
   const bindSearch = (inp: HTMLInputElement) => {
+    let deb: ReturnType<typeof setTimeout> | undefined;
     inp.addEventListener('input', () => {
-      clearTimeout((inp as any)._belDeb);
-      (inp as any)._belDeb = setTimeout(() => {
+      clearTimeout(deb);
+      deb = setTimeout(() => {
         if (!M.overlay) return;
         M.q = inp.value.trim();
         renderAll();
-      }, 180);
+      }, SEARCH_DEBOUNCE_MS);
     });
   };
   bindSearch(overlay.querySelector('[data-bel-search]') as HTMLInputElement);
@@ -290,6 +349,19 @@ async function openPanelInner(): Promise<void> {
     const it = itemById(cell.dataset.belId as string);
     if (it) openRowMenuAt(it, e.clientX, e.clientY);
   });
+  // 移动端长按卡片 → 底部抽屉（统一手势 core/dom.longPress：与 core/item-actions 同源，
+  // 触屏滚动不受影响——被动监听 + 10px 移动取消）。点卡开抽屉的既有入口保留，长按为新增入口。
+  longPress(
+    content,
+    (ev: any) => {
+      const cell = (ev.target as HTMLElement)?.closest?.('[data-bel-id]') as HTMLElement | null;
+      if (!cell) return;
+      const it = itemById(cell.dataset.belId as string);
+      if (it) openMobSheet(it);
+    },
+    undefined,
+    (ev: any) => isMobileEnv() && !!(ev.target as HTMLElement)?.closest?.('[data-bel-id]')
+  );
 
   renderAll();
   startAutoRefresh();
@@ -299,6 +371,11 @@ async function openPanelInner(): Promise<void> {
 export function closePanel(): void {
   stopAutoRefresh();
   closeBelDetail();
+  // 主题监听随面板关闭断开（H17）：面板关闭期间 body class 变动不再空转回调（有界泄漏）
+  if (bodyThemeObserver) {
+    bodyThemeObserver.disconnect();
+    bodyThemeObserver = null;
+  }
   if (dropDocClick) { document.removeEventListener('click', dropDocClick); dropDocClick = null; }
   if (M.overlay) {
     M.overlay.remove();
@@ -312,16 +389,10 @@ export function closePanel(): void {
 }
 
 export function cleanupBelongings(): void {
-  stopAutoRefresh();
-  closeBelDetail();
-  if (dropDocClick) { document.removeEventListener('click', dropDocClick); dropDocClick = null; }
+  closePanel();
   if (bodyThemeObserver) {
     bodyThemeObserver.disconnect();
     bodyThemeObserver = null;
-  }
-  if (M.overlay) {
-    M.overlay.remove();
-    M.overlay = null;
   }
   resetBelongingsState();
 }
@@ -390,7 +461,7 @@ function renderAll(): void {
   const panel = M.overlay.querySelector('.bz-bel-panel') as HTMLElement | null;
   if (!panel) return;
   // BelState 与 render.BelViewState 结构兼容（status/year/q/sort）；view.year 悬空回写直通 M
-  renderPanelView(panel, itemList(), M, { mountIcons });
+  renderPanelView(panel, itemList(), M, { mountIcons }, currencyUnit());
 }
 
 /** 状态筛选切换语义（chips 与移动横滑条委托共用）：
@@ -411,7 +482,7 @@ function openBelDetail(it: BelongingsItem): void {
   closeBelDetail();
   const mask = document.createElement('div');
   mask.className = 'bz-overlay-mask bz-bel-detail-mask';
-  mask.innerHTML = belDetailHtml(it);
+  mask.innerHTML = belDetailHtml(it, currencyUnit());
   document.body.appendChild(mask);
   topifyZ(mask); // ADR-0067：显示即发号（详情恒压主面板；表单再开时后发号恒压详情）
   mountIcons(mask);
@@ -434,9 +505,8 @@ function openBelDetail(it: BelongingsItem): void {
       await applyFlowWithUndo(cur, b.dataset.bdFlow as string);
       const now = itemById(it.id);
       if (!now) { closeBelDetail(); return; }
-      drawActs();
-      // 详情头行字段同步（状态徽章/出离行随流转刷新）
-      openBelDetail(itemById(it.id)!);
+      // 详情头行字段同步（状态徽章/出离行随流转刷新；openBelDetail 全量重建含操作钮）
+      openBelDetail(now);
     })();
   });
   mask.addEventListener('mousedown', (e) => { if (e.target === mask) closeBelDetail(); });
@@ -456,7 +526,7 @@ function openBelDetail(it: BelongingsItem): void {
 /** 抽屉头：render.ts 串 → 元素（core/item-actions 契约收 HTMLElement；占位图标在此兑现） */
 function sheetHeadEl(it: BelongingsItem): HTMLElement {
   const holder = document.createElement('div');
-  holder.innerHTML = sheetHeadHtml(it);
+  holder.innerHTML = sheetHeadHtml(it, currencyUnit());
   mountIcons(holder);
   return holder.firstElementChild as HTMLElement;
 }
@@ -494,20 +564,27 @@ async function applyFlowWithUndo(it: BelongingsItem, s: string): Promise<void> {
   emitDomainEvent('belongings', { kind: 'status', title: cur.name, status: s });
   notifyUndo(`「${cur.name}」已标记为${s}`, () => {
     void (async () => {
-      // B1：面板已关（closePanel 清 M.db）后撤销从盘重载，不误报「已被外部变更删除」
-      if (!M.db) M.db = await loadDatabase();
-      const now = itemById(it.id);
-      if (!now) {
-        notice('该物品已被外部变更删除，无法撤销', 'warning');
-        return;
+      try {
+        // B1：面板已关（closePanel 清 M.db）后撤销从盘重载，不误报「已被外部变更删除」
+        if (!M.db) M.db = await loadDatabase();
+        const now = itemById(it.id);
+        if (!now) {
+          notice('该物品已被外部变更删除，无法撤销', 'warning');
+          return;
+        }
+        now.current_status = prevStatus;
+        // B4：恢复流转前封口快照（出离→出离撤销不丢原日期）；无快照且现值非空才清（避免写冗余 null）
+        if (prevExit != null) now.exit_date = prevExit;
+        else if (now.exit_date != null) now.exit_date = null;
+        now.last_updated = new Date().toISOString();
+        await saveAndRender();
+        notice(`已撤销，「${now.name}」回到${prevStatus}`, 'success');
+      } catch (e) {
+        // 撤销写盘失败（H15）：内存已改必须从盘回滚，否则后续任意保存把未落盘的撤销补刀持久化
+        notifySaveError(e, '撤销状态');
+        M.db = await loadDatabase().catch(() => null);
+        M.renderFn?.();
       }
-      now.current_status = prevStatus;
-      // B4：恢复流转前封口快照（出离→出离撤销不丢原日期）；无快照且现值非空才清（避免写冗余 null）
-      if (prevExit != null) now.exit_date = prevExit;
-      else if (now.exit_date != null) now.exit_date = null;
-      now.last_updated = new Date().toISOString();
-      await saveAndRender();
-      notice(`已撤销，「${now.name}」回到${prevStatus}`, 'success');
     })();
   }, { type: 'restore' });
 }
@@ -536,20 +613,23 @@ function buildActions(it: BelongingsItem, rebuild: () => void): ItemAction[] {
   }));
 }
 
-function openRowMenuAt(it: BelongingsItem, x: number, y: number): void {
+/** 菜单/抽屉动作回调后按最新条目重建（条目可能已被替换，按 id 回查） */
+function makeSheetRebuild(it: BelongingsItem): () => void {
   const rebuild = () => {
     const it2 = itemById(it.id);
     if (it2) refreshItemSheet(buildActions(it2, rebuild), sheetHeadEl(it2));
   };
+  return rebuild;
+}
+
+function openRowMenuAt(it: BelongingsItem, x: number, y: number): void {
+  const rebuild = makeSheetRebuild(it);
   openItemMenu(x, y, buildActions(it, rebuild), true, 'bz-bel-menu');
   // 复位残余 click 抑制（issue 198 同款 P1）：右键时序会置位 armed 吞下一次左键；右键无补发 click，直接复位
   resetItemMenuClickGuard();
 }
 function openMobSheet(it: BelongingsItem): void {
-  const rebuild = () => {
-    const it2 = itemById(it.id);
-    if (it2) refreshItemSheet(buildActions(it2, rebuild), sheetHeadEl(it2));
-  };
+  const rebuild = makeSheetRebuild(it);
   openItemSheet(buildActions(it, rebuild), { sheetHead: sheetHeadEl(it) });
 }
 
@@ -559,6 +639,9 @@ async function deleteItem(it: BelongingsItem): Promise<void> {
   const v = await openFlowDialog({
     title: '删除物品',
     message: `确定要删除物品「${it.name}」吗？删除后可在通知中撤销。`,
+    // 皮肤类（issue 291）：确认框挂 body、脱离面板根，必须显式带 .bz-bel-flow-dialog
+    // 才能拿到海报 token（否则掉回 core 裸样式，与「物品详情」不同源）
+    className: 'bz-bel-flow-dialog',
     actions: [
       { label: '取消', value: 'cancel' },
       { label: '删除', value: 'del', danger: true, cta: true },
@@ -587,14 +670,21 @@ async function deleteItem(it: BelongingsItem): Promise<void> {
   emitDomainEvent('belongings', { kind: 'delete', title: it.name });
   notifyUndo(`已删除「${it.name}」`, () => {
     void (async () => {
-      if (!M.db) M.db = await loadDatabase(); // B1：面板已关后撤销从盘重载
-      if (M.db.items[snapshot.id]) {
-        notice(`已存在同 id 物品（${snapshot.id}），跳过恢复`, 'warning');
-        return;
+      try {
+        if (!M.db) M.db = await loadDatabase(); // B1：面板已关后撤销从盘重载
+        if (M.db.items[snapshot.id]) {
+          notice(`已存在同 id 物品（${snapshot.id}），跳过恢复`, 'warning');
+          return;
+        }
+        M.db.items[snapshot.id] = snapshot;
+        await saveAndRender();
+        notice(`已恢复「${snapshot.name}」`, 'success');
+      } catch (e) {
+        // 撤销写盘失败（H15）：内存已改必须从盘回滚，并明确提示
+        notifySaveError(e, '撤销删除');
+        M.db = await loadDatabase().catch(() => null);
+        M.renderFn?.();
       }
-      M.db.items[snapshot.id] = snapshot;
-      await saveAndRender();
-      notice(`已恢复「${snapshot.name}」`, 'success');
     })();
   }, { type: 'restore' });
 }
@@ -614,6 +704,8 @@ interface BelFormBaseline {
   soldPrice: string;
 }
 let _belBaseline: BelFormBaseline | null = null;
+/** 当前表单的编辑目标 id（null = 新建；H14：防叠开时区分「同一物品聚焦」与「另一物品误聚焦」） */
+let _belFormTargetId: string | null = null;
 
 function belFormStatusNow(mask: HTMLElement): string {
   return (mask.querySelector('[data-status].is-on') as HTMLElement | null)?.dataset.status || '';
@@ -638,20 +730,30 @@ function belFormDirty(): boolean {
 
 function closeBelForm(mask: HTMLElement): void {
   _belBaseline = null;
+  _belFormTargetId = null;
   unregisterSheetCompanion(mask);
   mask.remove();
 }
 
 function requestCloseBelForm(mask: HTMLElement): void {
-  if (belFormDirty()) confirmDiscard(() => closeBelForm(mask));
+  // 第三个参数 = 皮肤类（issue 291）：confirmDiscard 的确认框同样是 body 弹窗，
+  // 不传就与刚被它拦住的表单弹窗（.bz-bel-form 海报皮）两张脸
+  if (belFormDirty()) confirmDiscard(() => closeBelForm(mask), undefined, 'bz-bel-flow-dialog');
   else closeBelForm(mask);
 }
 
 export function openForm(it: BelongingsItem | null): void {
-  // B8 防叠开：已有表单悬浮时聚焦既有表单直接返回——重复开会让模块级 _belBaseline 互踩、脏拦截失效
+  // B8 防叠开：已有表单悬浮时聚焦既有表单直接返回——重复开会让模块级 _belBaseline 互踩、脏拦截失效。
+  // H14：仅同一目标（同物品编辑 / 同为新建）才静默聚焦；目标是另一物品时明确提示，
+  // 不再让 B 的编辑窗没开、内容可能填进 A
   const existing = document.querySelector('.bz-bel-form-mask') as HTMLElement | null;
   if (existing) {
-    (existing.querySelector('input, textarea') as HTMLInputElement | null)?.focus();
+    const targetId = it?.id ?? null;
+    if (_belFormTargetId === targetId) {
+      (existing.querySelector('input, textarea') as HTMLInputElement | null)?.focus();
+    } else {
+      notice('已有打开的表单，请先保存或关闭后再编辑其他物品', 'warning');
+    }
     return;
   }
   // 命令路径（面板未开）先确保 db 已载（旧 addBelongingsItemCommand 语义）；B7：失败弹提示，不静默
@@ -670,7 +772,8 @@ export function openForm(it: BelongingsItem | null): void {
   const init = belFormInit(it);
   const mask = document.createElement('div');
   mask.className = 'bz-overlay-mask bz-bel-form-mask';
-  mask.innerHTML = belFormHtml(it);
+  mask.innerHTML = belFormHtml(it, currencyUnit());
+  _belFormTargetId = it?.id ?? null;
   document.body.appendChild(mask);
   topifyZ(mask); // ADR-0067：显示即发号（原静态 z-index:110000 已删，恒压主面板）
   mountIcons(mask);
@@ -685,7 +788,7 @@ export function openForm(it: BelongingsItem | null): void {
     cat: init.catVal,
     price: init.priceVal,
     date: init.dateVal,
-    status: it?.current_status || '使用中',
+    status: it?.current_status || newItemStatus(),
     desc: init.descVal,
     exitDate: init.exitDateVal,
     soldPrice: init.soldPriceVal,
@@ -720,7 +823,7 @@ export function openForm(it: BelongingsItem | null): void {
   const statusPick = mask.querySelector('#bm-status') as HTMLElement;
   const exitRow = mask.querySelector('#bm-exit') as HTMLElement;
   const soldField = mask.querySelector('#bm-soldfield') as HTMLElement;
-  let curStatus = it?.current_status || '使用中';
+  let curStatus = it?.current_status || newItemStatus();
   const syncExitRow = () => {
     const exited = curStatus === '已转卖' || curStatus === '已丢弃';
     exitRow.hidden = !exited;
@@ -782,6 +885,12 @@ export function openForm(it: BelongingsItem | null): void {
     // 出离字段（ADR-0089）：转卖售价可选但填了必须合法
     const exited = curStatus === '已转卖' || curStatus === '已丢弃';
     const exitVal = exited ? (mask.querySelector('#bm-exitdate') as HTMLInputElement).value : '';
+    // 出离日期倒挂校验（H16）：早于购买日期会让「陪伴 N 天」与日均成本分母口径失真，保存前拦下
+    const exitDate = exited ? (exitVal || todayStr()) : '';
+    if (exitDate && exitDate < date) {
+      fail('出离日期不能早于购买日期');
+      return;
+    }
     const soldRaw = curStatus === '已转卖' ? (mask.querySelector('#bm-soldprice') as HTMLInputElement).value.trim() : '';
     let soldPrice: number | null = null;
     if (soldRaw !== '') {
@@ -805,6 +914,7 @@ export function openForm(it: BelongingsItem | null): void {
             notice('该物品已被外部变更删除，本次保存未写入', 'warning');
             unregisterSheetCompanion(mask);
             closeItemMenu();
+            _belFormTargetId = null;
             mask.remove();
             return;
           }
@@ -817,7 +927,7 @@ export function openForm(it: BelongingsItem | null): void {
           cur.current_status = curStatus;
           cur.description = desc;
           // 出离字段（ADR-0089）：只在出离态写值；退出出离态且旧值存在才清（避免给老记录写冗余 null）
-          if (exited) cur.exit_date = exitVal || todayStr();
+          if (exited) cur.exit_date = exitDate;
           else if (cur.exit_date != null) cur.exit_date = null;
           if (curStatus === '已转卖') cur.sold_price = soldPrice;
           else if (cur.sold_price != null) cur.sold_price = null; // 丢弃/在用态无售价语义
@@ -828,7 +938,8 @@ export function openForm(it: BelongingsItem | null): void {
         } else {
           if (!M.db) throw new Error('数据库未加载');
           const newItem: BelongingsItem = {
-            id: 'item_' + Date.now(),
+            // id 拼随机后缀（H18）：裸 Date.now() 同毫秒两条（批量导入等）会互相覆盖
+            id: 'item_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
             name,
             category,
             purchase_price: Math.round(price * 100) / 100,
@@ -837,7 +948,7 @@ export function openForm(it: BelongingsItem | null): void {
             description: desc,
             created_date: new Date().toISOString(),
             last_updated: new Date().toISOString(),
-            ...(exited ? { exit_date: exitVal || todayStr() } : {}),
+            ...(exited ? { exit_date: exitDate } : {}),
             ...(curStatus === '已转卖' ? { sold_price: soldPrice } : {}),
             ...(formIcon ? { icon: formIcon } : {}),
           };
@@ -847,6 +958,7 @@ export function openForm(it: BelongingsItem | null): void {
           notice(`物品「${name}」已添加`, 'success');
         }
         _belBaseline = null;
+        _belFormTargetId = null;
         unregisterSheetCompanion(mask);
         closeItemMenu();
         mask.remove();
