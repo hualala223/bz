@@ -12,7 +12,8 @@
 .bz-sp-desk,
 .bz-sp-mobile,
 .bz-sp-mob-modal,
-.bz-sp-picker-mask {
+.bz-sp-picker-mask,
+#bz-model-picker-popup {
   --sp-bg: #f6f2e9;
   --sp-panel: #fffcf6;
   --sp-line: #e5dfcf;
@@ -34,7 +35,8 @@
 .theme-dark .bz-sp-desk,
 .theme-dark .bz-sp-mobile,
 .theme-dark .bz-sp-mob-modal,
-.theme-dark .bz-sp-picker-mask {
+.theme-dark .bz-sp-picker-mask,
+.theme-dark #bz-model-picker-popup {
   --sp-bg: #1b1b1f;
   --sp-panel: #242429;
   --sp-line: #35353c;
@@ -57,6 +59,7 @@
   position: fixed;
   inset: 0;
   background: rgba(20, 15, 8, 0.4);
+  backdrop-filter: blur(var(--bz-overlay-blur));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1119,3 +1122,42 @@
     linear-gradient(90deg, var(--pz-night-l) 0 50%, var(--pz-night-d) 50% 100%);
   border-radius: 3px;
 }
+
+/* ═══════════ 模型选择器弹窗同皮（票 277/S1，上游 issue 265 纯 CSS 剥离版） ═══════════ */
+/* 壳体已接 --sp-*（上方 token 挂接），此处收口内部消费 Obsidian 原生变量的段落：
+   头部描边 / 内容区 / 列表行 hover·选中 / 名称·来源小字 / 空态。控件与 DOM 零改动。 */
+#bz-model-picker-popup .bz-settings-title { font-size: 14px; font-weight: 700; color: var(--sp-ink); }
+#bz-model-picker-popup .bz-settings-header {
+  border-bottom-color: var(--sp-line);
+}
+#bz-model-picker-popup .bz-settings-content {
+  background: var(--sp-panel);
+  color: var(--sp-ink);
+}
+#bz-model-picker-popup .bz-model-picker-row {
+  color: var(--sp-ink);
+}
+#bz-model-picker-popup .bz-model-picker-row:hover {
+  background: var(--sp-accent-soft);
+}
+#bz-model-picker-popup .bz-model-picker-row.is-current {
+  background: var(--sp-accent-soft);
+  color: var(--sp-accent);
+}
+#bz-model-picker-popup .bz-model-picker-name { color: inherit; }
+#bz-model-picker-popup .bz-model-picker-detail { color: var(--sp-ink-3); }
+#bz-model-picker-popup .bz-settings-empty { color: var(--sp-ink-2); }
+/* 移动端（≤768px）：保持居中卡片形态不变，max-height 把卡片夹进顶部安全区～底部安全区，
+   宽度放开到 94vw；列表超出则内容区内部滚动（纯视觉夹取，无行为改动） */
+@media (max-width: 768px) {
+  #bz-model-picker-popup {
+    max-height: calc(100vh - max(44px, env(safe-area-inset-top, 0px)) - max(12px, env(safe-area-inset-bottom, 0px)) - 24px);
+    width: 94vw !important;
+    max-width: 94vw !important;
+  }
+  #bz-model-picker-popup .bz-settings-content {
+    min-height: 0;
+    overflow-y: auto;
+  }
+}
+

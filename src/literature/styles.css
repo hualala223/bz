@@ -7,7 +7,8 @@
 .bz-lit-mask {
   position: fixed;
   inset: 0;
-  background: var(--background-modifier-cover); /* 纯遮罩（手册 §5.2 不采用毛玻璃质感） */
+  background: var(--bz-overlay); /* 票 277/S3-b：自 --background-modifier-cover 收编 --bz-overlay 单源（上游 knowledge 同款） */
+  backdrop-filter: blur(var(--bz-overlay-blur));
   animation: bz-lit-fade-in .2s ease-out;
 }
 .bz-lit-window {
