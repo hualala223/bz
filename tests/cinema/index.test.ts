@@ -95,7 +95,7 @@ describe('cinema quickAddWant 事件补发（movie:created want）', () => {
     M.folderPath = '我的/影视';
   });
 
-  it('加入想看 → 建笔记 + 发 movie:created(want) 事件 + progress 通知', async () => {
+  it('加入想看 → 建笔记 + 发 movie:created(want) 事件（豆瓣队列接管，无 progress 通知）', async () => {
     const seen: any[] = [];
     const off = onDomainEvent('movie', (evt) => seen.push(evt));
     const vault = new MockVault();
@@ -105,8 +105,8 @@ describe('cinema quickAddWant 事件补发（movie:created want）', () => {
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ kind: 'created', name: '新片', status: 'want', rating: null });
     expect((vault.files as any).get('我的/影视/《新片》.md')).toContain('评分: -1');
-    // progress 通知（poster 占位轮询等待；进度通知不自动消失）
-    expect(document.querySelector('.bz-notice--progress')?.textContent).toContain('正在获取海报');
+    // issue 261：海报抓取改由 douban-queue 接管——不再弹 progress 通知（jsdom 无 window.require，入队静默跳过）
+    expect(document.querySelector('.bz-notice--progress')).toBeNull();
     off();
   });
 });

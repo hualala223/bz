@@ -29,6 +29,8 @@ export class MockVault {
     mkdir: async (path: string): Promise<void> => {
       this.dirs.add(path);
     },
+    /** 宿主绝对路径解析（douban-queue spawn 用，issue 261）；固定前缀便于测试映射回 vault 相对路径 */
+    getFullPath: (path: string): string => '/mock-vault-root/' + path,
     /** adapter 级二进制读写（store-file 冲突自愈/迁移等经 app.vault.adapter 直读直写 .vec 用） */
     readBinary: async (path: string): Promise<ArrayBuffer> => {
       const bytes = this.binaryFiles.get(path);

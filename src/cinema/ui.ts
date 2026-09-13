@@ -12,7 +12,7 @@
  */
 import type { App } from 'obsidian';
 import { TFile } from 'obsidian';
-import { notify, notice, notifySaveError } from '../core/notice';
+import { notice, notifySaveError } from '../core/notice';
 import { emitDomainEvent } from '../core/domain-bus';
 import { escManager } from '../core/esc-manager';
 import { applyMobileWindowFullscreen, isMobileEnv } from '../core/mobile';
@@ -28,7 +28,7 @@ import { rebuildItems, getDisplayItems } from './data';
 import { formatRelativeTime } from '../core/utils';
 import { runAIRecommend, runSimilarRecommend, buildTasteProfile, quickAddWant } from './recommend';
 import { buildStatPageHtml } from './analysis';
-import { watchPosterFetch } from './poster-watch';
+import { enqueueDoubanFetch, isFetching } from './douban-queue';
 import {
   ICON, statusText, itemByKey, doubanSearchUrl,
   detailModalHtml, confirmModalHtml, formModalHtml, setModalHtml,
@@ -387,10 +387,7 @@ async function saveNew(sec: HTMLElement, p: FormPayload, app: App, close: () => 
     M.items.unshift(it);
     await persistItem(it, app);
     emitDomainEvent('movie', { kind: 'created', name: p.name, status: st === STATUS_WANT ? 'want' : st === STATUS_WATCHING ? 'watching' : 'watched', rating: p.rating, review: p.review || null });
-    if (it.file) {
-      const handle = notify('正在获取海报和豆瓣信息…', { type: 'progress' });
-      watchPosterFetch(app, it.file, handle);
-    }
+    if (it.file) enqueueDoubanFetch(it.file, it.name);
     close();
     panelToast(sec, `已添加「${p.name}」`);
     renderAll(app);
@@ -525,6 +522,7 @@ function midnightInput(app: App): MidnightRenderInput {
     aiCount: M.aiResult && M.aiResult.length ? M.aiResult.length : null,
     statHtml: buildStatPageHtml(),
     poster: (it) => posterUrl(it, app),
+    fetching: (it) => isFetching(it.file?.path),
   };
 }
 
@@ -556,7 +554,7 @@ function refreshDeskList(app: App, sec: HTMLElement): void {
   const cnt = head.querySelector('.j-cnt');
   if (cnt) cnt.textContent = `· ${list.length} 部`;
   const grid = body.querySelector('.grid');
-  if (grid) grid.innerHTML = list.map((it) => pcardHtml(it, posterUrl(it, app))).join('');
+  if (grid) grid.innerHTML = list.map((it) => pcardHtml(it, posterUrl(it, app), isFetching(it.file?.path))).join('');
   mountIcons(sec);
 }
 

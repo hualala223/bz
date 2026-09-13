@@ -388,6 +388,9 @@
 .bz-cinema--midnight .ai-err-ic{color:#b3402a}
 .bz-cinema--midnight .ai-spin{width:26px;height:26px;border:3px solid var(--chip);border-top-color:var(--gold);border-radius:50%;animation:cn-spin .8s linear infinite;margin:0 auto 16px}
 @keyframes cn-spin{to{transform:rotate(360deg)}}
+/* 豆瓣抓取中：海报区遮罩 spinner（issue 261，复用 cn-spin 关键帧） */
+.bz-cinema--midnight .pw-fetch{position:absolute;inset:0;z-index:3;display:grid;place-items:center;background:#0006}
+.bz-cinema--midnight .pw-spin{width:20px;height:20px;border:3px solid var(--chip);border-top-color:var(--gold);border-radius:50%;animation:cn-spin .8s linear infinite}
 .bz-cinema--midnight .ai-simfail{margin-top:14px;background:none;border:0;font-size:10.5px;color:var(--ink-3);cursor:pointer;font-family:inherit;letter-spacing:.1em;border-bottom:1px dashed var(--line)}
 .bz-cinema--midnight .rec-list{display:flex;flex-direction:column;gap:10px}
 .bz-cinema--midnight .rec-card{display:flex;gap:12px;align-items:flex-start;background:var(--chip);border:1px solid var(--line);border-radius:11px;padding:13px 14px}
