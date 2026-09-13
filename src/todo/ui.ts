@@ -5,11 +5,13 @@
  *       min(1280×880, 视口92%)，尺寸记忆 persist → settings.todoPanelWidth/Height）：
  *       左场景栏（.bz-rail 族：全部/今日/重要 = 图标前缀，用户场景 = 场景色点；
  *       「添加场景」虚线钮挂列表尾部，紧贴最后一个场景之下）+ 右侧列表
- *       （.bz-main-head 主头行 + .bz-toolrow 工具行（.bz-search 搜索 + 排序 segmented）；
- *       条目卡 meta 对齐源码 buildMeta 顺序）
+ *       （.bz-main-head 主头行 + .bz-toolrow 工具行（.bz-search 搜索 + 排序下拉
+ *       uiSelect，issue 268 起由三档平铺改单枚下拉）；条目卡 meta 对齐源码 buildMeta 顺序）
  * 头行：.bz-panel-brand 品牌块 + 右侧「打开待办设置 / 关闭」图标钮（issue 197，
- *       对齐剪藏本头行范式；设置钮直达设置面板待办域）
- * 移动：真全屏 + 顶部横滑场景条（.bz-mobstrip；头行钮组桌面/移动共用）
+ *       对齐剪藏本头行范式；设置钮直达设置面板待办域）。皮肤段桌面收掉整组，
+ *       移动端只放回关闭一枚（issue 268：设置/新建撤出移动头行）
+ * 移动：真全屏 + 顶部横滑场景条（.bz-mobstrip：场景 chips + 尾部「添加场景」虚线 chip）
+ *       + 底部录入（「添加」= 打开创建弹窗并把已输入文字带过去，issue 268 用户拍板）
  * 交互：
  *   - 桌面右键条目 → 跟手菜单（无顶部信息卡）；移动长按 → 底部抽屉（带 sheetHead）
  *     （两者复用 core/item-actions：attachItemActions）
@@ -21,7 +23,10 @@
  *   - 条目右键/长按「专注这个」= 开始一个归属到该待办的专注番茄（pomodoro 域动态 import）
  *   - 伪场景：今日 = 只看今天（今日/逾期未完成 + 今天完成）；重要 = 跨场景聚合 star 条目
  *   - 删除接撤销（core notifyUndo，条目插回原位）；composer 保存 toast 挂「补全」直开编辑器
- *   - 已完成折叠区展开默认只列近 30 天，尾部「更早 N 条」放全；空态 = 组件库 .bz-empty 三件套
+ *   - 打开默认场景 = 设置 memoOpenScene（@last 上次停留：关面板记住当下场景，跨开合与重启；
+ *     固定场景/伪场景直用，非法值回落「全部」；提醒 notePath 定位开面板不受其限，恒「全部」）
+ *   - 已完成折叠区时间窗 = 设置 memoDoneWindow（7/30/90 天，全部=不折叠）：窗内完成直列，
+ *     更早的收进尾部「更早 N 条」放全；空态 = 组件库 .bz-empty 三件套
  * 基线：按钮/输入/弹窗/平铺选择走组件库；域内只留待办特有布局。
  * 图标：一律 lucide。
  * 数据：与旧 memo 域读写同一 memo.json；后台任务由旧 memo 域执行。
@@ -33,16 +38,21 @@ import { escManager } from '../core/esc-manager';
 import { topifyZ } from '../core/dom';
 import { applyMobileWindowFullscreen, isMobileEnv } from '../core/mobile';
 import { getSettings, saveSettings, tryGetSettings } from '../core/settings-provider';
-import { uiModal, uiIcon, uiChoice, uiBtn, uiBtnRow, uiResizable, uiEmpty, mountIcons, uiSuggest } from '../core/ui';
+import { uiModal, uiIcon, uiChoice, uiSelect, uiBtn, uiBtnRow, uiResizable, uiEmpty, mountIcons, uiSuggest } from '../core/ui';
 import { openFlowDialog } from '../core/flow-dialog';
 import { emitDomainEvent } from '../core/domain-bus';
-import { attachItemActions, type ItemAction } from '../core/item-actions';
+import { attachItemActions, closeItemMenu, type ItemAction } from '../core/item-actions';
 import {
-  formatRelativeTime, getCurrentNoteInfo, getCurrentCursorPosition,
+  formatRelativeTime, getCurrentNoteInfo, getCurrentCursorPosition, localDayKey, stripMdExt,
   generateId, extractUrlAndDisplay, escapeHtml, fetchPageTitle,
 } from '../core/utils';
 import { TodoData, DEFAULT_SCENARIOS } from './data';
 import { getDueStatus, formatDueText } from './due';
+import {
+  TODO_ICONS as ICON, iconSpan, sceneDot, sceneLabel, mainCountHtml,
+  navBtnHtml, mobChipHtml, mobAddSceneChipHtml, panelShellHtml, metaTagsHtml,
+  cardHtml as renderCard, checkHtml, sectionLabelHtml, doneBarHtml, doneMoreHtml, type MetaDue,
+} from './render';
 import type { TodoItem } from './types';
 import { M } from './state';
 
@@ -50,74 +60,15 @@ import { M } from './state';
 const PANEL = { MIN_W: 720, MIN_H: 520, MAX_W: 1280, MAX_H: 880 };
 /** 搜索防抖（180ms，favorites/belongings 同值） */
 const SEARCH_DEBOUNCE_MS = 180;
-/** 已完成折叠区展开默认只列近 30 天，更早的收进「更早 N 条」 */
-const DONE_WINDOW_DAYS = 30;
 /** 搜索防抖计时（打开期间有效，面板关闭清理） */
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 // ---------- 小工具 ----------
 
-const ICON = {
-  brand: 'list-checks',
-  close: 'x',
-  search: 'search',
-  add: 'plus',
-  addScene: 'tag',
-  settings: 'settings',
-  empty: 'inbox',
-  pos: 'pin',
-  clear: 'x',
-  external: 'external-link',
-  book: 'book-open',
-  check: 'check',
-  restore: 'rotate-ccw',
-  postpone1: 'calendar-plus',
-  postpone3: 'calendar-clock',
-  star: 'star',
-  copy: 'copy',
-  edit: 'pencil',
-  del: 'trash-2',
-  course: 'graduation-cap',
-  script: 'terminal',
-  url: 'arrow-up-right',
-  overdue: 'circle-alert',
-  clock: 'clock',
-  calendar: 'calendar',
-  doneFold: 'chevron-down',
-  sceneAll: 'layers',
-  sceneToday: 'sun',
-};
-
-/** lucide 占位 HTML（innerHTML 拼接用；渲染后组件库 mountIcons 统一 setIcon） */
-function iconSpan(name: string, extra = ''): string {
-  return `<i data-lucide="${name}" class="bz-ic${extra ? ' ' + extra : ''}"></i>`;
-}
 
 const esc = escapeHtml;
 
-/** 场景色点（数据语义色，域内直给；与旧 memo 相近语义） */
-const SCENE_DOTS: Record<string, string> = {
-  剪藏: '#e67341', 代码: '#4c82c8', 公开课: '#8f5fc0', 学习: '#4c9e6c', 生活: '#c27a48', 工作: '#b25757',
-};
-function sceneDot(scene: string): string {
-  return SCENE_DOTS[scene] || '#8b8f9a';
-}
 
-/** 到期状态图标名（meta 标签前缀） */
-function dueIconName(status: string): string {
-  if (status === 'overdue') return ICON.overdue;
-  if (status === 'today') return ICON.clock;
-  return ICON.calendar;
-}
-function dueTagClass(status: string): string {
-  if (status === 'overdue') return 'bz-todo-tag-overdue';
-  if (status === 'today') return 'bz-todo-tag-today';
-  return 'bz-todo-tag-future';
-}
-function dueText(item: TodoItem): string {
-  const mode = (tryGetSettings() as any).memoDueFormat === 'absolute' ? 'absolute' : 'relative';
-  return formatDueText(item.due!, mode);
-}
 
 /** 某时间串（YYYY-MM-DD HH:mm:ss）是否为今天（「今日」视图只看今天完成的口径） */
 function isTodayStr(s: string): boolean {
@@ -127,7 +78,7 @@ function isTodayStr(s: string): boolean {
 /** composer/编辑器场景缺省兜底：设置 memoDefaultScene（合法时）否则第一个场景 */
 function fallbackScene(): string {
   const scenes = TodoData.getScenarios();
-  const s = (tryGetSettings() as any).memoDefaultScene;
+  const s = tryGetSettings().memoDefaultScene;
   return s && scenes.includes(s) ? s : scenes[0];
 }
 
@@ -137,6 +88,28 @@ function composerScene(): string {
   const specific =
     M.activeScene !== '全部' && M.activeScene !== '今日' && M.activeScene !== '重要' && scenes.includes(M.activeScene);
   return specific ? M.activeScene : fallbackScene();
+}
+
+/** 已完成折叠区时间窗（设置 memoDoneWindow）：天数；'all'=null（不折叠全列）；非法值回落 30 天 */
+function doneWindowDays(): number | null {
+  const v = tryGetSettings()?.memoDoneWindow;
+  if (v === 'all') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : 30;
+}
+
+/** 打开面板默认场景（设置 memoOpenScene）：'@last'=取关面板记忆 memoLastScene（issue 293）；
+ *  伪场景/场景名直用；非法值（含场景已删/改名）回落「全部」 */
+function resolveOpenScene(): string {
+  const s = tryGetSettings();
+  const v = s?.memoOpenScene;
+  const scenes = TodoData.getScenarios();
+  const known = (x: string) => x === '全部' || x === '今日' || x === '重要' || scenes.includes(x);
+  if (v === '@last') {
+    const last = s?.memoLastScene;
+    return last && known(last) ? last : '全部';
+  }
+  return v && known(v) ? v : '全部';
 }
 
 // ---------- 剪藏场景剪贴板预填（复用 core 同款 extractUrlAndDisplay + fetchPageTitle，与 memo 域一致） ----------
@@ -179,16 +152,16 @@ async function refresh(): Promise<void> {
   M.renderFn?.();
 }
 
-// ---------- T1：同源 memo.json 跨域同步（旧 memo 面板/后台任务改动 → 已开 todo 面板重读） ----------
+// ---------- T1：同源 memo.json 跨域同步（旧 memo 面板/后台任务改动 → 已开 memo 面板重读） ----------
 let vaultSyncRef: EventRef | null = null;
 let vaultSyncTimer: ReturnType<typeof setTimeout> | null = null;
 let syncing = false; // 自己写盘引发的 modify 不重复刷新（写路径已自 refresh）
 let origTodoWrite: ((data: any) => Promise<unknown>) | null = null; // 包装前原始 write（卸载还原）
 
 /** 订阅 vault modify：memo.json 文件变更（任意来源——memo 面板/后台任务/外部）→ 面板开着时防抖重读 */
-function subscribeMemoSync(app: App): void {
+function subscribeTodoSync(app: App): void {
   if (vaultSyncRef) return;
-  // 包装 TodoData.write：todo 自己的写盘置 syncing，modify 事件不再重复刷新（写路径已自 refresh）
+  // 包装 TodoData.write：memo 自己的写盘置 syncing，modify 事件不再重复刷新（写路径已自 refresh）
   if (!origTodoWrite) {
     origTodoWrite = TodoData.write.bind(TodoData);
     TodoData.write = async (data: any) => {
@@ -211,7 +184,7 @@ function subscribeMemoSync(app: App): void {
     }, 150);
   });
 }
-function unsubscribeMemoSync(): void {
+function unsubscribeTodoSync(): void {
   if (vaultSyncRef) {
     // vault.on 返回 EventRef，注销走 offref（M.appRef 在 unloadTodo 里于本函数之后才置空）
     M.appRef?.vault.offref(vaultSyncRef);
@@ -231,9 +204,6 @@ function unsubscribeMemoSync(): void {
 
 // ---------- 视图判定（过滤 + 排序） ----------
 
-function dueStatusOf(it: TodoItem): string | null {
-  return getDueStatus(it.due);
-}
 /** 到期排序优先级：overdue 0 / today 1 / future 2 / 无 3 */
 function dueRank(it: TodoItem): number {
   if (!it.due) return 3;
@@ -322,9 +292,14 @@ export function applyTodoSkin(skin: unknown): void {
   panel.classList.add(`bz-todo-skin-${v}`);
 }
 
-/** 当前皮肤类名（issue 210）：uiModal 弹窗（编辑器/添加场景/重命名）与面板共用同套皮肤 */
+/**
+ * 当前皮肤类名（issue 210）：挂 body 的浮层（uiModal 弹窗 / 流程框 / 右键菜单 / 抽屉）
+ * 与面板共用同套皮肤。回落口径**必须与 applyTodoSkin 逐字一致**（未知/缺省 → 纸感手账）：
+ * 面板回落纸感而弹窗返回空类的话，弹窗就掉回 core 裸皮——正是 issue 291 要消灭的
+ * 「面板有皮、子弹窗没皮」；且四类浮层都靠这个类才拿得到 --bz-* 皮肤 token。
+ */
 function skinClass(): string {
-  const s = (tryGetSettings() as any).todoSkin;
+  const s = tryGetSettings().todoSkin;
   return s === 'paper' || s === 'editorial' ? `bz-todo-skin-${s}` : '';
 }
 
@@ -338,57 +313,21 @@ export function openTodoPanel(app: App, opts?: { notePath?: string }): void {
     closeTodoPanel();
     return;
   }
-  TodoData.init(tryGetSettings() as any);
-  const fullscreen = (tryGetSettings() as any).todoMobileDefaultFullscreen === true;
+  TodoData.init(tryGetSettings());
   // 设置播种（P2）：「默认排序方式」（与 memo 共用 memoSortMode 键）与「默认显示归档」
-  // 在面板打开时初始化——此前恒「紧急优先」+ 折叠，两项设置对 todo 面板不生效
-  const sortSetting = (tryGetSettings() as any).memoSortMode;
+  // 在面板打开时初始化——此前恒「紧急优先」+ 折叠，两项设置对 memo 面板不生效
+  const sortSetting = tryGetSettings().memoSortMode;
   M.sortMode = sortSetting === 'priority' || sortSetting === 'due' || sortSetting === 'created' ? sortSetting : 'priority';
-  M.showDone = (tryGetSettings() as any).memoShowArchivedByDefault === true;
+  M.showDone = tryGetSettings().memoShowArchivedByDefault === true;
+  // 打开默认场景（memoOpenScene）：提醒 notePath 定位恒「全部」——定位靠搜索过滤，场景过滤会把目标条目挡掉
+  M.activeScene = opts?.notePath ? '全部' : resolveOpenScene();
   M.showEarlierDone = false; // 「更早 N 条」每次打开重新收起
   M.pinnedNewId = null;
+  M.search = ''; // E8：搜索词跨开合残留——输入框是新的但列表仍被旧关键词过滤（notePath 定位在 loadData 后另行覆写）
 
   const overlay = document.createElement('div');
   overlay.className = 'bz-panel-overlay';
-  overlay.innerHTML = `
-    <div class="bz-panel-frame bz-todo-panel bz-panel-mtop">
-      <div class="bz-panel-head">
-        <div class="bz-panel-brand">${iconSpan(ICON.brand, 'bz-ic--sm')}</div>
-        <div class="bz-panel-title">待办</div>
-        <div class="bz-panel-head-sp"></div>
-        <div class="bz-panel-head-btns">
-          <button class="bz-icon-btn" data-todo-head-settings title="打开待办设置">${iconSpan(ICON.settings)}</button>
-          <button class="bz-icon-btn" data-todo-head-close title="关闭">${iconSpan(ICON.close)}</button>
-        </div>
-      </div>
-      <div class="bz-todo-body">
-        <div class="bz-rail">
-          <div class="bz-rail-scroll">
-            <div class="bz-rail-label">场景</div>
-            <div data-todo-nav></div>
-            <button class="bz-todo-side-add" data-todo-addscene>${iconSpan(ICON.addScene)} 添加场景</button>
-          </div>
-        </div>
-        <div class="bz-todo-main">
-          <div class="bz-main-head">
-            <div class="bz-main-title" data-todo-main-title>全部</div>
-            <div class="bz-main-count" data-todo-main-count></div>
-            <div class="bz-main-spacer"></div>
-            <button class="bz-btn bz-btn--primary bz-btn--md" data-todo-newbtn>${iconSpan(ICON.add, 'bz-ic--sm')} 新建待办</button>
-          </div>
-          <div class="bz-toolrow">
-            <div class="bz-search">${iconSpan(ICON.search)}<input class="bz-input" type="text" data-todo-search placeholder="搜索内容 / 场景…"></div>
-            <div class="bz-todo-sort" data-todo-sort></div>
-          </div>
-          <div class="bz-mobstrip" data-todo-mob-scenes></div>
-          <div class="bz-todo-content" data-todo-content></div>
-          <div class="bz-todo-composer">
-            <input class="bz-input" type="text" data-todo-composer-input placeholder="输入内容，Enter 保存…">
-            <button class="bz-btn bz-btn--primary" data-todo-composer-add>${iconSpan(ICON.add, 'bz-ic--sm')} 添加</button>
-          </div>
-        </div>
-      </div>
-    </div>`;
+  overlay.innerHTML = panelShellHtml();
 
   document.body.appendChild(overlay);
   topifyZ(overlay); // T6：ADR-0067 动态发号——后开恒压先开的动态 overlay；不再占死静态 100000
@@ -397,32 +336,34 @@ export function openTodoPanel(app: App, opts?: { notePath?: string }): void {
   M.renderFn = () => renderAll();
 
   const panelEl = overlay.querySelector('.bz-todo-panel') as HTMLElement;
-  applyMobileWindowFullscreen(panelEl, fullscreen);
-  applyTodoSkin((tryGetSettings() as any).todoSkin);
+  // 移动端默认全屏（本地自有开关，ticket 68/ADR-0019）：开=挂 .bz-win-mfs 走域内真全屏段，
+  // 关=不挂类、走 core 的 ≤768 常规卡基线。本开关为本地现有功能，保留不动。
+  applyMobileWindowFullscreen(panelEl, tryGetSettings().todoMobileDefaultFullscreen === true);
+  applyTodoSkin(tryGetSettings().todoSkin);
   mountIcons(overlay);
 
-  // 排序三档（浮岛 segmented，issue 199：滑动白卡指示器；桌面工具行；移动不显示）
+  // 排序 = 组件库下拉（issue 268 用户拍板：三档平铺占宽把搜索框挤窄，改单枚下拉——
+  // 收起态只占一行文案宽，搜索框（.bz-search flex:1）随之变长；展开菜单走 .bz-select-menu，
+  // 皮肤段按 paper/editorial 各自风格化。值域/写回口径不变）
   const sortEl = overlay.querySelector('[data-todo-sort]') as HTMLElement;
-  const sortChoice = uiChoice<string>({
+  const sortSelect = uiSelect<string>({
     options: [
       { value: 'priority', label: '紧急优先' },
       { value: 'due', label: '仅按到期' },
       { value: 'created', label: '按创建' },
     ],
     value: M.sortMode,
-    float: true,
-    label: '排序方式',
+    className: 'bz-todo-sortsel',
     onChange: (v) => {
       M.sortMode = v;
       // 同步写入默认排序（与 memo 共用 memoSortMode 键）
-      const s = getSettings() as any;
-      s.memoSortMode = v;
+      getSettings().memoSortMode = v;
       void saveSettings();
       renderAll();
     },
   });
-  sortEl.appendChild(sortChoice.el);
-  sortChoiceDetach = sortChoice.detach;
+  sortEl.appendChild(sortSelect.el);
+  sortSelectDetach = sortSelect.detach;
 
   // 桌面拖动缩放（ADR-0084；移动端真全屏/常规卡都由 CSS 撑满视口，不挂）。
   // 尺寸记忆（ADR-0094）：persist.load 挂载时恢复（resize 工厂钳到与拖拽同口径），
@@ -433,7 +374,7 @@ export function openTodoPanel(app: App, opts?: { notePath?: string }): void {
       maxW: PANEL.MAX_W, maxH: PANEL.MAX_H,
       persist: {
         load: () => {
-          const s = tryGetSettings() as any;
+          const s = tryGetSettings();
           const w = Number(s?.todoPanelWidth) || 0;
           const h = Number(s?.todoPanelHeight) || 0;
           // 无记忆/越界旧值回 null → 面板走 CSS 默认尺寸（720×580）
@@ -441,8 +382,7 @@ export function openTodoPanel(app: App, opts?: { notePath?: string }): void {
           return { w, h };
         },
         save: (w, h) => {
-          const s = tryGetSettings() as any;
-          if (!s) return;
+          const s = tryGetSettings();
           s.todoPanelWidth = w;
           s.todoPanelHeight = h;
           void saveSettings();
@@ -485,19 +425,19 @@ export function openTodoPanel(app: App, opts?: { notePath?: string }): void {
       renderAll();
       return;
     }
-    // 「更早 N 条」：放全 30 天前的已完成条目
+    // 「更早 N 条」：放全时间窗外的已完成条目
     const doneMore = t.closest('[data-todo-donemore]');
     if (doneMore) {
       M.showEarlierDone = true;
       renderAll();
       return;
     }
-    // 底部录入
+    // 底部录入（桌面 = 快速落盘；移动 = 打开创建弹窗，见 submitComposer）
     const composerAdd = t.closest('[data-todo-composer-add]');
-    if (composerAdd) { addFromComposer(); return; }
+    if (composerAdd) { submitComposer(); return; }
   });
 
-  // 行内勾选（完成/恢复；300ms 防抖对齐 memo 卡片）
+  // 行内勾选（完成/恢复；300ms 防抖对齐 memo 卡片）——切换逻辑抽 toggleCheck，与移动抽屉头共用
   const content = overlay.querySelector('[data-todo-content]') as HTMLElement;
   content.addEventListener('click', (e) => {
     const check = (e.target as HTMLElement).closest('[data-todo-check]') as HTMLElement | null;
@@ -507,22 +447,7 @@ export function openTodoPanel(app: App, opts?: { notePath?: string }): void {
     const it = M.items.find((i) => i.id === card.dataset.todoId);
     if (!it) return;
     e.stopPropagation();
-    // 已恢复路径（已完成条目勾选 = 恢复）
-    if (it.completed) {
-      void restoreItem(it);
-      return;
-    }
-    // 完成防抖：300ms 内反悔取消
-    if (M.completeTimers.has(it.id)) {
-      clearTimeout(M.completeTimers.get(it.id));
-      M.completeTimers.delete(it.id);
-      return;
-    }
-    const timer = setTimeout(() => {
-      M.completeTimers.delete(it.id);
-      void completeItem(it);
-    }, 300);
-    M.completeTimers.set(it.id, timer);
+    toggleCheck(it);
   });
 
   // 底部录入 Enter
@@ -571,6 +496,12 @@ export function openTodoPanel(app: App, opts?: { notePath?: string }): void {
 
 export function closeTodoPanel(): void {
   if (M.overlay) {
+    // 上次停留（memoOpenScene='@last' 的取数源）：关面板记住当下场景，下次打开取回
+    const s = tryGetSettings();
+    if (s) {
+      s.memoLastScene = M.activeScene;
+      void saveSettings();
+    }
     M.overlay.remove();
     M.overlay = null;
   }
@@ -584,10 +515,10 @@ export function closeTodoPanel(): void {
     panelResizeDetach.detach();
     panelResizeDetach = null;
   }
-  // 摘排序浮岛的 resize 监听
-  if (sortChoiceDetach) {
-    sortChoiceDetach();
-    sortChoiceDetach = null;
+  // 摘排序下拉的 document 级监听（开合/ESC）
+  if (sortSelectDetach) {
+    sortSelectDetach();
+    sortSelectDetach = null;
   }
   M.renderFn = null;
   M.pinnedNewId = null;
@@ -610,8 +541,8 @@ export function registerEscapeHandler(): void {
 
 /** 面板当前 resize detach（打开期间非空，关闭清空） */
 let panelResizeDetach: { detach: () => void } | null = null;
-/** 排序浮岛 resize 监听 detach（面板关闭时摘除，防孤儿监听） */
-let sortChoiceDetach: (() => void) | null = null;
+/** 排序下拉（uiSelect）的 document 级监听 detach（面板关闭时摘除，防孤儿监听） */
+let sortSelectDetach: (() => void) | null = null;
 
 // ---------- 渲染 ----------
 
@@ -634,7 +565,7 @@ function renderMainHead(): void {
   // 数字包 .bz-todo-cnt-num 供皮肤染色（issue 210 纸感/编辑部计数数字着色）
   const items = getVisibleItems();
   const undone = items.filter((i) => !i.completed).length;
-  countEl.innerHTML = `· <span class="bz-todo-cnt-num">${items.length}</span> 项 · <span class="bz-todo-cnt-num">${undone}</span> 未完成`;
+  countEl.innerHTML = mainCountHtml(items.length, undone);
 }
 
 /** 场景选项归一（桌面 nav / 移动 chips 共用）；dot 仅用户场景携带（伪场景走 SCENE_PSEUDO_ICONS 图标） */
@@ -647,32 +578,7 @@ function sceneOptions(): { scene: string; dot: string }[] {
   ];
 }
 
-/** 伪场景图标前缀（issue 197 拍板：全部/今日/重要 = 图标，用户场景 = 场景色点）。
- *  重要 star 警示色走组件库 .bz-ic--warning（状态第二佐证，§6.1 状态不只靠颜色） */
-const SCENE_PSEUDO_ICONS: Record<string, { icon: string; cls?: string }> = {
-  全部: { icon: ICON.sceneAll },
-  今日: { icon: ICON.sceneToday },
-  重要: { icon: ICON.star, cls: 'bz-ic--warning' },
-};
 
-/** 场景名首 emoji（issue 200 拍板：行头三槽 = 图标/emoji/彩圆；带 emoji 的场景名以 emoji 作行头） */
-const LEADING_EMOJI_RE = /^(\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic})*)\s*/u;
-
-/** 场景显示名（剥掉作行头的首 emoji；「🏠 家」→「家」） */
-function sceneLabel(scene: string): string {
-  return scene.replace(LEADING_EMOJI_RE, '');
-}
-
-/** 场景项前导元素 HTML（三槽统一 14px 宽对齐：伪场景图标 / 场景名首 emoji / 场景色点；
- *  dotCls = .bz-rail-dot / .bz-mobstrip-dot 随宿主，彩圆本体尺寸不变居中成槽） */
-function sceneLeadHtml(o: { scene: string; dot: string }, dotCls: string): string {
-  const pseudo = SCENE_PSEUDO_ICONS[o.scene];
-  if (pseudo) return iconSpan(pseudo.icon, pseudo.cls ?? '');
-  const emo = o.scene.match(LEADING_EMOJI_RE)?.[1];
-  if (emo) return `<span class="bz-rail-emoji">${esc(emo)}</span>`;
-  if (!o.dot) return '';
-  return `<span class="${dotCls}" style="--bz-rail-tint:${o.dot}"></span>`;
-}
 
 /** 场景项管理菜单（重命名/删除/设置直达；伪场景不挂）——桌面右键浮层 / 移动长按抽屉复用组件库 */
 function attachSceneActions(el: HTMLElement, scene: string): void {
@@ -684,10 +590,7 @@ function renderNav(): void {
   const nav = M.overlay!.querySelector('[data-todo-nav]') as HTMLElement;
   if (!nav) return;
   nav.innerHTML = sceneOptions()
-    .map((o) => {
-      const active = M.activeScene === o.scene;
-      return `<button class="bz-rail-item${active ? ' on' : ''}" data-todo-scene="${esc(o.scene)}">${sceneLeadHtml(o, 'bz-rail-dot')}<span class="bz-rail-name">${esc(sceneLabel(o.scene))}</span><span class="bz-rail-count">${sceneCount(o.scene)}</span></button>`;
-    })
+    .map((o) => navBtnHtml(o, M.activeScene === o.scene, sceneCount(o.scene)))
     .join('');
   mountIcons(nav);
   nav.querySelectorAll<HTMLElement>('[data-todo-scene]').forEach((el) => {
@@ -698,56 +601,33 @@ function renderNav(): void {
 function renderMobScenes(): void {
   const wrap = M.overlay!.querySelector('[data-todo-mob-scenes]') as HTMLElement;
   if (!wrap) return;
+  // 「添加场景」固定挂在平铺场景条的**最后面**（issue 268 用户拍板：与收藏本磁贴行同款，
+  // 动作磁贴跟在全部场景之后）；左栏桌面那条虚线钮位置不变
   wrap.innerHTML = sceneOptions()
-    .map((o) => {
-      const active = M.activeScene === o.scene;
-      return `<button class="bz-mobstrip-chip${active ? ' is-on' : ''}" data-todo-scene="${esc(o.scene)}">${sceneLeadHtml(o, 'bz-mobstrip-dot')}${esc(sceneLabel(o.scene))}</button>`;
-    })
-    .join('');
+    .map((o) => mobChipHtml(o, M.activeScene === o.scene))
+    .join('') + mobAddSceneChipHtml();
   mountIcons(wrap);
   wrap.querySelectorAll<HTMLElement>('[data-todo-scene]').forEach((el) => {
     attachSceneActions(el, el.dataset.todoScene as string);
   });
 }
 
-/** 卡片 meta 行（顺序对齐 memo buildMeta：课程→脚本→链接→位置→场景→截止→时间） */
+/** meta 注入包（ADR-0104：moment/settings 留行为层——due 状态/文案在此算好注入纯层） */
+/** 到期文案口径（设置 memoDueFormat；本域保留该设置，上游已退役相对/绝对二选） */
+function dueTextMode(): 'relative' | 'absolute' {
+  return tryGetSettings().memoDueFormat === 'absolute' ? 'absolute' : 'relative';
+}
+
+function metaDueOf(it: TodoItem): MetaDue {
+  if (!it.due || it.completed) return null;
+  const st = getDueStatus(it.due);
+  if (!st) return null;
+  return { status: st, text: formatDueText(it.due, dueTextMode()) };
+}
+
+/** 卡片 meta 行（纯层 metaTagsHtml 的行为侧封装：注入 due 包与相对时间） */
 function metaTags(it: TodoItem): string {
-  const tags: string[] = [];
-  // 1. 课程（公开课）
-  if (it.scene === '公开课' && it.courseName) {
-    tags.push(`<span class="bz-todo-tag bz-todo-tag-course">${iconSpan(ICON.course)} ${esc(it.courseName.replace(/^《|》$/g, ''))}</span>`);
-  }
-  // 2. 脚本（代码）
-  if (it.scene === '代码' && it.scriptName) {
-    tags.push(`<span class="bz-todo-tag bz-todo-tag-script">${iconSpan(ICON.script)} ${esc(it.scriptName)}</span>`);
-  }
-  // 3. 链接
-  if (it.url) {
-    let host = '链接';
-    try { host = new URL(it.url).hostname.replace(/^www\./, ''); } catch (e) { /* 保持默认 */ }
-    tags.push(`<span class="bz-todo-tag bz-todo-tag-url" title="${esc(it.url)}">${iconSpan(ICON.url)} ${esc(host)}</span>`);
-  }
-  // 4. 位置（绑定笔记才显示；公开课课程同名文件不重复）
-  if (it.notePath) {
-    const name = it.notePath.split('/').pop()!.replace(/\.md$/i, '');
-    const isCourseSame = it.scene === '公开课' && it.courseName && it.courseName.replace(/^《|》$/g, '') === name;
-    if (!isCourseSame) {
-      tags.push(`<span class="bz-todo-tag bz-todo-tag-pos" data-todo-pos="${esc(it.id)}">${iconSpan(ICON.pos)} ${esc(name)}</span>`);
-    }
-  }
-  // 5. 场景（重要红底）
-  const imp = it.priority === 'important' ? ' bz-todo-tag-important' : '';
-  tags.push(`<span class="bz-todo-tag bz-todo-tag-scene${imp}">#${esc(it.scene)}</span>`);
-  // 6. 截止（未完成）
-  if (it.due && !it.completed) {
-    const st = getDueStatus(it.due);
-    tags.push(`<span class="bz-todo-tag ${dueTagClass(st!)}">${iconSpan(dueIconName(st!))} ${esc(dueText(it))}</span>`);
-  }
-  // 7. 相对时间
-  if (it.created) {
-    tags.push(`<span class="bz-todo-time">${esc(formatRelativeTime(it.created))}</span>`);
-  }
-  return tags.join('');
+  return metaTagsHtml(it, metaDueOf(it), it.created ? formatRelativeTime(it.created) : '');
 }
 
 function renderContent(): void {
@@ -771,45 +651,30 @@ function renderContent(): void {
   const urgent = active.filter((i) => dueRank(i) <= 1);
   const normal = active.filter((i) => dueRank(i) > 1);
 
-  const cardHtml = (it: TodoItem, isDone: boolean) => {
-    const checkCls = isDone ? ' bz-todo-checked' : '';
-    const titleCls = it.completed ? ' bz-todo-done' : '';
-    // 内容：有 url/linkedNote 时显示为可点链接（点击 = 打开），纯文本直出
-    const clickable = !!(it.linkedNote || it.url);
-    const titleHtml = clickable
-      ? `<a href="javascript:void(0)" data-todo-openitem="${esc(it.id)}">${esc(it.title)}</a>`
-      : esc(it.title);
-    return `<div class="bz-todo-card${titleCls}" data-todo-id="${esc(it.id)}">
-      <span class="bz-todo-check${checkCls}" data-todo-check title="${isDone ? '恢复未完成' : '标记完成'}"></span>
-      <div class="bz-todo-body-text">
-        <div class="bz-todo-card-title">${titleHtml}</div>
-        <div class="bz-todo-meta">${metaTags(it)}</div>
-      </div>
-    </div>`;
-  };
+  const cardHtml = (it: TodoItem) => renderCard(it, metaDueOf(it), it.created ? formatRelativeTime(it.created) : '');
 
   const sections: string[] = [];
   if (urgent.length) {
-    sections.push(`<div class="bz-todo-section-label">到期优先 <span class="bz-todo-sec-cnt">${urgent.length}</span></div>`);
-    sections.push(...urgent.map((it) => cardHtml(it, false)));
+    sections.push(sectionLabelHtml('到期优先', urgent.length));
+    sections.push(...urgent.map((it) => cardHtml(it)));
   }
   if (normal.length) {
-    sections.push(`<div class="bz-todo-section-label">其他 <span class="bz-todo-sec-cnt">${normal.length}</span></div>`);
-    sections.push(...normal.map((it) => cardHtml(it, false)));
+    sections.push(sectionLabelHtml('其他', normal.length));
+    sections.push(...normal.map((it) => cardHtml(it)));
   }
   if (done.length) {
     const open = M.showDone;
-    // 时间界：展开默认只列近 30 天完成的，更早的收进尾部「更早 N 条」（点开放全）
-    const cutoff = moment().subtract(DONE_WINDOW_DAYS, 'days').format('YYYY-MM-DD HH:mm:ss');
-    const recent = done.filter((i) => (i.completed as string) >= cutoff);
+    // 时间界（设置 memoDoneWindow）：展开默认只列时间窗内完成的，更早的收进尾部「更早 N 条」（点开放全；全部=不收）
+    const win = doneWindowDays();
+    const cutoff = win === null ? null : moment().subtract(win, 'days').format('YYYY-MM-DD HH:mm:ss');
+    const recent = cutoff === null ? done : done.filter((i) => (i.completed as string) >= cutoff);
     const earlier = done.length - recent.length;
     const listed = !open || M.showEarlierDone ? done : recent;
-    sections.push(`<div class="bz-todo-donebar${open ? ' bz-todo-donebar-open' : ''}" data-todo-donebar>
-      ${iconSpan(ICON.doneFold)} 已完成 <span class="bz-todo-donebar-cnt">${done.length}</span></div>`);
+    sections.push(doneBarHtml(open, done.length));
     if (open) {
-      sections.push(...listed.map((it) => cardHtml(it, true)));
+      sections.push(...listed.map((it) => cardHtml(it)));
       if (earlier > 0 && !M.showEarlierDone) {
-        sections.push(`<button class="bz-todo-done-more" data-todo-donemore>更早 ${earlier} 条</button>`);
+        sections.push(doneMoreHtml(earlier));
       }
     }
   }
@@ -841,24 +706,38 @@ function renderContent(): void {
     if (!it) return;
     attachItemActions(card as HTMLElement, buildCardActions(it), {
       menuClass: skinClass() || undefined,
+      sheetClass: skinClass() || undefined, // 抽屉挂 body，需自带皮肤类，头部勾选圈皮肤样式才随行
       sheetHead: buildSheetHead(it),
     });
   });
 }
 
-/** 移动抽屉顶部信息说明（与列表卡一致的标题 + meta；桌面右键菜单不带头部，组件库自动区分） */
+/** 移动抽屉顶部信息说明（与列表卡同源 markup——勾选圈走 checkHtml 单源（ADR-0104），
+ *  完成态 = 圈 bz-todo-checked + 头 bz-todo-done 暗淡 + 标题 .done 划线；点圈恢复/标记完成
+ *  走列表同款 toggleCheck（先关抽屉再执行，与功能项「先关再执行」同款收束）。
+ *  桌面右键菜单不带头部，组件库自动区分） */
 function buildSheetHead(it: TodoItem): HTMLElement {
   const head = document.createElement('div');
-  head.className = 'bz-item-sheet-entry';
+  head.className = 'bz-item-sheet-entry bz-todo-sheet-entry';
+  if (it.completed) head.classList.add('bz-todo-done');
+  head.insertAdjacentHTML('afterbegin', checkHtml(it));
+  const text = document.createElement('div');
+  text.className = 'bz-todo-body-text';
   const title = document.createElement('div');
   title.textContent = it.title;
   if (it.completed) title.classList.add('done');
-  head.appendChild(title);
+  text.appendChild(title);
   const meta = document.createElement('div');
   meta.className = 'bz-todo-meta';
   meta.innerHTML = metaTags(it);
   mountIcons(meta);
-  head.appendChild(meta);
+  text.appendChild(meta);
+  head.appendChild(text);
+  head.querySelector('[data-todo-check]')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeItemMenu();
+    toggleCheck(it);
+  });
   return head;
 }
 
@@ -901,11 +780,31 @@ function jumpToNote(it: TodoItem): void {
   }
 }
 
+/** 行内勾选切换（列表卡与移动抽屉头共用）：已完成 = 恢复；未完成 = 300ms 防抖后标记完成
+ *  （防抖窗口内再点 = 反悔取消） */
+function toggleCheck(it: TodoItem): void {
+  // 已恢复路径（已完成条目勾选 = 恢复）
+  if (it.completed) {
+    void restoreItem(it);
+    return;
+  }
+  // 完成防抖：300ms 内反悔取消
+  if (M.completeTimers.has(it.id)) {
+    clearTimeout(M.completeTimers.get(it.id));
+    M.completeTimers.delete(it.id);
+    return;
+  }
+  const timer = setTimeout(() => {
+    M.completeTimers.delete(it.id);
+    void completeItem(it);
+  }, 300);
+  M.completeTimers.set(it.id, timer);
+}
+
 async function completeItem(it: TodoItem): Promise<void> {
   try {
     await TodoData.completeItem(it.id);
     emitDomainEvent('memo', { kind: 'completed', title: it.title });
-    notice('已标记完成', 'success');
   } catch (e) {
     notifySaveError(e, '标记完成');
     console.error(e);
@@ -915,9 +814,8 @@ async function completeItem(it: TodoItem): Promise<void> {
 
 async function restoreItem(it: TodoItem): Promise<void> {
   try {
-    await TodoData.updateItem(it.id, { completed: null } as any);
+    await TodoData.updateItem(it.id, { completed: null });
     emitDomainEvent('memo', { kind: 'restored', title: it.title });
-    notice('已恢复未完成', 'success');
   } catch (e) {
     notifySaveError(e, '恢复未完成');
     console.error(e);
@@ -930,9 +828,9 @@ async function postponeItem(id: string, days: number): Promise<void> {
   if (!it || !it.due) return;
   const d = new Date(it.due.replace('T', ' '));
   d.setDate(d.getDate() + days);
-  const next = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const next = `${localDayKey(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   try {
-    await TodoData.updateItem(id, { due: next } as any);
+    await TodoData.updateItem(id, { due: next });
     emitDomainEvent('memo', { kind: 'postponed', title: it.title, due: next });
     notice(`已延后 ${days} 天`, 'success');
   } catch (e) {
@@ -947,7 +845,7 @@ async function togglePrio(id: string): Promise<void> {
   if (!it) return;
   const to = it.priority === 'important' ? 'minor' : 'important';
   try {
-    await TodoData.updateItem(id, { priority: to } as any);
+    await TodoData.updateItem(id, { priority: to });
     emitDomainEvent('memo', { kind: 'priority', title: it.title, to });
     notice(to === 'important' ? '已转为重要' : '已转为次要', 'success');
   } catch (e) {
@@ -959,9 +857,11 @@ async function togglePrio(id: string): Promise<void> {
 
 async function deleteItemConfirm(it: TodoItem): Promise<void> {
   // 三段式确认框：标题 + 问句（名称「」引号）+ 后果说明（删除已接撤销，后果如实说明）
+  // className：流程框挂 body，须显式带皮肤类才与编辑弹窗同皮（issue 291 全域子弹窗统一）
   const ok = await openFlowDialog({
     title: '删除待办',
     message: `确定删除待办「${it.title}」吗？\n删除后可在通知中撤销。`,
+    className: skinClass(),
     actions: [
       { label: '取消', value: 'cancel' },
       { label: '删除', value: 'delete', danger: true, cta: true },
@@ -1001,7 +901,7 @@ function buildCardActions(it: TodoItem): ItemAction[] {
   const actions: ItemAction[] = [];
   if (it.linkedNote || it.url) {
     let sub: string | undefined;
-    if (it.linkedNote) sub = it.linkedNote.split('/').pop()?.replace(/\.md$/i, '');
+    if (it.linkedNote) sub = stripMdExt(it.linkedNote.split('/').pop() || '');
     else if (it.url) {
       try { sub = new URL(it.url).hostname; } catch (e) { /* 忽略 */ }
     }
@@ -1010,7 +910,7 @@ function buildCardActions(it: TodoItem): ItemAction[] {
   if (it.notePath) {
     actions.push({
       icon: 'book-open', label: '跳转关联笔记', title: '跳转关联笔记',
-      sub: it.notePath.split('/').pop()?.replace(/\.md$/i, ''),
+      sub: stripMdExt(it.notePath.split('/').pop() || ''),
       onClick: () => jumpToNote(it),
     });
   }
@@ -1019,7 +919,7 @@ function buildCardActions(it: TodoItem): ItemAction[] {
     actions.push({ icon: 'timer', label: '专注这个', title: '开始一个归属到该待办的专注番茄', onClick: () => focusTodoItem(it) });
     actions.push({
       icon: 'check-circle', label: '标记完成', title: '标记完成',
-      sub: it.due ? formatDueText(it.due) : undefined,
+      sub: it.due ? formatDueText(it.due, dueTextMode()) : undefined,
       onClick: async () => { await completeItem(it); },
     });
   } else {
@@ -1052,11 +952,42 @@ function buildCardActions(it: TodoItem): ItemAction[] {
 
 // ---------- 编辑器（新建/编辑弹窗） ----------
 
+/**
+ * 底部录入提交（issue 268）：两端逻辑分叉——
+ * 桌面 = `addFromComposer()` 快速落盘（保留既有「输入即存 + toast 补全」链路）；
+ * 移动 = 打开创建弹窗（真全屏下弹窗能补场景/优先级/截止/定位，且移动端头行已撤掉新建钮，
+ * 这一枚就是移动端的新建入口）。已输入文字**带进弹窗**当初始内容（用户拍板），
+ * 输入框留到弹窗保存成功才清——中途取消不丢草稿。
+ * 「当前选中的场景」也一并带进弹窗（issue 269 用户拍板：选中某场景再点添加，
+ * 弹窗里预选这个场景）——与桌面 composer 快速落盘的 composerScene() 同口径。
+ */
+function submitComposer(): void {
+  if (!isMobileEnv()) { addFromComposer(); return; }
+  const input = M.overlay!.querySelector('[data-todo-composer-input]') as HTMLInputElement | null;
+  const txt = (input?.value || '').trim();
+  // 剪藏剪贴板预填的标题候选随草稿一起交接（内容仍是原始 URL 才认，用户改动即弃）
+  const hint = clipTitleHint && clipTitleHint.title && txt === clipTitleHint.url ? clipTitleHint : null;
+  openEditor(null, {
+    presetContent: txt,
+    presetTitle: hint ? hint.title : '',
+    presetScene: composerScene(),
+    onSaved: () => {
+      if (input) input.value = '';
+      clipTitleHint = null;
+    },
+  });
+}
+
+/** composer 落盘进行中标志（E19：双击防重入——清空移到成功分支后，输入框不再是防重入屏障） */
+let composerBusy = false;
+
 function addFromComposer(): void {
+  if (composerBusy) return; // E19：落盘窗口期忽略再次提交，防同文本双条目
   const overlay = M.overlay!;
   const input = overlay.querySelector('[data-todo-composer-input]') as HTMLInputElement;
   const txt = (input.value || '').trim();
   if (!txt) { notice('请输入内容'); return; }
+  composerBusy = true;
   // 场景缺省兜底：具体场景直用，伪场景回退 memoDefaultScene/第一个（composerScene 同口径）
   const scene = composerScene();
   void (async () => {
@@ -1090,27 +1021,40 @@ function addFromComposer(): void {
         type: 'success',
         action: { label: '补全', onClick: () => openEditor(it) },
       });
+      input.value = ''; // E20：成功才清空——保存失败草稿留在输入框（移动端弹窗路径同口径）
     } catch (e) {
       notifySaveError(e, '保存待办');
       console.error(e);
     }
-    input.value = '';
+    composerBusy = false;
     await refresh();
   })();
 }
 
-/** 打开编辑器（item = null 新建）；用 uiModal：无关闭按钮、点遮罩/ESC 关闭 */
-export function openEditor(item: TodoItem | null): void {
+/** 打开编辑器（item = null 新建）；用 uiModal：无关闭按钮、点遮罩/ESC 关闭
+ *
+ * opts（新建态预填，issue 268 移动端「底部添加 → 弹窗」交接用；编辑态忽略）：
+ *  - presetContent：内容框初值（底部录入已输入的文字带进弹窗）
+ *  - presetTitle：剪藏标题框初值（剪贴板预填抓到的页面标题）
+ *  - presetScene：场景平铺预选（issue 269：当前选中的场景带进弹窗；非法/缺省回落
+ *    memoDefaultScene → 第一个场景，与 fallbackScene 同口径）
+ *  - presetNote：关联笔记预置（2026-09-11「给当前笔记记一笔」命令；同「定位到笔记」的绑定字段）
+ *  - onSaved：保存成功后的回调（调用方清底部录入草稿）
+ */
+export function openEditor(
+  item: TodoItem | null,
+  opts?: {
+    presetContent?: string; presetTitle?: string; presetScene?: string; onSaved?: () => void;
+    presetNote?: { path: string; position: { line: number; ch: number } | null };
+  },
+): void {
   const isEdit = !!item;
   const scenes = TodoData.getScenarios();
   const editing = item ?? null;
-  // 默认场景：设置 memoDefaultScene 或第一个
-  let defaultScene: string;
-  if (editing) defaultScene = editing.scene;
-  else {
-    const s = (tryGetSettings() as any).memoDefaultScene;
-    defaultScene = s && scenes.includes(s) ? s : scenes[0];
-  }
+  // 默认场景：编辑态用条目自身场景；新建优先 opts.presetScene（合法才认），否则走
+  // fallbackScene（设置 memoDefaultScene 或第一个）
+  const presetScene = opts?.presetScene && scenes.includes(opts.presetScene) ? opts.presetScene : null;
+  const defaultScene = editing ? editing.scene : (presetScene ?? fallbackScene());
   const isClip = defaultScene === '剪藏';
   const isCode = defaultScene === '代码';
   const isCourse = defaultScene === '公开课';
@@ -1132,7 +1076,7 @@ export function openEditor(item: TodoItem | null): void {
   const contentInput = document.createElement('textarea');
   contentInput.className = 'bz-input';
   contentInput.placeholder = '输入待办内容...';
-  contentInput.value = editing ? editing.title : '';
+  contentInput.value = editing ? editing.title : (opts?.presetContent || '');
   contentField.append(contentLabel, contentInput);
   form.appendChild(contentField);
 
@@ -1142,7 +1086,7 @@ export function openEditor(item: TodoItem | null): void {
   const titleInput = document.createElement('input');
   titleInput.className = 'bz-input';
   titleInput.placeholder = '标题（可选）';
-  titleInput.value = '';
+  titleInput.value = editing ? '' : (opts?.presetTitle || '');
   titleBox.appendChild(titleInput);
   form.appendChild(titleBox);
 
@@ -1215,7 +1159,7 @@ export function openEditor(item: TodoItem | null): void {
       { value: 'minor', label: '次要' },
       { value: 'important', label: '重要' },
     ],
-    value: editing ? editing.priority : (tryGetSettings() as any).memoDefaultPriority || 'minor',
+    value: editing ? editing.priority : tryGetSettings().memoDefaultPriority || 'minor',
     float: true, // 浮岛 segmented（issue 199 拍板）
     label: '优先级',
     onChange: () => { /* 值由保存时读取 */ },
@@ -1271,9 +1215,11 @@ export function openEditor(item: TodoItem | null): void {
   // 📌 定位（F 款已入组件库 .bz-btn--chip，issue 200；真实读取当前笔记与光标，绑定后转品牌色）
   const posRow = document.createElement('div');
   posRow.className = 'bz-todo-pos-row';
+  // 新建态可预置关联笔记（2026-09-11「给当前笔记记一笔」命令：从首页入口一步进来就带着绑定，
+  // 不必再点一次「定位到笔记」）；编辑态一律以条目自身的绑定为准，预置值不参与。
   const posState: { notePath: string | null; notePosition: { line: number; ch: number } | null } = {
-    notePath: editing?.notePath || null,
-    notePosition: editing?.notePosition || null,
+    notePath: editing?.notePath || opts?.presetNote?.path || null,
+    notePosition: editing?.notePosition || opts?.presetNote?.position || null,
   };
   // 定位钮 = 组件库 chip 档（issue 200 F 款入库：.bz-btn--chip 图标圆底 + 文字素排）
   const posBtn = uiBtn({ icon: 'pin', label: '定位到笔记', chip: true });
@@ -1300,7 +1246,7 @@ export function openEditor(item: TodoItem | null): void {
     }
   });
   if (posState.notePath) {
-    const name = (posState.notePath.split('/').pop() || '').replace(/\.md$/i, '');
+    const name = stripMdExt(posState.notePath.split('/').pop() || '');
     setPosBtn(name, true);
   } else {
     setPosBtn('定位到笔记', false);
@@ -1378,9 +1324,8 @@ export function openEditor(item: TodoItem | null): void {
             courseName,
             coursePath,
             url: url ?? editing.url,
-          } as any);
+          });
           emitDomainEvent('memo', { kind: 'edited', old: { title: editing.title }, next: { title: finalTitle, scene, priority, due } });
-          notice('已保存', 'success');
         } else {
           const it: TodoItem = {
             id: generateId(), // T5：与旧 memo 同前缀 'item'（同源 memo.json）
@@ -1401,9 +1346,9 @@ export function openEditor(item: TodoItem | null): void {
           await TodoData.addItem(it);
           emitDomainEvent('memo', { kind: 'added', title: finalTitle, scene, priority, due });
           M.pinnedNewId = it.id; // 录入当场可见：伪场景过滤放行这条新目
-          notice(`已添加到「${scene}」`, 'success');
         }
         closeModal();
+        opts?.onSaved?.(); // 新建成功才回调（调用方清底部录入草稿；失败分支不触发）
         await refresh();
       } catch (e) {
         notifySaveError(e, isEdit ? '保存待办' : '新建待办');
@@ -1453,11 +1398,11 @@ function openAddSceneDialog(): void {
     if (/[,，]/.test(name)) { notice('场景名不能包含逗号'); return; }
     const scenes = TodoData.getScenarios();
     if (scenes.includes(name)) { notice('场景已存在'); return; }
-    const settings = getSettings() as any;
+    const settings = getSettings();
     const next = [...scenes, name].join(',');
     settings.memoScenarios = next;
     void saveSettings().then(async () => {
-      TodoData.init(getSettings() as any);
+      TodoData.init(getSettings());
       notice(`已添加场景「${name}」`, 'success');
       close();
       await refresh();
@@ -1498,10 +1443,9 @@ function openTodoInSettings(): void {
 
 /** 场景列表写回设置串（与旧 memo 共用 memoScenarios 键）→ 重建数据层 → 刷新 */
 function commitScenarios(next: string[], okMsg: string): Promise<void> {
-  const settings = getSettings() as any;
-  settings.memoScenarios = next.join(',');
+  getSettings().memoScenarios = next.join(',');
   return saveSettings().then(async () => {
-    TodoData.init(getSettings() as any);
+    TodoData.init(getSettings());
     notice(okMsg, 'success');
     await refresh();
   });
@@ -1563,7 +1507,7 @@ async function deleteSceneConfirm(scene: string): Promise<void> {
   if (DEFAULT_SCENARIOS.includes(scene)) { notice('默认场景不支持删除'); return; }
   const scenes = TodoData.getScenarios();
   const others = scenes.filter((s) => s !== scene);
-  const defSetting = (tryGetSettings() as any).memoDefaultScene;
+  const defSetting = tryGetSettings().memoDefaultScene;
   const target = defSetting && others.includes(defSetting) ? defSetting : others[0];
   if (!target) { notice('至少保留一个场景'); return; }
   const count = M.items.filter((i) => i.scene === scene).length;
@@ -1572,6 +1516,7 @@ async function deleteSceneConfirm(scene: string): Promise<void> {
     message: count > 0
       ? `确定删除场景「${scene}」吗？\n其中 ${count} 条待办将迁入默认场景「${target}」。`
       : `确定删除场景「${scene}」吗？\n场景将从设置中移除。`,
+    className: skinClass(), // 挂 body 的流程框须显式带皮肤类（issue 291）
     actions: [
       { label: '取消', value: 'cancel' },
       { label: '删除', value: 'delete', danger: true, cta: true },
@@ -1595,7 +1540,7 @@ export function ensureTodo(app: App): void {
   if (M.appRef) return;
   M.appRef = app;
   registerEscapeHandler();
-  subscribeMemoSync(app); // T1：同源 memo.json 跨域同步
+  subscribeTodoSync(app); // T1：同源 memo.json 跨域同步
   void loadData();
 }
 
@@ -1615,7 +1560,7 @@ export function addTodo(app: App): void {
 
 export function unloadTodo(): void {
   closeTodoPanel();
-  unsubscribeMemoSync(); // T1：退订 vault modify + 还原 TodoData.write 包装
+  unsubscribeTodoSync(); // T1：退订 vault modify + 还原 TodoData.write 包装
   M.completeTimers.forEach((t) => clearTimeout(t));
   M.completeTimers.clear();
   M.appRef = null;

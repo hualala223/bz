@@ -20,7 +20,7 @@
 .bz-todo-side-add {
   width: auto; margin: var(--bz-space-sm) var(--bz-space-xs) var(--bz-space-md);
   padding: 6px 10px; flex-shrink: 0;
-  border: 1px dashed var(--bz-border-strong); border-radius: 8px;
+  border: 1px dashed var(--bz-border-strong); border-radius: var(--bz-radius-sm);
   background: transparent; color: var(--bz-text-3); cursor: pointer;
   font-size: var(--bz-font-meta); font-family: inherit;
   display: flex; align-items: center; gap: 6px; justify-content: center;
@@ -30,11 +30,33 @@
 
 /* ---- 右栏 ---- */
 .bz-todo-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-/* 排序：浮岛 segmented 三档（.bz-choice--float，issue 199） */
+/* 排序 = 组件库下拉（issue 268：三档平铺改单枚下拉，收起态只占一行文案宽，
+   搜索框（.bz-search flex:1）随之吃掉余量变长）。组件默认 min-width:160px 按最长
+   选项预留，此处放开——收起态按内容宽（文案 + 箭头 + 内边距）自适应即可。 */
 .bz-todo-sort { flex-shrink: 0; }
+.bz-todo-sort .bz-select { min-width: 0; width: auto; }
+/* 排序下拉实例类（uiSelect className，挂 .bz-select 根上）：不参与工具行压缩，
+   宽度自适应由上一行管；皮肤观感（墨边贴纸/方角描边）见皮肤段排序下拉组 */
+.bz-todo-sortsel { flex-shrink: 0; }
+
+/* 移动场景条尾部「添加场景」虚线 chip（issue 268，markup 见 render.mobAddSceneChipHtml）：
+   动作磁贴跟在全部场景之后，与左栏 .bz-todo-side-add 同语义、收藏本 .bz-fav-chip-add
+   同款虚线范式。选择器带 .bz-mobstrip-chip 复合（0,2,0）稳压组件库基类。 */
+.bz-mobstrip-chip.bz-mobstrip-add {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--bz-border-strong);
+  color: var(--bz-text-3);
+}
+.bz-mobstrip-chip.bz-mobstrip-add .bz-ic { color: currentColor; }
+.bz-mobstrip-chip.bz-mobstrip-add:hover {
+  color: var(--bz-brand);
+  border-color: var(--bz-brand);
+  background: var(--bz-brand-soft);
+}
 
 /* ---- 列表 ---- */
-.bz-todo-content { flex: 1; overflow-y: auto; padding: 4px var(--bz-space-md) var(--bz-space-md); display: flex; flex-direction: column; min-height: 0; }
+.bz-todo-content { flex: 1; overflow-y: auto; padding: var(--bz-space-xs) var(--bz-space-md) var(--bz-space-md); display: flex; flex-direction: column; min-height: 0; }
 .bz-todo-section-label {
   display: flex; align-items: center; gap: var(--bz-space-sm);
   font-size: var(--bz-font-caption); font-weight: var(--bz-weight-semibold);
@@ -46,18 +68,18 @@
 .bz-todo-donebar {
   display: flex; align-items: center; gap: var(--bz-space-sm);
   margin: var(--bz-space-sm) var(--bz-space-xs) 2px; padding: 7px var(--bz-space-sm);
-  border: 1px dashed var(--bz-border-strong); border-radius: 8px;
+  border: 1px dashed var(--bz-border-strong); border-radius: var(--bz-radius-sm);
   background: var(--bz-surface-1); cursor: pointer;
   font-size: var(--bz-font-meta); color: var(--bz-text-2);
 }
 .bz-todo-donebar:hover { color: var(--bz-text-1); border-color: var(--bz-brand); }
 .bz-todo-donebar .bz-todo-donebar-cnt { margin-left: auto; font-size: var(--bz-font-caption); color: var(--bz-text-3); }
-.bz-todo-donebar .bz-ic { width: 13px; height: 13px; transition: transform 0.15s ease; }
+.bz-todo-donebar .bz-ic { width: 13px; height: 13px; transition: transform var(--bz-dur-fast) ease; }
 .bz-todo-donebar.bz-todo-donebar-open .bz-ic { transform: rotate(180deg); }
 /* 「更早 N 条」（已完成折叠区尾部，30 天时间界放全入口）：与折叠条同族弱化样式 */
 .bz-todo-done-more {
   margin: 2px var(--bz-space-xs) 0; padding: 6px var(--bz-space-sm);
-  border: none; border-radius: 8px; background: transparent;
+  border: none; border-radius: var(--bz-radius-sm); background: transparent;
   color: var(--bz-brand); cursor: pointer;
   font-size: var(--bz-font-meta); font-family: inherit; text-align: center;
 }
@@ -87,6 +109,15 @@
 .bz-todo-card-title { font-size: var(--bz-font-body); color: var(--bz-text-1); line-height: 1.5; word-break: break-word; overflow-wrap: anywhere; white-space: pre-wrap; }
 .bz-todo-card.bz-todo-done .bz-todo-card-title { text-decoration: line-through; color: var(--bz-text-2); }
 .bz-todo-card-title a { color: var(--bz-brand); text-decoration: underline; cursor: pointer; word-break: break-word; }
+
+/* ---- 移动抽屉头（buildSheetHead，ADR-0104 markup 单源）----
+   勾选圈复用上方 .bz-todo-check 单源规则（抽屉经 sheetClass 挂皮肤类，纸感/编辑部皮肤自动随行，
+   无需皮肤段额外覆盖）；此处只补头部横排布局与完成态——对齐列表 .bz-todo-card.bz-todo-done
+   口径（整体暗淡 0.62 + 标题划线变次级色） */
+.bz-todo-sheet-entry { flex-direction: row; align-items: flex-start; gap: 10px; }
+.bz-todo-sheet-entry .bz-todo-check { margin-top: 2px; }
+.bz-todo-sheet-entry.bz-todo-done { opacity: 0.62; }
+.bz-todo-sheet-entry .done { text-decoration: line-through; color: var(--bz-text-2); }
 
 /* meta 标签行（顺序对齐源码 buildMeta：课程→脚本→链接→位置→场景→截止→时间）。
    行内所有文字统一 18px 行高盒——标签 18px + 时间 18px，flex 居中后基线一致
@@ -125,6 +156,13 @@
 .bz-todo-form { display: flex; flex-direction: column; gap: var(--bz-space-md); margin-top: var(--bz-space-md); }
 .bz-todo-form .bz-field { margin-bottom: 0; }
 .bz-todo-form textarea.bz-input { min-height: 64px; }
+/* 弹窗内容包裹（uiModal .bz-dialog-body 的直接子节点，内含 .bz-todo-form）：
+   纵向排布 + 防溢出；顶部间距由 form 的 margin-top 自管。全 token 取值，
+   两肤 × 亮暗四组合随皮肤作用域 token 自动协调 */
+.bz-todo-editor { display: flex; flex-direction: column; min-width: 0; }
+/* 底部按钮行包裹：右对齐（内部 .bz-btn-row 同向双保险）；margin-top 沿用
+   addscene 按钮行惯例（表单 gap 之上再垫 xs 档，动作行与字段分离） */
+.bz-todo-form-actions { display: flex; justify-content: flex-end; margin-top: var(--bz-space-xs); }
 /* 第二个输入框（剪藏标题/代码脚本/公开课课程）容器：输入框满宽
    （.bz-input 默认 240px 定宽，不在 .bz-field 里的框须显式撑满，issue 199）；
    position:relative 供联想 .bz-popover 浮层锚定（issue 201） */
@@ -136,21 +174,47 @@
 .bz-todo-pos-row { display: flex; align-items: center; gap: var(--bz-space-sm); min-height: 32px; }
 .bz-todo-pos-row .bz-todo-pos-hint { font-size: var(--bz-font-caption); color: var(--bz-text-3); }
 .bz-todo-pos-row .bz-todo-pos-hint .bz-ic { width: 12px; height: 12px; vertical-align: -2px; }
+/* 截止时间行（datetime 输入 + 清除钮）：flex 防组件库 `.bz-field .bz-input
+   { width: 100% }` 把清除钮挤换行——输入框吃余量（flex-basis 覆盖 width），
+   清除钮定宽贴右；间距/对齐消费 spacing token，随肤随档 */
+.bz-todo-due-row { display: flex; align-items: center; gap: var(--bz-space-sm); }
+.bz-todo-due-row .bz-input { flex: 1; min-width: 0; }
 
 /* ---- 添加场景弹窗（issue 199：此前容器/提示零规则裸排） ---- */
 .bz-todo-addscene { display: flex; flex-direction: column; gap: var(--bz-space-md); margin-top: var(--bz-space-md); }
 .bz-todo-addscene .bz-input { width: 100%; }
-.bz-todo-addscene .bz-btn-row { margin-top: 4px; }
+.bz-todo-addscene .bz-btn-row { margin-top: var(--bz-space-xs); }
 .bz-todo-addscene-hint { font-size: var(--bz-font-caption); color: var(--bz-text-3); line-height: 1.5; }
 
-/* ---- 移动端（≤768px）：真全屏 + 横滑场景条（共享 .bz-mobstrip） ---- */
+/* （issue 266 的「移动端专属头行新建钮」在 issue 268 退役：移动端新建入口归底部
+   录入「添加」（打开创建弹窗）与场景条尾部「添加场景」，故此处原有的
+   `@media (min-width:769px){ .bz-todo-head-…{display:none} }` 一并删除。
+   守卫 tests/memo/mobile-ui-3fix.test.ts 断言全文件不再出现该类名，故此处不写全。） */
+
+/* ---- 移动端（≤768px）：真全屏 + 横滑场景条（共享 .bz-mobstrip）
+   头行钮组放回 / 单枚关闭钮 / 44px 触控档收在文件末尾的「移动端收口段
+   （issue 268）」——皮肤段 `.bz-todo-skin-* .bz-panel-head-btns{display:none}`
+   在本文件中位置更靠后（:369/:479），故覆盖规则必须排在它们之后。 ---- */
 @media (max-width: 768px) {
-  .bz-todo-panel {
-    width: 100vw; height: 100vh; max-width: none; max-height: none;
+  /* 本地差异：上游此段为无条件撑满；本地保留「移动端默认全屏」开关，
+     仅挂 .bz-win-mfs 时生效，关=回落 core 的 ≤768 常规卡基线。 */
+  .bz-todo-panel.bz-win-mfs {
+    width: 100vw; max-width: none;
+    /* 高度挂「随软键盘收缩的可视视口高度」（issue 266）：取值链见核心层
+       components.css 的 --bz-vvh 段——JS 写 px 精修（visualViewport），
+       未注入时退回 100dvh / 100vh 基线（末者与改造前一致，零劣化）。 */
+    height: var(--bz-vvh, 100vh); max-height: var(--bz-vvh, 100vh);
+    /* 顶部对齐（必须）：父层 .bz-panel-overlay（components.css）是
+       `align-items: center` 居中，遮罩自身仍是 100vh（fixed + inset:0 不随键盘
+       收缩）。若继续居中，高度缩短后的面板会上下对称内缩——底边
+       =(100vh+可视高)/2 仍在键盘之下，等于白修。改顶部对齐后底边 = 可视高
+       = 键盘上沿。 */
+    align-self: flex-start;
     border-radius: 0; border: none;
   }
   /* 顶部避让由根节点 .bz-panel-mtop 统一接管（44px，components.css），头行不再自垫 */
-  /* 场景栏桌面专属（移动端走 .bz-mobstrip 横滑条）；主头行同（移动端新建走底部录入条） */
+
+  /* 场景栏桌面专属（移动端走 .bz-mobstrip 横滑条）；主头行同（移动端新建走头行钮） */
   .bz-todo-body .bz-rail { display: none; }
   .bz-todo-main .bz-main-head { display: none; }
   .bz-todo-content { padding: var(--bz-space-sm) var(--bz-space-lg) calc(var(--bz-space-lg) + env(safe-area-inset-bottom, 0px)); }
@@ -158,7 +222,11 @@
   .bz-todo-card .bz-todo-check { width: 19px; height: 19px; }
   /* 触控热区 ≥44px（设计手册 §8.2）：视觉尺寸不变，::after 外扩热区（19px + 13px×2 = 45px） */
   .bz-todo-card .bz-todo-check::after { content: ''; position: absolute; inset: -13px; }
-  .bz-todo-card .bz-todo-card-title { font-size: 15px; }
+  /* 移动抽屉头同款口径（review P3）：抽屉是移动端高频场景，圈同 19px + 45px 热区，
+     对齐列表移动段——规则同款、层叠路径同款（checked 对勾 ::after 两侧行为一致） */
+  .bz-todo-sheet-entry .bz-todo-check { width: 19px; height: 19px; }
+  .bz-todo-sheet-entry .bz-todo-check::after { content: ''; position: absolute; inset: -13px; }
+  .bz-todo-card .bz-todo-card-title { font-size: var(--bz-font-emphasis); }
   .bz-todo-composer .bz-input { height: 40px; }
 }
 
@@ -251,7 +319,7 @@
   color: #fffdf6;
   font-weight: var(--bz-weight-bold);
   letter-spacing: 0.3em;
-  padding: 3px 8px 3px 11px;
+  padding: 3px var(--bz-space-sm) 3px 11px;
   border-radius: 3px;
   transform: rotate(-1.6deg);
   margin: var(--bz-space-sm) var(--bz-space-xs) var(--bz-space-md);
@@ -336,7 +404,69 @@
 .bz-todo-skin-paper .bz-panel-head-btns { display: none; }
 
 /* 工具行间距对齐原型（搜索框与排序之间 12px；用 margin——gap 覆盖在此环境不稳定） */
-.bz-todo-skin-paper .bz-todo-sort { margin-left: 12px; }
+.bz-todo-skin-paper .bz-todo-sort { margin-left: var(--bz-space-md); }
+
+/* 排序下拉（issue 268）：与搜索框同款墨边白底贴纸，收起态 + 展开菜单两态都进皮肤——
+   组件库 .bz-select / .bz-select-menu 的默认取值（surface-4 底、细描边、6px 圆角）
+   与纸感贴纸语汇不搭，故整组就地换装；菜单是 .bz-select 的绝对定位子节点。 */
+.bz-todo-skin-paper .bz-todo-sort .bz-select {
+  height: 32px; padding: 0 9px 0 var(--bz-space-md); gap: 6px;
+  border: 2px solid var(--bz-skin-ink);
+  border-radius: 11px;
+  background: var(--bz-surface-2);
+  color: var(--bz-text-1);
+  font-weight: var(--bz-weight-semibold);
+  box-shadow: 2px 2px 0 rgba(42, 35, 24, 0.85);
+}
+.bz-todo-skin-paper .bz-todo-sort .bz-select:hover { border-color: var(--bz-skin-ink); background: var(--bz-surface-hover); }
+.bz-todo-skin-paper .bz-todo-sort .bz-select.open { border-color: var(--bz-brand); box-shadow: 2px 2px 0 var(--bz-brand); }
+.bz-todo-skin-paper .bz-todo-sort .bz-select-car { color: var(--bz-text-1); width: 13px; height: 13px; }
+.bz-todo-skin-paper .bz-todo-sort .bz-select-menu {
+  margin-top: 2px; padding: var(--bz-space-xs);
+  background: #fffdf6;
+  border: 2px solid var(--bz-skin-ink);
+  border-radius: 11px;
+  box-shadow: 4px 4px 0 rgba(42, 35, 24, 0.85);
+}
+.bz-todo-skin-paper .bz-todo-sort .bz-select-item {
+  border-radius: var(--bz-radius-sm); font-weight: var(--bz-weight-medium); color: var(--bz-text-1);
+}
+.bz-todo-skin-paper .bz-todo-sort .bz-select-item:hover { background: var(--bz-brand-soft); }
+.bz-todo-skin-paper .bz-todo-sort .bz-select-item.is-on {
+  background: var(--bz-skin-ink); color: #fffdf6; font-weight: var(--bz-weight-bold);
+}
+.bz-todo-skin-paper .bz-todo-sort .bz-select-item.is-on:hover { background: var(--bz-skin-ink); color: #fffdf6; }
+
+/* 移动场景条平铺 chip（issue 269「平铺的场景也风格化」）：收起态 = 白底贴纸
+   （1.5px 墨框，无阴影——十条并排各自带硬阴影会吵），选中 = 品牌橙贴纸 + 墨框 + 硬阴影。 */
+.bz-todo-skin-paper .bz-mobstrip-chip {
+  background: var(--bz-surface-2);
+  border: 1.5px solid var(--bz-skin-ink);
+  color: var(--bz-text-1);
+  font-weight: var(--bz-weight-semibold);
+}
+.bz-todo-skin-paper .bz-mobstrip-chip .bz-ic { color: var(--bz-text-2); }
+.bz-todo-skin-paper .bz-mobstrip-chip:hover { background: var(--bz-surface-hover); }
+.bz-todo-skin-paper .bz-mobstrip-chip.is-on {
+  background: var(--bz-brand);
+  border-color: var(--bz-skin-ink);
+  color: #fffdf6;
+  font-weight: var(--bz-weight-bold);
+  box-shadow: 2px 2px 0 var(--bz-skin-ink);
+}
+.bz-todo-skin-paper .bz-mobstrip-chip.is-on .bz-ic { color: inherit; }
+.bz-todo-skin-paper .bz-mobstrip-chip.is-on .bz-mobstrip-dot { border: 1px solid rgba(255, 253, 246, 0.75); }
+
+/* 「添加场景」虚线 chip：纸感 = 墨色虚线框。放在通用 chip 段**之后**——同特异性
+   （0,2,0）靠后写者赢，否则会被上面的实框白底规则吃掉虚线。 */
+.bz-todo-skin-paper .bz-mobstrip-chip.bz-mobstrip-add {
+  border: 2px dashed rgba(42, 35, 24, 0.5);
+  background: transparent;
+  color: var(--bz-text-2);
+}
+.bz-todo-skin-paper .bz-mobstrip-chip.bz-mobstrip-add:hover {
+  border-color: var(--bz-skin-ink); color: var(--bz-text-1); background: var(--bz-surface-1);
+}
 
 /* 任务列表：行间虚线分隔 + 大复选框（勾位随尺寸重定位） */
 .bz-todo-skin-paper .bz-todo-card + .bz-todo-card { border-top: 1.5px dashed rgba(42, 35, 24, 0.16); }
@@ -404,6 +534,79 @@
   letter-spacing: 0.06em;
 }
 
+/* ─── 纸感手账 · 夜（issue 270：推翻「固定明度」旧拍板补暗色；照 cinema 先例
+   纯 CSS——.theme-dark 挂 body，面板 / uiModal 弹窗 / 右键菜单根均挂 document.body
+   树内，后代选择器可达）───
+   暗色 = 深纸底 + 浅墨边 + 黑硬阴影：token 整组覆盖后，各结构位消费 var 的声明
+   （墨边/输入墨框/激活描边等）自动随档；仅亮色段硬编码位需就地覆盖。小钮与贴纸的
+   var(--bz-skin-ink) 硬偏移阴影随墨转浅，暗底上读作「粉笔描边」，与浅墨边同一
+   语言；大壳层阴影显式转黑保深度。亮色侧零改动。 */
+.theme-dark .bz-todo-skin-paper {
+  --bz-skin-ink: #ece2ca;
+  --bz-surface-1: #211d13;
+  --bz-surface-2: #2b2617;
+  --bz-surface-3: #342e1d;
+  --bz-surface-hover: #38311f;
+  --bz-text-1: #ede4cd;
+  --bz-text-2: #b5a98a;
+  --bz-text-3: #7e7559;
+  --bz-border: rgba(236, 226, 202, 0.16);
+  --bz-border-strong: rgba(236, 226, 202, 0.72);
+  --bz-brand: #f27b28;
+  --bz-brand-hover: #fb8f42;
+  --bz-brand-soft: rgba(242, 123, 40, 0.2);
+}
+/* 三壳（面板/uiModal 弹窗/右键菜单）：米纸点阵转暗点阵，墨影转黑影；
+   墨边消费 ink 自动转浅 */
+.theme-dark .bz-todo-panel.bz-todo-skin-paper {
+  background:
+    radial-gradient(rgba(236, 226, 202, 0.1) 1px, transparent 1px) 0 0 / 22px 22px,
+    #1b1710;
+  box-shadow: 9px 10px 0 rgba(0, 0, 0, 0.6);
+}
+.theme-dark .bz-overlay-popup.bz-todo-skin-paper {
+  background: #1b1710;
+  box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.6);
+}
+.theme-dark .bz-item-menu.bz-todo-skin-paper {
+  background: #1b1710;
+  box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.6);
+}
+/* 头行斜纹：墨纹转浅墨纹 */
+.theme-dark .bz-todo-skin-paper .bz-panel-head {
+  background: repeating-linear-gradient(-45deg, rgba(236, 226, 202, 0.05) 0 14px, transparent 14px 28px);
+}
+/* 墨底纸字反转位（场景贴纸标签 / 表单格子选中项 / 排序选中项）：ink 转浅后
+   纸白字不可读，字转深纸色（底色消费 ink 自动转浅） */
+.theme-dark .bz-todo-skin-paper .bz-rail-label { color: #1b1710; }
+.theme-dark .bz-todo-skin-paper .bz-choice .bz-choice-btn { border-left-color: rgba(236, 226, 202, 0.16); }
+.theme-dark .bz-todo-skin-paper .bz-choice .bz-choice-btn.is-on { color: #1b1710 !important; }
+.theme-dark .bz-todo-skin-paper .bz-choice .bz-choice-btn.is-on:hover { color: #1b1710 !important; }
+.theme-dark .bz-todo-skin-paper .bz-todo-sort .bz-select-item.is-on { color: #1b1710; }
+.theme-dark .bz-todo-skin-paper .bz-todo-sort .bz-select-item.is-on:hover { color: #1b1710; }
+/* 硬编码纸白底位：排序菜单转深纸档；触发器/菜单/课程贴纸的墨影转黑影 */
+.theme-dark .bz-todo-skin-paper .bz-todo-sort .bz-select-menu {
+  background: #1b1710;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.6);
+}
+.theme-dark .bz-todo-skin-paper .bz-todo-sort .bz-select { box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.55); }
+/* open 态恢复品牌橙阴影：上条 (0,4,0) 与亮色 .open 档同特异性且更靠后，须显式压回 */
+.theme-dark .bz-todo-skin-paper .bz-todo-sort .bz-select.open { box-shadow: 2px 2px 0 var(--bz-brand); }
+.theme-dark .bz-todo-skin-paper .bz-todo-tag.bz-todo-tag-course {
+  background: #3a2f18;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.55);
+}
+/* 输入 inset 影转黑；卡间虚线与三处虚线框转浅墨（base 覆盖会以同特异性压住
+   亮色段的 :hover 恢复档，故 hover 位显式补回——声明与亮色一致，var 随档） */
+.theme-dark .bz-todo-skin-paper .bz-input { box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.35); }
+.theme-dark .bz-todo-skin-paper .bz-todo-card + .bz-todo-card { border-top-color: rgba(236, 226, 202, 0.14); }
+.theme-dark .bz-todo-skin-paper .bz-todo-side-add,
+.theme-dark .bz-todo-skin-paper .bz-todo-donebar,
+.theme-dark .bz-todo-skin-paper .bz-mobstrip-chip.bz-mobstrip-add { border-color: rgba(236, 226, 202, 0.4); }
+.theme-dark .bz-todo-skin-paper .bz-todo-side-add:hover,
+.theme-dark .bz-todo-skin-paper .bz-todo-donebar:hover,
+.theme-dark .bz-todo-skin-paper .bz-mobstrip-chip.bz-mobstrip-add:hover { border-color: var(--bz-skin-ink); }
+
 /* ─── 编辑部 ─── */
 /* token 层 */
 .bz-todo-skin-editorial {
@@ -431,14 +634,14 @@
 .bz-todo-panel.bz-todo-skin-editorial {
   background: #ffffff;
   border: 1.5px solid var(--bz-skin-ink);
-  border-radius: 4px;
+  border-radius: var(--bz-radius-xs);
   box-shadow: 0 24px 60px rgba(20, 20, 20, 0.18);
 }
 /* 弹窗壳 */
 .bz-overlay-popup.bz-todo-skin-editorial {
   background: #ffffff;
   border: 1.5px solid var(--bz-skin-ink);
-  border-radius: 4px;
+  border-radius: var(--bz-radius-xs);
   box-shadow: 0 18px 44px rgba(20, 20, 20, 0.2);
 }
 .bz-todo-skin-editorial .bz-panel-head { border-bottom: 1.5px solid var(--bz-skin-ink); }
@@ -491,13 +694,61 @@
 }
 .bz-todo-skin-editorial .bz-search .bz-input:focus,
 .bz-todo-skin-editorial .bz-todo-composer .bz-input:focus { border-bottom-color: var(--bz-brand); }
-.bz-todo-skin-editorial .bz-todo-sort .bz-choice--float {
-  background: var(--bz-surface-1);
+/* 排序下拉（issue 268）：方角描边触发器 + 白底墨框菜单；选中项红字（编辑部红是唯一强调色）。 */
+.bz-todo-skin-editorial .bz-todo-sort .bz-select {
+  height: 32px; padding: 0 var(--bz-space-sm) 0 10px; gap: 6px;
   border: 1.5px solid var(--bz-skin-ink);
   border-radius: 3px;
+  background: var(--bz-surface-1);
+  color: var(--bz-text-1);
+  letter-spacing: 0.08em;
 }
-.bz-todo-skin-editorial .bz-todo-sort .bz-choice-seg { background: var(--bz-skin-ink); border-radius: 0; }
-.bz-todo-skin-editorial .bz-todo-sort .bz-choice-btn.is-on { color: #ffffff !important; }
+.bz-todo-skin-editorial .bz-todo-sort .bz-select.open { border-color: var(--bz-brand); box-shadow: none; }
+.bz-todo-skin-editorial .bz-todo-sort .bz-select-car { width: 13px; height: 13px; color: var(--bz-text-1); }
+.bz-todo-skin-editorial .bz-todo-sort .bz-select-menu {
+  margin-top: 2px; padding: 0;
+  background: #ffffff;
+  border: 1.5px solid var(--bz-skin-ink);
+  border-radius: 3px;
+  box-shadow: 4px 4px 0 rgba(20, 20, 20, 0.16);
+}
+.bz-todo-skin-editorial .bz-todo-sort .bz-select-item {
+  border-radius: 0; padding: var(--bz-space-sm) 10px; letter-spacing: 0.08em; color: var(--bz-text-2);
+  border-top: 1px solid var(--bz-border);
+}
+.bz-todo-skin-editorial .bz-todo-sort .bz-select-item:first-child { border-top: none; }
+.bz-todo-skin-editorial .bz-todo-sort .bz-select-item:hover { background: var(--bz-skin-ink); color: #ffffff; }
+.bz-todo-skin-editorial .bz-todo-sort .bz-select-item.is-on { color: var(--bz-brand); font-weight: var(--bz-weight-bold); }
+.bz-todo-skin-editorial .bz-todo-sort .bz-select-item.is-on:hover { background: var(--bz-skin-ink); color: #ffffff; }
+
+/* 移动场景条平铺 chip（issue 269「平铺的场景也风格化」）：方角细墨框白底；选中 = 黑底白字。 */
+.bz-todo-skin-editorial .bz-mobstrip-chip {
+  border: 1px solid var(--bz-skin-ink);
+  border-radius: 3px;
+  background: #ffffff;
+  color: var(--bz-text-2);
+  letter-spacing: 0.08em;
+}
+.bz-todo-skin-editorial .bz-mobstrip-chip .bz-ic { color: var(--bz-text-2); }
+.bz-todo-skin-editorial .bz-mobstrip-chip:hover { background: var(--bz-surface-hover); color: var(--bz-text-1); }
+.bz-todo-skin-editorial .bz-mobstrip-chip.is-on {
+  background: var(--bz-skin-ink);
+  border-color: var(--bz-skin-ink);
+  color: #ffffff;
+  font-weight: var(--bz-weight-bold);
+}
+.bz-todo-skin-editorial .bz-mobstrip-chip.is-on .bz-ic { color: inherit; }
+
+/* 「添加场景」虚线 chip：编辑部 = 方角细墨虚线。放在通用 chip 段**之后**（后写者赢）。 */
+.bz-todo-skin-editorial .bz-mobstrip-chip.bz-mobstrip-add {
+  border: 1px dashed var(--bz-skin-ink);
+  background: transparent;
+  color: var(--bz-text-2);
+  letter-spacing: 0.1em;
+}
+.bz-todo-skin-editorial .bz-mobstrip-chip.bz-mobstrip-add:hover {
+  background: var(--bz-skin-ink); color: #ffffff; border-color: var(--bz-skin-ink);
+}
 .bz-todo-skin-editorial .bz-todo-section-label {
   font-family: var(--bz-skin-serif);
   font-style: italic;
@@ -520,37 +771,8 @@
 .bz-todo-skin-editorial .bz-todo-composer { border-top: 1.5px solid var(--bz-skin-ink); }
 .bz-todo-skin-editorial .bz-dialog-title { font-family: var(--bz-skin-serif); font-weight: 900; }
 
-/* 编辑部排序：文字 + 激活红下条（原型 3 形态，不用浮岛） */
-.bz-todo-skin-editorial .bz-todo-sort .bz-choice--float {
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  padding: 0;
-  gap: 0;
-}
-.bz-todo-skin-editorial .bz-todo-sort .bz-choice-seg { display: none; }
-.bz-todo-skin-editorial .bz-todo-sort .bz-choice-btn {
-  position: relative;
-  border-radius: 0;
-  height: auto;
-  padding: 4px 16px 10px;
-  background: transparent !important;
-  color: var(--bz-text-2) !important;
-  border-left: 1px solid var(--bz-border);
-}
-.bz-todo-skin-editorial .bz-todo-sort .bz-choice-btn.is-on {
-  color: var(--bz-text-1) !important;
-  font-weight: var(--bz-weight-bold);
-}
-.bz-todo-skin-editorial .bz-todo-sort .bz-choice-btn.is-on::after {
-  content: '';
-  position: absolute;
-  left: 14px;
-  right: 14px;
-  bottom: 0;
-  height: 3px;
-  background: var(--bz-brand);
-}
+/* （issue 268 之前的「编辑部排序：文字 + 激活红下条」三条规则随排序改下拉而退役，
+   新形态见上方 .bz-todo-skin-editorial .bz-todo-sort .bz-select 段。） */
 
 /* 编辑部弹窗表单平铺选择（场景/优先级）：方角描边格子、选中黑底白字（不用浮岛） */
 .bz-overlay-popup.bz-todo-skin-editorial .bz-choice--float {
@@ -579,10 +801,10 @@
 .bz-item-menu.bz-todo-skin-paper {
   background: #fffdf6;
   border: 2px solid var(--bz-skin-ink);
-  border-radius: 12px;
+  border-radius: var(--bz-radius-md);
   box-shadow: 5px 5px 0 rgba(42, 35, 24, 0.85);
 }
-.bz-todo-skin-paper .bz-item-menu-item { border-radius: 8px; font-weight: var(--bz-weight-medium); }
+.bz-todo-skin-paper .bz-item-menu-item { border-radius: var(--bz-radius-sm); font-weight: var(--bz-weight-medium); }
 .bz-todo-skin-paper .bz-item-menu-item:hover {
   background: var(--bz-brand-soft);
   color: var(--bz-text-1);
@@ -599,15 +821,112 @@
   color: #ffffff;
 }
 
+/* ─── 编辑部 · 夜（issue 270，先例与可达性论证同纸感段）───
+   编辑部 = 黑白红，暗色即「报纸暗房」反转：碳黑底 + 浅墨线 + 红仍为唯一强调色。
+   ink 转浅后，亮色段一切「ink 底 + 纸白字」的反转位（hover/选中）需就地补深字。 */
+.theme-dark .bz-todo-skin-editorial {
+  --bz-skin-ink: #e8e6e1;
+  --bz-surface-1: #161618;
+  --bz-surface-2: #1e1e21;
+  --bz-surface-3: #26262a;
+  --bz-surface-hover: #26262a;
+  --bz-text-1: #ececea;
+  --bz-text-2: #a5a29b;
+  --bz-text-3: #6d6a64;
+  --bz-border: #343337;
+  --bz-border-strong: #cfccc5;
+  --bz-brand: #ee4438;
+  --bz-brand-hover: #f55b50;
+  --bz-brand-soft: rgba(238, 68, 56, 0.16);
+}
+/* 三壳：白底转碳黑，投影转黑（墨边消费 ink 自动转浅） */
+.theme-dark .bz-todo-panel.bz-todo-skin-editorial {
+  background: #161618;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+.theme-dark .bz-overlay-popup.bz-todo-skin-editorial {
+  background: #161618;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
+}
+.theme-dark .bz-item-menu.bz-todo-skin-editorial {
+  background: #161618;
+  box-shadow: 6px 8px 0 rgba(0, 0, 0, 0.5);
+}
+/* ink 浅底反转位：纸白字转碳黑字（底色消费 ink 自动转浅） */
+.theme-dark .bz-todo-skin-editorial .bz-todo-side-add:hover,
+.theme-dark .bz-todo-skin-editorial .bz-todo-donebar:hover,
+.theme-dark .bz-todo-skin-editorial .bz-item-menu-item:hover,
+.theme-dark .bz-todo-skin-editorial .bz-todo-sort .bz-select-item:hover,
+.theme-dark .bz-todo-skin-editorial .bz-todo-sort .bz-select-item.is-on:hover,
+.theme-dark .bz-todo-skin-editorial .bz-mobstrip-chip.is-on,
+.theme-dark .bz-todo-skin-editorial .bz-mobstrip-chip.bz-mobstrip-add:hover { color: #161618; }
+/* 硬编码白底位转暗档：排序菜单/格子容器转主底，chip/复选框/格子项转次底 */
+.theme-dark .bz-todo-skin-editorial .bz-todo-sort .bz-select-menu {
+  background: #161618;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.5);
+}
+.theme-dark .bz-todo-skin-editorial .bz-mobstrip-chip { background: #1e1e21; }
+.theme-dark .bz-todo-skin-editorial .bz-mobstrip-chip:hover { background: var(--bz-surface-hover); }
+.theme-dark .bz-todo-skin-editorial .bz-todo-check { background: #1e1e21; }
+.theme-dark .bz-todo-skin-editorial .bz-todo-check:hover { background: var(--bz-brand); }
+.theme-dark .bz-overlay-popup.bz-todo-skin-editorial .bz-choice--float { background: #1e1e21; }
+.theme-dark .bz-overlay-popup.bz-todo-skin-editorial .bz-choice .bz-choice-btn { background: #1e1e21 !important; }
+.theme-dark .bz-overlay-popup.bz-todo-skin-editorial .bz-choice .bz-choice-btn.is-on { color: #161618 !important; }
+/* 移动端关闭钮（文件尾媒体查询档）：编辑部白底 !important 硬编码在暗色下转次底、
+   hover 浅墨底纸白字转碳黑字（墨边消费 ink 自动转浅）。桌面该钮被皮肤段整组
+   藏起，命中无视觉影响。 */
+.theme-dark .bz-todo-panel.bz-todo-skin-editorial .bz-todo-head-close { background: #1e1e21 !important; }
+.theme-dark .bz-todo-panel.bz-todo-skin-editorial .bz-todo-head-close:hover {
+  background: var(--bz-skin-ink) !important;
+  color: #161618 !important;
+}
+
+/* ---- 确认流程框（core/flow-dialog，issue 291：全域子弹窗统一） ----
+   删除待办 / 删除场景两个确认框经 openFlowDialog({className: skinClass()}) 挂皮肤类。
+   壳层（底色/描边/圆角/阴影）由上方 `.bz-overlay-popup.bz-todo-skin-*` 复合规则自动命中
+   （流程框与 uiModal 同挂 .bz-overlay-popup 共享壳），token 层（--bz-surface-2/--bz-brand/
+   --bz-text-2）也随皮肤走；这里只补皮肤特有的文字与主动作按钮形制——与编辑弹窗里
+   的 `.bz-btn--primary`/`.bz-dialog-title` 逐值同源，保证两处按钮长得一样。 */
+#__shared_confirm_popup__.bz-todo-skin-paper h4 {
+  font-family: var(--bz-skin-serif);
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+/* 纸感主钮形制（凸起墨章）。danger 态必须**整条让位**：本域两个流程框（删除待办 / 删除场景）
+   都是危险主动作，core 的 `.bz-flow-dialog--danger` 会把主钮整套压回中性次级形制
+   （底/文字/描边/圆角/阴影 + 字重回 medium），与同框「取消」同形制。
+   两条规则都带 `:not(.bz-flow-dialog--danger)` 守卫，**不能只靠特异性**：hover 那条特异性 (2,2,0)
+   与 core 危险规则相同，而域文件在 CSS 聚合序中后到 → 删除钮一悬停就会把 4px 硬阴影找回来
+   （issue 291 评审自审发现）。守卫写法与 password-vault / secondbrain 的 OK 钮规则同范式。
+   本块只在非 danger 场景（将来新增的说明框等）生效。 */
+#__shared_confirm_popup__.bz-todo-skin-paper:not(.bz-flow-dialog--danger) #__shared_confirm_ok__ {
+  border: 2px solid var(--bz-skin-ink);
+  border-radius: 11px;
+  box-shadow: 3px 3px 0 var(--bz-skin-ink);
+  font-weight: var(--bz-weight-bold);
+}
+#__shared_confirm_popup__.bz-todo-skin-paper:not(.bz-flow-dialog--danger) #__shared_confirm_ok__:hover {
+  box-shadow: 4px 4px 0 var(--bz-skin-ink);
+}
+#__shared_confirm_popup__.bz-todo-skin-editorial h4 {
+  font-family: var(--bz-skin-serif);
+  font-weight: 900;
+  letter-spacing: 0.18em;
+}
+#__shared_confirm_popup__.bz-todo-skin-editorial #__shared_confirm_ok__ {
+  font-weight: var(--bz-weight-semibold);
+  letter-spacing: 0.1em;
+}
+
 /* ---- 皮肤选择卡预览（设置面板 .bz-cardpick-prev 变体；复刻各皮肤面板迷你形态） ---- */
 .bz-skinprev-default { background: linear-gradient(150deg, #ffffff, #f0f0f4); }
 .bz-skinprev-default::before {
   content: ''; position: absolute; left: 10%; top: 16%; width: 42%; height: 26%;
-  border-radius: 999px; background: linear-gradient(135deg, #ef8352, #e2571c);
+  border-radius: var(--bz-radius-full); background: linear-gradient(135deg, #ef8352, #e2571c);
 }
 .bz-skinprev-default::after {
   content: ''; position: absolute; left: 10%; top: 60%; width: 72%; height: 10%;
-  border-radius: 999px; background: #e2e2e8;
+  border-radius: var(--bz-radius-full); background: #e2e2e8;
 }
 .bz-skinprev-paper {
   background:
@@ -633,4 +952,88 @@
 .bz-skinprev-editorial::after {
   content: ''; position: absolute; left: 16%; top: 18%; width: 46%; height: 16%;
   background: #141414;
+}
+
+/* ═══════════ 移动端收口段（issue 266 → 269 收敛）═══════════
+   位置要求：必须在前方两个皮肤段（`.bz-todo-skin-* .bz-panel-head-btns
+   { display: none }`）**之后**——媒体查询不增特异性，同特异性
+   下靠「后写者赢」，故本段是文件最后一节。仅收口四件事，均限 ≤768px：
+   1) 头行钮组放回（皮肤段 display:none 的反制）
+   2) 设置钮撤出移动头行（issue 268 用户拍板：设置归设置面板，头行只留关闭）
+   3) 关闭钮换装皮肤形态 + 定档（issue 269 用户拍板「小一点」：38 → 28px）
+   4) 顶距 44px 改挂头行自身（issue 269：「头部的斜斑纹条延伸出去那 44px 也要有」）
+   桌面端（>768px）零生效——桌面头行外观与本改动前逐像素一致。 */
+@media (max-width: 768px) {
+  /* 1) 头行钮组：皮肤段藏了整组，移动端真全屏必须放回，否则没有关闭入口。
+        核心层「非真全屏一律隐藏关闭按钮」（src/core/styles.css :130-136）只针对
+        .bz-icon-btn--close / .bz-win-close / .todo-btn-close / .news-close-btn
+        四类历史类名；本域关闭钮既挂 bz-icon-btn 又走 data-todo-head-close 钩子，
+        从不带 --close，故不受其约束，无需额外豁免。 */
+  .bz-todo-panel .bz-panel-head-btns,
+  .bz-todo-skin-paper .bz-panel-head-btns,
+  .bz-todo-skin-editorial .bz-panel-head-btns { display: flex; }
+
+  /* 2) 设置钮（issue 268）：移动端头行撤除——桌面由皮肤段整组收掉，移动端从此只留关闭。
+        设置入口仍在：场景项右键/长按菜单「在设置中编辑」（buildSceneActions）。 */
+  .bz-todo-panel .bz-todo-head-settings { display: none; }
+
+  /* 3) 关闭钮 = 移动端头行唯一按钮，28px 可视档（issue 269 两轮收小：38 → 34 → 28）+
+        皮肤贴纸形态。28px 与头行品牌块同尺寸（`.bz-todo-skin-paper .bz-panel-brand`
+        也是 28×28），头行两端因此左右等重。箱体尺寸用变量统一收口，图标随之 16px。
+        命中区：28px 加默认 -6px 外扩只有 40px，不足 44px，故 markup 挂
+        `.bz-touch-target--lg`（-8px）→ 28 + 16 = 44px ≥ 44px（设计手册 §8.2）。
+        桌面不动：本段仅 ≤768px，>768px 维持 22×26 基档。 */
+  .bz-todo-panel .bz-todo-head-close {
+    --bz-todo-close-box: 28px;
+    width: var(--bz-todo-close-box); height: var(--bz-todo-close-box);
+    flex-shrink: 0;
+  }
+  .bz-todo-panel .bz-todo-head-close .bz-ic { width: 16px; height: 16px; }
+
+  /* 4) 顶距 44px 从面板根挪到头行自身（issue 269）：核心层 .bz-panel-mtop 把
+        `padding-top: max(44px, 安全区)` 挂在面板根上，头行的斜纹底只盖住头行盒子
+        （44px），顶上那 44px 露出的是纸面点阵——斜纹条看着「被截断」。
+        把垫顶挪进头行（头行的底纹就一路铺到面板顶边，与桌面观感连续）。
+        选择器必须写成 `.bz-todo-panel.bz-panel-mtop .bz-panel-head`（0,3,0）：核心层
+        的反制规则是 `.bz-panel-mtop > div:first-child`（:first-child 算类级 → 0,2,1），
+        只写 (0,2,0) 压不住它，垫顶会被归零。
+        头行高度改 auto + min-height = 垫顶 + 44px（盒模型 border-box，全局
+        `*{box-sizing:border-box}`）：内容行仍是 44px，顶区总高 44+44 = 88px，
+        与挪之前逐像素一致（只给 min-height:44px 会让内容行被垫顶挤成 36px）。 */
+  .bz-todo-panel.bz-panel-mtop { padding-top: 0 !important; }
+  .bz-todo-panel.bz-panel-mtop .bz-panel-head {
+    height: auto;
+    min-height: calc(44px + max(44px, env(safe-area-inset-top, 0px)));
+    padding-top: max(44px, env(safe-area-inset-top, 0px)) !important;
+  }
+
+  /* 纸感：墨框白底 + 硬偏移阴影（贴纸钮同族）。三值都必须 !important——core/styles.css
+     的 `.bz-icon-btn` 基线把 background/border/box-shadow 全钉死在 `!important`
+     （`border: none !important` 与 `box-shadow: none !important`），普通声明压不住。 */
+  .bz-todo-panel.bz-todo-skin-paper .bz-todo-head-close {
+    background: var(--bz-surface-2) !important;
+    color: var(--bz-text-1) !important;
+    border: 2px solid var(--bz-skin-ink) !important;
+    border-radius: 9px;
+    box-shadow: 2px 2px 0 var(--bz-skin-ink) !important;
+  }
+  .bz-todo-panel.bz-todo-skin-paper .bz-todo-head-close:hover {
+    background: var(--bz-brand-soft) !important;
+  }
+  .bz-todo-panel.bz-todo-skin-paper .bz-todo-head-close:active {
+    transform: translate(2px, 2px);
+    box-shadow: none !important;
+  }
+
+  /* 编辑部：方角 + 细墨框 + 白底（无阴影，与编辑部弹窗壳同语言） */
+  .bz-todo-panel.bz-todo-skin-editorial .bz-todo-head-close {
+    background: #ffffff !important;
+    color: var(--bz-text-1) !important;
+    border: 1.5px solid var(--bz-skin-ink) !important;
+    border-radius: 3px;
+  }
+  .bz-todo-panel.bz-todo-skin-editorial .bz-todo-head-close:hover {
+    background: var(--bz-skin-ink) !important;
+    color: #ffffff !important;
+  }
 }

@@ -73,6 +73,12 @@ export default interface BzSettings {
   memoDefaultScene: string;
   /** 🕒 到期时间格式：relative（今天 14:00 到期）/ absolute（MM/DD HH:mm 到期） */
   memoDueFormat: string;
+  /** 🚪 打开面板默认场景：'@last'（上次停留，关面板时记忆）/ '全部' / '今日' / '重要' / 场景名；非法值回落「全部」 */
+  memoOpenScene: string;
+  /** ↩️ 上次停留场景（memoOpenScene='@last' 的取数源；关面板时写入，场景已删则回落「全部」） */
+  memoLastScene: string;
+  /** 🗂️ 已完成折叠区时间窗（天）：'7'/'30'/'90'，'all'=全部不折叠；非法值回落 30 */
+  memoDoneWindow: string;
 
   // ===== 📖 日记本（12 项，diary-notebook 合并）=====
   /** 📂 日记目录 */
@@ -512,6 +518,9 @@ export const DEFAULT_SETTINGS: BzSettings = {
   memoDefaultPriority: 'minor',
   memoDefaultScene: '',
   memoDueFormat: 'relative',
+  memoOpenScene: '@last',
+  memoLastScene: '',
+  memoDoneWindow: '30',
 
   // 日记本
   diaryDirectory: '我的/日记',

@@ -1,12 +1,13 @@
 /**
  * 待办域文件同步（memo.json 引用同步；ADR-0092 自旧 memo 域迁入，语义逐行等价）
  *   rename → 同步引用路径/标题/notePath（memo.json）
- *   delete → 清空 linkedNote 关联
+ *   delete → 清空关联（linkedNote + notePath/notePosition）
  * sync 纯函数与队列/去抖为域内私有副本（勿跨域 import）；
  * rename 经域事件总线 'vault:md-renamed' 按 DEBOUNCE_DELAY 合并去抖回放保序，
  * delete 走 'vault:md-deleted' 即时通道（obsidian-adapter 恒发、仅 md，
  * 载荷见 src/core/obsidian-adapter.ts）。
  */
+import { stripMdExt } from '../core/utils';
 import type { App } from 'obsidian';
 import { notify } from '../core/notice';
 import { tryGetSettings } from '../core/settings-provider';
@@ -23,25 +24,43 @@ interface SyncItem {
   [key: string]: any;
 }
 
-/** 笔记重命名：同步引用路径 / 标题 / notePath */
+/** 笔记重命名：同步引用路径 / 标题 / notePath。
+ *  E21：标题联动只对「本条引用了该笔记」（notePath/linkedNote 命中）的条目生效——
+ *  此前按「标题 === 旧文件名」盲改，内容恰好与文件同名的无关条目标题被悄悄改掉。 */
 function syncRename(
   items: SyncItem[],
   { oldPath, newPath, oldTitle, newTitle }: { oldPath: string; newPath: string; oldTitle: string; newTitle: string }
 ): boolean {
   let changed = false;
   for (const item of items) {
-    if (item.linkedNote === oldPath) { item.linkedNote = newPath; changed = true; }
-    if (item.title === oldTitle) { item.title = newTitle; changed = true; }
-    if (item.notePath === oldPath) { item.notePath = newPath; changed = true; }
+    const linkedHit = item.linkedNote === oldPath;
+    const noteHit = item.notePath === oldPath;
+    if (linkedHit) { item.linkedNote = newPath; changed = true; }
+    if (noteHit) { item.notePath = newPath; changed = true; }
+    if ((linkedHit || noteHit) && item.title === oldTitle) { item.title = newTitle; changed = true; }
   }
   return changed;
 }
 
-/** 笔记删除：清空关联 */
+/**
+ * 笔记删除：清空关联。
+ *
+ * 同时清 `linkedNote` 与 `notePath`/`notePosition`——**与 syncRename 的口径对齐**。
+ * 此前只清 linkedNote，但当前域从不写非空 linkedNote（新建/编辑器一律置 null，
+ * 见 ui.ts 的 addFromComposer/openEditor），真正在用的是 notePath（编辑器「定位到笔记」写的）：
+ * 于是删掉笔记后条目仍留着指向不存在文件的 notePath，卡片 meta 继续渲染「位置」tag
+ * （render.ts 的 data-todo-pos），点它 = jumpToNote 跳一个已删文件。
+ * rename 分支本就同步改 notePath，删除分支只清一半属实现遗漏（两分支口径不对称）。
+ */
 function syncDelete(items: SyncItem[], path: string): boolean {
   let changed = false;
   for (const item of items) {
     if (item.linkedNote === path) { item.linkedNote = null; changed = true; }
+    if (item.notePath === path) {
+      item.notePath = null;
+      item.notePosition = null;
+      changed = true;
+    }
   }
   return changed;
 }
@@ -64,10 +83,9 @@ async function saveJSON(app: App, filePath: string, data: any): Promise<void> {
 
 // ---------- 路径 / 设置 ----------
 
-/** 备忘录数据文件路径（ADR-0009 共享数据路径） */
-function getMemoPath(): string {
-  const s = tryGetSettings() as any;
-  return storageFile('memo.json', (s && s.storagePath) || 'CONFIG/STORAGE');
+/** 待办数据文件路径（ADR-0009 共享数据路径） */
+function getTodoPath(): string {
+  return storageFile('memo.json', tryGetSettings().storagePath || 'CONFIG/STORAGE');
 }
 
 /** 监听文件夹列表（issue 187：原 aiAgentWatchedFolders 键退役，固定默认范围） */
@@ -142,10 +160,10 @@ function createBatchFlusher<T>(run: (batch: T[]) => Promise<void>): ((ev: T) => 
 
 function createFileSyncAgent(app: App): void {
   /** 对 memo.json 执行同步函数，有变化才写回。
-   *  读改写整体入 per-path 串行队列：与 memo UI / todo UI 的 CRUD 同队列互斥，
+   *  读改写整体入 per-path 串行队列：与 memo UI / memo UI 的 CRUD 同队列互斥，
    *  后台同步不得用陈旧基线覆盖面板刚写入的数据（写竞态收敛）。 */
   async function syncSource(fn: (items: any[], ...args: any[]) => boolean, ...args: any[]) {
-    const path = getMemoPath();
+    const path = getTodoPath();
     await enqueueFileTask(path, async () => {
       const items = await loadJSON(app, path);
       if (fn(items, ...args)) await saveJSON(app, path, items);
@@ -154,12 +172,25 @@ function createFileSyncAgent(app: App): void {
 
   const isMd = (file: any) => file && file.extension === 'md' && inFolders(file.path, getWatchedFolders());
 
+  /** E22：范围外笔记只要被 memo.json 实际引用（notePath/linkedNote 命中）也放行同步——
+   *  notePath 可指向任意笔记（编辑器「定位到笔记」），监听范围只覆盖两个目录时，
+   *  范围外笔记 rename/delete 引用不同步（卡片「位置」tag 跳不存在的文件）。 */
+  const referencedByTodo = async (path: string): Promise<boolean> => {
+    if (!path) return false;
+    try {
+      const items = await loadJSON(app, getTodoPath());
+      return (items as SyncItem[]).some((it) => it?.linkedNote === path || it?.notePath === path);
+    } catch (e) {
+      return false;
+    }
+  };
+
   // rename 同类事件按 DEBOUNCE_DELAY 合并去抖回放保序；delete 保持即时。
 
   /** 总线载荷 → 现有闭包期望的伪 TFile 形状（{path, basename, extension:'md'}，rename 另附 oldPath） */
   const pseudoFile = (path: string): any => ({
     path,
-    basename: (path.split('/').pop() || '').replace(/\.md$/, ''),
+    basename: stripMdExt(path.split('/').pop() || ''),
     extension: 'md',
   });
 
@@ -171,24 +202,30 @@ function createFileSyncAgent(app: App): void {
   _flushers.push(flushRenames);
   _refs.push(onDomainEvent<{ oldPath: string; newPath: string }>('vault:md-renamed', (evt) => {
     const file = pseudoFile(evt.newPath);
-    if (!isMd(file)) return;
-    const oldTitle = (evt.oldPath ?? '').split('/').pop()!.replace(/\.md$/, '');
-    flushRenames({
-      oldPath: evt.oldPath,
-      newPath: evt.newPath,
-      oldTitle,
-      newTitle: file.basename,
-    });
+    // E22：范围外放行看新旧两条路径（改名移出/移入监听范围都算被引用）
+    void (async () => {
+      if (!(isMd(file) || (await referencedByTodo(evt.oldPath)) || (await referencedByTodo(evt.newPath)))) return;
+      const oldTitle = stripMdExt((evt.oldPath ?? '').split('/').pop()!);
+      flushRenames({
+        oldPath: evt.oldPath,
+        newPath: evt.newPath,
+        oldTitle,
+        newTitle: file.basename,
+      });
+    })();
   }));
 
   _refs.push(onDomainEvent<{ path: string }>('vault:md-deleted', (evt) => {
     const file = pseudoFile(evt.path);
-    if (!isMd(file)) return;
-    enqueue(() => syncSource(syncDelete, evt.path));
+    void (async () => {
+      // E22：范围外但被 memo.json 引用的笔记删除同样要清关联
+      if (!(isMd(file) || (await referencedByTodo(evt.path)))) return;
+      enqueue(() => syncSource(syncDelete, evt.path));
+    })();
   }));
 }
 
-/** 幂等初始化（todo 域总入口，main.ts onLayoutReady 调用） */
+/** 幂等初始化（memo 域总入口，main.ts onLayoutReady 调用） */
 export function ensureFileSync(app: App): void {
   if (initialized) return;
   initialized = true;

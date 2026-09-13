@@ -82,7 +82,7 @@ describe('memo 引用同步', () => {
     expect(bz[1].linkedNote).toBe('卡片盒/B.md'); // 无关条目不动
   });
 
-  it('watchedFolders 外不动：范围外改名不处理、从未写回', async () => {
+  it('watchedFolders 外但被引用：改名同步（E22 修复范围外引用不同步）', async () => {
     const { vault } = await setup();
     vault.files.set('CONFIG/STORAGE/memo.json', JSON.stringify([
       { id: 'm1', title: 'A', linkedNote: '我的/日记/2024.md' },
@@ -92,7 +92,20 @@ describe('memo 引用同步', () => {
     await flushQueue();
 
     const bz = JSON.parse(vault.files.get('CONFIG/STORAGE/memo.json')!);
-    expect(bz[0].linkedNote).toBe('我的/日记/2024.md'); // 未变
+    expect(bz[0].linkedNote).toBe('我的/日记/2025.md'); // 被 memo.json 引用 → 放行同步
+  });
+
+  it('watchedFolders 外且未被引用：改名不处理、从未写回', async () => {
+    const { vault } = await setup();
+    vault.files.set('CONFIG/STORAGE/memo.json', JSON.stringify([
+      { id: 'm1', title: 'A', linkedNote: '卡片盒/别的.md' },
+    ], null, 2));
+
+    emitDomainEvent('vault:md-renamed', { oldPath: '我的/日记/2024.md', newPath: '我的/日记/2025.md' });
+    await flushQueue();
+
+    const bz = JSON.parse(vault.files.get('CONFIG/STORAGE/memo.json')!);
+    expect(bz[0].linkedNote).toBe('卡片盒/别的.md'); // 未变
     expect(memoWrites(vault)).toBe(0); // 从未写回
   });
 

@@ -310,25 +310,32 @@ describe('todo 面板', () => {
     expect(document.querySelectorAll('.bz-todo-card')[0].textContent).toContain('ffmpeg 转写参数整理');
   });
 
-  it('排序三档 = 浮岛 segmented（issue 199）：float 轨道 + 滑动指示器节点，切换写回设置', async () => {
+  it('排序 = 组件库下拉（issue 268）：收起态单枚 + 展开菜单三档，切换写回设置', async () => {
     const { app, settings, saveSpy } = seedVault();
     openTodoPanel(app);
     await vi.waitFor(() => {
-      expect(document.querySelector('[data-todo-sort] .bz-choice--float')).toBeTruthy();
+      expect(document.querySelector('[data-todo-sort] .bz-select')).toBeTruthy();
     });
-    const track = document.querySelector('[data-todo-sort] .bz-choice--float') as HTMLElement;
-    // 三档 + 白卡指示器节点 + 默认「紧急优先」选中
-    expect(track.querySelectorAll('.bz-choice-btn').length).toBe(3);
-    expect(track.querySelector('.bz-choice-seg')).toBeTruthy();
-    expect(track.querySelector('.bz-choice-btn.is-on')?.textContent).toBe('紧急优先');
-    // 点击「按创建」→ 写回 memoSortMode（与 memo 共用键）+ 落盘
-    ([...track.querySelectorAll('.bz-choice-btn')].find((b) => b.textContent === '按创建') as HTMLElement).click();
+    const sel = document.querySelector('[data-todo-sort] .bz-select') as HTMLElement;
+    // 收起态：只亮当前档文案 + 箭头（三档平铺退役 → 搜索框腾出宽度）
+    expect(sel.querySelector('.bz-select-val')?.textContent).toBe('紧急优先');
+    expect(sel.querySelector('.bz-select-car')).toBeTruthy();
+    expect(document.querySelector('[data-todo-sort] .bz-choice')).toBeNull();
+    // 点触发器展开菜单：三档 + 当前档选中
+    sel.click();
+    const menu = sel.querySelector('.bz-select-menu') as HTMLElement;
+    expect(menu).toBeTruthy();
+    const items = [...menu.querySelectorAll('.bz-select-item')] as HTMLElement[];
+    expect(items.map((b) => b.textContent)).toEqual(['紧急优先', '仅按到期', '按创建']);
+    expect(menu.querySelector('.bz-select-item.is-on')?.textContent).toBe('紧急优先');
+    // 点「按创建」→ 写回 memoSortMode（与 memo 共用键）+ 落盘 + 菜单收起 + 收起态文案跟随
+    items.find((b) => b.textContent === '按创建')!.click();
     expect(settings.memoSortMode).toBe('created');
     await vi.waitFor(() => {
       expect(saveSpy).toHaveBeenCalled();
     });
-    // 选中态迁移 + 面板排序生效
-    expect(track.querySelector('.bz-choice-btn.is-on')?.textContent).toBe('按创建');
+    expect(sel.querySelector('.bz-select-menu')).toBeNull();
+    expect(sel.querySelector('.bz-select-val')?.textContent).toBe('按创建');
     expect(M.sortMode).toBe('created');
   });
 });

@@ -1,5 +1,5 @@
 /**
- * 待办（todo）域数据层：memo.json 读写（与旧 memo 域共用同一数据文件）
+ * 待办（memo）域数据层：memo.json 读写（与旧 memo 域共用同一数据文件）
  * 自 memo/data.ts 迁移（对象单例 DataManager 语义逐字保留）：jsonStore 读写、
  * 字段归一补齐、条目 CRUD、场景解析、公开课笔记检索。
  * 纯数据层（无 DOM）；UI 层经 state/refresh 回调刷新。
@@ -8,7 +8,8 @@ import moment from 'moment';
 import { jsonStore } from '../core/json-store';
 import { getApp } from '../core/app';
 import { generateId, extractUrlAndDisplay } from '../core/utils';
-import { enqueueFileTask, storageFile } from '../core/storage';
+import { backupOriginal, enqueueFileTask, storageFile } from '../core/storage';
+import { notify } from '../core/notice';
 import type { TodoItem } from './types';
 
 export interface TodoSettingsLike {
@@ -88,6 +89,23 @@ export const TodoData = {
   async loadItems(): Promise<TodoItem[]> {
     return enqueueFileTask(this.todoFilePath, async () => {
       const raw = await this.read();
+      // E23：合法 JSON 但非数组（对象/标量/null 等损坏形态）——此前 raw.map 抛 TypeError
+      // 被上层吞掉，面板静默空白。按 D1 契约原样留档后重建空清单，不再无声丢形态。
+      if (!Array.isArray(raw)) {
+        const backup = await backupOriginal(getApp(), this.todoFilePath);
+        await this.write([]);
+        try {
+          notify(
+            backup
+              ? `待办数据文件损坏（内容不是列表），原内容已留档到 ${backup}，已重建空清单继续使用`
+            : '待办数据文件损坏（内容不是列表），已重建空清单继续使用',
+            { type: 'warning', dedupeKey: 'todo-loaditems-corrupt' }
+          );
+        } catch (e) {
+          /* 无 DOM 环境（纯数据层 node 测试等）静默 */
+        }
+        return [];
+      }
       let needWrite = false;
       const items = raw.map((item: any) => {
         if (!item.id) {
@@ -105,7 +123,7 @@ export const TodoData = {
   async addItem(item: TodoItem) {
     return enqueueFileTask(this.todoFilePath, async () => {
       const data = await this.read();
-      data.unshift(item as any);
+      data.unshift(item);
       await this.write(data);
     });
   },
@@ -117,9 +135,9 @@ export const TodoData = {
       if (idx === -1) throw new Error('条目不存在');
       const old = data[idx];
       // 如果新数据包含 title 但未提供 url，则自动提取
-      if ((newData as any).title !== undefined && (newData as any).url === undefined) {
-        const { url } = extractUrlAndDisplay((newData as any).title);
-        (newData as any).url = url;
+      if (newData.title !== undefined && newData.url === undefined) {
+        const { url } = extractUrlAndDisplay(newData.title);
+        newData.url = url;
       }
       data[idx] = {
         ...old,
@@ -133,7 +151,7 @@ export const TodoData = {
 
   async completeItem(id: string) {
     const now = moment().format('YYYY-MM-DD HH:mm:ss');
-    await this.updateItem(id, { completed: now } as any);
+    await this.updateItem(id, { completed: now });
   },
 
   /** 删除条目；返回被删条目的原索引（未找到返回 -1），供撤销时插回原位 */
@@ -154,7 +172,7 @@ export const TodoData = {
     return enqueueFileTask(this.todoFilePath, async () => {
       const data = await this.read();
       const at = idx !== undefined && idx >= 0 && idx <= data.length ? idx : 0;
-      data.splice(at, 0, item as any);
+      data.splice(at, 0, item);
       await this.write(data);
     });
   },
