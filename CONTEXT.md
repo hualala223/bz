@@ -11,10 +11,10 @@ _Avoid_: 日记、记录、post
 
 **日期文件 (Date File)**: `我的/日记/YYYY-MM-DD.md`，一个文件包含同一天的多个条目，标题行 `# emoji序列 HH:mm` 作为条目边界与锚点。
 
-**未解析行 (Unparsed Line)**: 解析日期文件时**条目区内**无法归属任何条目的行（ADR-0110 起口径收窄到条目区）——两类：① 条目区内游离的非空行（典型来源：条目正文里「空行 + `# 某标题`」把条目截断后留下的孤行）；② 时间越界的条目标题行。标题正则 `# emoji序列 HH:mm` 要求 emoji 与时间之间有空白、时间恰两位数字，常见不合规形态：缺空格（`# 🤝02:43`）、单数字时间（`# 📖 9:33`）。解析行为：行内容静默丢弃（不改解析结果、不动数据格式）；UX-9（25c79a7）起统计并在 `loadAll` 结束时汇总为一次性 warning toast，写/删前守卫（P0）命中则拒处理并引导「检测日记解析」。**前导区不计入未解析行**（它写回时原样保留，见「日记前导区」）。
+**未解析行 (Unparsed Line)**: 解析日期文件时**条目区内**无法归属任何条目的行（ADR-0110 起口径收窄到条目区）——两类：① 条目区内游离的非空行（典型来源：条目正文里「空行 + `# 某标题`」把条目截断后留下的孤行）；② 时间越界的条目标题行。标题正则 `# emoji序列 HH:mm` 要求 emoji 与时间之间有空白、时间恰两位数字，常见不合规形态：缺空格（`# 🤝02:43`）、单数字时间（`# 📖 9:33`）。解析行为：行内容静默丢弃（不改解析结果、不动数据格式）；UX-9（25c79a7）起统计并在 `loadAll` 结束时汇总为一次性 warning toast，写/删前守卫（P0）命中则拒处理并提示先手工把不合规标题行规整为 `# emoji HH:mm`（ADR-0114 删除了原先的「检测日记解析」工具，守卫本体保留）。**前导区不计入未解析行**（它写回时原样保留，见「日记前导区」）。
 _Avoid_: 解析失败条目（它是「行」，不是条目）。修复边界见 ADR-0054（只修不合规头行：标题补空格/时间补零，正文归位不改写；时间越界等不可自动修，列清单跳转手工改）。
 
-**日记前导区 (Diary Preamble)**: 日期文件开头到**首个疑似条目标题行**之前的全部内容——frontmatter、`## 睡眠相关/## 随笔/## 日常行为记录/## 日程规划` 等小节骨架（用户的 QuickAdd 模板/宏创建，即「模板形态」文件，全库 621 个日记文件里 153 个属此类）、以及宏写入的正文。条目模型不为它产出条目，但 `writeFile` 全量重写时把它**原样拼回文件头**（`extractPreamble`，仅收敛首尾空行）——条目一律追加在骨架之后，插件写日记不再抹掉用户模板（ADR-0110）。疑似条目标题行 = 合法形 `# emoji HH:mm` 或可修形（缺空格 / 时间非两位），由 `findEntryRegionStart` 判定、与修复引擎单源；**边界行本身属条目区**（其不合规形态交「检测日记解析」修）。`deleteEntry` 清空条目时前导区存在则保留文件只收回条目区，无前导区才整文件删除。行号戳带前导区偏移。
+**日记前导区 (Diary Preamble)**: 日期文件开头到**首个疑似条目标题行**之前的全部内容——frontmatter、`睡眠相关/随笔/新闻联播内容记录/日常行为记录/日程规划` 等小节骨架（用户的 QuickAdd 模板/宏创建，即「模板形态」文件，全库 621 个日记文件里 153 个属此类；**层级自 ADR-0113 起由 `##` 上提为 `#`**，存量文件仍是 `##`，读侧按标题文字匹配、层级无关）、以及宏写入的正文。条目模型不为它产出条目，但 `writeFile` 全量重写时把它**原样拼回文件头**（`extractPreamble`，仅收敛首尾空行）——条目一律追加在骨架之后，插件写日记不再抹掉用户模板（ADR-0110）。疑似条目标题行 = 合法形 `# emoji HH:mm` 或可修形（缺空格 / 时间非两位），由 `findEntryRegionStart` 判定、与修复引擎单源；**边界行本身属条目区**（其不合规形态由写前守卫拦下，ADR-0114 起不再有「检测日记解析」工具）。`deleteEntry` 清空条目时前导区存在则保留文件只收回条目区，无前导区才整文件删除。行号戳带前导区偏移。
 _Avoid_: 把日期文件当「只有条目」的文件（会抹掉骨架/模板正文）；`diary-wall` 的 parser 副本是只读派生视图，不收编此语义
 
 **主标签 (Primary Tag)**: 标签配置中的一级标签（如 日记 📖、旅游 ✈️），可带二级标签。
@@ -157,6 +157,9 @@ _Avoid_: 预期难度、期望评级
 
 **挂起记录 (Parked Record)**: 复习条目文件在 vault 中找不到（删除后保留、改名/移动后未更新路径）的保留态——条目列表以删除线标灰展示（ticket 168 起移至 ⚙️ 设置「复习条目管理」组），不计逾期、不进复习队列，文件恢复（同路径重建/路径更新）即复活；可手动移出清理（撤销恢复，ADR-0077）。
 _Avoid_: 幽灵条目、孤儿记录
+
+**挪动兜底 (Move Relink)**: 复习条目路径失效时的同名自动接回（ADR-0115）——失效条目 × vault 同名文件**双向唯一**（vault 该文件名恰 1 个、挂起条目该文件名恰 1 条、目标不在计划/排除名单）即接回原排期；触发于插件启动批量收敛（`relinkMissingByBasename`）与文件 created 实时接回（`relinkOneByBasename`，覆盖 Obsidian 关闭期间/外部工具挪动、rename 事件丢失的场景）；歧义一律不动、维持挂起。正文是否变动无从校验（review.json 格式冻结不加哈希字段），以同名唯一为充分条件。
+_Avoid_: 自动找回、路径修复
 
 **第二大脑 (Second Brain)**: 笔记向量库的管理与检索功能（ticket 103 正名，前名「闪念」——QuickAdd《闪念.js》完整原型）：主面板统一入口（统计总览/来源分布/趋势/最近向量化/AI 一键概括）· 右侧窄窗（吸附缩起/悬停展开/参考卡拖出浮卡）· 向量检索增强（Ollama bge-m3，meta v10 段 + secondbrain.vec；ticket 110 起切块剥离 frontmatter、标题并入首块；ticket 120 起数据整合为**两文件**：`secondbrain.json`（meta/panel/link 三段 JSON）+ `secondbrain.vec`（向量二进制，原 secondbrain_vectors.vec 改名））· AI 对话（经主设置页 core AI 服务商，ticket 108 起统一；不再回退 Ollama 对话模型）。常驻监听光标移动与笔记变更。**引导态**（ticket 107）：本地无向量数据时三命令统一进主面板，首次向量化须用户点击按钮触发；**增量索引**（ticket 108）：打开面板时如有待处理变更，先以进度视图展示索引推进再进统计；**重新索引**（ticket 108）：设置弹窗确认后清空全库重嵌（区别于增量索引的 mtime + 正文指纹差异刷新，ADR-0078）。**自动双链 link agent**（ticket 111 + 115 + 116 + 118 + 120）：**关联范围（`linkAgentScopes`）只决定"哪些笔记会被关联"（目标/触发侧：落盘监听 + 存量补链目标 + 死链扫描），候选来源 = 白名单索引库（`secondBrainAllowPaths`）中的全部笔记**（ticket 116，任一已索引笔记都可就近作候选）；建链检索**查询端用笔记全文嵌入**（ticket 118：剥 frontmatter 去空白，超长 8000 字安全截尾）→ 本地语义近邻召回候选 → 在线 AI 裁判择优（"只链实质关联，存疑不链"）→ 单侧幂等写 `related`（Obsidian 图谱双向呈现）；待处理队列与基准哈希并入 `secondbrain.json` 的 link 段（queue/state，原 secondbrain_link_queue.json / secondbrain_link_state.json 已由 store-file 一次性迁移合并，ticket 120）跨设备自动消费、死链自动清理；**存量补链**（ticket 115）：每次启动自动对范围内缺 `related` 的存量笔记批量建链（`related` 即进度检查点），命令 `bz-secondbrain-link-all` 手动兜底，批次与监听共用串行锁；**正文大改自动重跑**（ticket 119/v1.4）：每次成功建链后把全文内容哈希记入 link.state 基准，范围内笔记被修改时按基准哈希过滤——**内容实质变化才重跑该篇建链**（Obsidian 高频保存/自写 related 触发 → 哈希相同 → 不空转；无基准的升级前存量首次修改视为变化重跑并重建基准）。**白名单目录 / 关联范围两字段默认均空，空 = 什么也不录（不索引 / 不自动关联），不是"全库"**（ticket 116；`LINK_AGENT_DEFAULT_SCOPE`「文献盒」回退已移除）。**Syncthing 冲突自愈**（ticket 152）：多设备各自 refresh 索引不同新笔记 → 两端真实分叉，Syncthing 必然保留 `secondbrain.sync-conflict-*` 副本（写前比对止血后仍发生）；store-file **每次读取时**扫描并自动收敛——JSON 段级 union（meta.notes 键并集取 mtime 大者 / panel 取 generatedAt 大者 / queue-state-chatHistory 并集去重）写回主文件、.vec 按合并后 meta 键序行级重排（行序不变式 = 键序 × chunks 数，meta 未变则主 .vec 直接复用），随后删除冲突文件；无同批 meta/维度不符/行不足 → 删向量走既有 indexIncomplete 全量重建（ticket 107 兜底，元数据仍在数据不丢）；损坏冲突 JSON 保留待人工处置。
 _Avoid_: 闪念（旧功能名，仅存于「闪念笔记」文档类型语义）、AI 补全（ai_completion 时代旧称）
@@ -382,15 +385,20 @@ _Avoid_: 写日记时直接新建加密条目（不提供该入口）
 
 **分步写日记 (Two-Step Add Diary)**: 写日记弹窗的两步形态（ADR-0109）——**第一步「类型 + 时间」**（`#add-diary-popup`，吸底「下一步」，未选类型拦截于冻结文案「请至少选择一个类型」）、**第二步「正文」**（`#add-diary-content-popup`，吸底「上一步」+「保存」）。两步共用一个 `#add-diary-mask`，第一步隐藏而非销毁，故 datetime 与类型容器连同选中态始终是 `saveNewEntry` 的数据源。移动端起因：原单弹窗正文框位于类型区下方，软键盘弹起后正文与保存被吞；两步后第二步只有「一个 textarea + 两枚按钮」，不做键盘避让亦无遮挡。草稿语义：「上一步」保留，「遮罩取消 / 保存」丢弃。preset 已带分类的入口（如每日复盘预选「复盘」）跳过第一步。
 _Avoid_: 「写日记弹窗」单指第一步——它是两步的合称，指具体某一步要写明第几步
+
+**日记内容块 (Diary Content Block)**: 写日记与每日复盘的落盘单位（issue 252，ADR-0114）——不再是 `# emoji HH:mm` 条目，而是往骨架小节里追加的**多行块**。写日记 → `# 随笔` 小节，块首行 `**✍️ 20:30**`（**加粗行不是标题**；多类型 emoji 连写），故仓库里四份头条正则（`diary/parser.ts`、`diary-wall/parser.ts`、`smartcat/diary-source.ts` 及 `recap` 复用的 `parseFile`）一律不命中，内容不进日记面板列表 / 标签筛选 / 回忆墙 / smartcat。每日复盘 → `# 当日复盘` 小节，块首行 `## 🪞 HH:mm`（h2），其下接复盘内层模板（`### 触动点` 起，`REVIEW_TEMPLATE` 已去首行以避免小节标题重复）。落点小节缺失时的行为**有意不对称**：`# 随笔` 在骨架里 → 缺失不建、追加文末并弹 warning（存量文件一字不改）；`# 当日复盘` 不在骨架里 → 缺失则写时在文末新建。插入实现与捕获行共用 `daily-capture.ts` 的 `locateSection`（`insertBlockIntoSection` vs `insertIntoSection`），「新层级优先、旧层级兜底」与「小节边界取命中行实际层级」只有一份。写盘走 core/storage 同路径串行队列（键 = 日记文件路径），与 `writeFile` 互斥。副作用：这些内容**不能**在插件面板里编辑/删除，只能直接开文件改；`parseFile` 与条目模型保留（回忆墙 / smartcat / 今日回顾 / 加密域仍要读存量条目）。_Avoid_: 把写日记的块首行写成 `# emoji HH:mm`——会被那四份头条正则当条目解析进面板/回忆墙/smartcat，与用户「不想在那些地方看到」的诉求直接冲突；判据是加粗行（非标题），不要换成任何层级的标题。_Avoid_: 给 `# 随笔` 也做「缺失即建」——会在存量条目形态文件里凭空长出小节，违反「存量不动」；只有 `# 当日复盘` 允许现场建节。_Avoid_: 把「检测日记解析」工具加回来——用户明确要求取消（ADR-0114）；写前守卫保留但不再引导到任何工具
 _Avoid_: 把草稿当持久化数据——它是模块级临时变量，关闭即丢，不落盘
 
 **日记隐私门 (Diary Privacy Guard)**: 根设置键 `diaryPrivacyGuard`（默认 `true`，仅显式 `false` 关闭，ADR-0106）——开启时日记内容在任何 AI 链路上不可达：smartcat 对 `source === 'diary'` 的观察整条豁免（`addObservation` 新旧签名在路由解析前拦截，不落行为/记忆任何流、不云端打分、不进反思素材与对话注入，与 ADR-0069 加密条目同口径）；recap AI 总结的 `buildRecapDigest` 剔除日记数字段与日记时间轴条目（写回本地的数字行/模板不受影响，本地写盘非上传）。设置页露出：日记本 ⚙️「隐私」组。🔐 加密条目的 ADR-0069 豁免与本开关无关，恒生效；流内存量历史日记条目不追溯清洗（只断新增）。
 _Avoid_: 日记不上传开关（正式名「隐私门」）、隐私模式（指整域行为，非本开关）
 
-**日常时间记录 (Daily Time Log)**: diary 域 `src/diary/daily.ts`（ticket 245，自 vault `CONFIG/SCRIPTS/日常时间记录/` 三个 QuickAdd 宏整合进插件）与 `src/diary/daily-capture.ts`（issue 247，同源 Multi 剩下两个 Capture 宏换血）——五件事：**当天任务完成情况**（7 项每日任务经 `openFlowDialog` 依次打勾，状态沿用 `CONFIG/SCRIPTS/每日任务状态.json`，`{ "YYYY-MM-DD": { taskId: boolean } }` 格式零迁移，路径硬编码不走 storagePath；取消=跳过不计，写回走 `updateFileSections` 段级合并只声明今天一段）、**每日复盘**（`REVIEW_TEMPLATE` 经写日记弹窗 preset 预填，作为日记条目写入）、**日程规划**（为明天 `addEntry` 含 `### 代办事项`/完成情况跟踪/备注 三段的日记条目，`PLAN_MARKER` 重复检测；写前 `diaryDataMap` 为 null 先 `loadAll`）、**当日待办事项**（issue 247，输入待办 → `- [ ] 内容-HH:mm` 插进当天日记 `### 代办事项` 小节末尾）、**日常行为记录**（issue 247，输入活动 → `- HH:mm-活动` 插进 `## 日常行为记录` 小节末尾）。后两者为**捕获行**语义：不经 `addEntry` 条目链路，文件级原样插行其余行不动（与 QuickAdd 宏**同格式共写**，同款先例见 collect 域；小节未命中=文末整行追加，文件缺失=「标记+首行」新建），写盘走同路径串行队列与 `writeFile` 互斥。入口：命令 `bz-diary-task-check`/`bz-diary-review`/`bz-diary-plan`/`bz-diary-todo-capture`/`bz-diary-activity-capture` + 日记面板头部 📋/🪞/🗓️/✅/🏃。
+**日常时间记录 (Daily Time Log)**: diary 域 `src/diary/daily.ts`（ticket 245，自 vault `CONFIG/SCRIPTS/日常时间记录/` 三个 QuickAdd 宏整合进插件）与 `src/diary/daily-capture.ts`（issue 247，同源 Multi 剩下两个 Capture 宏换血）——五件事：**当天任务完成情况**（7 项每日任务经 `openFlowDialog` 依次打勾，状态沿用 `CONFIG/SCRIPTS/每日任务状态.json`，`{ "YYYY-MM-DD": { taskId: boolean } }` 格式零迁移，路径硬编码不走 storagePath；取消=跳过不计，写回走 `updateFileSections` 段级合并只声明今天一段）、**每日复盘**（`REVIEW_TEMPLATE` 经写日记弹窗 preset 预填，**落 `# 当日复盘` 小节**——缺失则写时在文末新建；块首行 `## 🪞 HH:mm`，多条按时间顺序堆叠；ADR-0114 起不再作为日记条目写入）、**日程规划**（入口 `openPlanPicker`：`openFlowDialog` 两动作选「当日 / 明日」，默认焦点在明日 → `planDiary(target)` 按日记模板 `CONFIG/TEMPLATE/模板-日记.md` 为对应日期**建文件**：文件不存在 = 模板 + `## 代办事项`/完成情况跟踪/备注 三段；已存在但无规划 = 文件末尾原样补写；已存在且有规划 = 提示不重复、一个字节不写。两目标**共用同一模板**，只有落盘日期不同；判重 = **文件原文**同时命中 `PLAN_MARKER`(`## 代办事项`) 与 `PLAN_TRACK_MARKER`(`## 完成情况跟踪`)，ADR-0111/0112；**标题层级自 ADR-0113 起整体上提一级**——日记骨架 `#`（`# 睡眠相关`/`# 随笔`/`# 新闻联播内容记录`/`# 日常行为记录`/`# 日程规划`）、日程三段 `##`、复盘首行 `# 当日复盘`（其下 `###`/`####` 不动）；读侧（判重 / 补写 / 捕获插行）按标题**文字**匹配、层级无关，旧日记的 `##`/`###` 照常命中）、**当日待办事项**（issue 247，输入待办 → `- [ ] 内容-HH:mm` 插进当天日记 `## 代办事项` 小节末尾）、**日常行为记录**（issue 247，输入活动 → `- HH:mm-活动` 插进 `# 日常行为记录` 小节末尾）。后两者为**捕获行**语义：不经 `addEntry` 条目链路，文件级原样插行其余行不动（与 QuickAdd 宏**同格式共写**，同款先例见 collect 域；小节未命中=文末整行追加，文件缺失=「标记+首行」新建），写盘走同路径串行队列与 `writeFile` 互斥。入口：命令 `bz-diary-task-check`/`bz-diary-review`/`bz-diary-plan`/`bz-diary-todo-capture`/`bz-diary-activity-capture` + 日记面板头部 📋/🪞/🗓️/✅/🏃。
 _Avoid_: 把复盘/规划写成「往 md 末尾追加」——diary 条目模型是「按日期一个 md、整文件重写」，追加内容会被下一次重写冲掉
 _Avoid_: 把待办/行为捕获改走 `addEntry` 条目链路——它们是往既存小节追加行的捕获语义，条目化会破坏与 QuickAdd 宏的共写冻结格式（模板形态文件的条目写入自 ADR-0110 起已可共存，但捕获仍是「行」语义，别改成条目）
 _Avoid_: 把任务状态迁进 `CONFIG/STORAGE/`——沿用户决策沿用原路径，旧数据直接续用
+_Avoid_: 把日程规划重复检测改回单「代办事项」标记——它与「当日待办事项」捕获小节**同名**，会把当天已写过待办行的日记误判为「已有规划」而跳过；须与「完成情况跟踪」同时命中（ADR-0111）
+_Avoid_: 把读侧的标题匹配写死成某一个 `#` 层级（或 `includes` 全文包含）——层级一旦调整就会「新产物认不出旧文件」：旧日记被判成没有规划而重复创建、捕获插行退化成一整行追加到文末。判重与插行一律**按标题文字匹配、层级无关**，插行的小节边界取**命中行的实际层级**（ADR-0113）
+_Avoid_: 把日程规划改回 `addEntry` 条目链路——条目模型整文件重写**产不出模板骨架形态**，产物会与 QuickAdd 宏「日程规划.js」不同形（用户点名的基准是 `我的/日记/2026-09-11.md`）；判据也随之从「条目」回到「文件原文」（ADR-0112）
 
 **日记条目还原 (Diary Entry Restore)**: 加密日记降级回普通的语义——解密写回原日期 md 文件的**对应时间点**（merge，按 date+time 重插 `# emoji HH:mm` 块；md 已删则新建），密文取出即删（复用 `restoreNote`）。附件随还原一并写回原 vault 路径。触发双入口：保险箱面板现成「还原」手势，或日记面板改类型选非加密（自动降级）。
 _Avoid_: 整文件覆盖还原（日记条目是日期文件里的一个块，非整篇笔记）
@@ -461,11 +469,29 @@ _Avoid_: 设置弹窗（指筛选时）
 _Avoid_: 层规表、家族表、抬档、z 档位、companion 档
 **通知 (Notification)**: bz 自绘 toast 通知（`src/core/notice.ts`，ADR-0010，时长动态化见 ADR-0053），替代 Obsidian 原生 Notice 与 Q3 smartCat 气泡。右上角滑入 · z 动态发号（每次弹出抬顶，ADR-0067）· 堆叠上限 5 · 点击关闭。类型图标即视觉前缀：**消息正文一律不带 emoji**（类型图标与正文 emoji 重复，2026-08-1x 用户决策）。11 种类型：info ℹ️ / success ✅ / warning ⚠️ / error ❌ / pause ⏸️ / accept ✨ / delete 🗑️ / confirm ✓ / restore ↩️ / skip 🚫 / archive 📁 / progress 转圈。支持动态消息（setMessage/setType）、进度条（setProgress，-1 不确定态）、富文本（title + action 按钮）。时长：默认 info/success/warning 3s、error 5s；**未指定 duration 时按文字长度动态计算**（≤20 字用默认值，>20 字每多 1 字加 60ms，上限 15s）；显式 duration 优先；progress 不自动消失。
 **通知类型规范**: 新增通知时先查 ICONS 表（`src/core/notice.ts`）——已有类型直接用；确无匹配再新增（加 ICONS 项 + 颜色 class + 默认时长），**不得把 emoji 写进消息正文**。
+**通知偏好 (Notice preferences)**（issue 258，吸收上游 issue 297）: toast 的四项横切偏好，存 data.json，**缺省值均等于加入偏好之前的既有行为**——**通知级别**（`all` / `important` / `error`，低档位静默常规通知；带操作按钮的通知与 progress 永不放行）、**停留时长**（`quick` 2 秒 / `standard` 3 秒 / `relaxed` 5 秒 / `persistent` 点击才关；只缩放未显式指定时长的默认停留，撤销 6 秒反悔窗口与长文案动态延长不受影响）、**弹出位置**（桌面四角，缺省右上不挂类；移动端恒顶部居中）、**同屏上限**（3 / 5 / 8，超出挤掉最旧一条；常驻进度帧仍不被挤出）。读取经 `noticePref()` 走 settings-provider，provider 抛错一律按缺省走——通知是最后兜底的报告通道。界面在主设置页「🔔 通知」组（无 icon 平铺形态），**不进设置面板导航**（核心横切项不建业务域）。
+_Avoid_: 通知设置页、面板通知页、toast 配置
 _Avoid_: toast、气泡、原生通知、Notice
 
 **通知文案规范**: 类型图标自带前缀（success ✅ / warning ⚠️ / error ❌ 等），**消息正文不带 emoji**；中文全角冒号；不带感叹号；完成态动词「已」；「错误：」等冗余前缀不写。
 
 **设置项文案规范**（ticket 100 grilling 拍板）：① **标题**——直说用途、简短（4-8 字），**零符号**（不许括号、等号、斜杠、「0=不限」之类）；② **描述**——一句话讲清行为（20 字上下），**不用奇怪符号**（「、·/—」等一律避免）；用流畅的自然语言，不写实现细节（「内部自动处理」「留空 0 由 AI 决定」类不出现）；③ **通知文案并发**——聚合通知（如到期提醒、自动加入合并）同样一句大白话、无符号花样；④ 改键名不动的设置项，标题可改、键名与 data.json 兼容不变。
+
+### 上游别名（yeshimei/bz 线）
+
+本仓库与 GitHub `yeshimei/bz` 同源分叉（ADR-0117），两边对同一个域用了不同名字。**本表是上游别名的唯一登记处**——代码、命令 id、设置键、CSS 类名一律用「本地叫法」那一列（ADR-0118）；正文提到上游决策时写「上游 ADR-XXXX」（ADR-0119）。
+
+| 实体 | 本地叫法（本仓库） | 上游叫法 | 共享的东西 |
+|---|---|---|---|
+| 待办 | `todo` 域、`bz-todo-*`、TodoItem | `memo` 域、`bz-memo-*`、MemoItem（上游 ADR-0117 正名） | `memo.json`，结构与字段零变化 |
+| 文献盒 | `literature` 域、`bz-literature-*` | `knowledge` 域、`bz-knowledge-*`（上游 ADR-0112 改名） | 同一份条目数据；上游把 `literature.json` 复制为 `knowledge.json`（只复制不改写） |
+| 做题家 | 独立 `quiz` 域 | `review/quiz-core` 子模块 | `quiz.json` |
+| 密码本 | 并入 `encrypt`（ADR-0085） | 独立 `password-vault` 域（上游 ADR-0109/0110 回拆） | `CONFIG/.ENCRYPT/` 与 `kind=password-vault` |
+| 回忆墙 | 独立 `diary-wall` 域（ADR-0081） | 升格进 `diary` 域（上游 ADR-0115） | `我的/日记/*.md` 只读派生 |
+| 日常收集 | `collect` 域（ADR-0107） | 无（仍在外部 QuickAdd 宏） | `我的/日常收集/*.md` |
+| 启动器 | `launcher` 域 | 无（上游已退役） | `launcher.json`（残留文件，双方均静默忽略） |
+
+_注意_：`src/diary/` 这个目录名两边都在用但装的不是同一套东西——本地是日记面板 + 每日捕获写链路，上游另含升格后的回忆墙。跨线看代码时先确认是哪条线。
 
 ## Rules
 

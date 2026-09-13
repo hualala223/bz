@@ -2,6 +2,64 @@
 
 > 进度同步总表（AGENTS.md）。每票一节，状态：计划中 → 进行中 → 门禁 → 已交付。
 
+## 上游吸收第二轮（issue 266 审计归档 + 票 267~274 执行）— 基线 7b06f4b4
+
+**状态：已交付（2026-09-13）**。审计归档见 `issues/266-upstream-audit-archive-and-skin-exception.md`（含三档分级清单、出局项、皮肤例外逐条裁决）；ADR-0121 二次修订（第 5 条皮肤/外观层例外 + 原第 3 条第 1 项作废）已落盘。
+
+- [x] 票 267 待办本：面板重做 + 渲染纯层 + 排序下拉 + 三个新设置项 + E7/E21/E22/E23 修复；路径 `memo/`→`todo/` 逐文件对位
+- [x] 票 268 归物本：H14~H20 七项修复 + 金额单位/默认排序/默认状态三设置项 + 夜版海报 + 长按开抽屉；本地 5 项独有全保留
+- [x] 票 269 知识盒：术语来源 source/sourceTitle + URL 净化 + 标题/UP 主只补空 + AI 标题禁疑问句；UI/样式两套体系，本地文献盒原样保留
+- [x] 票 270 番茄钟：F11/F12/F13 三项修复（相位纯函数 + 渲染层；本地 `skin.ts` 保留）
+- [x] 票 271 影院：行为修复 G6~G9 + 荐片方案 A + 视图切换口径
+- [x] 票 272 保险库：共享解锁屏 + 锁屏统计落盘；只接 encrypt 侧，日记复用路径走 legacy 冻结（契约 6 函数，diary 分支不接）
+- [x] 票 273 第二大脑：原型重写 + 移动端滚动全屏 + 文献即时建链；本地向量指纹票 173 保留
+- [x] 票 274 小对齐打包：自动摘要/数据体检/书架墙/附件搬运四小域行为修复 + core 滚动条单源（S3-a 只吸前半段）+ bookshelf 假成功/确认框皮肤/继续钮
+- [x] 纪律执行：全部走 worktree 从 `095872f8` 分叉；冻结域（diary 系/review 系/AI 设置/小橘设置）零接触；上游守卫型测试未搬；构建产物未提交
+- [x] 收尾整合校验（主仓库工作区 = 吸收代码 + 用户未提交个人改动）：`tsc --noEmit` 0 错误（worktree 门禁基线不含个人改动，此为二者首次合体验证）；主仓 `node esbuild.config.mjs production` 构建成功，运行产物已含全部吸收功能（用户拍板「要生效」，重启 Obsidian 即生效）；在制产物备份于 `.workbuddy/backup-artifacts-20260913/`
+- [x] 构建产物（根 `main.js`/`styles.css`/4 个 `prototype-render.js`）随主仓构建刷新为吸收后版本，按惯例不提交
+- [ ] 待办：皮肤例外剩余候选（S1 模型弹窗同皮 / S3-b 遮罩毛玻璃 / S3-c 暗色补齐扫尾）暂不做，用户日后点名再立项；读书报告（人工对位类）暂缓
+
+## 上游分叉处置 — 与 GitHub yeshimei/bz 的关系定位（ADR-0117 ~ 0120）
+
+**状态：规则已定；吸收第一块（通知四项偏好）已交付，其余块等用户圈定**
+
+- [x] 审计：本地 ⇄ 上游分层比对（共同祖先 `af7ed6b5`；本地那次「并入上游」只有 1 个 parent，是内容复制非 merge）。产物 `.scratch/upstream-compare/`（`report/*.json` + `上游差异审计.html`）；分类 A 直接冲突 15 / B 纯增量约 15 / C 中性
+- [x] 决策 ADR-0117：定位「同源分叉的独立演进线、单向取用」——不 merge、不回归上游、不彻底分家；按块吸收，每块独立 ticket，两条硬门槛（不改数据契约 / 不倒逼调用方改写）
+- [x] 决策 ADR-0118：命名一律用本地叫法（todo / literature / encrypt / diary-wall / collect），上游别名只登记在 CONTEXT.md「上游别名」节
+- [x] 决策 ADR-0119：上游 ADR 进 `docs/adr/upstream-yeshimei/`、上游 issue 进 `issues/upstream-yeshimei/`（只读归档、保留原文件名含重号）；本地从 `0117` 续发；引用写「上游 ADR-XXXX」
+- [x] 决策 ADR-0120：A 类冲突一律本地优先（例外只能靠独立票 + 单独 ADR 走）；8 项冻结清单（storage.ts / mobile.ts 导出 / diary 写链路 / vec 版本 / pomodoro / literature 文件名 / encrypt / todo）；数据层三不（不迁文件名、不裁历史、不动向量版本）
+- [x] 归档落地：`docs/adr/upstream-yeshimei/` 23 篇 + README；`issues/upstream-yeshimei/` 累计 67 篇 + README
+- [x] Spec：`issues/256-upstream-absorption-spec.md`（就绪待开工）——吸收工作流总 spec，第一块 = 通知四项设置（`issues/255-absorb-notice-settings.md`）
+- [x] 事实核正：命令数「68」→ **63**（静态 47 以 smoke `EXPECTED_COMMAND_IDS` 为准 + collect 汉字分类 16 条动态生成），AGENTS.md 与审计报告同步；锁屏编号 → 上游 ADR-0124；ADR-0127 是路径选择弹窗单源（`core/ui/setlist.ts` 是另一件事）
+- [x] 拆票：本块按 ADR-0120「一块一票」立为 `issues/257`（基线落定，待用户过目清单）+ `issues/258`（通知四项偏好，已交付）；`issues/255` 转为设计依据不再启动
+- [x] 吸收第一块（`issues/258`，**已交付**）：通知四项横切偏好——级别降噪 / 停留档位 / 桌面四角位置 / 同屏上限；四个设置键 + 「🔔 通知」平铺分组 + 通知模块偏好读取通道（provider 抛错按缺省走）+ 四消费点接入 + core 层位置样式；四项缺省值均等于既有行为，模块导出面未变（零调用方改动）；既有 33 例断言语义未改，新增 22 例偏好测试
+- [ ] 待办：**其余吸收块由用户圈定后再开工**（候选：锁屏、单源选择器 / 路径弹窗单源、全域换肤、首页条目化、剪藏本渲染单源、影院豆瓣队列、知识盒术语来源与视频元数据、行为单源体系）
+- [ ] 待办：工作区未提交改动先落基线（提交前需用户过目）；根目录 `%SystemDrive%/`、`test-bundle.js`、`test-out*.txt` 待清理
+
+## Ticket 254 — 存储层空读防护 + review 数据写加固（P1-33）
+
+**状态：已交付**
+
+- [x] 定性：review.json 清库事故复盘（N 盘空读被当损坏重建默认值；`.CORRUPT` 无留档说明还走过「句柄瞬时丢失→缺失首建覆盖」变体）+ review 域裸读改写并发互覆实测 + 运行时字段全量写回膨胀（512KB→4.9MB）
+- [x] 方案：ADR-0116（`docs/adr/0116-storage-empty-read-guard.md`）
+- [x] core：read 重试 3 次（150ms）→ 空读耗尽抛错不动盘（绝不清库）+ 30s 去重 warning；非空解析失败维持留档+重建；write 前留底 `CONFIG/.CORRUPT/<名>-prev.bak`（失败不阻塞）
+- [x] review：saveItems 剥离 6 个运行时字段（旧字段兼容保留）；五变更方法（addItem/updateItem/removeItem/restoreItem/updateFilePath）整体入 `enqueueFileTask` 串行队列
+- [x] 测试：storage-reliability +6 例、review/data +3 例
+- [x] 文档：`issues/254-storage-empty-read-guard.md`
+- [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署
+- [x] 追记：逾期常驻通知冻结「1 篇」三连修——首查金丝雀门（resolved/15s 触发后，再等「条目文件全被索引命中 ∨ 索引数采样稳定 ∨ 60s 兜底」才首查，v1 纯 resolved 在 N 盘早于扫描完成仍复现假挂起）/ `_lastOverdueCount` 数字自纠 / 染色移出通知 try 块独立容错；index.test.ts 时序断言更新 + describe 补 `vi.restoreAllMocks()`（单例 spy 历史跨用例泄漏）
+
+## Ticket 253 — 复习计划挪动兜底：同名唯一自动接回
+
+**状态：已交付**
+
+- [x] 定性：Obsidian 关闭期间/外部工具挪动 → rename 事件丢失 → 条目挂起（不计逾期），用户视角「从计划消失」（23 篇实例核查 review.json）
+- [x] 方案：ADR-0115（`docs/adr/0115-review-move-relink.md`）——失效条目 × vault 同名文件双向唯一 → 走既有 `updateFilePath` 接回原排期；歧义不动
+- [x] 实现：`src/review/watch.ts` 新增 `baseNameOf`/`relinkOneByBasename`（created 实时接回，onVaultCreate 入口先试）/`relinkMissingByBasename`（启动批量收敛）；`src/review/index.ts` ensureReview 2s 定时器追加收敛调用
+- [x] 测试：`tests/review/watch.test.ts` +3 例（接回+通知 / 三类歧义不动 / created 接回不走自动加入）
+- [x] 文档：CONTEXT.md「挪动兜底」词条 + `issues/253-review-move-relink.md`
+- [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署（产物含 relink 逻辑）
+
 ## Ticket 167 — 已有 related 不再触发自动双链
 
 **状态：已交付**
@@ -529,4 +587,56 @@
 - [x] 端到端：真实 `2026-09-11.md` 修复前 28 行未解析拒写 → 修复后 0 行、写入成功且骨架一字不动（临时脚本验证后已删）
 - [x] 测试：新增 12 例 + 随语义更新 7 例（parser/repair/write-guard/repair-modal/store/recap-summarize）
 - [x] 文档：ADR-0110 + issues/248 + CONTEXT 术语修订（「未解析行」）+ 新词条「日记前导区」
+- [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署
+
+## 2026-09-11 · 日程规划支持「当日 / 明日」（ADR-0111 / issue 249）
+
+**状态：已交付**
+
+- [x] 需求：点「日程规划」先出现「当日 / 明日」两个选项；两选项生成的模版完全一样，只有落盘日期不同（当日=今天日记，明日=明天日记）
+- [x] 入口：新增 `openPlanPicker()`（`openFlowDialog` 两动作，默认焦点=明日，回车即旧行为；遮罩/ESC 取消不建）；命令 `bz-diary-plan` id 不变、名称去「（明日日记）」改「日程规划」
+- [x] 主流程：`planTomorrow()` 退役 → `planDiary(target)` + 纯函数 `planDate`/`planDateLabel`；模板 `buildPlanContent()` 逐字不动，两目标产物除日期外同构
+- [x] 顺带修缺陷：判重原用单标记 `### 代办事项`，与「当日待办事项」捕获的 `TODO_HEADING` 同名——支持「当日」后当天写过待办就会被误判为已规划而跳过；收紧为 `### 代办事项` + `### 完成情况跟踪` 双标记同时命中（纯函数 `hasPlan`），通知文案随目标走「当天/明天」
+- [x] 测试：`tests/diary/daily-flow.test.ts` 17 例（改造 3 例 + 新增 4 例：当日落盘/取消不写/两目标正文逐字一致/单标记不误判/「当天」文案）
+- [x] 文档：ADR-0111 + issues/249 + CONTEXT.md「日常时间记录」词条修订（含新增 `_Avoid_`）
+- [x] 门禁：tsc 0 错 + 全量测试 268 文件 4284 例绿 + 构建部署（根 main.js 已同步）
+
+## 2026-09-11 · 日程规划改为「按日记模板建文件」（ADR-0112 / issue 250）
+
+**状态：已交付**
+
+- [x] 报障：用户「你修改了我原本的日程规划的模板样式」——对照真源属实：QuickAdd 宏 `日程规划.js` = 读 `CONFIG/TEMPLATE/模板-日记.md` + 末尾追加三段 + 新建文件（产物即 `我的/日记/2026-09-11.md` 的骨架形态）；插件版走 `addEntry` 条目链路，产物是 `# 📖 HH:mm` 条目形态，**不同形**
+- [x] 字节级校验：`模板原文 + "\n\n" + buildPlanContent() + "\n\n"` 与 vault 真文件 `2026-09-11.md` 完全一致（COMPOSE_MATCH=true），基准确立
+- [x] 落盘改造：文件不存在 = 模板 + 三段新建；已存在且原文已有规划（双标记）= 提示不重复一字不写；已存在但无规划 = 末尾补 `## 日程规划` + 三段（已有标题则只补三段），其余一字不动
+- [x] 纯函数：`buildDiaryFileContent(template, date)` / `appendPlanToDiary(content)` / `hasPlan(text)`（判据由「解析条目」改「文件原文」）；模板真源仍为 vault 模板文件（与宏同源），不可读时内置兜底骨架
+- [x] frontmatter 规整（Q3-B）：删 `title`（占位残留）、`date_creation` 填 `{目标日期} 00:00:00`；这是与用户基准文件仅有的两处差异
+- [x] 模板文件清理（Q3-B，vault 内 `CONFIG/TEMPLATE/模板-日记.md` 去两行脏字段）：4 个消费方（日程规划.js / 日记.js / daily-notes / QuickAdd）同步受益
+- [x] 测试：`tests/diary/daily-flow.test.ts` 17 例（8 例日程规划，内联 vault 真文件为逐字节基准）
+- [x] 文档：ADR-0112 + ADR-0111「修订」段 + issues/250 + CONTEXT.md 词条再修（含新增 `_Avoid_`）
+- [x] 门禁：tsc 0 错 + 全量测试 268 文件 4284 例绿 + 构建部署
+
+## 2026-09-11 · 日记标题层级整体上提一级（ADR-0113 / issue 251）
+
+**状态：已交付**
+
+- [x] 需求：用户「把所有的标题都往前提一级，就是二号标题变成一号标题，三号标题变成二号标题」
+- [x] 裁定：存量旧日记**兼容旧层级**（读侧按标题文字匹配、层级无关，不批量迁移）；复盘模板**只提首行**（`## 当日复盘` → `# 当日复盘`，其下 `###`/`####` 不动）
+- [x] 写侧：`FALLBACK_DIARY_TEMPLATE` 骨架各级 → `#`；`buildPlanContent()` 三段 → `##`；`PLAN_HEADING` → `# 日程规划`；`PLAN_MARKER`/`PLAN_TRACK_MARKER` → `## 代办事项`/`## 完成情况跟踪`；`ACTIVITY_HEADING` → `# 日常行为记录`、`TODO_HEADING` → `## 代办事项`；vault `CONFIG/TEMPLATE/模板-日记.md` 五个骨架标题同步提级
+- [x] 读侧兼容：新增 `headingLineRe(text)`（`^#{1,6}[ \t]+文字[ \t]*$`）——`hasPlan` 与 `appendPlanToDiary` 判标题层级无关；`insertIntoSection` 新增 `findMarkerLine` 两轮查找（精确优先、旧层级兜底）且小节边界取**命中行实际层级**，旧文件插行结果逐字不变
+- [x] 测试：`daily-flow` / `daily-capture` / `daily-capture-ui` / `daily-tasks` 四文件更新 + 新增 6 例（旧层级判重命中、新层级标题不重复插、新层级小节插入与切分、新层级 UI 落行、兜底骨架为 `#`、复盘首行 `#`）
+- [x] 文档：ADR-0113 + issues/251 + CONTEXT.md「日常时间记录」「日记前导区」词条修订（含新增 `_Avoid_`：读侧标题匹配不得写死层级）
+- [x] 门禁：tsc 0 错 + 全量测试 268 文件 4290 例绿 + 构建部署（根 main.js 与 vault 插件目录均已同步，旧层级字面量 0 命中）
+
+## 2026-09-11 · 写日记 / 复盘改为「按小节落块」+ 退役日记解析检测（ADR-0114 / issue 252）
+
+**状态：已交付**
+
+- [x] 需求：写日记内容落 `# 随笔`、复盘落 `# 当日复盘`；不要出现在日记面板列表 / 标签筛选 / 回忆墙 / smartcat；「检测日记解析」取消
+- [x] 落点：新增 `src/diary/daily-write.ts`（`ESSAY_HEADING` / `REVIEW_HEADING` / `buildEntryBlock` / `writeDiaryEntry`）——写日记块首行 `**✍️ 20:30**`（**加粗行不是标题**，四份 `^# emoji HH:mm` 头条正则全部不命中，故自然不进那四个消费方）；复盘块首行 `## 🪞 21:40`（h2，落在骨架级 `# 当日复盘` 之下）
+- [x] 建节规则（有意不对称）：`# 随笔` 在骨架里 → 缺失**不建**、追加文末并弹 warning；`# 当日复盘` 不在骨架里 → 缺失则**写时在文末新建**（用户原话「在日记文件最下面添加」）
+- [x] 复用与兼容：`daily-capture.ts` 抽出 `locateSection` 两入口共用，新增 `insertBlockIntoSection`（多行块 + `createIfNotFound`）；单行 `insertIntoSection` 行为逐字不变，ADR-0113 的「新层级优先、旧层级兜底」只有一份实现
+- [x] 链路：`saveNewEntry` 改走 `writeDiaryEntry`（不再 `addEntry` / 不再 `insertCard` / 不再标签筛选联动）；`jumpToEntry` 降级为 `openDiaryFile`（打开该日期文件）；`REVIEW_TEMPLATE` 去掉首行（小节名由落点提供，避免重复标题）
+- [x] 退役工具：删面板「维护」组 + `repair-modal.ts` + `repair.ts` + 对应测试 + `bz-diary-repair-*` / `.bz-button` 样式 + d3 白名单条目；`store.ts`×3 / `recap/summarize.ts`×1 守卫文案改为不指向已删工具的人话；**写前守卫本体保留**（防丢行）
+- [x] 测试：更新 8 个文件（两条旧「插卡」用例改写为「不插卡」，成功文案改正则，失败分支改从 `vault.create` 注入）；`tests/diary` 32 文件 479 例全绿
+- [x] 文档：ADR-0114 + issues/252 + CONTEXT.md「日常时间记录」「日记前导区」词条修订（新增「日记内容块」词条）
 - [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署
