@@ -42,6 +42,7 @@ import {
   openSecondBrainChat,
   rebuildSecondBrainLinks,
   runSecondBrainLinkAll,
+  rebuildSecondBrainIndex,
   unloadSecondBrain,
 } from './secondbrain';
 import { openPomodoro, unloadPomodoro, ensurePomodoro } from './pomodoro';
@@ -149,6 +150,8 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-secondbrain-rebuild-links', name: '重跑当前笔记关联', icon: 'link', callback: () => rebuildSecondBrainLinks(getApp()) },
   // 自动双链（ticket 115）：存量未连接笔记手动批量补链（启动自动补链的显式兜底）
   { id: 'bz-secondbrain-link-all', name: '为未关联笔记批量补链', icon: 'link-2', callback: () => runSecondBrainLinkAll(getApp()) },
+  // 重建索引（票 276，上游 2026-09-11 首页入口菜单）：全库重建向量索引（函数早已存在，此前无命令入口；与票 173 增量指纹判定互不影响——重建是手动清空重嵌，指纹管自动增量）
+  { id: 'bz-secondbrain-rebuild-index', name: '重建索引', icon: 'refresh-cw', callback: () => rebuildSecondBrainIndex(getApp()) },
   // 番茄钟（ticket 26-32 新域）
   { id: 'bz-pomodoro-open', name: '番茄钟', icon: 'timer', callback: () => openPomodoro(getApp()) },
   // 文献盒（literature 域：主面板=文献笔记列表 + 视频录入/文字录入/设置；ADR-0072 迁出、ADR-0071 AI 回迁）
