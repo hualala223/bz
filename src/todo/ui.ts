@@ -49,6 +49,9 @@ import {
 import { TodoData, DEFAULT_SCENARIOS } from './data';
 import { getDueStatus, formatDueText } from './due';
 import {
+  syncItemAdded, syncItemChecked, syncItemDeleted, syncItemReAdded, syncItemTitle,
+} from './diary-sync';
+import {
   TODO_ICONS as ICON, iconSpan, sceneDot, sceneLabel, mainCountHtml,
   navBtnHtml, mobChipHtml, mobAddSceneChipHtml, panelShellHtml, metaTagsHtml,
   cardHtml as renderCard, checkHtml, sectionLabelHtml, doneBarHtml, doneMoreHtml, type MetaDue,
@@ -804,6 +807,7 @@ function toggleCheck(it: TodoItem): void {
 async function completeItem(it: TodoItem): Promise<void> {
   try {
     await TodoData.completeItem(it.id);
+    await syncItemChecked(it, true); // ADR-0122：日记投影行打钩
     emitDomainEvent('memo', { kind: 'completed', title: it.title });
   } catch (e) {
     notifySaveError(e, '标记完成');
@@ -815,6 +819,7 @@ async function completeItem(it: TodoItem): Promise<void> {
 async function restoreItem(it: TodoItem): Promise<void> {
   try {
     await TodoData.updateItem(it.id, { completed: null });
+    await syncItemChecked(it, false); // ADR-0122：日记投影行退钩
     emitDomainEvent('memo', { kind: 'restored', title: it.title });
   } catch (e) {
     notifySaveError(e, '恢复未完成');
@@ -870,11 +875,13 @@ async function deleteItemConfirm(it: TodoItem): Promise<void> {
   if (ok !== 'delete') return;
   try {
     const idx = await TodoData.deleteItem(it.id);
+    await syncItemDeleted(it); // ADR-0122：日记投影行同步删除
     emitDomainEvent('memo', { kind: 'deleted', title: it.title });
     notifyUndo(`已删除待办「${it.title}」`, () => {
       void (async () => {
         try {
           await TodoData.restoreItem(it, idx); // 插回删除前的原位置
+          await syncItemReAdded(it); // ADR-0122：撤销 = 两边都恢复
           await refresh();
         } catch (e) {
           notifySaveError(e, '撤销删除');
@@ -1014,6 +1021,7 @@ function addFromComposer(): void {
     };
     try {
       await TodoData.addItem(it);
+      await syncItemAdded(it); // ADR-0122：日记投影行追加（序号接当天最大号）
       emitDomainEvent('memo', { kind: 'added', title: it.title, scene: it.scene, priority: it.priority, due: it.due });
       M.pinnedNewId = it.id; // 录入当场可见：伪场景过滤放行这条新目
       // 补全半径：toast 挂「补全」按钮直开该条编辑器
@@ -1325,6 +1333,7 @@ export function openEditor(
             coursePath,
             url: url ?? editing.url,
           });
+          await syncItemTitle(editing, finalTitle); // ADR-0122：日记投影行标题同步
           emitDomainEvent('memo', { kind: 'edited', old: { title: editing.title }, next: { title: finalTitle, scene, priority, due } });
         } else {
           const it: TodoItem = {
@@ -1344,6 +1353,7 @@ export function openEditor(
             url,
           };
           await TodoData.addItem(it);
+          await syncItemAdded(it); // ADR-0122：日记投影行追加（序号接当天最大号）
           emitDomainEvent('memo', { kind: 'added', title: finalTitle, scene, priority, due });
           M.pinnedNewId = it.id; // 录入当场可见：伪场景过滤放行这条新目
         }

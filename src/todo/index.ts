@@ -13,6 +13,7 @@
 import type { App } from 'obsidian';
 import { openTodoPanel as uiOpenPanel, addTodo, ensureTodo, unloadTodo as uiUnload } from './ui';
 import { ensureTodoReminders as remindersEnsure, unloadTodoReminders as remindersUnload } from './reminder';
+import { ensureTodoDiarySync, unloadTodoDiarySync } from './diary-sync';
 import { TodoData } from './data';
 import { tryGetSettings } from '../core/settings-provider';
 
@@ -22,6 +23,7 @@ export { ensureFileSync, unloadFileSync } from './file-sync';
 export function openTodoPanel(app: App): void {
   TodoData.init(tryGetSettings() as any);
   ensureTodo(app);
+  ensureTodoDiarySync(app); // ADR-0122：当天首次开面板跑顺延（幂等，注册反向监听）
   uiOpenPanel(app);
 }
 
@@ -32,10 +34,12 @@ export function addTodoItem(app: App): void {
   addTodo(app);
 }
 
-/** main.ts onLayoutReady：待办提醒后台（启动自动弹出 + 打开笔记提醒；落点=待办面板） */
+/** main.ts onLayoutReady：待办提醒后台（启动自动弹出 + 打开笔记提醒；落点=待办面板）
+ *  + 日记同步（ADR-0122：启动顺延 + vault modify 反向监听，移动端同样触发） */
 export function ensureTodoReminders(app: App): void {
   TodoData.init(tryGetSettings() as any);
   ensureTodo(app);
+  ensureTodoDiarySync(app);
   remindersEnsure(app);
 }
 
@@ -43,4 +47,5 @@ export function ensureTodoReminders(app: App): void {
 export function unloadTodo(): void {
   uiUnload();
   remindersUnload();
+  unloadTodoDiarySync();
 }

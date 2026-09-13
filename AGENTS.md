@@ -18,7 +18,7 @@
 
 ## 架构
 
-- `src/main.ts`：命令裸注册表、设置页、懒加载、onunload（63 命令 = 静态注册 47（以 `tests/smoke.test.ts` 的 `EXPECTED_COMMAND_IDS` 为准，含 collect 面板/统一入口/选区收集 3 条；其中 45 条在 COMMANDS 数组，`bz-attach-move`/`bz-diary-open` 由 main.ts 裸注册）+ collect 汉字分类动态生成 16 条（`DEFAULT_COLLECT_CATEGORIES`）。2026-09-13 审计核正，原写「68 命令」为文档漂移）
+- `src/main.ts`：命令裸注册表、设置页、懒加载、onunload（63 命令 = 静态注册 47（以 `tests/smoke.test.ts` 的 `EXPECTED_COMMAND_IDS` 为准，含 collect 面板/统一入口/选区收集 3 条；其中 45 条在 COMMANDS 数组，`bz-attach-move`/`bz-diary-open` 由 main.ts 裸注册）+ collect 汉字分类动态生成 16 条（`DEFAULT_COLLECT_CATEGORIES`）。2026-09-13 审计核正，原写「68 命令」为文档漂移；ticket 276 加「今日已复习」后 63 → 64；ticket 282 退役「当日待办事项」（bz-diary-todo-capture，ADR-0122）后 64 → 63）
 - `src/core/`：共享层（不挂 window）——app/settings-provider/ai/json-store/domain-bus/obsidian-adapter/path-classify/esc-manager/flow-dialog/utils/dom/changelog/notice（自绘 toast）/settings-modal/settings-schema/settings-common
 - `src/<域>/`：index.ts + data + ui + styles.css（该域样式源头，聚合进根 `styles.css`）；`src/settings.ts`；根 `styles.css`（构建聚合产物，勿手改）；`docs/adr/`；`CONTEXT.md`；`.scratch/<feature>/`
 - **依赖方向（ADR-0002）**：`core ← config/state ← parser ← store ← ui ← main`。store 无 DOM；UI 刷新靠回调订阅；禁止模块顶层互访，函数级引用环须函数体内延迟解析。

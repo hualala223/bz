@@ -669,3 +669,16 @@
 - [x] 测试：更新 8 个文件（两条旧「插卡」用例改写为「不插卡」，成功文案改正则，失败分支改从 `vault.create` 注入）；`tests/diary` 32 文件 479 例全绿
 - [x] 文档：ADR-0114 + issues/252 + CONTEXT.md「日常时间记录」「日记前导区」词条修订（新增「日记内容块」词条）
 - [x] 门禁：tsc 0 错 + 全量测试绿 + 构建部署
+
+## 2026-09-13 · 加待办 × 日记「代办事项」双向同步（ADR-0122 / issue 282 / ticket 282）
+
+**状态：已交付**
+
+- [x] 需求：加待办添加 → 同步写进当天日记 `## 代办事项`；勾选完成 → 日记打钩；当天未完成自动顺延第二天；按添加顺序编序号（grill-with-docs 两轮裁决：当日待办事项捕获退役 / 全部双向 / 按天重排 / 同步窗口=今天 / 移动端同步）
+- [x] 换血：z-diary-todo-capture「当日待办事项」彻底退役（main.ts 命令 + diary 面板 ✅ 按钮 + openTodoCapture/uildTodoLine 删除，命令数 64 → 63）；TODO_HEADING 与 writeDiarySection 导出供 todo 域复用
+- [x] diary 域：daily-capture.ts 新增纯函数 ditSectionLines（小节行集合变换，与插入版共用 locateSection，ADR-0114 单点不漂移）
+- [x] todo 域：新增 diary-projection.ts（纯层：投影行 - [ ] <序号>. <标题>-<HH:mm> 解析/构建、匹配键 标题-HH:mm 不写 id、小节行变换）+ diary-sync.ts（编排：增/勾/题/删/撤销五钩子、启动+首开顺延、vault modify 反向监听——lastSeen 快照 + **同时刻新行=改题**判定、回声幂等、当天首见只建快照防误删）
+- [x] 接线：	odo/ui.ts 五动作挂钩；	odo/index.ts openTodoPanel/ensureTodoReminders 挂 nsureTodoDiarySync（幂等+每天一次顺延）、unloadTodo 挂卸载；memo.json 14 字段冻结不动，无号历史捕获行不参与匹配
+- [x] 测试：新增 	ests/todo/diary-projection.test.ts 13 例 + 	ests/todo/diary-sync.test.ts 12 例；smoke 命令清单与 daily-capture 两文件同步修订
+- [x] 文档：ADR-0122 + issues/282 + CONTEXT.md 新增「待办日记同步」术语组（待办日记投影/日记行序号/同步窗口/顺延）+ AGENTS.md 命令数核正
+- [x] 门禁：tsc 0 错 + 全量测试 290 文件 4561 例绿 + 构建部署（根 main.js/styles.css 与 vault 插件目录同步）
