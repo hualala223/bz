@@ -2,6 +2,35 @@
 
 > 进度同步总表（AGENTS.md）。每票一节，状态：计划中 → 进行中 → 门禁 → 已交付。
 
+## 票号冲突处置 + 读书报告收编（票 278 改编 / 票 279）— 2026-09-13 晚
+
+- [x] 票号冲突处置（`ba2d361c`）：第二大脑重建索引票 276 双占，按用户裁决改编 **278**（`issues/278-secondbrain-rebuild-index-command.md`，改名提交，git 史不改写）；并行会话保留 276（复习域今日已复习列表）。后续新票从 279 起编。
+- [x] 票 279 读书报告收编（`77381a7c`）：整域对齐上游 HEAD（77cc6676 去内联 198 处 style→域 CSS+暗色提亮 / 17c55363 G10 热力图翻月边界修复 / 05e8da46 yieldToMainThread 上收 core/utils）+ 测试同步（含新 style.test.ts）。**安全性预验证**：blob hash 比对证实本地四文件全为上游 85f38a99 血统原文、零私有改动 → 纯 fast-forward 零丢失；跨域消费方 main.ts/bookshelf 依赖的 4 导出全保留。门禁：域 88 例全绿 + tsc 0 错 + 全量 288 文件 4541 例全绿 + production 构建（产物 rr 类 39→142、暗色规则 0→11 实测生效）。至此遗留清单④读书报告项闭环。
+
+## 遗留清单裁决落地（票 275/278/277 + 隐私防线）— 用户四点裁决（2026-09-13）
+
+**状态：已交付**。用户对上游吸收遗留清单逐项拍板：①影院三项按上游来（数据通就行）②重建索引与票 173 指纹无关（确认后登记）③日记隐私绝对红线（本地自证 + gitignore 防线）④皮肤候选跟上游走（ADR-0121 第 5 条执行）。
+
+> **票号冲突说明**：原票 276 双占——第二大脑重建索引命令登记（提交 `b5f851f7`）按用户裁决改编 **278**（`issues/278-secondbrain-rebuild-index-command.md`）；并行会话的「Ticket 276」= 复习域今日已复习列表（`issues/276-review-today-list.md`）。两票互不相干，后续新票从 **279** 起编。
+
+- [x] 隐私防线（`18eb6947`）：全库扫描自证零日记内容/零媒体文件/无 prototypes/ 目录（5 个本地 prototype-data.js 夹具无日记条目形态内容）；.gitignore 加 `prototypes/`、`我的/`、`*.m4a`、`*.mp4` 防线
+- [x] 票 275 影院三项（`97ff29f8`）：标记已看改走编辑窗（openForm presetSt + saveEdit 域事件补发承接 markStatus 语义）+ 随机抽一部命令 bz-cinema-random-pick（openRandomMovie/pickRandomCinema）+ localNow 单源收敛 core/ui/str；main.ts 用 hash-object 构造暂存版，用户在制 hunk 未入提交；测试改写 + 移植 + 新增（含想看池空退全量用例）
+- [x] 票 278 第二大脑重建索引命令（`b5f851f7`，原编 276）：bz-secondbrain-rebuild-index 登记（导出早已存在）；与票 173 增量指纹判定互不影响（重建=手动清空重嵌，指纹=自动增量判定）
+- [x] 票 277 皮肤例外（`2b091360`）：S1 模型弹窗挂 --sp-* 同皮（上游 265 纯 CSS 剥离，放弃其夹带的移动端重构）+ S3-b 八处遮罩毛玻璃 token 单源（diary×3/quiz/encrypt×3/favorites/literature/settings-panel）+ S3-c quiz token 对档（todo/secondbrain/belongings 暗色实测已随 267/273/268 进入；reading-report 与 knowledge UI 收编不吸，见票）；附回滚自检记录 + 守卫测试 10 例
+- [x] 门禁：tsc 0 错；全量 287 文件 / 4536 例全绿（已含并行会话在制功能）；production 构建过（产物标记 6/6 命中），在制产物备份 `.workbuddy/backup-artifacts-20260913-2/`
+- [ ] 待办：读书报告（去内联+暗色+指标提亮，含 .ts 重构，人工对位）单独立票待用户过菜单
+
+## Ticket 276 — 复习域：今日已复习列表（点击打开原文，强制阅读模式）
+
+**状态：已交付（2026-09-13）**
+
+- [x] 需求（grill-with-docs 四问全部推荐）：命令 `bz-review-today`「今日已复习」独立弹窗罗列当天复习过的文档——文档名 + HH:MM + 当天次数 + 最后评级，`lastReviewed` 倒序；点击新标签页打开原文并**强制阅读模式**；空态文案；挂起记录标灰、点击 warning 不报错
+- [x] 口径：零新增数据字段——「当天」沿用**当天已复习**术语（`isReviewedToday`/`sameLocalDay`），次数取 `reviewHistory` 当天条数，评级取 `lastDifficulty`
+- [x] 实现：`src/review/today.ts`（collectTodayReviewed 纯函数 + showTodayReviewed/closeTodayReviewed；createOverlay 共享壳 + bz-win-head/bz-win-close + escManager，骨架对齐 stats-ui）；`src/review/index.ts` openTodayReviewed；`src/main.ts` 命令注册（icon: history）；`src/review/styles.css` 正文列表样式；**全插件首个强制阅读模式先例**（`openFile({ state: { mode: 'preview' } })`，此前无 setViewState/mode:'preview' 用法）
+- [x] 测试：`tests/review/today.test.ts`（纯函数 6 例）+ `tests/review/today-ui.test.ts`（UI 3 例）+ smoke 命令清单/名称断言
+- [x] 文档：`issues/276-review-today-list.md` + CONTEXT.md「今日已复习」词条
+- [x] 门禁：tsc 0 错 + 全量测试绿
+
 ## 上游吸收第二轮（issue 266 审计归档 + 票 267~274 执行）— 基线 7b06f4b4
 
 **状态：已交付（2026-09-13）**。审计归档见 `issues/266-upstream-audit-archive-and-skin-exception.md`（含三档分级清单、出局项、皮肤例外逐条裁决）；ADR-0121 二次修订（第 5 条皮肤/外观层例外 + 原第 3 条第 1 项作废）已落盘。
