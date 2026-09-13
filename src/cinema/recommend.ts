@@ -13,6 +13,7 @@ import { STATUS_WANT, STATUS_WATCHED } from './constants';
 import type { CinemaItem } from './state';
 import { M } from './state';
 import { refreshDataAndView } from './data';
+import { localNow } from '../core/ui/str';
 import { enqueueDoubanFetch } from './douban-queue';
 
 /** 类型 → 默认 tag（加入想看用） */
@@ -161,12 +162,7 @@ export function parseRecommendJson(raw: string): any[] | null {
   }
 }
 
-/** 本地时间 YYYY-MM-DD HH:mm:ss */
-function localNowFormat(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-}
+// localNowFormat 已退役：localNow 单源收敛至 core/ui/str（票 275 遗留③，实现逐字节等价）
 
 /** 加入想看（AI 推荐条目 → 建笔记，评分 -1） */
 export async function quickAddWant(app: App, name: string, type: string): Promise<void> {
@@ -183,7 +179,7 @@ export async function quickAddWant(app: App, name: string, type: string): Promis
     notice(`影视「${trimmedName}」已在库中`);
     return;
   }
-  const now = localNowFormat();
+  const now = localNow();
   const content = `---
 tags:
 - ${tag}

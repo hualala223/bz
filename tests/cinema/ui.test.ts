@@ -11,9 +11,9 @@ import { resetObsidianMocks, hasNotice, Platform } from '../mock-obsidian-entry'
 import { M, resetCinemaState } from '../../src/cinema/state';
 import { rebuildItems } from '../../src/cinema/data';
 import { runAIRecommend, runSimilarRecommend } from '../../src/cinema/recommend';
-import { createOverlay, closeOverlay, openAddModalDirect } from '../../src/cinema/ui';
+import { createOverlay, closeOverlay, openAddModalDirect, openRandomMovie, renderAll } from '../../src/cinema/ui';
 import { configureFetchQueue, enqueueDoubanFetch, isFetching, shutdownDoubanQueue } from '../../src/cinema/douban-queue';
-import { ensureCinema, unloadCinema, openCinemaAnalysis } from '../../src/cinema';
+import { ensureCinema, unloadCinema, openCinemaAnalysis, pickRandomCinema } from '../../src/cinema';
 import { setAISettingsProvider, resetAIProviderCache } from '../../src/core/ai';
 import { setApp } from '../../src/core/app';
 import { setSettingsProvider } from '../../src/core/settings-provider';
@@ -193,7 +193,7 @@ describe('cinema 风格化面板（issue 236）', () => {
     expect(M.items.some((i) => i.name === '想看片')).toBe(false);
   });
 
-  it('右键菜单（cn-menu）：动作集按状态显隐；「标记已看」写 frontmatter + 面板 toast', async () => {
+  it('右键菜单（cn-menu）：动作集按状态显隐；「标记已看」改走编辑窗预选已看（票 275①），保存落盘 + 事件补发', async () => {
     const { app } = seedVault();
     createOverlay(app);
     const root = document.querySelector('[data-cinema-root]') as HTMLElement;
@@ -212,13 +212,22 @@ describe('cinema 风格化面板（issue 236）', () => {
     const labels2 = Array.from((root.querySelector('.cn-menu') as HTMLElement).querySelectorAll('.cn-menu-item')).map((b) => b.textContent);
     expect(labels2.some((l) => l?.includes('标记在看'))).toBe(false);
     expect(labels2.some((l) => l?.includes('标记已看'))).toBe(false);
-    // 想看卡点「标记已看」→ 评分默认 5 落盘 + cn-toast
+    // 想看卡点「标记已看」→ 改走编辑窗预选「已看」（票 275①，上游 6cb2ac88）：确认保存才落盘
+    const movieEvents: any[] = [];
+    const offMovie = onDomainEvent('movie', (evt) => movieEvents.push(evt));
     pcardByName(root, '想看片').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 30 }));
     clickEl(Array.from((root.querySelector('.cn-menu') as HTMLElement).querySelectorAll('.cn-menu-item')).find((b) => b.textContent?.includes('标记已看')));
-    await vi.waitFor(() => expect(root.querySelector('.cn-toast')?.textContent).toContain('标记为已看'));
+    const form = root.querySelector('.cn-modal') as HTMLElement;
+    expect(form.querySelector('.j-name') as HTMLInputElement).toBeTruthy(); // 编辑窗打开
+    expect(form.querySelector('[data-f-st="已看"]')?.classList.contains('is-on')).toBe(true); // 状态预选「已看」
+    expect((form.querySelector('.j-rating') as HTMLElement).style.display).not.toBe('none'); // 评分/影评随已看展开
+    clickEl(form.querySelector('.j-save'));
+    await vi.waitFor(() => expect(root.querySelector('.cn-toast')?.textContent).toContain('已保存'));
     const item = M.items.find((i) => i.name === '想看片')!;
     expect(item.status).toBe(2); // STATUS_WATCHED
-    expect(item.rating).toBe(5);
+    // saveEdit 承接原 markStatus 的事件语义：状态流转 want→watched 补发小橘行为流
+    expect(movieEvents.some((e) => e.kind === 'status' && e.from === 'want' && e.to === 'watched' && e.name === '想看片')).toBe(true);
+    offMovie();
   });
 
   it('详情 → 编辑弹窗：字段预选当前值，评分滑杆联动读数，保存写回 frontmatter', async () => {
@@ -675,5 +684,69 @@ describe('cinema 行为修复（票 271：G7 回滚 / G8 出队 / chips 回落�
     expect(M.view).toBe('list');
     expect(M.typeFilter).toBe('剧集');
     expect(root.querySelectorAll('.m-grid .pcard').length).toBe(1);
+  });
+});
+
+/**
+ * 票 275②：随机抽一部（上游补扫 C 回归，测试自上游 tests/cinema/ui.test.ts 移植）——
+ * pickRandomCinema 把 M.view 回落 list；面板已开时先整刷再叠详情（不叠旧 stat/ai 页）。
+ */
+describe('票 275 随机抽一部（已开面板先整刷再叠详情）', () => {
+  beforeEach(() => {
+    resetObsidianMocks();
+    resetCinemaState();
+    clearDomainEvents();
+    M.folderPath = '我的/影视';
+    document.body.innerHTML = '';
+  });
+  afterEach(() => {
+    Platform.isMobile = false;
+    unloadCinema();
+    document.body.innerHTML = '';
+  });
+
+  it('面板已开且停在分析页：先整刷回落列表页再叠详情（不叠旧 stat 页）', () => {
+    const { app } = seedVault();
+    createOverlay(app);
+    // 模拟用户停在分析页
+    M.view = 'stat';
+    renderAll(app);
+    const root0 = document.querySelector('[data-cinema-root]') as HTMLElement;
+    expect(root0.querySelector('.sp-body')).toBeTruthy(); // 分析页在
+    expect(root0.querySelector('.d-scroll')).toBeNull();
+
+    // 想看池只有《想看片》→ 抽取确定
+    pickRandomCinema(app);
+
+    expect(M.view).toBe('list');
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    expect(root.querySelector('.d-scroll .pcard')).toBeTruthy(); // 列表页已渲染
+    expect(root.querySelector('.sp-body')).toBeNull(); // 旧分析页已被整刷掉
+    expect(root.querySelector('.cn-modal')).toBeTruthy(); // 详情弹窗叠在列表页上
+    expect(hasNotice(/抽到「想看片」/)).toBe(true);
+  });
+
+  it('面板未开：冷开面板落列表页再叠详情（原有口径不变）', () => {
+    const { app } = seedVault();
+    openRandomMovie(app);
+    expect(M.view).toBe('list');
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    expect(root.querySelector('.d-scroll .pcard')).toBeTruthy();
+    expect(root.querySelector('.cn-modal')).toBeTruthy();
+  });
+
+  it('想看池空：退到全量抽取并说明（不静默无反应）', () => {
+    const vault = new MockVault();
+    vault.files.set('我的/影视/《只有已看》.md', md(`---
+tags: [电影]
+评分: 8.0
+观影日期: 2026-08-01
+---`));
+    const app = mockAppWithVault(vault);
+    ensureCinema(app);
+    rebuildItems(app);
+    openRandomMovie(app);
+    expect(hasNotice(/想看清单空着/)).toBe(true);
+    expect(document.querySelector('.cn-modal')).toBeTruthy();
   });
 });

@@ -21,6 +21,13 @@ export function esc(s: unknown): string {
   return escapeHtml(String(s ?? ''));
 }
 
+/** 本地时间 YYYY-MM-DD HH:mm:ss（票 275：自影院域私有实现收敛单源，实现与上游逐字节等价） */
+export function localNow(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
 /** lucide 图标占位串（`<i data-lucide>`）：渲染入 DOM 后由 mountIcons 兑现成 SVG——
  *  插件 = core/ui icons.ts mountIcons（setIcon），评审壳 = prototype-icons.js 内联 SVG（壳层差异表） */
 export function iconSpan(name: string, extra = ''): string {

@@ -75,7 +75,7 @@ const EXPECTED_COMMAND_IDS = [
   'bz-favorites-open', 'bz-favorites-add',
   'bz-bookshelf-open',
   'bz-reading-report-open',
-  'bz-cinema-open', 'bz-cinema-add', 'bz-cinema-analysis',
+  'bz-cinema-open', 'bz-cinema-add', 'bz-cinema-analysis', 'bz-cinema-random-pick',
   'bz-review-count', 'bz-review-add-current', 'bz-review-add-current-with-links',
   // 上游线 P2/P3：复习统计报告 + 快速复制密码
   'bz-review-report', 'bz-encrypt-copy-password',
