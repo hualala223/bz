@@ -6,7 +6,7 @@ import { MockVault, mockAppWithVault } from '../mock-vault';
 import { resetObsidianMocks } from '../mock-obsidian-entry';
 import { setApp } from '../../src/core/app';
 import { setSettingsProvider } from '../../src/core/settings-provider';
-import { PomodoroDataManager, POMODORO_FILE_PATH, getPomodoroFilePath, defaultPomodoroData } from '../../src/pomodoro/data';
+import { PomodoroDataManager, POMODORO_FILE_PATH, getPomodoroFilePath, defaultPomodoroData, trimHistory } from '../../src/pomodoro/data';
 import { createInitialState, recover, DEFAULT_DURATIONS, DEFAULT_OPTIONS } from '../../src/pomodoro/state';
 
 function makeApp(vault: MockVault) {
@@ -329,6 +329,55 @@ describe('PomodoroDataManager', () => {
     });
     raw = JSON.parse(vault.files.get(POMODORO_FILE_PATH)!);
     expect('pausedBy' in raw.state).toBe(false);
+  });
+});
+
+describe('trimHistory（F13：历史保留窗裁剪）', () => {
+  /** 窗口起点 = 今日零点 −6 天（与 stats.last7Days 最左一天同一起点） */
+  function floorOf(now: number): number {
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - 6);
+    return d.getTime();
+  }
+
+  it('窗外剔除、窗口边界（含）与窗内保留', () => {
+    const now = Date.now();
+    const floor = floorOf(now);
+    const outside = { ts: floor - 1, duration: 1500 }; // 早 1ms → 窗外
+    const atFloor = { ts: floor, duration: 1500 }; // 恰好起点 → 保留
+    const inWindow = { ts: floor + 3_600_000, duration: 1500 };
+    const today = { ts: now, duration: 1500 };
+    expect(trimHistory([outside, atFloor, inWindow, today], now)).toEqual([atFloor, inWindow, today]);
+  });
+
+  it('未来时间戳（时钟回拨）保守保留', () => {
+    const now = Date.now();
+    const future = { ts: now + 86_400_000, duration: 1500 };
+    expect(trimHistory([future], now)).toEqual([future]);
+  });
+
+  it('空历史 / 全部窗外 → 空数组', () => {
+    const now = Date.now();
+    expect(trimHistory([], now)).toEqual([]);
+    const stale = { ts: floorOf(now) - 86_400_000, duration: 1500 };
+    expect(trimHistory([stale], now)).toEqual([]);
+  });
+
+  it('返回新数组，不改动入参', () => {
+    const now = Date.now();
+    const input = [{ ts: now, duration: 1500 }];
+    const out = trimHistory(input, now);
+    expect(out).not.toBe(input);
+    expect(out).toEqual(input);
+    expect(input).toHaveLength(1);
+  });
+
+  it('窗口覆盖 7 个日历日的全部记录', () => {
+    const now = Date.now();
+    const floor = floorOf(now);
+    const sevenDays = [0, 1, 2, 3, 4, 5, 6].map((i) => ({ ts: floor + i * 3_600_000, duration: 1500 }));
+    expect(trimHistory(sevenDays, now)).toHaveLength(7);
   });
 });
 

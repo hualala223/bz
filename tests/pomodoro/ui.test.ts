@@ -218,6 +218,35 @@ describe('ensurePomodoro（插件启动恢复）', () => {
     expect(raw.state.paused).toBe(true);
     expect(raw.state.endTime).toBeNull(); // 保持暂停
   });
+
+  it('F12：冻结后 hidden 期间手动解冻再手动暂停 → visible 不误自动恢复（冻结标记随解冻清除）', async () => {
+    const vault = new MockVault();
+    vault.files.set(getPomodoroFilePath(), runningData());
+    const app = makeApp(vault);
+    setApp(app);
+    await ensurePomodoro(app); // 注册 visibilitychange 监听（ticket 62 仅在此注册）
+    await openPomodoro(app); // 幂等复用已加载数据，拿到弹窗按钮
+    // hidden → 本条会话被本机制冻结（autoPauseMain = true）
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(JSON.parse(vault.files.get(getPomodoroFilePath())!).state.paused).toBe(true);
+    // hidden 期间手动解冻（继续）→ paused 清除；F12 要求冻结标记同步清除
+    el('pomodoro-btn-start').click();
+    expect(el('pomodoro-btn-start').textContent).toContain('暂停');
+    // 紧接着再手动暂停 → 这是「手动暂停」，visible 时必须保持
+    el('pomodoro-btn-start').click();
+    expect(el('pomodoro-btn-start').textContent).toContain('继续');
+    await vi.advanceTimersByTimeAsync(0);
+    // visible：手动暂停不被覆盖（未修复时残留标记会让 resumeOnVisible 静默续跑）
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    document.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(0);
+    const raw = JSON.parse(vault.files.get(getPomodoroFilePath())!);
+    expect(raw.state.paused).toBe(true);
+    expect(raw.state.endTime).toBeNull();
+    expect(el('pomodoro-btn-start').textContent).toContain('继续');
+  });
 });
 
 
@@ -317,6 +346,41 @@ describe('番茄钟弹窗', () => {
     expect(el('pomodoro-btn-start').textContent).toContain('开始');
     await vi.advanceTimersByTimeAsync(3000);
     expect(el('pomodoro-time').textContent).toBe('25:00');
+  });
+
+  it('F11：重置落盘（reset 恒返回 none 事件，靠「状态已变」条件写盘）', async () => {
+    const { app, vault } = setup();
+    await openPomodoro(app);
+    el('pomodoro-btn-start').click(); // 运行中：endTime 非空
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(JSON.parse(vault.files.get(getPomodoroFilePath())!).state.endTime).not.toBeNull(); // 运行态已落盘
+    el('pomodoro-btn-reset').click();
+    await vi.advanceTimersByTimeAsync(0);
+    const raw = JSON.parse(vault.files.get(getPomodoroFilePath())!);
+    expect(raw.state.phase).toBe('focus');
+    expect(raw.state.endTime).toBeNull(); // 旧 endTime 不残留盘上（否则重启复活旧计时并弹「继续」）
+    expect(raw.state.remaining).toBe(1500);
+    expect(raw.state.paused).toBe(false);
+  });
+
+  it('F13：落盘按保留窗裁剪历史（窗口外记录不写入 pomodoro.json）', async () => {
+    const vault = new MockVault();
+    const oldTs = T0 - 30 * 24 * 3600 * 1000; // 30 天前（窗外）
+    const recentTs = T0 - 1000; // 今天（窗内）
+    vault.files.set(
+      getPomodoroFilePath(),
+      JSON.stringify({
+        version: 1,
+        state: { phase: 'idle', endTime: null, remaining: 0, paused: false, cycleFocusCount: 0 },
+        history: [{ ts: oldTs, duration: 1500 }, { ts: recentTs, duration: 1500 }],
+      })
+    );
+    const { app } = setup(vault);
+    await openPomodoro(app); // 装载即裁剪（内存）
+    el('pomodoro-btn-start').click(); // 开始 → started 事件 → 落盘（再裁一次）
+    await vi.advanceTimersByTimeAsync(0);
+    const raw = JSON.parse(vault.files.get(getPomodoroFilePath())!);
+    expect(raw.history).toEqual([{ ts: recentTs, duration: 1500 }]);
   });
 
   it('跳过 → 流转到短休息（未开始）', async () => {
