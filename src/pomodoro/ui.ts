@@ -27,6 +27,7 @@ import type { SoundKind } from './sound';
 import { syncPomodoroStatusBar } from './statusbar';
 import { todayCount, todayMinutes, todayHourBuckets, last7Days } from './stats';
 import { PRESETS, CUSTOM_PRESET_ID } from './config';
+import { POMODORO_SKIN_THEMES, skinClassOf } from './skin';
 import type { PomodoroState, HistoryEntry, Durations, PomodoroOptions, Phase, PomodoroAction, PomodoroEvent } from './state';
 import { transition, recover, createInitialState, phaseDurationSec } from './state';
 import { pad2 } from '../core/utils';
@@ -219,12 +220,21 @@ function renderStats(): void {
   }
 }
 
+/** 面板主题皮肤类挂载（issue 264）：面板根摘旧挂新，取值 = pomodoroSkinTheme（未知回落番茄） */
+function applySkinClass(): void {
+  const popup = document.getElementById('pomodoro-popup');
+  if (!popup) return;
+  for (const t of POMODORO_SKIN_THEMES) popup.classList.remove(`pomodoro-skin-${t.value}`);
+  popup.classList.add(skinClassOf(tryGetSettings().pomodoroSkinTheme));
+}
+
 function render(): void {
   const d = durations();
   const remain = remainingSec();
   // 状态栏不依赖弹窗存在（关闭后继续每秒刷新）
   syncPomodoroStatusBar(state, remain);
   if (!maskEl) return;
+  applySkinClass(); // 面板主题随设置走（设置面板改主题后下一次 render 即生效）
   const total = phaseDurationSec(state.phase === 'idle' ? 'focus' : state.phase, d);
   // 环形进度：剩余比例 → dashoffset（dasharray 恒为周长，offset=C*remain/total）
   const C = 2 * Math.PI * 52;
@@ -442,6 +452,13 @@ function openPomodoroSettings(): void {
   openSettingsModal({ title: '番茄钟设置', maxWidth: 560, schema: pomodoroSettingsSchema() });
 }
 
+/** 面板主题清单出口（测试与评审壳从 ui 消费；单源 = ./skin） */
+export { POMODORO_SKIN_THEMES } from './skin';
+export type { PomodoroSkinTheme } from './skin';
+
+/** 外观组主题行 options（issue 264）：由清单单源 map 生成；布局行的配套回落按 layout 字段判定 */
+const SKIN_THEME_OPTIONS = POMODORO_SKIN_THEMES.map((t) => ({ value: t.value, label: t.label, layout: 'default', prevClass: `bz-sp-prev-pomo-${t.value}` }));
+
 /** 番茄钟设置 schema（ticket 131；ADR-0064）：时间方案/行为/移动端三组，置于模块顶层供文案 lint 直接引用。
  *  设置变更后 render() 重绘主面板（沿用原 onChange 副作用）；声音提醒/后台自动暂停沿用缺省开语义
  *  （键缺失视为开，非键直绑的 === true 口径）——三函数绑定逐字保持原读值语义。 */
@@ -463,6 +480,30 @@ export function pomodoroSettingsSchema(): SettingsSchema {
   } as const;
   return {
     groups: [
+      {
+        // 外观组（issue 264 吸收上游）：布局行占位单卡（真键 pomodoroSkin）；主题 10 套皮，
+        // onChange 驱动 render() 重挂皮肤类——设置关着弹窗换肤也即时生效
+        icon: 'palette',
+        name: '外观',
+        rows: [
+          {
+            type: 'choiceCards', name: '面板布局', binding: { key: 'pomodoroSkin' },
+            options: [{ value: 'default', label: '计时盘', prevClass: 'bz-sp-prev-panel' }],
+            // 配套回落（上游 issue 246 a2 口径）：换布局后若当前主题不属于新布局的配套 → 回落第一个适配主题
+            onChange: () => {
+              const s = tryGetSettings() as any;
+              const cur = String(s.pomodoroSkinTheme ?? '');
+              const fit = SKIN_THEME_OPTIONS.filter((o) => o.layout === s.pomodoroSkin);
+              if (!fit.some((o) => o.value === cur)) {
+                s.pomodoroSkinTheme = (fit[0] ?? SKIN_THEME_OPTIONS[0]).value;
+                saveSettings();
+              }
+              render();
+            },
+          },
+          { type: 'choiceCards', name: '面板主题', binding: { key: 'pomodoroSkinTheme' }, layoutKey: 'pomodoroSkin', options: SKIN_THEME_OPTIONS, onChange: () => render() },
+        ],
+      },
       {
         icon: 'timer',
         name: '时间方案',

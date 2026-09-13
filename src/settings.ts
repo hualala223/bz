@@ -310,6 +310,10 @@ export default interface BzSettings {
   pomodoroRestoreMode: string;
   /** 后台自动暂停：窗口 hidden（最小化/遮挡/休眠）时主番茄钟暂停，恢复可见自动继续（默认开，ticket 62；blur 不触发） */
   pomodoroAutoPauseOnHide: boolean;
+  /** 🎨 番茄钟面板布局（issue 264 吸收上游；当前仅 default 计时盘，非法值域内回落） */
+  pomodoroSkin: string;
+  /** 🎨 番茄钟面板主题（10 套皮单源 = src/pomodoro/skin.ts，未知值回落番茄） */
+  pomodoroSkinTheme: string;
 
   // ===== 📥 日常收集（collect 域，issue 246：QuickAdd「日常收集」宏换血）=====
   /** 📂 目标文件夹（收集 md 统一存放目录，vault 根相对） */
@@ -640,6 +644,8 @@ export const DEFAULT_SETTINGS: BzSettings = {
   pomodoroVolume: 100,
   pomodoroRestoreMode: 'background',
   pomodoroAutoPauseOnHide: true,
+  pomodoroSkin: 'default',
+  pomodoroSkinTheme: 'tomato',
 
   // 加密保险箱（encrypt 域）
   encryptRoot: 'CONFIG/.ENCRYPT',

@@ -2,6 +2,8 @@
  * 番茄钟设置测试（ticket 31）：settings 结构 + ⚙️ 设置弹窗（12 项/12 档/分组卡片/动态显隐/保存）+ 设置生效
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import { MockVault, mockAppWithVault } from '../mock-vault';
 import { resetObsidianMocks } from '../mock-obsidian-entry';
 import { setApp } from '../../src/core/app';
@@ -9,6 +11,7 @@ import { setSettingsProvider, setSettingsSaver } from '../../src/core/settings-p
 import { openPomodoro, unloadPomodoro } from '../../src/pomodoro';
 import { DEFAULT_SETTINGS } from '../../src/settings';
 import { PRESETS, CUSTOM_PRESET_ID } from '../../src/pomodoro/config';
+import { pomodoroSettingsSchema, POMODORO_SKIN_THEMES } from '../../src/pomodoro/ui';
 
 const T0 = new Date('2026-08-10T10:00:00').getTime();
 
@@ -84,19 +87,19 @@ describe('⚙️ 设置弹窗', () => {
     vi.useRealTimers();
   });
 
-  it('打开设置弹窗：分组卡片（时间方案/行为）+ 12 个可见设置项', async () => {
+  it('打开设置弹窗：分组卡片（外观/时间方案/行为）+ 14 个可见设置项（issue 264 补外观组）', async () => {
     const settings = { ...DEFAULT_SETTINGS } as any;
     const { app } = setup(settings);
     await openPomodoro(app);
     el('pomodoro-btn-settings').click();
     expect(el('bz-settings-modal-popup')).not.toBeNull();
-    // ticket 131：移动端组行挂在整组隐藏的组下（bz-setting-hidden）——12 个设置项 = 除移动端组外的全部行
+    // ticket 131：移动端组行挂在整组隐藏的组下（bz-setting-hidden）——14 个设置项 = 除移动端组外的全部行
     // （classic 下自定义三行隐藏但仍留 DOM，声明式联动保留结构；行级隐藏不计入此处口径）
     const allItems = [...document.querySelectorAll('#bz-settings-modal-popup .setting-item')];
-    expect(allItems.length).toBe(13);
+    expect(allItems.length).toBe(15);
     expect(
       allItems.filter((el) => !(el as HTMLElement).closest('.bz-settings-group')!.classList.contains('bz-setting-hidden')).length
-    ).toBe(12);
+    ).toBe(14);
     expect(itemByName('预设方案')).not.toBeUndefined();
     expect(itemByName('长休息间隔')).not.toBeUndefined();
     expect(itemByName('声音提醒')).not.toBeUndefined();
@@ -104,17 +107,18 @@ describe('⚙️ 设置弹窗', () => {
     expect(itemByName('打开时恢复方式')).not.toBeUndefined();
     expect(itemByName('后台自动暂停')).not.toBeUndefined();
     expect(itemByName('读书自动番茄钟')).toBeUndefined(); // ticket 63 移除
-    // 分组卡片结构：桌面 2 组可见（时间方案/行为；移动端组挂 bz-setting-hidden 整组隐藏——ticket 131
-    // 声明式联动保留结构），原生图标 + 徽标（classic 时自定义三行隐藏 → 时间方案 2 项：预设方案 + 长休息间隔）
+    // 分组卡片结构：桌面 3 组可见（外观/时间方案/行为；issue 264 补外观组；移动端组挂 bz-setting-hidden
+    // 整组隐藏——ticket 131 声明式联动保留结构），原生图标 + 徽标（classic 时自定义三行隐藏 → 时间方案 2 项：预设方案 + 长休息间隔）
     const isHiddenGroup = (el: Element) =>
       Boolean((el.closest('.bz-settings-group') as HTMLElement | null)?.classList.contains('bz-setting-hidden'));
     const heads = [...document.querySelectorAll('#bz-settings-modal-popup .bz-settings-group-head')].filter((el) => !isHiddenGroup(el));
-    expect(heads.map((h) => (h as HTMLElement).textContent!.trim())).toEqual(['时间方案2 项', '行为7 项']);
-    expect(heads.map((h) => h.querySelector('.bz-settings-group-icon')!.getAttribute('data-icon'))).toEqual(['timer', 'sliders-horizontal']);
+    expect(heads.map((h) => (h as HTMLElement).textContent!.trim())).toEqual(['外观2 项', '时间方案2 项', '行为7 项']);
+    expect(heads.map((h) => h.querySelector('.bz-settings-group-icon')!.getAttribute('data-icon'))).toEqual(['palette', 'timer', 'sliders-horizontal']);
     const names = [...document.querySelectorAll('#bz-settings-modal-popup .bz-settings-group-body .setting-item')]
       .filter((el) => !(el as HTMLElement).closest('.bz-settings-group')!.classList.contains('bz-setting-hidden'))
       .map((it) => (it as HTMLElement).dataset.name);
     expect(names).toEqual([
+      '面板布局', '面板主题',
       '预设方案', '工作时长', '短休息时长', '长休息时长', '长休息间隔',
       '强制专注模式', '自动循环', '自动跳过休息', '声音提醒', '后台自动暂停', '提示音音量', '打开时恢复方式',
     ]);
@@ -316,5 +320,99 @@ describe('设置生效', () => {
     const merged = { ...DEFAULT_SETTINGS, pomodoroPreset: 'marathon' };
     expect(merged.pomodoroPreset).toBe('marathon');
     expect(merged.pomodoroSound).toBe(true);
+  });
+});
+
+describe('面板主题（皮肤单源，issue 264）', () => {
+  it('10 套主题：清单 = 设置选项，且 CSS 每套都有亮/暗两套皮', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/pomodoro/styles.css'), 'utf8');
+    expect(POMODORO_SKIN_THEMES.length).toBe(10);
+    const themeRow = (pomodoroSettingsSchema().groups[0].rows as any[]).find((r) => r.name === '面板主题');
+    expect(themeRow.options.map((o: any) => o.value)).toEqual(POMODORO_SKIN_THEMES.map((t) => t.value));
+    // 每套皮 = 亮色一组 + .theme-dark 暗色一组（缺一套即静默「暗色下观感错乱」）
+    for (const t of POMODORO_SKIN_THEMES) {
+      expect(css).toContain(`#pomodoro-popup.pomodoro-skin-${t.value}`);
+      expect(css).toContain(`.theme-dark #pomodoro-popup.pomodoro-skin-${t.value}`);
+    }
+  });
+
+  it('配色单源：色值只在 pomodoro/styles.css 的 :root --pz-<id>-* 表，settings-panel 预览卡引用变量（评审双源清零）', () => {
+    const pzCss = readFileSync(resolve(process.cwd(), 'src/pomodoro/styles.css'), 'utf8');
+    const spCss = readFileSync(resolve(process.cwd(), 'src/settings-panel/styles.css'), 'utf8');
+    for (const t of POMODORO_SKIN_THEMES) {
+      // 预览卡三槽：亮面/暗面/强调都出自 :root 表
+      expect(pzCss).toContain(`--pz-${t.value}-l:#`);
+      expect(pzCss).toContain(`--pz-${t.value}-d:#`);
+      expect(pzCss).toContain(`--pz-${t.value}-a:#`);
+      expect(spCss).toContain(`bz-sp-prev-pomo-${t.value}`);
+      expect(spCss).toContain(`var(--pz-${t.value}-a)`);
+    }
+    // 预览卡段内不得再手抄六位 hex（#fff 圆点高光除外）——色值唯一出处 = :root 表
+    const prevBlock = spCss.slice(spCss.indexOf('bz-sp-prev-pomo-tomato'));
+    expect(prevBlock).not.toMatch(/#[0-9a-fA-F]{6}/);
+    // 弹窗消费块不再持有皮肤 hex：皮肤类行只允许变量声明（--pz-*）与 grid 格纹例外
+    const skinLines = pzCss.split('\n').filter((l) => l.includes('.pomodoro-skin-'));
+    for (const l of skinLines) {
+      const decl = l.replace(/--[a-z-]+:(var\(--pz-[a-z-]+\)|rgba\([^)]*\)|#fff\b)/gi, '');
+      expect(decl).not.toMatch(/#[0-9a-fA-F]{6}/);
+    }
+  });
+});
+
+describe('外观组链路（issue 264：设置面板改主题 → 弹窗即时换皮）', () => {
+  beforeEach(() => {
+    resetObsidianMocks();
+    setApp(null as any);
+    setSettingsProvider(() => ({} as any));
+    document.body.innerHTML = '';
+    unloadPomodoro();
+  });
+  afterEach(() => {
+    unloadPomodoro();
+  });
+
+  it('主题行 onChange：点卡片 → 写设置 + render → 弹窗皮肤类即时重挂（弹窗开着不用重开）', async () => {
+    const settings = { ...DEFAULT_SETTINGS, pomodoroSkinTheme: 'tomato' } as any;
+    const { app } = setup(settings);
+    await openPomodoro(app);
+    expect(el('pomodoro-popup').classList.contains('pomodoro-skin-tomato')).toBe(true);
+    el('pomodoro-btn-settings').click();
+    const row = itemByName('面板主题');
+    expect(row).toBeTruthy();
+    const card = row.querySelector('.bz-cardpick-card[data-value="ink"]') as HTMLButtonElement | null;
+    expect(card).toBeTruthy();
+    card!.click();
+    // onChange 链是异步（write → persist → row.onChange → render），让微任务落地
+    await new Promise((r) => setTimeout(r, 0));
+    expect(settings.pomodoroSkinTheme).toBe('ink');
+    expect(el('pomodoro-popup').classList.contains('pomodoro-skin-ink')).toBe(true);
+    expect(el('pomodoro-popup').classList.contains('pomodoro-skin-tomato')).toBe(false);
+  });
+
+  it('布局行 onChange 已挂（配套回落）；当前主题适配布局时不回落（防误重置用户主题）', () => {
+    const settings = { ...DEFAULT_SETTINGS, pomodoroSkin: 'default', pomodoroSkinTheme: 'sakura' } as any;
+    setup(settings);
+    const rows = pomodoroSettingsSchema().groups[0].rows as any[];
+    const layoutRow = rows.find((r) => r.name === '面板布局');
+    const themeRow = rows.find((r) => r.name === '面板主题');
+    expect(typeof layoutRow.onChange).toBe('function');
+    expect(typeof themeRow.onChange).toBe('function');
+    // 全部主题 layout='default' 与当前布局适配 → 回落分支不可达，主题原样保留
+    layoutRow.onChange('default', {} as any);
+    expect(settings.pomodoroSkinTheme).toBe('sakura');
+  });
+
+  it('布局行配套回落：主题值非法 → 回落第一个适配主题；布局无任何适配主题 → 兜底第一项', () => {
+    // 当前全部主题 layout='default'：非法主题值在适配集内不存在 → 回落适配集第一个（tomato）
+    const s1 = { ...DEFAULT_SETTINGS, pomodoroSkin: 'default', pomodoroSkinTheme: 'no-such' } as any;
+    setup(s1);
+    const layoutRow = (pomodoroSettingsSchema().groups[0].rows as any[]).find((r) => r.name === '面板布局');
+    layoutRow.onChange('default', {} as any);
+    expect(s1.pomodoroSkinTheme).toBe('tomato');
+    // 未来新增布局（无配套主题）：适配集为空 → 兜底第一项，不留悬空值
+    const s2 = { ...DEFAULT_SETTINGS, pomodoroSkin: 'future-layout', pomodoroSkinTheme: 'sakura' } as any;
+    setup(s2);
+    (pomodoroSettingsSchema().groups[0].rows as any[]).find((r) => r.name === '面板布局')!.onChange('future-layout', {} as any);
+    expect(s2.pomodoroSkinTheme).toBe('tomato');
   });
 });

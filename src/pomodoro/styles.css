@@ -1,48 +1,143 @@
 /* ==================== 番茄钟域样式（src/pomodoro/styles.css） ==================== */
 /* ==================== 番茄钟状态栏（pomodoro，ticket 60 收敛：原注入样式，逐字搬运） ==================== */
-    .pomodoro-statusbar { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; padding: 2px 4px; border-radius: var(--radius-s, 4px); transition: background-color 0.15s ease, opacity 0.15s ease; }
+    .pomodoro-statusbar { display: inline-flex; align-items: center; gap: var(--bz-space-xs); cursor: pointer; padding: 2px var(--bz-space-xs); border-radius: var(--radius-s, var(--bz-radius-xs)); transition: background-color var(--bz-dur-fast) ease, opacity var(--bz-dur-fast) ease; }
     .pomodoro-statusbar:hover { background: var(--background-modifier-hover); color: var(--text-normal); } /* 悬停/可点反馈，对齐组件库交互基线 */
     .pomodoro-statusbar-idle:hover { opacity: 0.75; } /* 空闲灰态悬停抬亮 */
     .pomodoro-statusbar .pomodoro-statusbar-icon { display: inline-flex; align-items: center; }
     .pomodoro-statusbar-idle { opacity: 0.45; }
     /* x6：暂停态与空闲态视觉区分（暂停显示「已暂停」标签；醒目标识，非空闲灰态） */
     .pomodoro-statusbar-paused { opacity: 1; color: var(--text-warning, var(--text-normal)); }
-    .pomodoro-statusbar-paused .pomodoro-statusbar-text { font-size: 12px; }
+    .pomodoro-statusbar-paused .pomodoro-statusbar-text { font-size: var(--bz-font-meta); }
 
 
 /* ==================== 番茄钟弹窗（pomodoro，ticket 60 收敛：原注入样式，逐字搬运） ==================== */
-    #pomodoro-mask { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--background-modifier-cover); } /* z 动态发号（ADR-0067）；遮罩色走主题 token（原写死 rgba 已对齐） */
-    #pomodoro-popup { width: 320px; padding: 24px; border-radius: 16px; background: var(--background-primary); box-shadow: 0 8px 40px rgba(0,0,0,0.3); text-align: center; position: relative; }
+    #pomodoro-mask { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bz-overlay); backdrop-filter: blur(var(--bz-overlay-blur)); } /* z 动态发号（ADR-0067）；遮罩色走 --bz-overlay（原写死 rgba 已对齐） */
+    #pomodoro-popup { width: 320px; padding: var(--bz-space-xl); border-radius: var(--bz-radius-lg); background: var(--pz-bg, var(--background-primary)); box-shadow: 0 8px 40px rgba(0,0,0,0.3); text-align: center; position: relative; }
     #pomodoro-popup:focus { outline: none; } /* Space 快捷键承载焦点，不画焦点环 */
-    #pomodoro-ring-svg { width: 160px; height: 160px; margin: 8px auto; display: block; }
-    .pomodoro-ring-track { fill: none; stroke: var(--background-modifier-border); stroke-width: 8; }
-    .pomodoro-ring-progress { fill: none; stroke: var(--interactive-accent); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 1s linear; }
+    #pomodoro-ring-svg { width: 160px; height: 160px; margin: var(--bz-space-sm) auto; display: block; }
+    .pomodoro-ring-track { fill: none; stroke: var(--pz-line, var(--background-modifier-border)); stroke-width: 8; }
+    .pomodoro-ring-progress { fill: none; stroke: var(--pz-accent, var(--interactive-accent)); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 1s linear; }
     /* 本轮循环位置：N 个 6px 方点，已完成填 accent（增强包，替代「专注 2/4」文字小字） */
-    .pomodoro-cycle { display: flex; gap: 4px; justify-content: center; align-items: center; margin-top: 4px; height: 6px; }
-    .pomodoro-cycle-dot { width: 6px; height: 6px; border-radius: 2px; background: var(--background-modifier-border); }
-    .pomodoro-cycle-dot-on { background: var(--interactive-accent); }
-    #pomodoro-phase { font-size: 15px; color: var(--text-muted); margin-top: 8px; }
-    .pomodoro-phase-icon { display: inline-flex; align-items: center; vertical-align: -2px; margin-right: 4px; }
+    .pomodoro-cycle { display: flex; gap: var(--bz-space-xs); justify-content: center; align-items: center; margin-top: var(--bz-space-xs); height: 6px; }
+    .pomodoro-cycle-dot { width: 6px; height: 6px; border-radius: 2px; background: var(--pz-line, var(--background-modifier-border)); }
+    .pomodoro-cycle-dot-on { background: var(--pz-accent, var(--interactive-accent)); }
+    #pomodoro-phase { font-size: var(--bz-font-emphasis); color: var(--pz-muted, var(--text-muted)); margin-top: var(--bz-space-sm); }
+    .pomodoro-phase-icon { display: inline-flex; align-items: center; vertical-align: -2px; margin-right: var(--bz-space-xs); }
     .pomodoro-phase-icon svg { width: 14px; height: 14px; }
     /* 当前专注任务名（待办「专注这个」联动）：弱化小字，超长省略，悬停 title 见全文 */
-    .pomodoro-task { font-size: 12px; color: var(--text-faint); margin-top: 4px; max-width: 240px; margin-left: auto; margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    #pomodoro-time { font-size: 42px; font-weight: 600; color: var(--text-normal); font-variant-numeric: tabular-nums; }
-    .pomodoro-controls { display: flex; gap: 8px; justify-content: center; margin-top: 16px; }
-    .pomodoro-btn { padding: 6px 14px; border-radius: 8px; background: var(--background-secondary); color: var(--text-normal); cursor: pointer; font-size: 14px; }
+    .pomodoro-task { font-size: var(--bz-font-meta); color: var(--pz-faint, var(--text-faint)); margin-top: var(--bz-space-xs); max-width: 240px; margin-left: auto; margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #pomodoro-time { font-size: 42px; font-weight: 600; color: var(--pz-fg, var(--text-normal)); font-variant-numeric: tabular-nums; }
+    .pomodoro-controls { display: flex; gap: var(--bz-space-sm); justify-content: center; margin-top: var(--bz-space-lg); }
+    .pomodoro-btn { padding: 6px 14px; border-radius: var(--bz-radius-sm); background: var(--pz-btn, var(--background-secondary)); color: var(--pz-btn-fg, var(--text-normal)); cursor: pointer; font-size: var(--bz-font-body); }
     .pomodoro-btn:hover:not(:disabled) { background: var(--background-modifier-hover); }
     .pomodoro-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    .pomodoro-btn-primary { background: var(--interactive-accent); color: var(--text-on-accent); }
+    .pomodoro-btn-primary { background: var(--pz-accent, var(--interactive-accent)); color: var(--pz-on-accent, var(--text-on-accent)); }
     .pomodoro-btn-primary:hover:not(:disabled) { background: var(--interactive-accent-hover); }
-    #pomodoro-btn-settings { position: absolute; top: 16px; right: 16px; padding: 6px; background: none; border-radius: 8px; color: var(--text-muted); transition: opacity 0.2s; }
-    #pomodoro-btn-settings:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
-    #pomodoro-btn-settings.pomodoro-settings-hidden { opacity: 0; pointer-events: none; }
-    .pomodoro-stats { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--background-modifier-border); }
-    #pomodoro-today { font-size: 13px; color: var(--text-muted); margin-bottom: 8px; }
+    .pomodoro-stats { margin-top: var(--bz-space-lg); padding-top: var(--bz-space-md); border-top: 1px solid var(--pz-line, var(--background-modifier-border)); }
+    #pomodoro-today { font-size: var(--bz-font-label); color: var(--pz-muted, var(--text-muted)); margin-bottom: var(--bz-space-sm); }
     .pomodoro-week { display: flex; gap: 6px; justify-content: center; align-items: flex-end; }
     .pomodoro-stat-day { display: flex; flex-direction: column; align-items: center; gap: 2px; }
     .pomodoro-stat-col { display: flex; align-items: flex-end; height: 40px; }
     .pomodoro-stat-bar { width: 10px; border-radius: 3px 3px 0 0; background: var(--interactive-accent); min-height: 2px; }
-    .pomodoro-stat-label { font-size: 11px; color: var(--text-faint); }
+    .pomodoro-stat-label { font-size: var(--bz-font-caption); color: var(--pz-faint, var(--text-faint)); }
+
+/* ==================== 面板主题（皮肤）· 10 套 × 亮/暗两版（issue 264 吸收上游） ====================
+   口径（上游 2026-09-11 用户拍板「全都要，每套都要亮色和暗色」）：
+   - 皮肤类由 ui.ts::applySkinClass 挂在 #pomodoro-popup 上，取值 = 设置 pomodoroSkinTheme；
+   - 清单单源 = src/pomodoro/skin.ts::POMODORO_SKIN_THEMES（设置面板选项同表生成）；
+   - **色值单源 = 下方 :root 的 --pz-<id>-* 表**（唯一色值出处；设置面板预览卡
+     src/settings-panel/styles.css 引用同一批变量，加皮/改色两处自动同步）；
+   - 每套皮只剩两行「消费变量声明」：亮色一行 + .theme-dark 暗色一行，把表值赋给
+     --pz-bg/accent/fg/muted/faint/btn/btn-fg/on-accent（暗色再加 --pz-line），
+     消费全走上方基础段的 var 兜底链（无皮肤 = 完全回落 Obsidian 主题变量）；
+   - 槽位：l/d=亮·暗面 a/ad=亮·暗强调 fg/fgd=亮·暗时间字 m/md=亮·暗阶段·今日字
+     f/fd=亮·暗任务·柱标签字 b/bf=亮次钮底·字（仅番茄/夜航有专属，缺省回落默认）
+     bd/bfd=暗次钮底·字；
+   - 合并注记：轨道/圆点/分割线原 .12/.14/.16 微差并作暗色 --pz-line 一值；
+     墨白亮色 stat-label 与任务原差一档，并入 --pz-faint（视觉不可辨）；
+   - **只换面/字/强调色/描边阴影**，不碰任何布局属性；暗色走 .theme-dark 前缀（同 memo 范式）。 */
+:root {
+    /* 1 番茄 tomato（默认） */
+    --pz-tomato-l:#fdf7f3; --pz-tomato-d:#2a2320; --pz-tomato-a:#e5534b; --pz-tomato-ad:#f2705e;
+    --pz-tomato-fgd:#f5ece8; --pz-tomato-m:#8b6f68; --pz-tomato-md:#b9a49c; --pz-tomato-f:#b09a94; --pz-tomato-fd:#8d7a74;
+    --pz-tomato-b:#f3ece6; --pz-tomato-bf:#3d332f; --pz-tomato-bd:#352d29; --pz-tomato-bfd:#d9ccc5;
+    /* 2 墨白 ink */
+    --pz-ink-l:#ffffff; --pz-ink-d:#1f1f1e; --pz-ink-a:#171512; --pz-ink-ad:#f2f0ea;
+    --pz-ink-fgd:#f2f0ea; --pz-ink-m:#6b6558; --pz-ink-md:#a8a49c; --pz-ink-f:#a8a294; --pz-ink-fd:#7d7a72;
+    --pz-ink-bd:#2b2b29; --pz-ink-bfd:#d6d3cc;
+    /* 3 方格纸 grid */
+    --pz-grid-l:#fdfcf8; --pz-grid-d:#22231f; --pz-grid-a:#4a4a46; --pz-grid-ad:#d7d3c8;
+    --pz-grid-fgd:#eceae2; --pz-grid-m:#6b6558; --pz-grid-md:#a8a49c; --pz-grid-f:#a8a294; --pz-grid-fd:#7d7a72;
+    --pz-grid-bd:#2c2e29; --pz-grid-bfd:#d6d3cc;
+    /* 4 苔原 moss */
+    --pz-moss-l:#f2f5ef; --pz-moss-d:#20261f; --pz-moss-a:#4c9e6c; --pz-moss-ad:#6fc08e;
+    --pz-moss-fgd:#e8eee6; --pz-moss-m:#6a7d6c; --pz-moss-md:#9db3a2; --pz-moss-f:#9aa79c; --pz-moss-fd:#7b8f80;
+    --pz-moss-bd:#2a3228; --pz-moss-bfd:#d3ddd0;
+    /* 5 海雾 mist */
+    --pz-mist-l:#f1f4f8; --pz-mist-d:#1e2229; --pz-mist-a:#3d7bd6; --pz-mist-ad:#6fa0ef;
+    --pz-mist-fgd:#e6ecf5; --pz-mist-m:#66768f; --pz-mist-md:#9aa9c2; --pz-mist-f:#96a3b6; --pz-mist-fd:#78859c;
+    --pz-mist-bd:#272c35; --pz-mist-bfd:#d2dbe9;
+    /* 6 暖沙 sand */
+    --pz-sand-l:#f8f2e8; --pz-sand-d:#26221c; --pz-sand-a:#c27a48; --pz-sand-ad:#e0a373;
+    --pz-sand-fgd:#f1e9dc; --pz-sand-m:#7d6a55; --pz-sand-md:#b8a692; --pz-sand-f:#a8947c; --pz-sand-fd:#8d7f6d;
+    --pz-sand-bd:#322c25; --pz-sand-bfd:#dcd2c4;
+    /* 7 蜜柑 citrus */
+    --pz-citrus-l:#fffaf0; --pz-citrus-d:#272319; --pz-citrus-a:#e6951d; --pz-citrus-ad:#f2b544;
+    --pz-citrus-fgd:#f7efdf; --pz-citrus-m:#7d6a40; --pz-citrus-md:#bab192; --pz-citrus-f:#ab9a6c; --pz-citrus-fd:#8f876c;
+    --pz-citrus-bd:#332e20; --pz-citrus-bfd:#e0d9c2;
+    /* 8 樱粉 sakura */
+    --pz-sakura-l:#fdf3f6; --pz-sakura-d:#2a2026; --pz-sakura-a:#d64d8f; --pz-sakura-ad:#ef77b4;
+    --pz-sakura-fgd:#f6e9ef; --pz-sakura-m:#8a5f74; --pz-sakura-md:#bd9aab; --pz-sakura-f:#b394a4; --pz-sakura-fd:#917a87;
+    --pz-sakura-bd:#352830; --pz-sakura-bfd:#e0cfd8;
+    /* 9 咖啡 latte */
+    --pz-latte-l:#f6f0e6; --pz-latte-d:#241f19; --pz-latte-a:#8a5a3b; --pz-latte-ad:#c08a63;
+    --pz-latte-fg:#4a3628; --pz-latte-fgd:#f1e9dc; --pz-latte-m:#7a6553; --pz-latte-md:#b39d8c; --pz-latte-f:#a8947c; --pz-latte-fd:#8a7a6b;
+    --pz-latte-bd:#302920; --pz-latte-bfd:#dcd2c4;
+    /* 10 夜航 night */
+    --pz-night-l:#eceff3; --pz-night-d:#23262b; --pz-night-a:#b5801f; --pz-night-ad:#f0b429;
+    --pz-night-fgd:#f2efe6; --pz-night-m:#5f6a78; --pz-night-md:#a7b0bd; --pz-night-f:#8d97a5; --pz-night-fd:#7d8794;
+    --pz-night-b:#e4e9ef; --pz-night-bf:#3a4250; --pz-night-bd:#2e323a; --pz-night-bfd:#dfe3ea;
+}
+/* 1 番茄 · tomato（默认；暗色主按钮字=暗面深底，非白） */
+    #pomodoro-popup.pomodoro-skin-tomato { --pz-bg:var(--pz-tomato-l); --pz-accent:var(--pz-tomato-a); --pz-muted:var(--pz-tomato-m); --pz-faint:var(--pz-tomato-f); --pz-btn:var(--pz-tomato-b); --pz-btn-fg:var(--pz-tomato-bf); --pz-on-accent:#fff; }
+    .theme-dark #pomodoro-popup.pomodoro-skin-tomato { --pz-bg:var(--pz-tomato-d); --pz-accent:var(--pz-tomato-ad); --pz-fg:var(--pz-tomato-fgd); --pz-muted:var(--pz-tomato-md); --pz-faint:var(--pz-tomato-fd); --pz-btn:var(--pz-tomato-bd); --pz-btn-fg:var(--pz-tomato-bfd); --pz-on-accent:var(--pz-tomato-d); --pz-line:rgba(255,255,255,.14); }
+/* 2 墨白 · ink（无彩色；仅此皮有专属阴影一档） */
+    #pomodoro-popup.pomodoro-skin-ink { --pz-bg:var(--pz-ink-l); --pz-accent:var(--pz-ink-a); --pz-muted:var(--pz-ink-m); --pz-faint:var(--pz-ink-f); --pz-on-accent:#fff; box-shadow: 0 6px 30px rgba(0,0,0,.14); }
+    .theme-dark #pomodoro-popup.pomodoro-skin-ink { --pz-bg:var(--pz-ink-d); --pz-accent:var(--pz-ink-ad); --pz-fg:var(--pz-ink-fgd); --pz-muted:var(--pz-ink-md); --pz-faint:var(--pz-ink-fd); --pz-btn:var(--pz-ink-bd); --pz-btn-fg:var(--pz-ink-bfd); --pz-on-accent:var(--pz-ink-d); --pz-line:rgba(255,255,255,.14); }
+/* 3 方格纸 · grid（亮/暗各一道格纹线色，背景图唯一例外块） */
+    #pomodoro-popup.pomodoro-skin-grid {
+      --pz-bg:var(--pz-grid-l); --pz-accent:var(--pz-grid-a); --pz-muted:var(--pz-grid-m); --pz-faint:var(--pz-grid-f); --pz-on-accent:#fff;
+      --pz-grid-ln:rgba(23,21,18,.05);
+      background-image: linear-gradient(var(--pz-grid-ln) 1px, transparent 1px), linear-gradient(90deg, var(--pz-grid-ln) 1px, transparent 1px);
+      background-size: 16px 16px; background-position: -1px -1px;
+    }
+    .theme-dark #pomodoro-popup.pomodoro-skin-grid { --pz-bg:var(--pz-grid-d); --pz-accent:var(--pz-grid-ad); --pz-fg:var(--pz-grid-fgd); --pz-muted:var(--pz-grid-md); --pz-faint:var(--pz-grid-fd); --pz-btn:var(--pz-grid-bd); --pz-btn-fg:var(--pz-grid-bfd); --pz-on-accent:var(--pz-grid-d); --pz-line:rgba(255,255,255,.14); --pz-grid-ln:rgba(255,255,255,.05); }
+/* 4 苔原 · moss */
+    #pomodoro-popup.pomodoro-skin-moss { --pz-bg:var(--pz-moss-l); --pz-accent:var(--pz-moss-a); --pz-muted:var(--pz-moss-m); --pz-faint:var(--pz-moss-f); --pz-on-accent:#fff; }
+    .theme-dark #pomodoro-popup.pomodoro-skin-moss { --pz-bg:var(--pz-moss-d); --pz-accent:var(--pz-moss-ad); --pz-fg:var(--pz-moss-fgd); --pz-muted:var(--pz-moss-md); --pz-faint:var(--pz-moss-fd); --pz-btn:var(--pz-moss-bd); --pz-btn-fg:var(--pz-moss-bfd); --pz-on-accent:var(--pz-moss-d); --pz-line:rgba(255,255,255,.14); }
+/* 5 海雾 · mist */
+    #pomodoro-popup.pomodoro-skin-mist { --pz-bg:var(--pz-mist-l); --pz-accent:var(--pz-mist-a); --pz-muted:var(--pz-mist-m); --pz-faint:var(--pz-mist-f); --pz-on-accent:#fff; }
+    .theme-dark #pomodoro-popup.pomodoro-skin-mist { --pz-bg:var(--pz-mist-d); --pz-accent:var(--pz-mist-ad); --pz-fg:var(--pz-mist-fgd); --pz-muted:var(--pz-mist-md); --pz-faint:var(--pz-mist-fd); --pz-btn:var(--pz-mist-bd); --pz-btn-fg:var(--pz-mist-bfd); --pz-on-accent:var(--pz-mist-d); --pz-line:rgba(255,255,255,.14); }
+/* 6 暖沙 · sand */
+    #pomodoro-popup.pomodoro-skin-sand { --pz-bg:var(--pz-sand-l); --pz-accent:var(--pz-sand-a); --pz-muted:var(--pz-sand-m); --pz-faint:var(--pz-sand-f); --pz-on-accent:#fff; }
+    .theme-dark #pomodoro-popup.pomodoro-skin-sand { --pz-bg:var(--pz-sand-d); --pz-accent:var(--pz-sand-ad); --pz-fg:var(--pz-sand-fgd); --pz-muted:var(--pz-sand-md); --pz-faint:var(--pz-sand-fd); --pz-btn:var(--pz-sand-bd); --pz-btn-fg:var(--pz-sand-bfd); --pz-on-accent:var(--pz-sand-d); --pz-line:rgba(255,255,255,.14); }
+/* 7 蜜柑 · citrus */
+    #pomodoro-popup.pomodoro-skin-citrus { --pz-bg:var(--pz-citrus-l); --pz-accent:var(--pz-citrus-a); --pz-muted:var(--pz-citrus-m); --pz-faint:var(--pz-citrus-f); --pz-on-accent:#fff; }
+    .theme-dark #pomodoro-popup.pomodoro-skin-citrus { --pz-bg:var(--pz-citrus-d); --pz-accent:var(--pz-citrus-ad); --pz-fg:var(--pz-citrus-fgd); --pz-muted:var(--pz-citrus-md); --pz-faint:var(--pz-citrus-fd); --pz-btn:var(--pz-citrus-bd); --pz-btn-fg:var(--pz-citrus-bfd); --pz-on-accent:var(--pz-citrus-d); --pz-line:rgba(255,255,255,.14); }
+/* 8 樱粉 · sakura */
+    #pomodoro-popup.pomodoro-skin-sakura { --pz-bg:var(--pz-sakura-l); --pz-accent:var(--pz-sakura-a); --pz-muted:var(--pz-sakura-m); --pz-faint:var(--pz-sakura-f); --pz-on-accent:#fff; }
+    .theme-dark #pomodoro-popup.pomodoro-skin-sakura { --pz-bg:var(--pz-sakura-d); --pz-accent:var(--pz-sakura-ad); --pz-fg:var(--pz-sakura-fgd); --pz-muted:var(--pz-sakura-md); --pz-faint:var(--pz-sakura-fd); --pz-btn:var(--pz-sakura-bd); --pz-btn-fg:var(--pz-sakura-bfd); --pz-on-accent:var(--pz-sakura-d); --pz-line:rgba(255,255,255,.14); }
+/* 9 咖啡 · latte（仅此皮亮色时间字有专属值） */
+    #pomodoro-popup.pomodoro-skin-latte { --pz-bg:var(--pz-latte-l); --pz-accent:var(--pz-latte-a); --pz-fg:var(--pz-latte-fg); --pz-muted:var(--pz-latte-m); --pz-faint:var(--pz-latte-f); --pz-on-accent:#fff; }
+    .theme-dark #pomodoro-popup.pomodoro-skin-latte { --pz-bg:var(--pz-latte-d); --pz-accent:var(--pz-latte-ad); --pz-fg:var(--pz-latte-fgd); --pz-muted:var(--pz-latte-md); --pz-faint:var(--pz-latte-fd); --pz-btn:var(--pz-latte-bd); --pz-btn-fg:var(--pz-latte-bfd); --pz-on-accent:var(--pz-latte-d); --pz-line:rgba(255,255,255,.14); }
+/* 10 夜航 · night（亮面压深保证浅底可读） */
+    #pomodoro-popup.pomodoro-skin-night { --pz-bg:var(--pz-night-l); --pz-accent:var(--pz-night-a); --pz-muted:var(--pz-night-m); --pz-faint:var(--pz-night-f); --pz-btn:var(--pz-night-b); --pz-btn-fg:var(--pz-night-bf); --pz-on-accent:#fff; }
+    .theme-dark #pomodoro-popup.pomodoro-skin-night { --pz-bg:var(--pz-night-d); --pz-accent:var(--pz-night-ad); --pz-fg:var(--pz-night-fgd); --pz-muted:var(--pz-night-md); --pz-faint:var(--pz-night-fd); --pz-btn:var(--pz-night-bd); --pz-btn-fg:var(--pz-night-bfd); --pz-on-accent:var(--pz-night-d); --pz-line:rgba(255,255,255,.14); }
+
+/* ==================== 本地独有段（issue 264 吸收时保留，上游无） ==================== */
+    #pomodoro-btn-settings { position: absolute; top: 16px; right: 16px; padding: 6px; background: none; border-radius: 8px; color: var(--text-muted); transition: opacity 0.2s; }
+    #pomodoro-btn-settings:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+    #pomodoro-btn-settings.pomodoro-settings-hidden { opacity: 0; pointer-events: none; }
     /* 今日专注时段分布：12 槽（2 小时一格）小方柱，条形语言与近 7 天柱一致（增强包） */
     .pomodoro-hours { display: flex; gap: 4px; justify-content: center; align-items: flex-end; margin-top: 8px; }
     .pomodoro-hour-bar { width: 8px; border-radius: 3px 3px 0 0; background: var(--background-modifier-border); min-height: 2px; }
@@ -59,6 +154,6 @@
    ::after 外扩已收编 core .bz-touch-target（components.css，模板挂类）：
    控制按钮 = --sm(-4px)、右上角设置钮 = 默认(-6px)；此处仅保留 padding 抬档。 */
 @media (pointer: coarse) {
-    .pomodoro-btn { padding: 10px 16px; }
+    .pomodoro-btn { padding: 10px var(--bz-space-lg); }
     #pomodoro-btn-settings { padding: 10px; }
 }

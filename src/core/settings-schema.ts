@@ -216,7 +216,9 @@ interface ChoiceCardsRow extends RowBase {
   type: 'choiceCards';
   name: string;
   binding: RowBinding<string>;
-  options: Array<{ value: string; label: string; prevClass?: string }>;
+  options: Array<{ value: string; label: string; prevClass?: string; layout?: string }>;
+  /** 主题行配套布局键（issue 264 吸收上游）：声明本行是哪个布局键的「主题」，设置面板按当前布局过滤适配主题 */
+  layoutKey?: string;
   onChange?: (value: string, ctx: SettingsRowContext) => void;
 }
 

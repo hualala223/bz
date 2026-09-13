@@ -790,10 +790,24 @@ describe('增强包：循环圆点 / 时段分布 / 通知动作 / Space / 待�
     expect(raw.state.phase).toBe('focus');
   });
 
-  it('样式基线：mask 遮罩走 --background-modifier-cover token；状态栏挂 hover 反馈', () => {
+  it('样式基线：mask 遮罩走 --bz-overlay token（issue 264 随上游换代）；状态栏挂 hover 反馈', () => {
     const css = readFileSync(resolve(process.cwd(), 'src/pomodoro/styles.css'), 'utf8');
-    expect(/#pomodoro-mask\s*\{[^}]*--background-modifier-cover/.test(css)).toBe(true);
+    expect(/#pomodoro-mask\s*\{[^}]*--bz-overlay/.test(css)).toBe(true);
     expect(/#pomodoro-mask\s*\{[^}]*rgba\(0,0,0,\s*0\.45\)/.test(css)).toBe(false);
     expect(css).toContain('.pomodoro-statusbar:hover');
+  });
+
+  it('面板主题 → 弹窗皮肤类：设置给值即换类，同时只挂一套（issue 264）', async () => {
+    const { app } = setup(new MockVault(), { pomodoroSkinTheme: 'night' });
+    await openPomodoro(app);
+    const popup = el('pomodoro-popup');
+    expect(popup.classList.contains('pomodoro-skin-night')).toBe(true);
+    expect(popup.classList.contains('pomodoro-skin-tomato')).toBe(false);
+  });
+
+  it('面板主题未设 / 未知值 → 回落默认皮肤番茄（issue 264）', async () => {
+    const { app } = setup(new MockVault(), { pomodoroSkinTheme: 'no-such-skin' });
+    await openPomodoro(app);
+    expect(el('pomodoro-popup').classList.contains('pomodoro-skin-tomato')).toBe(true);
   });
 });
