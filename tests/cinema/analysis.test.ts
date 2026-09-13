@@ -150,6 +150,11 @@ describe('cinema buildAnalysisHTML', () => {
     expect(html).toContain('评分趋势');
   });
 
+  it('G9：想看清单带豆瓣分（读存在的 doubanRating——原 it.douban 恒空不显示）', () => {
+    const html = buildAnalysisHTML();
+    expect(html).toContain('想看片 · 豆瓣 8');
+  });
+
   it('空库 → 引导文案', () => {
     resetCinemaState();
     M.folderPath = '我的/影视';

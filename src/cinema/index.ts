@@ -26,13 +26,14 @@ export function applyDefaultView(): void {
 
 /** 幂等初始化（懒加载）：设置注入 + ESC + 自动刷新 */
 export function ensureCinema(app: App): void {
+  // G6：目录每次调用同步读设置——会话内改「影视文件夹」立即生效；否则 M.folderPath 首次
+  // 初始化即缓存旧值，面板/新建仍走旧目录、要重载才对上。DEFAULT_FOLDER 保留导出（域外引用）
+  const s = tryGetSettings() as Record<string, unknown>;
+  M.folderPath =
+    typeof s.cinemaFolderPath === 'string' && s.cinemaFolderPath.trim() ? s.cinemaFolderPath : DEFAULT_FOLDER;
   if (initialized) return;
   initialized = true;
   M.appRef = app;
-  const s = tryGetSettings() as Record<string, unknown>;
-  // 目录：cinemaFolderPath 显式配置优先，缺省回落默认（旧 movieFolderPath 键已随 movie 域退役删除）
-  M.folderPath =
-    typeof s.cinemaFolderPath === 'string' && s.cinemaFolderPath.trim() ? s.cinemaFolderPath : DEFAULT_FOLDER;
   registerEscapeHandler();
   registerAutoRefresh(app);
 }

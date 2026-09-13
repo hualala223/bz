@@ -12,6 +12,7 @@ import { M, resetCinemaState } from '../../src/cinema/state';
 import { rebuildItems } from '../../src/cinema/data';
 import { runAIRecommend, runSimilarRecommend } from '../../src/cinema/recommend';
 import { createOverlay, closeOverlay, openAddModalDirect } from '../../src/cinema/ui';
+import { configureFetchQueue, enqueueDoubanFetch, isFetching, shutdownDoubanQueue } from '../../src/cinema/douban-queue';
 import { ensureCinema, unloadCinema, openCinemaAnalysis } from '../../src/cinema';
 import { setAISettingsProvider, resetAIProviderCache } from '../../src/core/ai';
 import { setApp } from '../../src/core/app';
@@ -610,5 +611,69 @@ tags: [电影]
     const { app } = seedVault();
     createOverlay(app);
     expect(document.querySelector('section.bz-cinema--midnight')).toBeTruthy();
+  });
+});
+
+describe('cinema 行为修复（票 271：G7 回滚 / G8 出队 / chips 回落）', () => {
+  beforeEach(() => {
+    resetObsidianMocks();
+    resetCinemaState();
+    clearDomainEvents();
+    Platform.isMobile = false;
+    M.folderPath = '我的/影视';
+    document.body.innerHTML = '';
+  });
+  afterEach(() => {
+    Platform.isMobile = false;
+    unloadCinema();
+    // 队列注入还原（防污染同文件其余用例）
+    configureFetchQueue({ cli: '', node: '' });
+    shutdownDoubanQueue();
+    document.body.innerHTML = '';
+    setSettingsProvider(() => ({}) as any);
+  });
+
+  it('G7：快速标记落盘失败 → 内存状态/评分/日期回滚（面板显示不与磁盘相反）', async () => {
+    const { app } = seedVault();
+    createOverlay(app);
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    const item = M.items.find((i) => i.name === '想看片')!;
+    const before = { status: item.status, rating: item.rating, watchDate: item.watchDate };
+    expect(before.status).toBe(0); // 想看
+    vi.spyOn(app.fileManager, 'processFrontMatter').mockRejectedValue(new Error('disk full'));
+    pcardByName(root, '想看片').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 30 }));
+    clickEl(Array.from((root.querySelector('.cn-menu') as HTMLElement).querySelectorAll('.cn-menu-item')).find((b) => b.textContent?.includes('标记已看')));
+    await vi.waitFor(() => expect(item.status).toBe(before.status));
+    expect(item.rating).toBe(before.rating);
+    expect(item.watchDate).toBe(before.watchDate);
+  });
+
+  it('G8：删除影片即出队豆瓣抓取（在抓 pending 撤销，不再挂 loading / 记假失败）', async () => {
+    const { app, vault } = seedVault();
+    configureFetchQueue({ cli: 'C:/fake/cli.js', node: 'C:/fake/node.exe', gapMs: 0, refreshDelayMs: 0, spawn: () => new Promise(() => {}) });
+    const path = '我的/影视/《想看片》.md';
+    expect(enqueueDoubanFetch(vault.file(path), '想看片')).toBe(true);
+    expect(isFetching(path)).toBe(true);
+    createOverlay(app);
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    clickEl(pcardByName(root, '想看片'));
+    clickEl((root.querySelector('.cn-modal') as HTMLElement).querySelector('.j-del'));
+    const confirm = root.querySelector('.cn-confirm') as HTMLElement;
+    vi.spyOn(app.vault, 'trash').mockResolvedValue(undefined);
+    clickEl(confirm.querySelector('.j-del'));
+    await vi.waitFor(() => expect(isFetching(path)).toBe(false));
+  });
+
+  it('chips：在 AI 页点 chips → 先回落列表视图（筛选生效且页面不留在原视图）', () => {
+    Platform.isMobile = true;
+    const { app } = seedVault();
+    createOverlay(app);
+    const root = document.querySelector('section.mob.bz-cinema--midnight') as HTMLElement;
+    clickEl(root.querySelector('.j-mai'));
+    expect(M.view).toBe('ai');
+    clickEl(root.querySelector('.chip[data-c="剧集"]'));
+    expect(M.view).toBe('list');
+    expect(M.typeFilter).toBe('剧集');
+    expect(root.querySelectorAll('.m-grid .pcard').length).toBe(1);
   });
 });

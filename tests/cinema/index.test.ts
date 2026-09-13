@@ -110,3 +110,35 @@ describe('cinema quickAddWant 事件补发（movie:created want）', () => {
     off();
   });
 });
+
+describe('G6：影视文件夹设置会话内即时生效（票 271）', () => {
+  beforeEach(() => {
+    resetObsidianMocks();
+    resetCinemaState();
+    document.body.innerHTML = '';
+  });
+  afterEach(() => {
+    unloadCinema();
+    setSettingsProvider(() => ({} as any));
+  });
+
+  it('已初始化后再改 cinemaFolderPath → 再次 ensureCinema 立即改用新目录（不必重载）', () => {
+    setSettingsProvider(() => ({ cinemaFolderPath: '我的/影院' } as any));
+    const vault = new MockVault();
+    ensureCinema(makeApp(vault));
+    expect(M.folderPath).toBe('我的/影院');
+    // 会话内改设置：目录每次 ensureCinema 同步读 → 面板/新建立刻走新目录
+    setSettingsProvider(() => ({ cinemaFolderPath: '我的/新影库' } as any));
+    ensureCinema(makeApp(vault));
+    expect(M.folderPath).toBe('我的/新影库');
+  });
+
+  it('已初始化 + 设置被清空 → 回落默认目录（幂等初始化不阻断目录同步）', () => {
+    setSettingsProvider(() => ({ cinemaFolderPath: '我的/影院' } as any));
+    const vault = new MockVault();
+    ensureCinema(makeApp(vault));
+    setSettingsProvider(() => ({} as any));
+    ensureCinema(makeApp(vault));
+    expect(M.folderPath).toBe('我的/影视');
+  });
+});

@@ -28,7 +28,7 @@ import { rebuildItems, getDisplayItems } from './data';
 import { formatRelativeTime } from '../core/utils';
 import { runAIRecommend, runSimilarRecommend, buildTasteProfile, quickAddWant } from './recommend';
 import { buildStatPageHtml } from './analysis';
-import { enqueueDoubanFetch, isFetching } from './douban-queue';
+import { enqueueDoubanFetch, dequeueDoubanFetch, isFetching } from './douban-queue';
 import {
   ICON, statusText, itemByKey, doubanSearchUrl,
   detailModalHtml, confirmModalHtml, formModalHtml, setModalHtml,
@@ -87,6 +87,8 @@ function openDouban(item: CinemaItem): void {
 async function markStatus(item: CinemaItem, target: '在看' | '已看', sec: HTMLElement, app: App): Promise<void> {
   const fromSt = item.status === STATUS_WANT ? 'want' : item.status === STATUS_WATCHING ? 'watching' : 'watched';
   const prevRating = item.rating && item.rating > 0 ? item.rating : null;
+  // G7：先记快照，落盘失败回滚内存（saveEdit 同法）——否则面板显示与磁盘相反
+  const prev = { status: item.status, rating: item.rating, watchDate: item.watchDate };
   item.status = target === '已看' ? STATUS_WATCHED : STATUS_WATCHING;
   if (target === '在看') {
     item.rating = 0;
@@ -104,6 +106,7 @@ async function markStatus(item: CinemaItem, target: '在看' | '已看', sec: HT
     }
     renderAll(app);
   } catch (e) {
+    Object.assign(item, prev);
     notifySaveError(e);
     console.error(e);
     renderAll(app);
@@ -446,6 +449,9 @@ function openConfirm(sec: HTMLElement, item: CinemaItem, app: App): void {
         notice('删除失败：文件可能被占用，请重试', 'error');
         return;
       }
+      // G8：删除成功即出队豆瓣抓取——未开始的移出队列、在抓的不再记失败
+      // （否则十几秒后弹「以下影片获取失败：《已删的片》」且「重启后会自动重试」文案不实）
+      dequeueDoubanFetch(item.file.path);
     }
     const idx = M.items.indexOf(item);
     if (idx > -1) M.items.splice(idx, 1);
@@ -616,6 +622,8 @@ function bindMidnight(sec: HTMLElement, app: App): void {
     }
     const chip = t.closest('.chip') as HTMLElement | null;
     if (chip) {
+      // chips 属列表视图：在 AI/分析页点 chips 必须回落列表（否则筛选生效但页面停在原视图，看着像「点了没反应」）
+      M.view = 'list';
       if (chip.dataset.c) {
         M.typeFilter = chip.dataset.c === 'all' ? null : chip.dataset.c;
         M.statusFilter = null;
