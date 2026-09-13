@@ -7,3 +7,10 @@ viz/
 .scratch/
 x.dsh-worktrees/
 .dsh-worktrees/
+
+# 上游 yeshimei/bz 的 prototypes/ 含真实日记原文与私人媒体（票 266 §2.3），
+# 本地绝不吸收；此行是防线，防止未来任何复制/合库动作把它带进本仓库。
+prototypes/
+我的/
+*.m4a
+*.mp4
