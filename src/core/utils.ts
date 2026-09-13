@@ -28,6 +28,19 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** yieldToMainThread(timeoutMs)：让出主线程（requestIdleCallback 优先 + 超时兜底，退化 setTimeout(0)；蓝本 checkup/run.ts，票 279 随读书报告域上收进入） */
+export function yieldToMainThread(timeoutMs = 200): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined') {
+      resolve();
+      return;
+    }
+    const ric = (window as any).requestIdleCallback;
+    if (typeof ric === 'function') ric(() => resolve(), { timeout: timeoutMs });
+    else window.setTimeout(resolve, 0);
+  });
+}
+
 // ==================== Q3 工具（window.__utils 逐字移植） ====================
 
 /** generateId(prefix)：prefix-时间戳-随机6位 */

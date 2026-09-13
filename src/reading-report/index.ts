@@ -8,6 +8,7 @@
  * 保留的既有机制：l3 先渲染骨架占位、s1 用户字段生成点转义（innerHTML 均静态模板/已转义内容）、
  * 渲染中途取消不写已摘除 DOM（容器卸载/视图切走/面板关闭经 cancelReadingReport 作废在途渲染）。
  */
+import { yieldToMainThread as yieldToMainThreadCore } from '../core/utils';
 import type { App } from 'obsidian';
 import { notify } from '../core/notice';
 import { mountIcons, uiEmpty, uiBtn, uiBtnRow } from '../core/ui';
@@ -51,19 +52,15 @@ export interface ReportRenderOptions {
   onBack?: () => void;
 }
 
+/** requestIdleCallback 超时兜底（防止长空闲期饿死分片渲染） */
+const IDLE_CALLBACK_TIMEOUT_MS = 50;
+
 /**
  * 让出主线程（ticket 40）：分片渲染/大数据步骤之间插帧，大库不再数秒冻结。
  * requestIdleCallback 优先（带超时兜底），不可用时退化为 setTimeout(0)。
  */
 function yieldToMainThread(): Promise<void> {
-  return new Promise((resolve) => {
-    const ric = (window as any).requestIdleCallback;
-    if (typeof ric === 'function') {
-      ric(() => resolve(), { timeout: 50 });
-    } else {
-      window.setTimeout(resolve, 0);
-    }
-  });
+  return yieldToMainThreadCore(IDLE_CALLBACK_TIMEOUT_MS);
 }
 
 /** 作废在途渲染 + 收起在途 progress toast（视图切走/面板关闭/卸载共用；幂等） */
@@ -249,4 +246,11 @@ function navHeatmap(container: HTMLElement, dir: number): void {
   }
   const title = container.querySelector('[data-rr-hm-title]') as HTMLElement | null;
   if (title) title.textContent = heatmapMonthTitle(lastHeatmap.cursor);
+  // G10：翻月边界同步——两按钮 disabled 按初始游标一次性渲染，navHeatmap 不同步则
+  // 点一次 ‹ 后 › 永久失效回不去（越界点击本身已空操作，这里只刷禁用态）
+  const newIdx = lastHeatmap.keys.indexOf(lastHeatmap.cursor);
+  const prevBtnEl = container.querySelector('[data-rr-hm-prev]') as HTMLButtonElement | null;
+  const nextBtnEl = container.querySelector('[data-rr-hm-next]') as HTMLButtonElement | null;
+  if (prevBtnEl) prevBtnEl.disabled = newIdx <= 0;
+  if (nextBtnEl) nextBtnEl.disabled = newIdx >= lastHeatmap.keys.length - 1;
 }
