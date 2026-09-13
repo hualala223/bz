@@ -164,6 +164,11 @@ export function getCurrentCursorPosition(): { line: number; ch: number } | null 
   return ed ? { line: ed.getCursor().line, ch: ed.getCursor().ch } : null;
 }
 
+/** stripMdExt(name)：剥离结尾 .md 扩展名（大小写不敏感；issue 262 术语/文献来源用） */
+export function stripMdExt(name: string): string {
+  return String(name || '').replace(/\.md$/i, '');
+}
+
 /** fetchPageTitle(url)：requestUrl 抓取页面 <title>（失败返回 null） */
 export async function fetchPageTitle(url: string): Promise<string | null> {
   try {

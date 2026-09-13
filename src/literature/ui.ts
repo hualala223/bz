@@ -59,6 +59,8 @@ import { emitDomainEvent, onDomainEvent } from '../core/domain-bus';
 import { getApp } from '../core/app';
 import type BzSettings from '../settings';
 import { LiteratureData, normalizeLooseTime } from './data';
+import { normalizeSourceUrl } from './source';
+import { fetchVideoMeta } from './video-meta';
 import type { LiteratureTask } from './types';
 import { BatchRunner, type BatchEvents } from './processor';
 import { backfillNotes, generateTermDraft, generateTermNote, summarizeTermSummary } from './note-gen';
@@ -291,6 +293,9 @@ export class UIManager {
   private termHasDraft = false;
 
   private editingId: string | null = null;
+  /** 录入 URL 防抖解析（issue 262，上游 issue 278 同款）：定时器 + 序列号失效在途响应 */
+  private addUrlTimer: ReturnType<typeof setTimeout> | null = null;
+  private addUrlSeq = 0;
   private onKeydown: (e: KeyboardEvent) => void = () => {};
   /** 运行中终止按钮文案（ticket 146 单钮态机）：整批=「终止」；仅失败项续跑=「终止整批」；空闲=null */
   private batchAbortLabel: '终止' | '终止整批' | null = null;
@@ -1301,10 +1306,25 @@ export class UIManager {
         if (e.key === 'Enter') { e.preventDefault(); void this._handleAddSave(); }
       });
     }
+    // 录入 URL 防抖解析（issue 262，上游 issue 278 同款，450ms）：粘贴/手输停顿即净化写回 + 抓元信息回填空字段；
+    // 无 placeholder、无解析按钮（既有拍板不回加）；全程静默
+    const addUrlInput = q<HTMLInputElement>(popup, '#lit-add-url');
+    if (addUrlInput) {
+      addUrlInput.addEventListener('input', () => {
+        if (this.addUrlTimer) clearTimeout(this.addUrlTimer);
+        this.addUrlSeq++; // 新输入使在途解析过期（回填前序列号校验丢弃）
+        this.addUrlTimer = setTimeout(() => {
+          this.addUrlTimer = null;
+          void this.addUrlResolve(addUrlInput);
+        }, 450);
+      });
+    }
   }
 
   showAddDialog(editItem?: Partial<LiteratureTask>): void {
     if (!this.addPopup || !this.addMask) return;
+    // 重开即全新：清防抖定时器 + 序列号失效在途解析（编辑态预填不触发 input，改 URL 才走回填）
+    this.addUrlReset();
     this.editingId = editItem?.id ?? null;
     // 有 id = 编辑既有任务；无 id（含预填对象）= 新增模式（ticket 134：聚合讯入口预填不显示编辑态）；
     // ticket 143：无标题，编辑态以右上角小标签 #lit-add-mode 表意
@@ -1351,6 +1371,32 @@ export class UIManager {
     if (this.addMask) this.addMask.style.display = 'none';
     if (this.addPopup) this.addPopup.style.display = 'none';
     this.editingId = null;
+    this.addUrlReset(); // 关弹窗清定时器/在途序列：杜绝迟到回填到已卸载 DOM（issue 262）
+  }
+
+  /** 录入 URL 解析清理：防抖定时器归零 + 序列号失效在途响应（开/关弹窗共用） */
+  private addUrlReset(): void {
+    if (this.addUrlTimer) { clearTimeout(this.addUrlTimer); this.addUrlTimer = null; }
+    this.addUrlSeq++;
+  }
+
+  /**
+   * 录入 URL 防抖触发（issue 262，上游 issue 278 同款）：先净化写回（值有变才写，用户可见），再抓元信息。
+   * 回填只补空字段（trim 后为空才算空）；序列号 + 输入值双校验丢弃过期响应；全程静默。
+   */
+  private async addUrlResolve(input: HTMLInputElement): Promise<void> {
+    const popup = this.addPopup;
+    if (!popup) return;
+    const seq = this.addUrlSeq;
+    const cleaned = normalizeSourceUrl(input.value);
+    if (cleaned && cleaned !== input.value) input.value = cleaned;
+    const meta = await fetchVideoMeta(cleaned);
+    // 序列号（期间改过输入/开关弹窗）或输入值（用户又动过）变了 → 迟到响应，丢弃
+    if (seq !== this.addUrlSeq || this.addPopup !== popup || input.value !== cleaned) return;
+    const titleEl = q<HTMLInputElement>(popup, '#lit-add-vtitle');
+    const upEl = q<HTMLInputElement>(popup, '#lit-add-uploader');
+    if (meta?.title && titleEl && !titleEl.value.trim()) titleEl.value = meta.title;
+    if (meta?.uploader && upEl && !upEl.value.trim()) upEl.value = meta.uploader;
   }
 
   private async _handleAddSave(): Promise<void> {
