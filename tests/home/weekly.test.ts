@@ -152,7 +152,8 @@ describe('本周待办（todoWeekStats：完成/创建两项独立）', () => {
 });
 
 describe('本周日记（countDiaryThisWeek）', () => {
-  it('文件名 YYYY-MM-DD 落本周计数；上周日/非日期名忽略', () => {
+  it('本地文件名日期 YYYY-MM-DD 落本周计数；上周日/非日记名忽略（票 288 本地口径）', () => {
+    // 本地日记：文件名即日期（Obsidian basename 不含 .md，入参同样如此）
     const names = ['2026-09-02', '2026-08-31', '2026-08-30', '2026-09-06', '杂记'];
     expect(countDiaryThisWeek(names, currentWeekRange(WED))).toBe(3);
     expect(countDiaryThisWeek([], currentWeekRange(WED))).toBe(0);
@@ -194,7 +195,7 @@ describe('collectWeeklyStat（只读采集集成）', () => {
     expect(created).toEqual([]);
   });
 
-  it('混合数据：各指标独立聚合（影视/读完/番茄/待办/日记）', async () => {
+  it('混合数据：各指标独立聚合（影视/读完/番茄/备忘录/日记）', async () => {
     // 影视：1 部本周已看 + 1 部上周已看 + 1 部本周想看（不计）
     vault.files.set('我的/影视/《周中一场》.md', cinemaMd(8, '2026-09-02'));
     vault.files.set('我的/影视/《上周一场》.md', cinemaMd(7, '2026-08-29'));
@@ -218,7 +219,7 @@ describe('collectWeeklyStat（只读采集集成）', () => {
       { created: '2026-09-02 08:00:00', completed: '2026-09-03 20:00:00' },
       { created: '2026-08-29 10:00:00', completed: '2026-09-02 11:00:00' },
     ]));
-    // 日记：本周 2 条 + 上周日 1 条
+    // 日记：本周 2 条 + 上周日 1 条（本地文件名 YYYY-MM-DD，票 288）
     vault.files.set('我的/日记/2026-09-01.md', '周一');
     vault.files.set('我的/日记/2026-09-02.md', '周三');
     vault.files.set('我的/日记/2026-08-30.md', '上周日');

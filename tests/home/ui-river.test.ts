@@ -1,8 +1,10 @@
+import { todayStr } from '../helpers/date';
 /**
  * 内容首页（home 域）UI 测试（issue 232 活动河改版）：
- * 面板装配（头行/三栏/移动瓦片）、16 域入口行、时间线空态、预告三卡、点行直达、ESC/遮罩关闭。
+ * 面板装配（头行/三栏/移动瓦片）、全域入口行、时间线空态、预告三卡、点行直达、ESC/遮罩关闭；
+ * issue 290 秒开三件套：首次骨架秒开、关闭保留 DOM 重开复用刷新、卸载真销毁。
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { MockVault, mockAppWithVault } from '../mock-vault';
 import { setApp } from '../../src/core/app';
 import { setSettingsProvider } from '../../src/core/settings-provider';
@@ -12,11 +14,6 @@ import { closeOverlay } from '../../src/home/ui';
 import { resetHomeState, H } from '../../src/home/state';
 import { DOMAINS } from '../../src/home/domains';
 
-function todayStr(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
 
 function yesterdayDateStr(): string {
   const d = new Date();
@@ -27,6 +24,34 @@ function yesterdayDateStr(): string {
 
 function yesterdayStr(): string {
   return `${yesterdayDateStr()} 09:00:00`;
+}
+
+/** 今日/昨日的某时刻（行为流条目时刻用运行期 now 派生，与 todayStr()/yesterdayDateStr() 同口径） */
+function todayAt(h: number, m = 0): Date {
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  return d;
+}
+function yesterdayAt(h: number, m = 0): Date {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  d.setHours(h, m, 0, 0);
+  return d;
+}
+
+/** 写行为流侧车（issue 305：时间线痕迹源；recap 文件统计只供摘要/计数） */
+function writeBehavior(vault: MockVault, items: Array<{ source: string; type: string; name: string; dt: Date }>): void {
+  vault.files.set('CONFIG/STORAGE/smartcat-behavior.json', JSON.stringify({
+    version: 1,
+    items: items.map(({ source, type, name, dt }) => ({
+      id: `beh_${dt.getTime()}`,
+      timestamp: dt.toISOString(),
+      type,
+      source,
+      description: `${source}:${type} ${name}`,
+      metadata: { entityType: source, action: type, name },
+    })),
+  }));
 }
 
 function recApp(vault: MockVault): any {
@@ -55,13 +80,19 @@ describe('home 活动河 UI（issue 232）', () => {
     unloadHome();
   });
 
-  it('面板装配：头行标题/日期 + 三栏容器 + 关闭钮；数据采集后 16 行入口全渲染', async () => {
+  it('面板装配：头行（周历+日期，标题已退役）+ 三栏容器 + 关闭钮；数据采集后全量入口行渲染', async () => {
     const app = recApp(vault);
     openHome(app);
-    await new Promise((r) => setTimeout(r, 20));
-    const overlay = document.querySelector('.bz-home-overlay') as HTMLElement;
-    expect(overlay).toBeTruthy();
-    expect(overlay.querySelector('.bz-home-title')!.textContent).toBe('首页');
+    // 面板异步装配（骨架秒开 → 数据采集回填）：固定 sleep 在高负载（部署后 Obsidian 重索引整库）下
+    // 会读到半成品 DOM（[data-home-weekday] 实得 0），故改为对「渲染完成」这件事本身做 waitFor（issue 291 §7①）
+    const overlay = await vi.waitFor(() => {
+      const el = document.querySelector('.bz-home-overlay') as HTMLElement;
+      expect(el).toBeTruthy();
+      expect(el.querySelectorAll('[data-home-weekday]').length).toBe(7); // issue 288 本周 → 周历七格
+      expect(el.querySelectorAll('.bz-home-erow').length).toBe(DOMAINS.length);
+      return el;
+    });
+    expect(overlay.querySelector('.bz-home-title')).toBeNull(); // 2026-09-09：标题桌面/移动都去掉
     expect(overlay.querySelector('[data-home-date]')!.textContent).toMatch(/\d{4}-\d{2}-\d{2} 周/);
     expect(overlay.querySelector('[data-home-close]')).toBeTruthy();
     expect(overlay.querySelectorAll('[data-home-go]').length).toBeGreaterThanOrEqual(DOMAINS.length);
@@ -81,6 +112,29 @@ describe('home 活动河 UI（issue 232）', () => {
     expect((overlay.querySelector('[data-home-next]') as HTMLElement).textContent).toContain('明 天 预 告');
   });
 
+  it('入口彩点 class（item-1789106079981）：日记动静 ok、剪藏未读/影院在看 warn、重要待办 hot、规则外域 off', async () => {
+    vault.files.set(`我的/日记/${todayStr()}.md`, '# 📝 08:30\n记一笔。\n'); // 今日有动静 → diary ok（本地日记口径：条目标题行计数，票 288）
+    vault.files.set('CONFIG/STORAGE/news.json', JSON.stringify({ articles: [{ read: false }, { read: true }] })); // 未读 > 0 → clipping warn
+    vault.files.set('CONFIG/STORAGE/memo.json', JSON.stringify([
+      { title: '重要待办', created: '2026-01-01 09:00:00', completed: null, priority: 'important' }, // 重要未完成 → todo hot
+    ]));
+    vault.files.set('我的/影视/《正在看》.md', '---\ntags:\n- 电影\n评分: 0\n---\n'); // 在看 > 0 → cinema warn
+    const app = recApp(vault);
+    openHome(app);
+    await new Promise((r) => setTimeout(r, 20));
+    const overlay = document.querySelector('.bz-home-overlay')!;
+    const dotClass = (id: string): string => {
+      const el = overlay.querySelector(`[data-home-go="${id}"] .bz-home-dot`);
+      expect(el, `域 ${id} 入口行彩点缺失`).toBeTruthy();
+      return Array.from(el!.classList).find((c) => c.startsWith('bz-home-dot--'))!;
+    };
+    expect(dotClass('diary')).toBe('bz-home-dot--ok');
+    expect(dotClass('clipping')).toBe('bz-home-dot--warn');
+    expect(dotClass('cinema')).toBe('bz-home-dot--warn');
+    expect(dotClass('todo')).toBe('bz-home-dot--hot');
+    expect(dotClass('favorites')).toBe('bz-home-dot--off'); // 规则外域由 dotOf 回落 off
+  });
+
   it('点入口行执行对应域命令并关首页（demo 命令通道记录 id）', async () => {
     const app = recApp(vault);
     openHome(app);
@@ -88,15 +142,50 @@ describe('home 活动河 UI（issue 232）', () => {
     (document.querySelector('[data-home-go="cinema"]') as HTMLElement).click();
     await new Promise((r) => setTimeout(r, 0));
     expect(app.__executed).toEqual(['bz-cinema-open']);
-    expect(document.querySelector('.bz-home-overlay')).toBeNull();
-    expect(H.river).toBeNull(); // 关闭清采集态
+    // issue 290：关闭 = 隐藏保留 DOM（重开秒显），采集态一并保留
+    const overlay = document.querySelector('.bz-home-overlay') as HTMLElement;
+    expect(overlay).toBeTruthy();
+    expect(overlay.style.display).toBe('none');
+    expect(H.overlayVisible).toBe(false);
+    expect(H.river).not.toBeNull();
   });
 
-  it('周历：7 格动静历渲染；点昨天格时间线切天、选中格同步', async () => {
-    vault.files.set('CONFIG/STORAGE/memo.json', JSON.stringify([
-      { title: '甲', created: yesterdayStr() + ' 09:00:00', completed: null },
-    ]));
+  it('第二大脑磁贴（issue 251）：入口行在册、图标物化、点行直达主面板命令', async () => {
     const app = recApp(vault);
+    openHome(app);
+    await new Promise((r) => setTimeout(r, 20));
+    const row = document.querySelector('[data-home-go="secondbrain"]') as HTMLElement;
+    expect(row).toBeTruthy();
+    expect(row.querySelector('.bz-ic')).toBeTruthy();
+    expect((row.querySelector('.bz-ic') as HTMLElement).dataset.icon).toBe('brain'); // mock setIcon 记录图标名
+    expect(row.textContent).toContain('第二大脑');
+    row.click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(app.__executed).toEqual(['bz-secondbrain-panel']);
+  });
+
+  it('周历：默认「本周」档出 7 格；缩到「当天」只留今天一格、点过去的天时间线切天', async () => {
+    writeBehavior(vault, [{ source: 'memo', type: 'added', name: '甲', dt: yesterdayAt(9) }]);
+    const app = recApp(vault);
+    openHome(app);
+    await new Promise((r) => setTimeout(r, 20));
+    // issue 288：默认「时间范围」= 本周 → 7 格全出（旧口径 today 只留一格已废）
+    const wks0 = document.querySelectorAll('[data-home-weekday]');
+    expect(wks0.length).toBe(7);
+    expect(document.querySelectorAll('.bz-home-wk--hit').length).toBe(1); // 只有昨天有动静
+
+    // 缩到「当天」：周历只留今天一格（范围设置本身就管「能往回翻几天」）
+    setSettingsProvider(() => ({ ...DEFAULT_SETTINGS, homeTimelineRange: 'today' }));
+    unloadHome();
+    resetHomeState();
+    openHome(app);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(document.querySelectorAll('[data-home-weekday]').length).toBe(1);
+
+    // 回到「本周」：点昨天那格 → 时间线切到昨天
+    setSettingsProvider(() => ({ ...DEFAULT_SETTINGS, homeTimelineRange: 'week' }));
+    unloadHome();
+    resetHomeState();
     openHome(app);
     await new Promise((r) => setTimeout(r, 20));
     const wks = document.querySelectorAll('[data-home-weekday]');
@@ -104,63 +193,153 @@ describe('home 活动河 UI（issue 232）', () => {
     // 倒排：第一格=今天，显示「今」不写数字
     expect((wks[0] as HTMLElement).dataset.homeWeekday).toBe(todayStr());
     expect(wks[0].querySelector('.bz-home-wk-n')!.textContent).toBe('今');
-    expect(document.querySelectorAll('.bz-home-wk--hit').length).toBe(1); // 只有昨天有动静
     const yesterday = yesterdayDateStr();
     const ybtn = document.querySelector(`[data-home-weekday="${yesterday}"]`) as HTMLElement;
     ybtn.click();
     await new Promise((r) => setTimeout(r, 0));
-    expect((document.querySelector('[data-home-flow] .bz-home-sec-t') as HTMLElement).textContent).toContain(yesterday.slice(5));
-    expect(document.querySelectorAll('.bz-home-timeline .bz-home-ev').length).toBe(1); // 新增待办一条
+    expect(document.querySelector('[data-home-flow] .bz-home-sec-t')).toBeNull(); // 时间线标题行已退役，选中日由周历高亮表达
+    expect(document.querySelectorAll('.bz-home-timeline .bz-home-ev').length).toBe(1); // 新增备忘录一条
     expect(document.querySelector(`[data-home-weekday="${yesterday}"]`)!.classList.contains('bz-home-wk--sel')).toBe(true);
   });
 
-  it('今日收集快照卡：今日条数 + 最近 3 条（分类 badge + 摘要）；点卡片直达日常收集', async () => {
-    const d = new Date();
-    const p = (n: number) => String(n).padStart(2, '0');
-    const stamp = `${p(d.getFullYear() % 100)}/${p(d.getMonth() + 1)}/${p(d.getDate())}-08:00:00`;
-    vault.files.set(
-      '我的/日常收集/日常灵感收集.md',
-      `## 非文件收集\n- ${stamp} 一条很长的灵感内容需要被截断展示\n`
-    );
+  it('issue 287：时间线内容过滤 / 时刻列 / 字号档 从设置读，关掉即不出（每次开面板现读，无缓存）', async () => {
+    // 行为流 memo:added → kind=progress（状态推进类）
+    writeBehavior(vault, [{ source: 'memo', type: 'added', name: '甲', dt: todayAt(9) }]);
+    setSettingsProvider(() => ({
+      ...DEFAULT_SETTINGS,
+      homeTimelineProgress: false, // 关掉状态推进 → 唯一的痕迹该被挡掉
+      homeTimelineTime: false,
+      homeTimelineSize: 'compact',
+    }));
     const app = recApp(vault);
     openHome(app);
     await new Promise((r) => setTimeout(r, 20));
+    expect(document.querySelectorAll('.bz-home-timeline .bz-home-ev').length).toBe(0);
+    expect(document.querySelector('.bz-home-flow-empty')!.textContent).toContain('内容过滤');
+    expect((document.querySelector('.bz-home-timeline') as HTMLElement).dataset.tlSize).toBe('compact');
+    expect((document.querySelector('.bz-home-timeline') as HTMLElement).dataset.tlTime).toBe('0');
+    expect(document.querySelector('.bz-home-ev-tm')).toBeNull(); // 时刻列关掉 → 连 span 都不渲染
+  });
 
-    const card = document.querySelector('.bz-home-collect') as HTMLElement;
-    expect(card).toBeTruthy();
-    expect(card.querySelector('.bz-home-collect-n')!.textContent).toBe('1 条');
-    expect(card.querySelector('.bz-home-collect-cat')!.textContent).toBe('日常灵感收集');
-    expect(card.querySelectorAll('.bz-home-collect-it').length).toBe(1);
-    // 入口行计数文案同源
-    const erow = document.querySelector('[data-home-go="collect"].bz-home-erow') as HTMLElement;
-    expect(erow.querySelector('.bz-home-ect')!.textContent).toBe('今日 1 条');
+  it('issue 287：明天预告卡关掉 → 第三栏整个收掉（不是只清内容）', async () => {
+    setSettingsProvider(() => ({ ...DEFAULT_SETTINGS, homeNextCards: false }));
+    const app = recApp(vault);
+    openHome(app);
+    await new Promise((r) => setTimeout(r, 20));
+    const next = document.querySelector('[data-home-next]') as HTMLElement;
+    expect(next.style.display).toBe('none');
+    expect(next.innerHTML).toBe('');
+  });
 
-    card.click();
+  it('issue 287：默认打开日＝最后有动静 → 开面板落在昨天并高亮那一格', async () => {
+    writeBehavior(vault, [{ source: 'memo', type: 'added', name: '甲', dt: yesterdayAt(9) }]); // 只有昨天有动静
+    setSettingsProvider(() => ({
+      ...DEFAULT_SETTINGS,
+      homeTimelineRange: 'week', // 窗口要够宽，昨天才在可选范围内
+      homeDefaultDay: 'lastActive',
+    }));
+    const app = recApp(vault);
+    openHome(app);
+    await new Promise((r) => setTimeout(r, 20));
+    const yesterday = yesterdayDateStr();
+    expect(document.querySelector(`[data-home-weekday="${yesterday}"]`)!.classList.contains('bz-home-wk--sel')).toBe(true);
+    expect(document.querySelectorAll('.bz-home-timeline .bz-home-ev').length).toBe(1); // 直接就看到昨天那条
+  });
+
+  it('时间线查看日随关闭保留、随卸载归零（issue 290 反转：重开停在上次查看日）', async () => {
+    writeBehavior(vault, [
+      { source: 'memo', type: 'added', name: '甲', dt: todayAt(9) },
+      { source: 'memo', type: 'added', name: '乙', dt: yesterdayAt(9) }, // 昨天也有一条：切过去才有事件可断言
+    ]);
+    const app = recApp(vault);
+    openHome(app);
+    await new Promise((r) => setTimeout(r, 20));
+    // 点周历切到昨天 → 查看日停在过去
+    const yesterday = yesterdayDateStr();
+    (document.querySelector(`[data-home-weekday="${yesterday}"]`) as HTMLElement).click();
     await new Promise((r) => setTimeout(r, 0));
-    expect(app.__executed).toEqual(['bz-collect-open']);
-  });
+    expect(H.riverView).toBe(yesterday);
 
-  it('今日收集快照卡空态：无收集文件时给引导文案且不入库', async () => {
-    const app = recApp(vault);
+    // 关面板再重开（issue 290）：DOM 与查看日保留——同一元素复用，仍停昨天的选中
+    const el1 = document.querySelector('.bz-home-overlay');
+    closeOverlay();
     openHome(app);
     await new Promise((r) => setTimeout(r, 20));
-    const card = document.querySelector('.bz-home-collect') as HTMLElement;
-    expect(card.querySelector('.bz-home-collect-empty')).toBeTruthy();
-    expect(card.querySelectorAll('.bz-home-collect-it').length).toBe(0);
-    expect(vault.files.size).toBe(0);
+    expect(document.querySelector('.bz-home-overlay')).toBe(el1); // 复用不重建
+    expect(H.riverView).toBe(yesterday);
+    expect(document.querySelector(`[data-home-weekday="${yesterday}"]`)!.classList.contains('bz-home-wk--sel')).toBe(true);
+    expect(document.querySelectorAll('.bz-home-timeline .bz-home-ev').length).toBe(1); // 停在昨天：只出昨天那条（今天的不在）
+
+    // 卸载（resetHomeState）才是查看日的真归零时机
+    unloadHome();
+    resetHomeState();
+    expect(H.riverView).toBeNull();
   });
 
-  it('点关闭钮 / 遮罩均关闭（桌面无关闭钮显示由 CSS 控制事件仍可用）', async () => {
+  it('点关闭钮 / 遮罩均关闭（issue 290：隐藏保留 DOM，非移除）', async () => {
     const app = recApp(vault);
     openHome(app);
     await new Promise((r) => setTimeout(r, 20));
     (document.querySelector('[data-home-close]') as HTMLElement).click();
-    expect(document.querySelector('.bz-home-overlay')).toBeNull();
+    const afterClose = document.querySelector('.bz-home-overlay') as HTMLElement;
+    expect(afterClose).toBeTruthy();
+    expect(afterClose.style.display).toBe('none');
 
     openHome(app);
     await new Promise((r) => setTimeout(r, 20));
-    const overlay = document.querySelector('.bz-home-overlay')!;
+    const overlay = document.querySelector('.bz-home-overlay') as HTMLElement;
+    expect(overlay.style.display).not.toBe('none');
     overlay.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(document.querySelector('.bz-home-overlay')).toBeNull();
+    expect((document.querySelector('.bz-home-overlay') as HTMLElement).style.display).toBe('none');
+  });
+
+  it('issue 290：首次打开秒开——openHome 同步返回即有面板骨架，时间线异步汇入', async () => {
+    writeBehavior(vault, [{ source: 'memo', type: 'added', name: '甲', dt: todayAt(9) }]);
+    const app = recApp(vault);
+    openHome(app); // 不 await：同步段就该有完整面板壳 + 骨架占位
+    const overlay = document.querySelector('.bz-home-overlay') as HTMLElement;
+    expect(overlay).toBeTruthy();
+    expect(overlay.querySelector('[data-home-close]')).toBeTruthy();
+    expect((overlay.querySelector('[data-home-flow]') as HTMLElement).textContent).toContain('正在汇入今天的痕迹');
+    await new Promise((r) => setTimeout(r, 20));
+    // 动态加载到位：骨架被真数据替换（时间线出今天那条，不再有「正在汇入」）
+    expect((overlay.querySelector('[data-home-flow]') as HTMLElement).textContent).not.toContain('正在汇入今天的痕迹');
+    expect(overlay.querySelectorAll('.bz-home-timeline .bz-home-ev').length).toBe(1);
+  });
+
+  it('issue 290：关闭保留 DOM——重开复用同一元素秒显旧渲染，动态刷新写入新数据', async () => {
+    const app = recApp(vault); // 初始无行为流文件 → 时间线空态
+    openHome(app);
+    await new Promise((r) => setTimeout(r, 20));
+    const el1 = document.querySelector('.bz-home-overlay') as HTMLElement;
+    expect(el1.querySelector('.bz-home-flow-empty')!.textContent).toContain('这一天还没有留下痕迹');
+
+    closeOverlay();
+    expect(el1.isConnected).toBe(true); // DOM 保留
+    expect(el1.style.display).toBe('none');
+
+    // 行为流新增今日动静后重开：同一元素、同步恢复显示（秒显旧内容），刷新尚未到达
+    writeBehavior(vault, [{ source: 'memo', type: 'added', name: '新条目', dt: todayAt(10) }]);
+    openHome(app);
+    expect(document.querySelector('.bz-home-overlay')).toBe(el1); // 复用不重建
+    expect(el1.style.display).not.toBe('none');
+    expect(H.overlayVisible).toBe(true);
+    expect(el1.querySelector('.bz-home-flow-empty')!.textContent).toContain('这一天还没有留下痕迹'); // 旧渲染还在
+    // 动态刷新到达：时间线写进新条目
+    await new Promise((r) => setTimeout(r, 20));
+    expect(el1.querySelectorAll('.bz-home-timeline .bz-home-ev').length).toBe(1);
+  });
+
+  it('issue 290：unloadHome 真销毁——隐藏保留的 DOM 被移除、状态整体归零', async () => {
+    const app = recApp(vault);
+    openHome(app);
+    await new Promise((r) => setTimeout(r, 20));
+    closeOverlay();
+    expect(document.querySelector('.bz-home-overlay')).toBeTruthy(); // 关闭保留
+    unloadHome();
+    expect(document.querySelector('.bz-home-overlay')).toBeNull(); // 卸载真销毁
+    expect(H.currentOverlay).toBeNull();
+    expect(H.overlayVisible).toBe(false);
+    expect(H.river).toBeNull();
   });
 });

@@ -11,9 +11,9 @@
  *             回退笔记创建时间（file.stat.ctime）落本周
  *  - books    书架墙读完：completionDate 落本周（md 书目，口径同快照在读徽标）
  *  - pomodoro pomodoro.json history：完成时刻落本周条数 + duration 秒折分钟
- *  - todo     memo.json（todo 同源）：completed 落本周=完成数，created 落本周=创建数
+ *  - todo     memo.json（待办域同源）：completed 落本周=完成数，created 落本周=创建数
  *             （完成率 P%=完成/创建，创建 0 则 UI 侧只显示完成数）
- *  - diary    日记目录文件名（YYYY-MM-DD.md，同快照「今日已写」口径）落本周条数
+ *  - diary    日记目录文件名（本地口径 `YYYY-MM-DD.md`，ADR-0113；上游条目戳解析不吸，票 288）落本周条数
  */
 import type { App, TFile } from 'obsidian';
 import { tryGetSettings } from '../core/settings-provider';
@@ -134,7 +134,7 @@ export function todoWeekStats(
   return { done, created };
 }
 
-/** 本周日记计数（纯函数）：文件名（basename，'YYYY-MM-DD'）落本周的条数；非日期名忽略 */
+/** 本周日记计数（纯函数）：本地日记文件名即 `YYYY-MM-DD`（ADR-0113），basename 解析日期落本周条数；非法名忽略。 */
 export function countDiaryThisWeek(basenames: string[], range: WeekRange): number {
   return basenames.filter((n) => inWeek(parseLocalDay(n), range)).length;
 }
@@ -209,7 +209,7 @@ export async function collectWeeklyStat(app: App, now: number = Date.now()): Pro
     /* 目录缺失/解析失败：回落 0 */
   }
 
-  // 读完：书库 md 书目 completionDate 落本周（口径同快照在读徽标的 md 书目）
+  // 读完：书架 md 书目 completionDate 落本周（口径同快照在读徽标的 md 书目）
   try {
     out.booksFinished = countBooksFinished(scanMarkdownBooks(app), range);
   } catch {
@@ -230,7 +230,7 @@ export async function collectWeeklyStat(app: App, now: number = Date.now()): Pro
     /* 读失败：回落 0 */
   }
 
-  // 待办：memo.json 直读（todo 同源；不依赖 DataManager 单例初始化，文件缺失不建）
+  // 待办：memo.json 直读（todo 域同源；不依赖 DataManager 单例初始化，文件缺失不建）
   try {
     const raw = await readJsonIfExists(app, storageFile('memo.json'));
     const all = Array.isArray(raw) ? (raw as Array<Record<string, unknown>>) : [];
@@ -241,7 +241,7 @@ export async function collectWeeklyStat(app: App, now: number = Date.now()): Pro
     /* 读失败：回落 0 */
   }
 
-  // 日记：目录文件名 YYYY-MM-DD 落本周
+  // 日记：文件名日期（YYYY-MM-DD）落本周（本地日记口径，票 288）
   try {
     const dir = settingDir(['diaryDirectory'], '我的/日记');
     out.diary = countDiaryThisWeek(dirMdBasenames(app, dir), range);

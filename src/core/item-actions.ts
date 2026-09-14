@@ -64,11 +64,19 @@ export interface ItemActionsOptions {
   sheetSub?: string;
   /** 长按触发过滤器：返回 false 的按压不弹浮层（如正文文字区——让位系统长按选字/复制） */
   longPressFilter?: (e: any) => boolean;
-  /** 桌面右键菜单附加类（issue 210：皮肤域传 bz-todo-skin-*，菜单随面板换肤） */
+  /** 桌面右键菜单附加类（issue 210：皮肤域传 bz-memo-skin-*，菜单随面板换肤） */
   menuClass?: string;
   /**
+   * 桌面右键菜单的**盒头 markup（纯字符串）**：顶部一行「域色点 + 域名 …… 计数」，
+   * 2026-09-11 观感整改（用户选 B 方案）——home 菜单跨 21 个域，不写域身份就不知道
+   * 右键的是哪一行；口径与长按抽屉盒头同源，但抽屉是两行版式，桌面菜单要一行，
+   * 故两者各自出 markup（sheetHead / menuHeadHtml），不强行共用。
+   * **不传 = 不渲染盒头**（其他域零影响）。文本须由调用方自行转义（如 home 的 esc）。
+   */
+  menuHeadHtml?: string;
+  /**
    * 移动端抽屉附加类（与 menuClass 对称：同一套皮肤类可同时传给两端）。
-   * 用途 = 让域按自己的排版口径微调抽屉（如皮肤域让抽屉头部勾选圈随面板换肤）。
+   * 用途 = 让域按自己的排版口径微调抽屉（如 home 把盒头/功能项字号调成面板档）。
    */
   sheetClass?: string;
 }
@@ -126,6 +134,11 @@ function inSheetCompanion(target: Node): boolean {
 
 /** 文档捕获层 mousedown：点浮层外任意处按下即关闭 */
 function onMouseDownCapture(ev: MouseEvent): void {
+  // 长按松手时浏览器补发的**合成 mousedown**会落在刚打开的遮罩上（触屏兼容鼠标事件：
+  // touchend → mousedown(命中指针处元素=遮罩) → mouseup(仍指向原触摸目标) → 可能无 click）。
+  // 静置窗口内不当作「外部点击」，否则抽屉开出来就被自己的遮罩关掉（真机实测：长按后
+  // 一松手抽屉即消失，用户感知「长按没反应」）。窗口外（真实轻点）照常关闭。
+  if (touchSettlePending) return;
   if (popupEl && popupEl.isConnected && !popupEl.contains(ev.target as Node) && !inSheetCompanion(ev.target as Node)) {
     closeItemMenu();
   }
@@ -149,10 +162,18 @@ function onClickCapture(ev: MouseEvent): void {
     return;
   }
   if (touchSettlePending) {
+    // C6：只吞落在浮层（抽屉/遮罩）内的合成 click——长按松手的补发 click 恒命中刚弹出的
+    // 遮罩/抽屉；落点在浮层外的窗口期 click 是用户真实点击（如长按弹抽屉后立刻点下一张卡），
+    // 不吞不拦（原先整窗口盲吞 400ms，下一张卡第一次点击无反应）。
+    const inPopup =
+      (popupEl != null && popupEl.contains(target)) || (sheetMask != null && sheetMask.contains(target));
     touchSettlePending = false;
-    ev.stopImmediatePropagation();
-    ev.preventDefault();
-    return;
+    if (inPopup) {
+      ev.stopImmediatePropagation();
+      ev.preventDefault();
+      return;
+    }
+    // 浮层外：真实点击放行，落入下方外部点击关闭分支
   }
   if (popupEl && popupEl.isConnected && !popupEl.contains(target) && !inSheetCompanion(target)) {
     closeItemMenu();
@@ -204,7 +225,7 @@ function armTouchSettle(): void {
 
 /**
  * 复位 click 抑制（issue 198 review P1）：
- * 直调 openItemMenu(..., true) 的域（如 diary-wall 容器右键委托）在 Chromium 右键时序下，
+ * 直调 openItemMenu(..., true) 的域（如 diary 容器右键委托）在 Chromium 右键时序下，
  * 随后 mouseup 落在菜单外会经 onMouseUpCapture 置位残余抑制（residualClickArmed），
  * 吞掉用户下一次左键（含点菜单项，要点两次才生效）。右键无补发 click，抑制本就不需要——
  * 打开菜单后调用本函数把 suppressNextClick / residualClickArmed 一并复位。
@@ -275,12 +296,31 @@ function focusMenuFirst(host: HTMLElement, scope: HTMLElement): void {
   attachItemKeyboardNav(host, scope);
 }
 
-/** 桌面跟手菜单（鼠标长按；anchored at 光标，防溢出） */
-export function openItemMenu(x: number, y: number, actions: ItemAction[], suppressResidualClick = false, menuClass?: string): void {
+/** 桌面跟手菜单（右键弹出；anchored at 光标，防溢出）
+ *  @param menuHeadHtml 盒头 markup（可选，见 ItemActionsOptions.menuHeadHtml；不传不渲染） */
+export function openItemMenu(
+  x: number,
+  y: number,
+  actions: ItemAction[],
+  suppressResidualClick = false,
+  menuClass?: string,
+  menuHeadHtml?: string
+): void {
   closeItemMenu();
   const m = document.createElement('div');
   m.className = 'bz-item-menu' + (menuClass ? ' ' + menuClass : '');
   m.style.visibility = 'hidden';
+  // 盒头 + 分隔线（B 方案，2026-09-11）：只有传了 markup 的域才渲染。
+  // 单行窄条，所以这里不做 mountIcons（内容里不放 data-lucide 占位，域色点走内联 style）。
+  if (menuHeadHtml) {
+    const head = document.createElement('div');
+    head.className = 'bz-item-menu-head';
+    head.innerHTML = menuHeadHtml;
+    m.appendChild(head);
+    const sep = document.createElement('div');
+    sep.className = 'bz-item-menu-sep';
+    m.appendChild(sep);
+  }
   for (const a of actions) {
     const item = document.createElement('button');
     item.type = 'button';
@@ -518,7 +558,7 @@ export function attachItemActions(card: HTMLElement, actions: ItemAction[], opts
     if (isMobileEnv()) return; // 移动端走触屏长按 → 抽屉
     if (opts?.longPressFilter && !opts.longPressFilter(e)) return; // 让位系统选字/复制：不弹也不拦
     e.preventDefault();
-    openItemMenu(e.clientX, e.clientY, actions, true, opts?.menuClass);
+    openItemMenu(e.clientX, e.clientY, actions, true, opts?.menuClass, opts?.menuHeadHtml);
     suppressNextClick = false; // 右键无补发 click，关闭残余抑制
   });
 

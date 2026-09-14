@@ -13,7 +13,8 @@
  */
 import { esc, iconSpan } from '../core/ui/str';
 import { DOMAIN_ICONS } from '../core/domain-icons';
-import type { RecapItem, RecapSummary } from '../recap/aggregate';
+import type { PomodoroPhase } from '../core/pomodoro-phase';
+import type { RecapSummary } from '../recap/aggregate';
 
 // 再出口（壳经 window.BZR_home 取用；插件 ui.ts 亦统一从这里取）
 export { esc, iconSpan };
@@ -21,8 +22,8 @@ export { DOMAIN_ICONS };
 
 /* ---------- 域清单（原 domains.ts 收编；domains.ts re-export 兼容旧引用） ---------- */
 
-/** 磁贴 id → 事实源键（wall/settings 与域 id 异名，其余同键） */
-const ICON_KEY: Record<string, string> = { wall: 'diary-wall', settings: 'settings-panel' };
+/** 磁贴 id → 事实源键（settings 与域 id 异名、wall 即 diary-wall 域，其余同键） */
+const ICON_KEY: Record<string, string> = { settings: 'settings-panel', wall: 'diary-wall' };
 /** 图标一律取 core/domain-icons 单一事实源（终局 review 批 B：17 条字面量迁移，值不变） */
 const iconOf = (id: string): string => DOMAIN_ICONS[ICON_KEY[id] ?? id];
 
@@ -40,19 +41,25 @@ export interface HomeDomain {
 
 export const DOMAINS: HomeDomain[] = [
   { id: 'diary', commandId: 'bz-diary-open', name: '日记本', sub: '写今天的闪念', icon: iconOf('diary') },
+  // 待办（todo 域，上游 memo 换血接替 ADR-0092/0117，本地命名走 ADR-0118）：上游 09-10 起补入首页入口（票 288）
+  { id: 'todo', commandId: 'bz-todo-open', name: '待办', sub: '随手记与待办', icon: iconOf('todo') },
   { id: 'cinema', commandId: 'bz-cinema-open', name: '影院', sub: '影视想看与在看', icon: iconOf('cinema') },
   { id: 'review', commandId: 'bz-review-open', name: '复习计划', sub: '到期卡片队列', icon: iconOf('review') },
   { id: 'pomodoro', commandId: 'bz-pomodoro-open', name: '番茄钟', sub: '专注计时', icon: iconOf('pomodoro') },
   { id: 'favorites', commandId: 'bz-favorites-open', name: '收藏本', sub: '收藏条目', icon: iconOf('favorites') },
   { id: 'clipping', commandId: 'bz-clipbook-open', name: '剪藏本', sub: '未读流与剪藏', icon: iconOf('clipping') },
-  // 日常收集（collect 域，issue 246）：QuickAdd 宏换血进插件，捕获入口在首页留快照位
+  // 日常收集（collect 域，issue 246）：本地独有域入口
   { id: 'collect', commandId: 'bz-collect-open', name: '日常收集', sub: '灵感与素材收集', icon: iconOf('collect') },
-  // 文献盒（literature 域，ADR-0072）：文献笔记列表 + 视频/术语录入（补内容域曝光位）
+  // 文献盒（literature 域，ADR-0072；上游 knowledge 的本地命名 ADR-0118）
   { id: 'literature', commandId: 'bz-literature-open', name: '文献盒', sub: '文献笔记与录入', icon: iconOf('literature') },
-  // 书库（bookshelf 域换血接替 library；内部 id 保持兼容 home.json 钉选）
+  // 旧书库（library）域退役：本卡由书架墙（bookshelf）承接（id 变更后旧 home.json 里钉选的 library 自动失效，可在编辑模式重钉）
   { id: 'bookshelf', commandId: 'bz-bookshelf-open', name: '书库', sub: '藏书与读书笔记', icon: iconOf('bookshelf') },
+  // 第二大脑（secondbrain 域，issue 251）：主面板统一入口（检索/对话/灵感参考都从面板进；票 288 补入）
+  { id: 'secondbrain', commandId: 'bz-secondbrain-panel', name: '第二大脑', sub: '笔记检索与问答', icon: iconOf('secondbrain') },
+  // 回忆墙（diary-wall 域）：冻结域独立入口（ADR-0121；上游已并入日记本条目，本地不随）
   { id: 'wall', commandId: 'bz-diary-wall-open', name: '回忆墙', sub: '相片墙浏览日记', icon: iconOf('wall') },
   { id: 'belongings', commandId: 'bz-belongings-open', name: '归物本', sub: '物品登记', icon: iconOf('belongings') },
+  // 移动附件（attach 域）：上游 09-10 自入口移除，本地保留现状（可在隐藏列表配置，票 288 记录偏差）
   { id: 'attach', commandId: 'bz-attach-move', name: '移动附件', sub: '附件归位', icon: iconOf('attach') },
   { id: 'encrypt', commandId: 'bz-encrypt-open', name: '保险库', sub: '密码·加密笔记·日记', icon: iconOf('encrypt') },
   { id: 'settings', commandId: 'bz-settings-panel-open', name: '设置', sub: '全域设置', icon: iconOf('settings') },
@@ -60,34 +67,271 @@ export const DOMAINS: HomeDomain[] = [
 
 export const DOMAIN_MAP: Map<string, HomeDomain> = new Map(DOMAINS.map((d) => [d.id, d]));
 
-/** 徽标功能色（数据语义，双主题一致） */
+/** 徽标功能色（数据语义，双主题一致；键 = 本地域 id，ADR-0118） */
 export const DOMAIN_DOT: Record<string, string> = {
   diary: '#e67341',
+  todo: '#e8590c',
   recap: '#d64d8f',
   cinema: '#e6951d',
   review: '#7c5cd6',
   pomodoro: '#e5534b',
   favorites: '#f0b429',
   clipping: '#2f9e5f',
-  collect: '#c98a2e',
   literature: '#c2559d',
   bookshelf: '#3d7bd6',
+  secondbrain: '#a33d2a',
   'reading-report': '#3fa7a0',
-  wall: '#7c8cf8',
   belongings: '#45a35c',
   attach: '#8a8f99',
   encrypt: '#8a8f99',
   smartcat: '#e67341',
   settings: '#8a8f99',
+  // 日常收集（collect 域，issue 246）：琥珀色快照卡同源
+  collect: '#c98a2e',
 };
 
 /** 全量域 id（钉选候选/迷你 chips 遍历顺序） */
 export const ALL_DOMAIN_IDS: string[] = DOMAINS.map((d) => d.id);
 
+/* ---------- 入口顺序（2026-09-10 用户拍板：桌面/移动各排各的，持久化 home.json） ---------- */
+
+/**
+ * 按持久化顺序重排域清单（纯函数，node 可测）。
+ *  - 未列出的域（此后新增的域）保持 DOMAINS 声明顺序，整体落在已列出项之后；
+ *  - 已退役/未知 id 自然被忽略（不在 domains 里就不参与排序）；
+ *  - sort 在 V8 稳定 → 未列出项之间的先后 = DOMAINS 声明顺序。
+ */
+export function applyOrder(order: readonly string[] | null | undefined, domains: HomeDomain[] = DOMAINS): HomeDomain[] {
+  if (!order || !order.length) return domains;
+  const rank = new Map<string, number>();
+  order.forEach((id, i) => { if (!rank.has(id)) rank.set(id, i); });
+  const MISS = Number.MAX_SAFE_INTEGER;
+  return [...domains].sort((a, b) => (rank.get(a.id) ?? MISS) - (rank.get(b.id) ?? MISS));
+}
+
+/**
+ * 把 id 在**可见序列**内挪到指定下标（纯函数，node 可测；拖拽排序的落点计算用）。
+ * 入参 order 先归一化成**完整顺序**（= applyOrder 的 id 序列，补齐未列出域）：
+ * 首次排序时 order 为空，拖一次就要落盘完整 14 项，而不是只存动过的那两项。
+ *
+ * 下标口径：**只对可见域计数**（hidden 里的域不占位），落盘结果 = 新可见序列 + hidden 追尾。
+ * 为何不按完整序列计数：设置面板里的列表是「可见域在前、移除的域排最下面」（用户 2026-09-10 拍板），
+ * 拖拽下标取自该列表；若按完整序列解释，隐藏项插在中间时下标会整体错位。
+ * 越界 / 未知 id → 返回归一化结果（不抛错）。
+ */
+export function reorderTo(
+  order: readonly string[] | null | undefined,
+  id: string,
+  toIndex: number,
+  hidden: readonly string[] = [],
+  domains: HomeDomain[] = DOMAINS,
+): string[] {
+  const all = applyOrder(order, domains).map((d) => d.id);
+  const off = new Set(hidden);
+  const visible = all.filter((x) => !off.has(x));
+  const from = visible.indexOf(id);
+  if (from < 0 || toIndex < 0 || toIndex >= visible.length) return all;
+  visible.splice(from, 1);
+  visible.splice(toIndex, 0, id);
+  return [...visible, ...all.filter((x) => off.has(x))];
+}
+
+/** 排序作用端：桌面入口行（desk）/ 移动瓦片（mob）——两套顺序互不影响 */
+export type HomeOrderScope = 'desk' | 'mob';
+
+/** 入口顺序持久化形状（home.json / 见 ./order 读写）
+ *  v3（2026-09-10 用户拍板「两端互不影响、互相不能修改」）：**顺序与隐藏都按端各一份** ——
+ *  在桌面端删掉的域不会从移动端消失，反之亦然。v2 的单一 `hidden` 读取时两端各继承一份（见 ./order）。 */
+export interface HomeOrder {
+  version: number;
+  desk: string[];
+  mob: string[];
+  /** 桌面端隐藏的域 id（只作用于桌面入口行） */
+  hiddenDesk: string[];
+  /** 移动端隐藏的域 id（只作用于移动瓦片） */
+  hiddenMob: string[];
+}
+
+/** 取某端的隐藏域清单（纯函数，node 可测）：desk/mob 各一份，互不影响 */
+export function hiddenOf(order: HomeOrder, scope: HomeOrderScope): string[] {
+  return scope === 'mob' ? order.hiddenMob : order.hiddenDesk;
+}
+
+/**
+ * 首页实际展示的域清单 = 该端持久化顺序 + 剔除隐藏域（渲染层与设置弹窗共用，单一口径）。
+ * order 为空 → DOMAINS 默认顺序；hidden 为空 → 全部展示。
+ */
+export function visibleDomains(
+  order?: readonly string[] | null,
+  hidden?: readonly string[] | null,
+  domains: HomeDomain[] = DOMAINS,
+): HomeDomain[] {
+  const hide = new Set(hidden ?? []);
+  return applyOrder(order, domains.filter((d) => !hide.has(d.id)));
+}
+
+/* ---------- 入口菜单（桌面右键 / 移动长按抽屉） ---------- */
+
+/** 菜单里一条域动作：文案 + 直达命令 id + lucide 图标名（执行在 ui.ts，本层只出清单） */
+export interface DomainMenuAction {
+  label: string;
+  commandId: string;
+  icon: string;
+  /**
+   * **相位敏感单动作**槽位（番茄钟专用）：ui.ts 挂菜单时用 `pomodoroMenuAction(H.pomodoroPhase)`
+   * 的结果**整体盖掉** label / commandId / icon —— 一个相位只出**一条**，
+   * 不是「多条按状态显示不同文案」（曾把三项并列写出「停止专注 + 继续专注」自相矛盾的菜单，2026-09-11 修正）。
+   */
+  dynamic?: 'phase';
+  /** 危险动作（清空/批量改数据类）：菜单项与抽屉项红色强调 */
+  kind?: 'danger';
+  /**
+   * 执行后**不关首页面板**（只读/即时类动作，如锁定保险库、暂停专注）——
+   * 关面板再执行会让用户看不到结果，且下次打开还要重走一遍。执行完由 ui.ts 刷新面板数据。
+   * 缺省 false = 关首页再执行（打开别域面板/需要确认框的动作走这条）。
+   */
+  keepHome?: boolean;
+}
+
+/**
+ * 番茄钟那一条菜单项（纯函数，node 可测）：**相位敏感的单个动作**，四相位互斥、一次只出一条。
+ * 用户 2026-09-11 拍板的口径（原先把「停止专注/跳过休息/继续专注」并列 —— 停止与继续互斥，
+ * 并列必自相矛盾）：
+ *   ① 没开始任何专注 → 开始专注
+ *   ② 正在专注       → 停止专注（= 暂停；点完就落到③那一支，故两条不会同现）
+ *   ③ 停止专注了     → 继续专注
+ *   ④ 在休息阶段     → 跳过休息
+ * 三支命令都是现成的：②③ 共用 bz-pomodoro-pause（计时中暂停 / 暂停中继续），
+ * ① 走 bz-pomodoro-focus-toggle（idle 分支即开始），④ 走 bz-pomodoro-skip。
+ * 类型单源 = core/pomodoro-phase（与 pomodoro/ui.ts::menuPhase 的返回值一一对应）。
+ */
+export function pomodoroMenuAction(phase: PomodoroPhase): DomainMenuAction {
+  if (phase === 'focusing') return { label: '停止专注', commandId: 'bz-pomodoro-pause', icon: 'pause' };
+  if (phase === 'paused') return { label: '继续专注', commandId: 'bz-pomodoro-pause', icon: 'play' };
+  if (phase === 'break') return { label: '跳过休息', commandId: 'bz-pomodoro-skip', icon: 'skip-forward' };
+  return { label: '开始专注', commandId: 'bz-pomodoro-focus-toggle', icon: 'timer' };
+}
+
+/**
+ * 域菜单动作（2026-09-10 用户拍板：菜单只放**域自己的快捷功能**——
+ * 不放「打开 X」（入口本身就是打开）、不放「整理顺序」（排序改直接拖拽，见 shared.reorderTo）。
+ * **本表没有条目的域 = 不挂右键菜单 / 长按抽屉**（空的就别弹），ui.ts 依此判断。
+ * 图标一律取「其他域右键菜单已在用」的 lucide 名（原型图标表按名查，
+ * 不在表里的名字会静默渲染成空 —— 新增图标记得同时补 prototypes/home/prototype-icons.js）。
+ *
+ * 2026-09-11 补 9 条（用户点名采纳）：全部是「不开面板、一步完成」的动作，
+ * 其中即时类带 `keepHome`（不关首页）；清空类带 `kind: 'danger'`（红字 + 二次确认）。
+ */
+export const DOMAIN_MENU: Record<string, DomainMenuAction[]> = {
+  // 日记菜单不挂（上游 bz-diary-write 属日记冻结域产物，ADR-0121；票 288）
+  todo: [
+    { label: '写待办', commandId: 'bz-todo-add', icon: 'clipboard-list' },
+    // 上游「给当前笔记记一笔」（bz-memo-note-binding）本地无等价命令，不挂（票 288）
+  ],
+  cinema: [
+    { label: '加影视', commandId: 'bz-cinema-add', icon: 'plus' },
+    { label: '影视分析报告', commandId: 'bz-cinema-analysis', icon: 'bar-chart-3' },
+    // 从「想看」池随机抽一部并直接开详情（抽不动脑子时的入口）
+    { label: '随机抽一部', commandId: 'bz-cinema-random-pick', icon: 'shuffle' },
+  ],
+  review: [
+    // 上游 bz-review-start/add 本地复习命令面不同（review 域冻结），映射本地既有命令（票 288）
+    { label: '今日复习', commandId: 'bz-review-today', icon: 'play' },
+    { label: '复习计划分析报告', commandId: 'bz-review-report', icon: 'bar-chart-3' },
+  ],
+  // 番茄钟：**相位敏感的单个动作**（见 pomodoroMenuAction）——静态项只是 idle 兜底，
+  // 挂菜单时整条按实时相位替换（文案/命令/图标），四相位互斥、一次只出一条。
+  pomodoro: [
+    { label: '开始专注', commandId: 'bz-pomodoro-focus-toggle', icon: 'timer', dynamic: 'phase', keepHome: true },
+  ],
+  favorites: [{ label: '加收藏', commandId: 'bz-favorites-add', icon: 'bookmark' }],
+  // 剪藏本此前是空菜单（无域快捷动作）；这条是唯一「不开面板」的批量动作，故挂在入口上。
+  // 危险项：一次改 N 条 read 状态（面板里同款动作也是走确认框），故 kind: 'danger' + 确认框；
+  // keepHome = 确认框叠在首页上、清完当场看到「未读 N 篇」归零。
+  clipping: [
+    { label: '未读全部标为已读', commandId: 'bz-clipbook-mark-all-read', icon: 'check-check', kind: 'danger', keepHome: true },
+  ],
+  literature: [
+    { label: '术语生成文献笔记', commandId: 'bz-literature-note-term', icon: 'file-text' },
+    // 上游「视频生成文献笔记」（bz-knowledge-note-video）本地无该命令，不挂（票 288）
+  ],
+  bookshelf: [
+    { label: '阅读分析报告', commandId: 'bz-reading-report-open', icon: 'bar-chart-3' },
+    // 上游「继续在读」（bz-bookshelf-continue）本地无该命令，不挂（票 288）
+  ],
+  secondbrain: [
+    { label: '第二大脑对话', commandId: 'bz-secondbrain-chat', icon: 'message-circle' },
+    { label: '参考侧栏', commandId: 'bz-secondbrain-open', icon: 'zap' },
+    // 全库重建向量索引（函数早已存在、此前没有命令入口）
+    { label: '重建索引', commandId: 'bz-secondbrain-rebuild-index', icon: 'refresh-cw', keepHome: true },
+  ],
+  belongings: [{ label: '加物品', commandId: 'bz-belongings-add', icon: 'archive' }],
+  // 保险库：此前是空菜单（无域快捷动作）；锁定是唯一「不开面板」的一步动作
+  // （上游 bz-encrypt-lock-vault 的本地命令名 = bz-encrypt-lock，票 288 映射）
+  encrypt: [
+    { label: '锁定保险库', commandId: 'bz-encrypt-lock', icon: 'lock', keepHome: true },
+  ],
+  // 密码本（vault）菜单不挂：本地密码本并入保险库统一域（ADR-0085），无独立命令面
+  // 日常收集（collect 域，issue 246）：统一收集入口与选区收集（本地独有）
+  collect: [
+    { label: '收集内容', commandId: 'bz-collect-capture', icon: 'pencil-line' },
+  ],
+};
+
+/** 域色（入口行 / 移动瓦片 / 抽屉盒头共用单一口径；未登记的域回落中性灰） */
+export function domainColor(id: string): string {
+  return DOMAIN_DOT[id] ?? '#8a8f99';
+}
+
+/**
+ * 桌面右键菜单盒头 markup（B 方案，2026-09-11 用户选）——**一行**：
+ * 「域色点 + 域名 ……… 计数」。与长按抽屉的两行盒头（sheetHeadHtml）同源口径，
+ * 但桌面菜单是窄条，塞两行会把菜单撑高，故各自出 markup：
+ *  - 右侧计数 = `riverCountText`（无计数就**留空**，不回落域副题 —— 副题偏长会把菜单顶宽）；
+ *  - 域色点走内联 style（各域色不同，CSS 侧不枚举）；文本一律 esc。
+ * 只有 home 传了它（其他域不传 = 不渲染盒头，见 core/item-actions 的 menuHeadHtml）。
+ */
+export function menuHeadHtml(d: HomeDomain, data: RiverData): string {
+  const ct = riverCountText(d.id, data) ?? '';
+  return '<span class="bz-item-menu-head-dot" style="background:' + domainColor(d.id) + '"></span>'
+    + '<span class="bz-item-menu-head-nm">' + esc(d.name) + '</span>'
+    + (ct ? '<span class="bz-item-menu-head-cnt">' + esc(ct) + '</span>' : '');
+}
+
+/**
+ * 长按抽屉盒头 markup（2026-09-10 用户拍板：盒头要更详细）：
+ * **上排 = 域彩色图标 + 域名（同一行）**，**下排 = 入口行右侧那行灰字**（不与图标同排、
+ * 也不缩进到图标右侧 —— 整行起于盒头左边）。灰字口径与列表同源（见 riverCountText；
+ * 该域没有计数文案时回落域副题 sub —— 与入口行 `riverCountText(...) ?? d.sub` 完全一致）。
+ * 纯层只出 markup，ui.ts 建节点后 mountIcons 物化图标（图标一律 data-lucide 占位）。
+ */
+export function sheetHeadHtml(d: HomeDomain, data: RiverData): string {
+  const ct = riverCountText(d.id, data) ?? d.sub;
+  return '<div class="bz-home-sheet-head">'
+    + '<div class="bz-home-sheet-top">'
+    + '<span class="bz-home-sheet-ic" style="color:' + domainColor(d.id) + '">' + iconSpan(d.icon) + '</span>'
+    + '<div class="bz-home-sheet-nm">' + esc(d.name) + '</div>'
+    + '</div>'
+    + '<div class="bz-home-sheet-sub">' + esc(ct) + '</div>'
+    + '</div>';
+}
+
 /* ---------- 活动河类型（原 river.ts 纯类型段收编；river.ts re-export 兼容） ---------- */
 
-/** 时间线一条痕迹（recap RecapItem 的域展宽版：todo 保留原名，前端图标/名称映射） */
-export type RiverEvent = RecapItem;
+/** 时间线一条痕迹（issue 305 / ADR-0132：痕迹源 = 小橘行为流，不再是 recap 文件统计）。
+ *  domain = **首页域 id**（cinema/clipping/knowledge…，渲染据此取图标/色/名；行为流 source
+ *  经 behavior-timeline 的映射表归一）；kind 在映射时定死（见 TimelineKind）。 */
+export interface RiverEvent {
+  domain: string;
+  /** 排序与展示时刻（当天窗口内毫秒） */
+  ts: number;
+  /** 时间标签 'HH:mm' */
+  timeLabel: string;
+  /** 一句话正文（如「标记《X》已看」「完成『X』」） */
+  text: string;
+  /** 类别；缺省 = 无 kind 的旧形态，过滤回落文案前缀判类（eventKind） */
+  kind?: TimelineKind | 'skipped';
+}
 
 /** 日记连击态 */
 export interface RiverStreak {
@@ -99,6 +343,10 @@ export interface RiverStreak {
 /** 全部域入口实时计数（口径注释见 river.ts 各采集分支） */
 export interface RiverCounts {
   diaryTotal: number;
+  /** 待办未完成条数（2026-09-10 todo 入首页入口时补；上游 memoOpen 的本地命名，ADR-0118） */
+  todoOpen: number;
+  /** 待办重要未完成条数（priority==='important' && !completed；todo 彩点 hot 用，item-1789106079981） */
+  todoUrgentOpen: number;
   reviewTotal: number;
   reviewOverdue: number;
   reviewDueTomorrow: number;
@@ -115,6 +363,8 @@ export interface RiverCounts {
 
 export const EMPTY_COUNTS: RiverCounts = {
   diaryTotal: 0,
+  todoOpen: 0,
+  todoUrgentOpen: 0,
   reviewTotal: 0,
   reviewOverdue: 0,
   reviewDueTomorrow: 0,
@@ -127,14 +377,6 @@ export const EMPTY_COUNTS: RiverCounts = {
   belongingsTotal: 0,
   collectToday: 0,
 };
-
-/** 收集快照一条（分类名 + 正文摘要）。
- *  本地纯类型：shared 是渲染纯层（import 白名单只放 core/ui/str 与 core/domain-icons），
- *  不从 collect 域引类型，避免把配置层拖进预览包。 */
-export interface CollectRecentItem {
-  category: string;
-  text: string;
-}
 
 /** 时间线摘要（recap RecapSummary + todoCreated：彩点规则的需要） */
 export interface RiverSummary extends RecapSummary {
@@ -176,8 +418,113 @@ export interface RiverData {
   week: RiverWeekDay[];
   streak: RiverStreak;
   counts: RiverCounts;
-  /** 最近收集条目（时间倒序，最多 3 条；collect 域目标文件只读聚合） */
+  /** 番茄钟正在专注（计时中或暂停中；采集层动态 import 跨域只读，失败回落 false）。
+   *  纯层不做跨域 import（渲染纯层契约），专注态只能作为数据入参进彩点规则（item-1789106079981）。 */
+  pomodoroFocusing: boolean;
+  /** 最近收集条目（时间倒序，最多 3 条；collect 域目标文件只读聚合，issue 246） */
   collectRecent: CollectRecentItem[];
+}
+
+/** 收集快照一条（分类名 + 正文摘要）。
+ *  本地纯类型：shared 是渲染纯层（import 白名单只放 core/ui/str 与 core/domain-icons），
+ *  不从 collect 域引类型，避免把配置层拖进预览包。 */
+export interface CollectRecentItem {
+  category: string;
+  text: string;
+}
+
+/* ---------- 收集快照（首页第三栏卡片，collect 域 issue 246） ---------- */
+
+/** 收集正文摘要截断（空白折叠成单空格；超长加 …；max ≤ 0 原样返回） */
+export function truncateCollect(text: string, max = 42): string {
+  const s = (text || '').replace(/\s+/g, ' ').trim();
+  if (max <= 0 || s.length <= max) return s;
+  return s.slice(0, max) + '…';
+}
+
+/* ---------- 时间线类别（内容过滤 / 范围 / 字号 口径；issue 287，2026-09-11 用户点名） ---------- */
+
+/** 时间线一条痕迹的类别（设置面板「时间线内容过滤」的勾选单位）。
+ *  分法只认「这条痕迹说了什么」，不认域——同一条日记痕迹永远是 produce，
+ *  不会因为改了域清单而换类。issue 305 起由行为流映射时定死（见 behavior-timeline）。 */
+export type TimelineKind =
+  /** 产出：写出了/收进了/记下了东西（日记条目、剪藏保存、读完一本、看完一部、写完备忘、专注完） */
+  | 'produce'
+  /** 状态推进：改的是已有东西的状态（加入片单、读到 N%、新增待办、标记在看） */
+  | 'progress'
+  /** 点评 ✦：小橘挂在痕迹下面的那句话，以及你给影片打的星级（行为流 movie:rated） */
+  | 'note';
+
+/** 三类的中文名（设置面板勾选项文案单源；首页不需要，故只在这边声明） */
+export const TIMELINE_KIND_LABEL: Record<TimelineKind | 'skipped', string> = {
+  produce: '产出',
+  progress: '状态推进',
+  note: '点评 ✦',
+  skipped: '已跳过',
+};
+
+/** 时间线痕迹的类别集合（三类 + 第四类「已跳过」） */
+export type TimelineEventKind = TimelineKind | 'skipped';
+
+/** 时间线过滤设置（四个键的读值快照；缺省全开产出/状态推进/点评，「已跳过」默认关）
+ *  issue 305 / ADR-0132：时间线痕迹源改吃小橘行为流，「已跳过」回归（issue 288 的
+ *  「行为流数据时间线吃不到」前提反转——数据源已整体替换）。 */
+export interface TimelineFilter {
+  produce: boolean;
+  progress: boolean;
+  notes: boolean;
+  skipped: boolean;
+}
+
+export const DEFAULT_TIMELINE_FILTER: TimelineFilter = {
+  produce: true, progress: true, notes: true, skipped: false,
+};
+
+/** 时间线时间范围（「最近 N 天」的分子；week = 周历窗口全长 7 天） */
+export type TimelineRange = 'today' | '3d' | 'week';
+
+/** 范围 → 天数（today=1 只渲染今天那一格；3d=3；week=7 与周历同窗口） */
+export function timelineRangeDays(range: string | null | undefined): number {
+  if (range === '3d') return 3;
+  if (range === 'week') return 7;
+  return 1;
+}
+
+/**
+ * 旧形态（无 kind）痕迹 → 类别：按**文案前缀**判。
+ * issue 305 起痕迹由行为流映射时直带 kind，本函数只剩两个用途：原型/测试里的手搓数据、
+ * 以及历史存档数据的回落。判据仍取文案——同一域两种动作分属两类是常态
+ * （影院「标记已看」= 产出，「加入片单」= 状态推进）。
+ */
+export function timelineKind(text: string): TimelineKind {
+  // 状态推进：只有「还没发生成事实」的动作落这里
+  if (
+    text.startsWith('新增备忘录')       // 记下来了，但还没做完
+    || text.includes('加入片单')        // 想看，不是看过
+    || text.includes('读到 ')           // 进度，不是读完
+  ) return 'progress';
+  return 'produce';
+}
+
+/** 一条痕迹的类别：事件直带 kind 优先，缺省回落文案前缀判类（纯函数，node 可测）。 */
+export function eventKind(e: { text: string; kind?: string }): TimelineEventKind {
+  const k = e.kind as TimelineEventKind | undefined;
+  return k ?? timelineKind(e.text);
+}
+
+/** 单条痕迹是否该显示（纯函数）：过滤判据单源——filterEvents 与渲染层（flowHtml）共用。 */
+export function eventVisible(e: { text: string; kind?: string }, filter: TimelineFilter): boolean {
+  switch (eventKind(e)) {
+    case 'skipped': return filter.skipped;
+    case 'note': return filter.notes;
+    case 'progress': return filter.progress;
+    default: return filter.produce;
+  }
+}
+
+/** 按设置过滤时间线痕迹（纯函数，node 可测）。 */
+export function filterEvents<T extends { text: string; kind?: string }>(events: T[], filter: TimelineFilter): T[] {
+  return events.filter((e) => eventVisible(e, filter));
 }
 
 /* ---------- 日期/文案小工具 ---------- */
@@ -212,6 +559,12 @@ export interface RiverNote {
   text: string;
 }
 
+/** 时刻 → 当日内毫秒偏移（本地时区） */
+function dayOffsetMs(t: number): number {
+  const d = new Date(t);
+  return d.getHours() * 3600000 + d.getMinutes() * 60000 + d.getSeconds() * 1000 + d.getMilliseconds();
+}
+
 /** 点评规则（node 可测）：
  *  - 首条动静 vs 昨天首条：早晚分钟差点评（昨天无痕迹则报首动时刻）；
  *  - 今晚（≥18 点）有动静、日记还空着且连击 >0 → 末条挂连击提醒 */
@@ -221,7 +574,10 @@ export function buildNotes(data: RiverData): RiverNote[] {
   if (!day.events.length) return notes;
   if (day.firstTs !== null) {
     if (data.yesterday.firstTs !== null) {
-      const diff = Math.round((day.firstTs - data.yesterday.firstTs) / 60000);
+      // 「动手早晚」比的是两天各自的**钟点**，必须归一化到日内偏移再相减：
+      // firstTs 是绝对时间戳（跨天差 ~24h），直接减会在真实数据上恒得「晚了 1300+ 分钟」
+      // （2026-09-10 修复；此前测试把昨天时刻也设成今天，掩盖了该缺陷）。
+      const diff = Math.round((dayOffsetMs(day.firstTs) - dayOffsetMs(data.yesterday.firstTs)) / 60000);
       if (diff > 0) notes.push({ index: 0, text: `动手比昨天晚了 ${diff} 分钟，不过来了就好。` });
       else if (diff < 0) notes.push({ index: 0, text: `动手比昨天早了 ${-diff} 分钟，好开头。` });
       else notes.push({ index: 0, text: '和昨天几乎同一时间动手，节奏很稳。' });
@@ -267,27 +623,35 @@ export function buildPreviews(data: RiverData): RiverPreview[] {
   if (!s.diaryWrittenToday && s.diaryStreak > 0) {
     out.push({ h: `日记连击 ×${s.diaryStreak} 待续`, b: '写三行也算数。今晚补上，明天它自己接着长。', go: 'diary', goLabel: '去写日记 →' });
   } else if (s.diaryWrittenToday) {
-    out.push({ h: `今日日记已写 · 连击 ×${s.diaryStreak + 1}`, b: '明天同一时间回来续上，连击就是这么长起来的。', go: 'diary', goLabel: '看日记本 →' });
+    // 连击口径（H11）：diaryStreak 已含今天（writtenToday 时从今天起算），不再 +1（恒多算一天的回归）
+    out.push({ h: `今日日记已写 · 连击 ×${s.diaryStreak}`, b: '明天同一时间回来续上，连击就是这么长起来的。', go: 'diary', goLabel: '看日记本 →' });
   } else {
-    out.push({ h: '给明天留一句话', b: '今晚写一篇日记，明晚它会变成回忆墙上的新格子。', go: 'diary', goLabel: '去写日记 →' });
+    out.push({ h: '给明天留一句话', b: '今晚写一篇日记，明晚它会变成日记本媒体墙上的新格子。', go: 'diary', goLabel: '去写日记 →' });
   }
   return out;
 }
 
-/** 入口行彩点状态：ok=今天有动静 / warn=提醒（日记连击）/ hot=逾期 / off=无动静 */
+/** 入口行彩点状态：ok=今日有动静 / warn=进行中·待处理（日记连击、专注中、剪藏未读、影院在看、书库在读）/ hot=逾期·需立即关注（复习逾期、重要待办未完成）/ off=无动静 */
 export type RiverDot = 'ok' | 'warn' | 'hot' | 'off';
 
-/** 彩点规则（node 可测；与原型 buildDots 一致，映射到 home 域 id：todo/memo 同源） */
+/** 彩点规则（node 可测；与原型 buildDots 一致，映射到本地 home 域 id，ADR-0118）。
+ *  点亮等级语义（item-1789106079981 定案）：ok=今日有动静；warn=进行中/待处理；hot=逾期/需立即关注；
+ *  同域多条件取高（off<ok<warn<hot）。 */
 export function buildDots(data: RiverData): Record<string, RiverDot> {
   const day = data.today;
   const hasEvent = (d: string): boolean => day.events.some((e) => e.domain === d);
+  const c = data.counts;
   return {
     diary: day.summary.diary > 0 ? 'ok' : data.streak.diaryStreak > 0 ? 'warn' : 'off',
-    review: data.counts.reviewOverdue > 0 ? 'hot' : 'off',
-    memo: day.summary.todoDone + day.summary.todoCreated > 0 ? 'ok' : 'off',
-    pomodoro: day.summary.pomodoros > 0 ? 'ok' : 'off',
-    cinema: hasEvent('cinema') ? 'ok' : 'off',
-    bookshelf: hasEvent('bookshelf') ? 'ok' : 'off',
+    review: c.reviewOverdue > 0 ? 'hot' : 'off',
+    todo: c.todoUrgentOpen > 0 ? 'hot' : day.summary.todoDone + day.summary.todoCreated > 0 ? 'ok' : 'off',
+    pomodoro: data.pomodoroFocusing ? 'warn' : day.summary.pomodoros > 0 ? 'ok' : 'off',
+    cinema: c.cinemaWatching > 0 ? 'warn' : hasEvent('cinema') ? 'ok' : 'off',
+    // 书库（2026-09-11 用户要求）：**有在读 = warn**，与影院「有在看」同口径——
+    // 「在读 N 本」是进行中的事，比「今天动过书库」更该亮；没在读才看今日动静。
+    bookshelf: c.bookshelfReading > 0 ? 'warn' : hasEvent('bookshelf') ? 'ok' : 'off',
+    clipping: c.clippingUnread > 0 ? 'warn' : 'off',
+    // 日常收集（collect 域，issue 246）：今天有收集 = ok
     collect: data.counts.collectToday > 0 ? 'ok' : 'off',
   };
 }
@@ -303,6 +667,8 @@ export function riverCountText(id: string, data: RiverData): string | null {
   switch (id) {
     case 'diary':
       return `${c.diaryTotal} 篇${data.streak.diaryWrittenToday ? ' · 今日已写' : ''}`;
+    case 'todo':
+      return `${c.todoOpen} 条待办`;
     case 'review':
       return c.reviewOverdue > 0 ? `${c.reviewTotal} 张 · 逾期 ${c.reviewOverdue}` : `${c.reviewTotal} 张在册`;
     case 'cinema':
@@ -317,23 +683,8 @@ export function riverCountText(id: string, data: RiverData): string | null {
       return `登记 ${c.belongingsTotal} 件`;
     case 'collect':
       return `今日 ${c.collectToday} 条`;
-    case 'wall':
-      return `${c.diaryTotal} 格`;
     default:
       return null; // recap/literature/reading-report/attach/encrypt/smartcat/settings/pomodoro 走域副题
   }
 }
 
-/** 时间线域徽记 id（recap 记 todo，展示归 memo：todo/memo 同源） */
-export function memoIdOf(domain: string): string {
-  return domain === 'todo' ? 'memo' : domain;
-}
-
-/* ---------- 收集快照（首页第三栏卡片） ---------- */
-
-/** 收集正文摘要截断（空白折叠成单空格；超长加 …；max ≤ 0 原样返回） */
-export function truncateCollect(text: string, max = 42): string {
-  const s = (text || '').replace(/\s+/g, ' ').trim();
-  if (max <= 0 || s.length <= max) return s;
-  return s.slice(0, max) + '…';
-}

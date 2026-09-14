@@ -46,7 +46,7 @@ import {
   rebuildSecondBrainIndex,
   unloadSecondBrain,
 } from './secondbrain';
-import { openPomodoro, unloadPomodoro, ensurePomodoro } from './pomodoro';
+import { openPomodoro, unloadPomodoro, ensurePomodoro, toggleFocus, skipBreak, togglePause } from './pomodoro';
 import { mountPomodoroStatusBar, unmountPomodoroStatusBar } from './pomodoro/statusbar';
 // 文献盒（literature 域，ADR-0072 自 bili-downloader 迁出；网页版已移除，见 tools/bili-downloader）
 import { openLiteraturePanel, openTermNote, unloadLiterature } from './literature';
@@ -162,6 +162,10 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-secondbrain-rebuild-index', name: '重建索引', icon: 'refresh-cw', callback: () => rebuildSecondBrainIndex(getApp()) },
   // 番茄钟（ticket 26-32 新域）
   { id: 'bz-pomodoro-open', name: '番茄钟', icon: 'timer', callback: () => openPomodoro(getApp()) },
+  // 首页入口菜单三支（票 288 / 上游 issue 288）：相位敏感动作——开始/停止专注、跳过休息、暂停/继续
+  { id: 'bz-pomodoro-focus-toggle', name: '开始专注', icon: 'timer', callback: () => toggleFocus(getApp()) },
+  { id: 'bz-pomodoro-skip', name: '跳过休息', icon: 'skip-forward', callback: () => skipBreak(getApp()) },
+  { id: 'bz-pomodoro-pause', name: '暂停/继续专注', icon: 'pause', callback: () => togglePause(getApp()) },
   // 文献盒（literature 域：主面板=文献笔记列表 + 视频录入/文字录入/设置；ADR-0072 迁出、ADR-0071 AI 回迁）
   { id: 'bz-literature-open', name: '文献盒', icon: 'list-video', callback: () => openLiteraturePanel(getApp()) },
   { id: 'bz-literature-note-term', name: '术语生成文献笔记', icon: 'book-type', callback: () => openTermNote(getApp()) },

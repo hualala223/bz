@@ -1,8 +1,8 @@
 // @vitest-environment node
 /**
- * 内容首页（home 域）活动河数据层测试（issue 232）：
+ * 内容首页（home 域）活动河数据层测试（issue 232；issue 305 时间线痕迹源替换）：
  * 规则纯函数（buildNotes/buildPreviews/buildDots/riverCountText）+ collectRiver
- * 只读采集集成（MockVault；时间线复用 recap、计数各源容错、日记连击、不建文件）。
+ * 只读采集集成（MockVault；时间线吃小橘行为流、计数各源容错、日记连击、不建文件）。
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { MockVault, mockAppWithVault } from '../mock-vault';
@@ -18,6 +18,23 @@ import type { RiverData } from '../../src/home/river';
 const NOW = new Date(2026, 8, 7, 21, 36).getTime(); // 2026-09-07 周一晚
 const DAY = 86400000;
 
+/** 行为流原始条目（issue 305：时间线痕迹源） */
+function beh(source: string, type: string, name: string, dt: Date, extra: Record<string, unknown> = {}) {
+  return {
+    id: `beh_${dt.getTime()}`,
+    timestamp: dt.toISOString(),
+    type,
+    source,
+    description: `${source}:${type} ${name}`,
+    metadata: { entityType: source, action: type, name, ...extra },
+  };
+}
+
+/** 写行为流侧车文件（vault 内存 mock） */
+function writeBehavior(vault: MockVault, items: unknown[]): void {
+  vault.files.set('CONFIG/STORAGE/smartcat-behavior.json', JSON.stringify({ version: 1, items }));
+}
+
 function emptyRiver(): RiverData {
   const emptyDay = (ds: string) => ({ dateStr: ds, events: [], summary: { diary: 0, movies: 0, books: 0, todoDone: 0, todoCreated: 0, pomodoros: 0, pomodoroMinutes: 0 }, firstTs: null });
   const emptyWeek = (ds: string) => ({ dateStr: ds, label: ds.slice(5), dayOfMonth: Number(ds.slice(8)), weekday: '', hit: false });
@@ -29,6 +46,7 @@ function emptyRiver(): RiverData {
     streak: { diaryStreak: 0, diaryWrittenToday: false },
     counts: { ...EMPTY_COUNTS },
     collectRecent: [],
+    pomodoroFocusing: false,
   };
 }
 
@@ -51,6 +69,18 @@ describe('buildNotes（时间线规则点评）', () => {
     d.today.events[0].ts = y9.getTime();
     d.today.firstTs = y9.getTime();
     expect(buildNotes(d)[0].text).toContain('同一时间');
+  });
+
+  it('跨天：昨天首动 09:00 / 今天首动 07:42 → 早了 78 分钟（回归锁）', () => {
+    // 真实数据的 firstTs 是绝对时间戳（今天 07:42 vs 昨天 09:00，跨天差 ~22.7h）——
+    // 曾直接相减 → 显示「晚了 1362 分钟」（2026-09-10 原型自检抓到并修复）
+    const d = emptyRiver();
+    const t = new Date(NOW); t.setHours(7, 42, 0, 0);
+    const y = new Date(NOW - DAY); y.setHours(9, 0, 0, 0);
+    d.today.firstTs = t.getTime();
+    d.today.events = [{ domain: 'diary', ts: t.getTime(), timeLabel: '07:42', text: 'x' }];
+    d.yesterday.firstTs = y.getTime();
+    expect(buildNotes(d)[0].text).toContain('早了 78 分钟');
   });
 
   it('昨天无痕迹：报今天首动时刻', () => {
@@ -107,7 +137,7 @@ describe('buildPreviews（明天预告三张卡）', () => {
 });
 
 describe('buildDots / riverCountText（入口行彩点与计数文案）', () => {
-  it('彩点：日记 ok/连击 warn、复习逾期 hot、待办/番茄/影视/书库有动静 ok、其余 off', () => {
+  it('彩点：日记 ok/连击 warn、复习逾期 hot、备忘录/番茄/影视/书库有动静 ok、剪藏未读恒基线、其余 off', () => {
     const d = emptyRiver();
     d.today.summary.diary = 3;
     d.counts.reviewOverdue = 1;
@@ -119,14 +149,61 @@ describe('buildDots / riverCountText（入口行彩点与计数文案）', () =>
     const dots = buildDots(d);
     expect(dots.diary).toBe('ok');
     expect(dots.review).toBe('hot');
-    expect(dots.memo).toBe('ok');
+    expect(dots.todo).toBe('ok');
     expect(dots.cinema).toBe('ok');
     expect(dots.bookshelf).toBe('ok');
     expect(dots.pomodoro).toBe('off');
+    expect(dots.clipping).toBe('off'); // 无未读 → 灭
     expect(dots.favorites).toBeUndefined(); // 规则外域由 UI 层回落 off
     d.today.summary.diary = 0;
     d.streak = { diaryStreak: 4, diaryWrittenToday: false };
     expect(buildDots(d).diary).toBe('warn');
+  });
+
+  it('彩点五条件各自点亮（item-1789106079981）：剪藏未读/专注中/影院在看 warn、重要备忘/复习逾期 hot，warn>ok 取高', () => {
+    const d = emptyRiver();
+    // 剪藏本：未读 > 0 → warn
+    d.counts.clippingUnread = 2;
+    expect(buildDots(d).clipping).toBe('warn');
+    d.counts.clippingUnread = 0;
+    // 番茄钟：正在专注 → warn（即使今日零轮）；今日轮数 > 0 且未专注 → ok；专注压过 ok
+    d.pomodoroFocusing = true;
+    expect(buildDots(d).pomodoro).toBe('warn');
+    d.pomodoroFocusing = false;
+    d.today.summary.pomodoros = 2;
+    expect(buildDots(d).pomodoro).toBe('ok');
+    d.pomodoroFocusing = true;
+    expect(buildDots(d).pomodoro).toBe('warn');
+    d.pomodoroFocusing = false;
+    d.today.summary.pomodoros = 0;
+    // 影院：在看 > 0 → warn（压过今日痕迹 ok）
+    d.counts.cinemaWatching = 1;
+    expect(buildDots(d).cinema).toBe('warn');
+    d.counts.cinemaWatching = 0;
+    d.today.events = [{ domain: 'cinema', ts: NOW, timeLabel: '21:00', text: 'x' }];
+    expect(buildDots(d).cinema).toBe('ok');
+    d.today.events = [];
+    // 书库（2026-09-11 用户要求）：在读 > 0 → warn（与影院在看同口径，压过今日痕迹 ok）；
+    // 没在读时回落「今日有动静 ok」；两者皆无 → 灭
+    d.counts.bookshelfReading = 2;
+    expect(buildDots(d).bookshelf).toBe('warn');
+    d.counts.bookshelfReading = 0;
+    d.today.events = [{ domain: 'bookshelf', ts: NOW, timeLabel: '21:00', text: 'x' }];
+    expect(buildDots(d).bookshelf).toBe('ok');
+    d.today.events = [];
+    // 备忘录：重要未完成 > 0 → hot（压过今日动静 ok）
+    d.counts.todoUrgentOpen = 1;
+    expect(buildDots(d).todo).toBe('hot');
+    d.today.summary.todoDone = 2;
+    expect(buildDots(d).todo).toBe('hot'); // 重要未完成仍在，hot 不降级
+    d.counts.todoUrgentOpen = 0;
+    expect(buildDots(d).todo).toBe('ok'); // 只剩今日动静 → ok
+    d.today.summary.todoDone = 0;
+    // 复习：逾期 > 0 → hot（既有规则不动）
+    d.counts.reviewOverdue = 1;
+    expect(buildDots(d).review).toBe('hot');
+    d.counts.reviewOverdue = 0;
+    expect(buildDots(d).review).toBe('off');
   });
 
   it('计数文案：各域口径与未接数域回落 null（UI 用域副题）', () => {
@@ -151,24 +228,10 @@ describe('buildDots / riverCountText（入口行彩点与计数文案）', () =>
     expect(riverCountText('clipping', d)).toBe('未读 55 篇');
     expect(riverCountText('favorites', d)).toBe('48 条');
     expect(riverCountText('belongings', d)).toBe('登记 65 件');
-    expect(riverCountText('wall', d)).toBe('522 格');
+    // ADR-0115：回忆墙磁贴随升格并入日记本，'wall' id 退役 → 回落 null（与未接数域同口径）
+    expect(riverCountText('wall', d)).toBeNull();
     expect(riverCountText('settings', d)).toBeNull();
     expect(riverCountText('pomodoro', d)).toBeNull();
-  });
-
-  it('收集（collect 域）：彩点随今日条数、计数文案「今日 N 条」、摘要截断', () => {
-    const d = emptyRiver();
-    expect(buildDots(d).collect).toBe('off');
-    expect(riverCountText('collect', d)).toBe('今日 0 条');
-    d.counts.collectToday = 3;
-    expect(buildDots(d).collect).toBe('ok');
-    expect(riverCountText('collect', d)).toBe('今日 3 条');
-
-    // 摘要：空白折叠成单空格；超长截断加 …；max ≤ 0 原样
-    expect(truncateCollect('  多行\n灵感   一条 ')).toBe('多行 灵感 一条');
-    expect(truncateCollect('一二三四五', 3)).toBe('一二三…');
-    expect(truncateCollect('一二三', 3)).toBe('一二三');
-    expect(truncateCollect('一二三', 0)).toBe('一二三');
   });
 });
 
@@ -191,6 +254,8 @@ describe('collectRiver（只读采集集成）', () => {
     expect(d.yesterday.events).toEqual([]);
     expect(d.counts).toEqual(EMPTY_COUNTS);
     expect(d.streak).toEqual({ diaryStreak: 0, diaryWrittenToday: false });
+    // 专注态：番茄钟未初始化（只读裸相位，不 ensure 不恢复）→ 回落 false（item-1789106079981）
+    expect(d.pomodoroFocusing).toBe(false);
     const created = [...vault.files.keys()].filter((p) => !filesBefore.has(p));
     expect(created).toEqual([]);
   });
@@ -199,6 +264,7 @@ describe('collectRiver（只读采集集成）', () => {
     const d0 = dateStrOf(NOW);
     const d1 = dateStrOf(NOW - DAY);
     const d2 = dateStrOf(NOW - 2 * DAY);
+    // 本地日记口径：文件名即 YYYY-MM-DD（ADR-0113；票 288）
     vault.files.set(`我的/日记/${d1}.md`, '昨天');
     vault.files.set(`我的/日记/${d2}.md`, '前天');
     let r = collectRiver(mockAppWithVault(vault) as any, NOW);
@@ -230,9 +296,7 @@ describe('collectRiver（只读采集集成）', () => {
   });
 
   it('周历 7 天窗口：今天在前、hit=当天有动静、label=MM-DD', async () => {
-    vault.files.set('CONFIG/STORAGE/memo.json', JSON.stringify([
-      { title: '甲', created: '2026-09-06 09:00:00', completed: null },
-    ]));
+    writeBehavior(vault, [beh('memo', 'added', '甲', new Date(2026, 8, 6, 9, 0))]);
     const data = await collectRiver(mockAppWithVault(vault) as any, NOW);
     expect(data.days.length).toBe(7);
     expect(data.days[0].dateStr).toBe(dateStrOf(NOW));
@@ -240,20 +304,74 @@ describe('collectRiver（只读采集集成）', () => {
     expect(data.week[0].dateStr).toBe(dateStrOf(NOW));
     expect(data.week[0].label).toBe('09-07');
     expect(data.week[0].hit).toBe(false); // 今天无动静
-    expect(data.week[1].hit).toBe(true); // 昨天（09-06）有新增待办
+    expect(data.week[1].hit).toBe(true); // 昨天（09-06）行为流有新增待办
     expect(data.week.map((w) => w.dayOfMonth)).toEqual([7, 6, 5, 4, 3, 2, 1]);
   });
 
-  it('时间线接通：今天完成待办 + 新增待办派生 todoCreated（复用 recap 口径）', async () => {
+  it('时间线接通：行为流动作进时间线 + todoCreated 由「新增待办」前缀派生（issue 305）', async () => {
+    writeBehavior(vault, [
+      beh('memo', 'added', '甲', new Date(2026, 8, 7, 9, 0)),
+      beh('memo', 'completed', '甲', new Date(2026, 8, 7, 10, 0)),
+      beh('memo', 'added', '乙', new Date(2026, 8, 7, 11, 0)),
+      beh('movie', 'watched', '沙丘', new Date(2026, 8, 7, 20, 0), { rating: 8 }),
+      beh('movie', 'deleted', '噪音', new Date(2026, 8, 7, 20, 30)), // 删除动作不进时间线
+      beh('news', 'skipped', '某篇', new Date(2026, 8, 7, 12, 0)),
+    ]);
+    // recap 侧继续供摘要数字（完成 1 条 → todoDone；文件统计口径不受影响）
     vault.files.set('CONFIG/STORAGE/memo.json', JSON.stringify([
       { title: '甲', created: '2026-09-07 09:00:00', completed: '2026-09-07 10:00:00' },
       { title: '乙', created: '2026-09-07 11:00:00', completed: null },
     ]));
     const data = await collectRiver(mockAppWithVault(vault) as any, NOW);
-    expect(data.today.events.map((e) => e.text)).toEqual(['新增待办『甲』', '完成『甲』', '新增待办『乙』']);
+    expect(data.today.events.map((e) => e.text)).toEqual([
+      '新增待办『甲』', '完成『甲』', '新增待办『乙』', '已跳过『某篇』', '标记《沙丘》已看',
+    ]);
+    expect(data.today.events.map((e) => e.kind)).toEqual(['progress', 'produce', 'progress', 'skipped', 'produce']);
+    // 域归口：行为流 source → 首页域 id（渲染徽标/彩点 hasEvent 认这个）
+    expect([...new Set(data.today.events.map((e) => e.domain))]).toEqual(['todo', 'clipping', 'cinema']);
     expect(data.today.summary.todoDone).toBe(1);
     expect(data.today.summary.todoCreated).toBe(2);
-    expect(data.today.firstTs).not.toBeNull();
+    expect(data.today.firstTs).toBe(new Date(2026, 8, 7, 9, 0).getTime());
+  });
+
+  it('影院批量回填免疫（issue 305 事故回归）：外部改笔记不进时间线，摘要口径照旧', async () => {
+    // 观影日期=今天 + 已看 → recap 摘要 movies 仍计 1（文件统计职责保留），但时间线条目为零
+    vault.files.set('我的/影视/《批量回填》.md', `---\ntags:\n- 电影\n评分: 8\n观影日期: ${dateStrOf(NOW)}\n---\n`);
+    const data = await collectRiver(mockAppWithVault(vault) as any, NOW);
+    expect(data.today.summary.movies).toBe(1);
+    expect(data.today.events).toEqual([]);
+    expect(data.week[0].hit).toBe(false);
+  });
+
+  it('备忘录重要筛选（item-1789106079981）：todoUrgentOpen 只数未完成的重要条，todoOpen 保持全量口径', async () => {
+    vault.files.set('CONFIG/STORAGE/memo.json', JSON.stringify([
+      // 重要 + 未完成 → 计 urgent
+      { title: ' urgent open', created: '2026-09-01 09:00:00', completed: null, priority: 'important' },
+      // 普通 + 未完成 → 只进 todoOpen
+      { title: '普通待办', created: '2026-09-01 10:00:00', completed: null },
+      // 重要 + 已完成 → 两边都不计
+      { title: 'urgent done', created: '2026-09-01 11:00:00', completed: '2026-09-02 08:00:00', priority: 'important' },
+      // 非 important 字面量（如 normal/high）不算重要
+      { title: '高优待办', created: '2026-09-01 12:00:00', completed: null, priority: 'high' },
+    ]));
+    const data = await collectRiver(mockAppWithVault(vault) as any, NOW);
+    expect(data.counts.todoOpen).toBe(3); // 未完成全量（urgent open + 普通待办 + 高优待办）
+    expect(data.counts.todoUrgentOpen).toBe(1); // 只剩重要且未完成
+  });
+
+  it('收集（collect 域）：彩点随今日条数、计数文案「今日 N 条」、摘要截断', () => {
+    const d = emptyRiver();
+    expect(buildDots(d).collect).toBe('off');
+    expect(riverCountText('collect', d)).toBe('今日 0 条');
+    d.counts.collectToday = 3;
+    expect(buildDots(d).collect).toBe('ok');
+    expect(riverCountText('collect', d)).toBe('今日 3 条');
+
+    // 摘要：空白折叠成单空格；超长截断加 …；max ≤ 0 原样
+    expect(truncateCollect('  多行\n灵感   一条 ')).toBe('多行 灵感 一条');
+    expect(truncateCollect('一二三四五', 3)).toBe('一二三…');
+    expect(truncateCollect('一二三', 3)).toBe('一二三');
+    expect(truncateCollect('一二三', 0)).toBe('一二三');
   });
 
   it('收集快照：跨分类聚合今日条数 + 最近 3 条倒序回填分类名；非标准行忽略且不建文件', async () => {

@@ -83,6 +83,8 @@ const EXPECTED_COMMAND_IDS = [
   'bz-review-today',
   'bz-secondbrain-panel', 'bz-secondbrain-open', 'bz-secondbrain-chat', 'bz-secondbrain-rebuild-links', 'bz-secondbrain-link-all', 'bz-secondbrain-rebuild-index',
   'bz-pomodoro-open',
+  // 首页入口菜单三支（票 288 / 上游 issue 288）：相位敏感动作
+  'bz-pomodoro-focus-toggle', 'bz-pomodoro-skip', 'bz-pomodoro-pause',
   'bz-literature-open', 'bz-literature-note-term',
   'bz-attach-move',
   'bz-encrypt-open', 'bz-encrypt-lock',

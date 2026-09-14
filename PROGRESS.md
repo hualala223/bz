@@ -771,3 +771,15 @@
 - [x] 校验：脚本比对「清单行集合 == `src/` 下除 `core` 外的目录集合」→ 双向零差异（24 = 24）
 - [x] 门禁：本轮仅改 `AGENTS.md`（`.md` 文档），`src/` 与 `tests/` 一字未动 → 不触发重跑测试/类型检查；沿用当日 283 票的全绿结论（290 文件 / 4568 例，tsc 0 错）
 - [x] 核对脚本留存 `.scratch/`（`audit_agents_drift.py` / `audit_cmd_diff.py` / `audit_cmd_list.py` / `verify_agents_table.py`，未提交）
+
+
+## 2026-09-14 · ticket 288：home 域整体吸收（上游 issue 267/283/287/288/290/305 + ADR-0132 + H11-H13 修复批）
+
+- [x] 起因：上游差量第二次核对（.scratch/upstream-diff-report-2026-09-14.md）确认票 286/287 后上游真实功能差量只剩 home 域整体落后（缺 4 文件、10 文件行数约半）
+- [x] 上游功能入库：入口顺序/显隐按端独立 + 拖拽编辑器、入口彩点五条件、时间线六项设置、首页设置五组 + 域快捷菜单九条、秒开三件套（关面板保留 DOM）、时间线改吃小橘行为流（ADR-0132，外部文件改动免疫）、入口菜单相位敏感番茄钟动作
+- [x] 依赖三件随票吸收：core/pomodoro-phase.ts（相位类型单源）、pomodoro/ui 5 函数（menuPhase/toggleFocus/isFocusing/skipBreak/togglePause）+ main.ts 3 命令（bz-pomodoro-focus-toggle/skip/pause，命令数 68→**71**）、core/item-actions.ts 换上游版（menuHeadHtml 盒头 + C6 触屏误吞修复）
+- [x] settings 新增 11 键（homeLayout/homeSkin/homeTimeline*/homeDefaultDay/homeNextCards）
+- [x] 本地适配（票内登记）：日记口径  直判（冻结域不吸上游条目戳解析）；todo/literature 本地命名映射（ADR-0118）；保留 attach 入口（上游移除属上游用户拍板，本地维持现状）；DOMAIN_MENU 剔除 diary/vault 项、review 映射本地命令；回植本地私有「今日收集快照卡」（collect 域 issue 246）全套 + 两条测试
+- [x] 冻结防线：diary-format / 上游日记契约（304/305、ADR-0130/0131）零引入；review 域零改动（home 只读消费 reviewApp 既有 API）
+- [x] 门禁全绿：tsc 0 错；vitest 全量 **303 文件 / 4762 用例通过**；esbuild production 构建通过（产物已部署 vault 插件目录，构建产物不提交）
+- [x] 流程：git worktree 隔离（wt-home-sync，主仓零接触），门禁后显式路径落主仓；测试适配 tests/home 8 文件（上游 5 新 + 3 更新，日记夹具改本地条目标题行口径）

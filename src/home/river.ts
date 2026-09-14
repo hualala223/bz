@@ -12,15 +12,18 @@
  *  - 各源独立容错，某源失败回落空值不拖垮整面板。
  *
  * 数据源口径：
- *  - 时间线（今天/昨天）复用 recap collectRecap（五域痕迹聚合，anchor 参数天然支持昨天）；
+ *  - 时间线痕迹 = 小橘行为流（issue 305 / ADR-0132，映射见 ./behavior-timeline；外部文件改动免疫）；
+ *  - 时间线所在天的摘要 summary 仍由 recap collectRecap（五域文件统计）供给，anchor 天然支持任意天；
  *  - 计数复用各域既有口径：cinema 评分三分（同 snapshot）、bookshelf md+EPUB 状态三分
  *    （同 bookshelf 域）、review 到期/逾期（同 snapshot reviewApp.loadItems）、
  *    clipping 未读 = news.json !read 计数、favorites/belongings 同 snapshot；
- *  - 日记连击：日记目录「YYYY-MM-DD.md」从今天往回连续存在的天数（今天未写不断签）。
+ *  - 日记连击：日记目录「YYYY-MM-DD.md」文件名日期（本地日记口径，ADR-0113 章节模型；
+ *    上游一目一文件戳解析不吸——日记域冻结，票 288），从今天往回连续存在的天数（今天未写不断签）。
  */
 import type { App, TFile } from 'obsidian';
 import { collectRecap } from '../recap/aggregate';
-import type { RecapItem, RecapSummary } from '../recap/aggregate';
+import { behaviorToDays, readBehaviorItems, type TimelineEvent } from './behavior-timeline';
+import type { RecapSummary } from '../recap/aggregate';
 import { tryGetSettings } from '../core/settings-provider';
 import { storageFile } from '../core/storage';
 import { reviewApp } from '../review/app';
@@ -34,7 +37,7 @@ import { getStoragePath as getFavoritesPath } from '../favorites/config';
 import { readRecentEntries, countSameDay } from '../collect/store';
 import type { CollectEntry } from '../collect/data';
 import { EMPTY_COUNTS, EMPTY_SUMMARY, dateStrOf } from './shared';
-import type { CollectRecentItem, RiverData, RiverDay, RiverCounts, RiverStreak, RiverSummary, RiverWeekDay } from './shared';
+import type { RiverData, RiverDay, RiverCounts, RiverStreak, RiverSummary, RiverWeekDay, CollectRecentItem } from './shared';
 
 // 兼容再出口：类型与规则纯函数单源在 ./shared（旧引用 `from './river'` 零改）
 export {
@@ -48,13 +51,14 @@ export type {
 
 const DAY_MS = 86400000;
 
-/* ---------- RecapItem → RiverDay ---------- */
+/* ---------- 行为流事件 → RiverDay ---------- */
 
-function toRiverDay(dateStr: string, summary: RecapSummary, items: RecapItem[]): RiverDay {
-  const events = [...items].sort((a, b) => a.ts - b.ts);
-  // todoCreated：recap 摘要没有，由「新增待办」痕迹数派生（buildRecap 文案契约）
-  const full: RiverSummary = { ...summary, todoCreated: events.filter((e) => e.text.startsWith('新增待办')).length };
-  return { dateStr, events, summary: full, firstTs: events.length ? events[0].ts : null };
+/** 一天的时间线：事件升序 + todoCreated 派生（行为流「新增待办」文案前缀契约）。
+ *  summary 数字仍来自 recap（issue 305 / ADR-0132：只换痕迹源，不动计数面）。 */
+function toRiverDay(dateStr: string, summary: RecapSummary, events: TimelineEvent[]): RiverDay {
+  const sorted = [...events].sort((a, b) => a.ts - b.ts);
+  const full: RiverSummary = { ...summary, todoCreated: sorted.filter((e) => e.text.startsWith('新增待办')).length };
+  return { dateStr, events: sorted, summary: full, firstTs: sorted.length ? sorted[0].ts : null };
 }
 
 /* ---------- 小工具（本地副本防跨文件牵连，同 recap 口径） ---------- */
@@ -118,7 +122,7 @@ function collectCinemaCounts(app: App, c: RiverCounts): void {
   }
 }
 
-/** 书库：在读 / 读完（md + EPUB 三分口径，同 library 域） */
+/** 书库：在读 / 读完（md + EPUB 三分口径，同 bookshelf 域） */
 async function collectBookshelfCounts(app: App, c: RiverCounts): Promise<void> {
   for (const b of scanMarkdownBooks(app)) {
     if (b.status === '在读') c.bookshelfReading++;
@@ -157,21 +161,15 @@ async function collectBelongingsCounts(app: App, c: RiverCounts): Promise<void> 
   c.belongingsTotal = Object.keys((db as { items?: Record<string, unknown> }).items ?? {}).length;
 }
 
-/** 日记总数（目录前缀递归 md 数，含子目录）+ 写作连击（今天未写不算断） */
-function collectDiary(app: App, now: number, c: RiverCounts): RiverStreak {
-  const dir = settingDir(['diaryDirectory'], '我的/日记');
-  try {
-    c.diaryTotal = app.vault.getMarkdownFiles().filter((f) => f.path.startsWith(dir + '/')).length;
-  } catch {
-    /* 目录读取失败：总数留 0 */
-  }
-  const writtenToday = fileExists(app, `${dir}/${dateStrOf(now)}.md`);
-  let streak = 0;
-  // 今天已写从今天起算；未写从昨天起算（连击不断签），再往回数连续日期
-  for (let t = writtenToday ? now : now - DAY_MS; fileExists(app, `${dir}/${dateStrOf(t)}.md`); t -= DAY_MS) {
-    streak++;
-  }
-  return { diaryStreak: streak, diaryWrittenToday: writtenToday };
+/** 待办：未完成条数 + 重要未完成条数（memo.json 同源直读，不依赖 DataManager 单例；文件缺失不建）。
+ *  「重要」判定先例 = todo 域 reminder（priority==='important' 且未完成；item-1789106079981 彩点 hot 条件）；
+ *  todoOpen 继续全量口径（riverCountText「N 条待办」在用），两字段互不覆盖。 */
+async function collectTodoCounts(app: App, c: RiverCounts): Promise<void> {
+  const raw = await readJsonIfExists(app, storageFile('memo.json'));
+  const all = Array.isArray(raw) ? raw : [];
+  const open = (all as Array<Record<string, unknown>>).filter((m) => !m?.completed);
+  c.todoOpen = open.length;
+  c.todoUrgentOpen = open.filter((m) => m?.priority === 'important').length;
 }
 
 /** 收集快照（collect 域，issue 246）：今日条数 + 最近 3 条。
@@ -185,14 +183,54 @@ async function collectCollectSnapshot(
   for (const e of all.slice(0, 3)) recent.push({ category: e.category, text: e.text });
 }
 
+/** 番茄钟是否正在专注（计时中或暂停中；item-1789106079981 彩点 warn 条件）——
+ *  跨域**只读**：isFocusing 无副作用（不加载、不恢复、不通知），动态 import 遵守 ADR-0002；
+ *  失败回落 false（同 ui.ts readPomodoroFocusing 先例；ensure 兜底留给 ui 层，本层不触发恢复副作用）。 */
+async function collectFocusing(): Promise<boolean> {
+  try {
+    const m = await import('../pomodoro');
+    return m.isFocusing();
+  } catch {
+    return false;
+  }
+}
+
+/** 某日期是否已有日记（本地日记口径：`dir/YYYY-MM-DD.md` 直判；日记域冻结不吸上游条目戳解析，票 288） */
+function hasDiaryDay(app: App, dir: string, date: string): boolean {
+  return fileExists(app, `${dir}/${date}.md`);
+}
+
+/** 日记总数（目录前缀 md 数，含子目录）+ 写作连击（今天未写不算断） */
+function collectDiary(app: App, now: number, c: RiverCounts): RiverStreak {
+  const dir = settingDir(['diaryDirectory'], '我的/日记');
+  try {
+    c.diaryTotal = app.vault.getMarkdownFiles().filter((f) => f.path.startsWith(dir + '/')).length;
+  } catch {
+    /* 目录读取失败：总数留 0 */
+  }
+  const writtenToday = hasDiaryDay(app, dir, dateStrOf(now));
+  let streak = 0;
+  // 今天已写从今天起算；未写从昨天起算（连击不断签），再往回数连续日期
+  for (let t = writtenToday ? now : now - DAY_MS; hasDiaryDay(app, dir, dateStrOf(t)); t -= DAY_MS) {
+    streak++;
+  }
+  return { diaryStreak: streak, diaryWrittenToday: writtenToday };
+}
+
 /* ---------- 聚合入口 ---------- */
+
 /** 采集活动河全量数据（今天/昨天时间线 + 连击 + 全部域计数；全程只读） */
 export async function collectRiver(app: App, now: number = Date.now()): Promise<RiverData> {
   // 本周 7 天窗口（今天~6 天前）一次并行采集；recap anchor 参数天然支持任意天
   const DAYS_N = 7;
-  const dayRecaps = await Promise.all(
-    Array.from({ length: DAYS_N }, (_, i) => collectRecap(app, now - i * DAY_MS).catch(() => null))
-  );
+  const [dayRecaps, behaviorItems] = await Promise.all([
+    Promise.all(
+      Array.from({ length: DAYS_N }, (_, i) => collectRecap(app, now - i * DAY_MS).catch(() => null))
+    ),
+    // 时间线痕迹源 = 小橘行为流（issue 305 / ADR-0132）：文件推导口径退役，外部改动免疫
+    readBehaviorItems(app).catch(() => []),
+  ]);
+  const behaviorDays = behaviorToDays(behaviorItems, now, DAYS_N);
 
   const counts: RiverCounts = { ...EMPTY_COUNTS };
   const collectRecent: CollectRecentItem[] = [];
@@ -200,15 +238,23 @@ export async function collectRiver(app: App, now: number = Date.now()): Promise<
     Promise.resolve()
       .then(fn)
       .catch(() => undefined);
-  await Promise.all([
-    safe(() => collectReviewCounts(app, now, counts)),
-    safe(() => collectCinemaCounts(app, counts)),
-    safe(() => collectBookshelfCounts(app, counts)),
-    safe(() => collectClippingCounts(app, counts)),
-    safe(() => collectFavoritesCounts(app, counts)),
-    safe(() => collectBelongingsCounts(app, counts)),
-    safe(() => collectCollectSnapshot(app, now, counts, collectRecent)),
-  ]);
+  // 专注相位与计数同一波并发（collectFocusing 自带失败回落 false）；
+  // as const 保二元组型——否则 spread 数组并入后 focusing 会被 widen 成 void | boolean
+  const [, focusing] = await Promise.all([
+    Promise.all(
+      [
+        () => collectReviewCounts(app, now, counts),
+        () => collectCinemaCounts(app, counts),
+        () => collectBookshelfCounts(app, counts),
+        () => collectClippingCounts(app, counts),
+        () => collectFavoritesCounts(app, counts),
+        () => collectBelongingsCounts(app, counts),
+        () => collectTodoCounts(app, counts),
+        () => collectCollectSnapshot(app, now, counts, collectRecent),
+      ].map(safe)
+    ),
+    collectFocusing(),
+  ] as const);
   let streak: RiverStreak = { diaryStreak: 0, diaryWrittenToday: false };
   try {
     streak = collectDiary(app, now, counts);
@@ -216,8 +262,10 @@ export async function collectRiver(app: App, now: number = Date.now()): Promise<
     /* 连击计算失败回落空 */
   }
 
-  const days = dayRecaps.map((r, i) =>
-    toRiverDay(dateStrOf(now - i * DAY_MS), r?.summary ?? EMPTY_SUMMARY, r?.items ?? [])
+  // 时间线痕迹源 = 小橘行为流（issue 305 / ADR-0132）：recap 只继续供 summary/周历 hit，
+  // items 不再进时间线——文件推导口径退役，外部批量改动不再产生任何时间线条目。
+  const days: RiverDay[] = dayRecaps.map((r, i) =>
+    toRiverDay(dateStrOf(now - i * DAY_MS), r?.summary ?? EMPTY_SUMMARY, behaviorDays[i]?.events ?? [])
   );
   const WD = ['日', '一', '二', '三', '四', '五', '六'];
   const week: RiverWeekDay[] = days.map((d) => {
@@ -232,5 +280,6 @@ export async function collectRiver(app: App, now: number = Date.now()): Promise<
     streak,
     counts,
     collectRecent,
+    pomodoroFocusing: focusing,
   };
 }

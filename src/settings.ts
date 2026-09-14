@@ -377,6 +377,26 @@ export default interface BzSettings {
    *  顶层加字段需改根结构，会破坏仍在用的外部统计脚本 主页.js（读 favorites.length），
    *  且违背「既有结构不改」铁律；排序键落设置与 memoSortMode/movieDefaultSort 同惯例） */
   favoritesSortKey: string;
+  // ===== 内容首页（home 域；票 288 随上游 issue 287/288 吸收）=====
+  /** 🎨 内容首页外观占位（issue 246 同范式）：布局=活动河单卡，主题=米白单卡 */
+  homeLayout: string;
+  homeSkin: string;
+  // ===== 首页时间线（issue 287，2026-09-11 用户点名六项；issue 288 拆组 + 去「已跳过」）=====
+  /** 时间线字号档：compact 紧凑 / normal 标准 / loose 宽松（域 UI 在 .bz-home-panel 上挂 data-tl-size） */
+  homeTimelineSize: string;
+  /** 时间线时间范围（天数口径）：today 当天 / 3d 最近 3 天 / week 本周 7 天（= 周历窗口，默认） */
+  homeTimelineRange: string;
+  /** 时间线内容过滤：勾选显示哪些类（产出 / 状态推进 / 点评 ✦ / 已跳过，issue 305） */
+  homeTimelineSkipped: boolean;
+  homeTimelineProduce: boolean;
+  homeTimelineProgress: boolean;
+  homeTimelineNotes: boolean;
+  /** 打开首页默认落到哪天：today 今天 / lastActive 最后有动静的那天 */
+  homeDefaultDay: string;
+  /** 时间线显示时刻列（11:03 那列；关掉整列隐藏，行首缩进随之内收） */
+  homeTimelineTime: boolean;
+  /** 明天预告卡开关（第三栏整块） */
+  homeNextCards: boolean;
   /** 书库：移动端默认全屏（默认开——原 CSS ≤768 全屏主面板与读书笔记；阅读报告跟随此键） */
   /** 影视：移动端默认全屏（默认开——主面板/影视分析/影视报告同控，原 JS 内联强制全屏） */
   // ===== 🎬 影院（cinema 域；上游 ADR-0087 起接管旧影视域）=====
@@ -712,6 +732,19 @@ export const DEFAULT_SETTINGS: BzSettings = {
   clipbookMidWidth: 0,
   favoritesMobileDefaultFullscreen: true,
   favoritesSortKey: 'created',
+  // 内容首页（home 域，票 288）：默认 = 标准字号 / **本周**（能往回翻整周，用户 2026-09-11 拍板）/
+  // 三类中前三类开 / 默认今天 / 显示时刻 / 预告卡开
+  homeLayout: 'default',
+  homeSkin: 'cream',
+  homeTimelineSize: 'normal',
+  homeTimelineRange: 'week',
+  homeTimelineProduce: true,
+  homeTimelineSkipped: false,
+  homeTimelineProgress: true,
+  homeTimelineNotes: true,
+  homeDefaultDay: 'today',
+  homeTimelineTime: true,
+  homeNextCards: true,
   cinemaMobileDefaultFullscreen: true,
   pomodoroMobileDefaultFullscreen: false,
   encryptMobileDefaultFullscreen: true,

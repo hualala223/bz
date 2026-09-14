@@ -30,6 +30,8 @@ import { PRESETS, CUSTOM_PRESET_ID } from './config';
 import { POMODORO_SKIN_THEMES, skinClassOf } from './skin';
 import type { PomodoroState, HistoryEntry, Durations, PomodoroOptions, Phase, PomodoroAction, PomodoroEvent } from './state';
 import { transition, recover, createInitialState, phaseDurationSec } from './state';
+/** 界面相位类型与布尔口径单源（票 288：home 入口菜单依赖，随上游上收 core） */
+import { isFocusingPhase, type PomodoroPhase } from '../core/pomodoro-phase';
 import { pad2 } from '../core/utils';
 import { emitDomainEvent } from '../core/domain-bus';
 
@@ -781,6 +783,86 @@ export async function startFocusForTask(app: App, taskTitle: string): Promise<vo
   }
   state = { ...state, task: taskTitle };
   applyAction('start'); // 内含通知/落盘/tick 生命周期/渲染（弹窗与状态栏的任务名同步刷新）
+}
+
+/**
+ * 是否处于「专注进行中」（计时中或暂停中）——只读内存态，**无副作用**（不加载数据、不触发恢复/通知）。
+ * 消费方：toggleFocus、home/river.ts（彩点 warn 条件）。
+ * 布尔口径**从相位单源推导**（core/pomodoro-phase.isFocusingPhase，与首页彩点同出一源，票 288）。
+ */
+export function isFocusing(): boolean {
+  return isFocusingPhase(menuPhase());
+}
+
+/**
+ * 开始 / 停止专注切换（首页入口菜单命令用，票 288 / 上游 issue 288）。
+ * 语义 = 面板「开始」与「重置」两颗钮的合并：
+ *  - 专注中（计时或暂停）→ 停止（reset 回 idle，不写 history）；
+ *  - 休息阶段（计时或暂停）→ 先跳过休息，再开专注；
+ *  - idle → 直接开专注。
+ * 强制专注（forceFocus）下 transition 会拦下 reset（返回同一 state 引用），此时只提示不改状态。
+ */
+export async function toggleFocus(app: App): Promise<void> {
+  await ensurePomodoro(app);
+  if (isFocusing()) {
+    const before = state;
+    applyAction('reset');
+    if (state === before) notice('强制专注模式中，请先在番茄钟面板操作', 'warning');
+    else notice('专注已停止');
+    return;
+  }
+  if (state.phase === 'short-break' || state.phase === 'long-break') {
+    state = transition(state, 'skip', Date.now(), durations(), options()).state;
+    void save();
+    render();
+  }
+  applyAction('start');
+}
+
+/**
+ * 首页入口菜单用的**界面相位**（只读内存态，无副作用）：四值互斥，决定菜单里那**唯一**的
+ * 番茄钟项（见 home/shared.pomodoroMenuAction）。类型单源 = core/pomodoro-phase。
+ *  - 休息阶段（短/长休，计时或暂停）→ 'break'（暂停的休息照样能跳过）
+ *  - 专注暂停中 → 'paused'；专注计时中 → 'focusing'
+ *  - 其余 → 'idle'
+ * 注意：reset/停止后 phase 仍是 'focus'（state.ts 语义），所以 idle 不能按 phase 判，要看 endTime / paused。
+ */
+export function menuPhase(): PomodoroPhase {
+  if (state.phase === 'short-break' || state.phase === 'long-break') return 'break';
+  if (state.phase !== 'focus') return 'idle';
+  if (state.paused) return 'paused';
+  return state.endTime !== null ? 'focusing' : 'idle';
+}
+
+/**
+ * 跳过休息（命令 bz-pomodoro-skip，票 288 首页入口菜单）：
+ * 休息阶段（计时或暂停）→ 跳过休息并直接开始下一轮专注；不在休息阶段 → 只提示不改状态。
+ * skip 不记历史（面板同款语义）、归属随之作废，故与 toggleFocus 的休息分支同一路径。
+ */
+export async function skipBreak(app: App): Promise<void> {
+  await ensurePomodoro(app);
+  if (state.phase !== 'short-break' && state.phase !== 'long-break') {
+    notice('当前不在休息阶段', 'warning');
+    return;
+  }
+  state = transition(state, 'skip', Date.now(), durations(), options()).state;
+  void save();
+  render();
+  applyAction('start'); // 内含通知/落盘/tick 生命周期/渲染
+}
+
+/**
+ * 暂停 / 继续（命令 bz-pomodoro-pause，票 288 首页入口菜单）：
+ * 面板「暂停/继续」钮的命令版——有计时在跑则暂停，暂停中则继续；
+ * 空闲态（既没在跑也没暂停）只提示，不代开专注（那是「开始专注」的事）。
+ */
+export async function togglePause(app: App): Promise<void> {
+  await ensurePomodoro(app);
+  if (state.endTime === null && !state.paused) {
+    notice('当前没有进行中的计时', 'warning');
+    return;
+  }
+  applyAction(state.paused ? 'resume' : 'pause');
 }
 
 /** 卸载清理（T32 接入 onunload；测试重置） */
