@@ -243,7 +243,10 @@ export const DOMAIN_MENU: Record<string, DomainMenuAction[]> = {
   ],
   review: [
     // 上游 bz-review-start/add 本地复习命令面不同（review 域冻结），映射本地既有命令（票 288）
-    { label: '今日复习', commandId: 'bz-review-today', icon: 'play' },
+    // 「今日复习」= 按数量复习（bz-review-count，count.ts 抽卡流程）；此前误挂 bz-review-today
+    //（注册名「今日已复习」，是历史查看不是开刷），2026-09-14 用户点名纠正，已复习历史保留为第二条。
+    { label: '今日复习', commandId: 'bz-review-count', icon: 'play' },
+    { label: '今日已复习', commandId: 'bz-review-today', icon: 'history' },
     { label: '复习计划分析报告', commandId: 'bz-review-report', icon: 'bar-chart-3' },
   ],
   // 番茄钟：**相位敏感的单个动作**（见 pomodoroMenuAction）——静态项只是 idle 兜底，

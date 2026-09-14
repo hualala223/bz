@@ -90,6 +90,8 @@ describe('DOMAIN_MENU 形状', () => {
       ['clipping', 'bz-clipbook-mark-all-read'],
       ['collect', 'bz-collect-capture'],
       ['literature', 'bz-literature-note-term'],
+      // 复习：今日复习=按数量复习（bz-review-count）；今日已复习=历史查看（bz-review-today）
+      ['review', 'bz-review-count'],
       ['review', 'bz-review-today'],
       // 日记四动作（2026-09-14 用户点名；既有命令直呼，diary 域零改动）
       ['diary', 'bz-diary-write'],
