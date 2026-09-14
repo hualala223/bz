@@ -18,7 +18,7 @@
 
 ## 架构
 
-- `src/main.ts`：命令裸注册表、设置页、懒加载、onunload（**67 条命令** = `COMMANDS` 表 **65** 条 + 表外裸注册 1 条 + diary 域 init 内 1 条。表内 65 = 48 条显式字面量 + 1 条 `ATTACH_COMMAND_ID`（`bz-attach-move`，main.ts:163）+ 16 条 collect 汉字分类经 `...DEFAULT_COLLECT_CATEGORIES.map(categoryCommandId)` 展开（main.ts:181）；表外 = `bz-diary-open`（main.ts:297）；域内 init = `bz-diary-write`（`src/diary/ui/quote.ts:15`）。核算口径 = `tests/smoke.test.ts` 的 `EXPECTED_COMMAND_IDS`（50 字面量 + 16 条 collect 展开 = 66）另加 `bz-diary-write`。2026-09-14 重新核正：原写「63 命令 = 静态注册 47」为文档漂移，实际 67）
+- `src/main.ts`：命令裸注册表、设置页、懒加载、onunload（**68 条命令** = `COMMANDS` 表 **66** 条 + 表外裸注册 1 条 + diary 域 init 内 1 条。表内 66 = 49 条显式字面量 + 1 条 `ATTACH_COMMAND_ID`（`bz-attach-move`，main.ts:169）+ 16 条 collect 汉字分类经 `...DEFAULT_COLLECT_CATEGORIES.map(categoryCommandId)` 展开（main.ts:186）；表外 = `bz-diary-open`（main.ts:303）；域内 init = `bz-diary-write`（`src/diary/ui/quote.ts:15`）。核算口径 = `tests/smoke.test.ts` 的 `EXPECTED_COMMAND_IDS`（51 字面量 + 16 条 collect 展开 = 67）另加 `bz-diary-write`。2026-09-14 重新核正：原写「63 命令 = 静态注册 47」为文档漂移，实际 68）
 - `src/core/`：共享层（不挂 window）——app/settings-provider/ai/json-store/domain-bus/obsidian-adapter/path-classify/esc-manager/flow-dialog/utils/dom/changelog/notice（自绘 toast）/settings-modal/settings-schema/settings-common
 - `src/<域>/`：index.ts + data + ui + styles.css（该域样式源头，聚合进根 `styles.css`）；`src/settings.ts`；根 `styles.css`（构建聚合产物，勿手改）；`docs/adr/`；`CONTEXT.md`；`.scratch/<feature>/`
 - **依赖方向（ADR-0002）**：`core ← config/state ← parser ← store ← ui ← main`。store 无 DOM；UI 刷新靠回调订阅；禁止模块顶层互访，函数级引用环须函数体内延迟解析。

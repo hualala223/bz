@@ -2,6 +2,8 @@
  * 剪藏本设置「数据源」组（ticket 124，ADR-0060；自旧 clipping 域迁入 clipbook，ADR-0086）：
  * news.json 存在 → 三源开关 + UP 主名单管理 + B站抓取条数 + 保留天数；缺失 → 安装引导行。
  * 数据操作走 ./news-source-settings（串行队列 + 段级合并写盘）。
+ * 抓取自插件内完成（issue 302 / ADR-0128）：抓取间隔 select + 立即抓取按钮；
+ * 原「安装外部数据源守护」引导分支退役。
  *
  * 声明式重写（推翻 ticket 131 的 custom 插槽方案）：全组输出标准声明行（toggle/number/
  * button/info），与其他设置组同一渲染链（core ⚙️ 弹窗 + 设置面板两端同 schema 同视觉）。
@@ -21,9 +23,10 @@ import { escManager } from '../core/esc-manager';
 import type { SettingsRow, SettingsRowContext, SettingsSchema } from '../core/settings-schema';
 import {
   readDataSourceState, writeSources, addBilibiliUp, removeBilibiliUp,
-  writeBilibiliMaxItems, addRssFeed, removeRssFeed, type DataSourceState,
+  writeBilibiliMaxItems, addRssFeed, removeRssFeed, writeFetchInterval, type DataSourceState,
 } from './news-source-settings';
-import { resolveUidFromInput, extractFeedTitleFromXml, looksLikeFeedXml, normalizeRssFeedUrl, type BilibiliUpInfo, type RssFeed } from './news-data';
+import { fetchNowNews, notifyManualFetchResult, localDatetime } from './news-fetcher';
+import { resolveUidFromInput, extractFeedTitleFromXml, looksLikeFeedXml, normalizeRssFeedUrl, normalizeFetchIntervalMin, FETCH_INTERVAL_STEPS, type BilibiliUpInfo, type RssFeed } from './news-data';
 
 /** 状态盒（构建期快照的可变副本）：三函数绑定 get/set 读它，save 经数据层落盘 */
 type DataSourceBox = DataSourceState;
@@ -38,25 +41,16 @@ export function dataSourceGroupRows(init: DataSourceState): SettingsRow[] {
     sources: { ...init.sources },
     bilibiliUps: [...init.bilibiliUps],
     bilibiliUpInfo: { ...init.bilibiliUpInfo },
+    rssFeeds: init.rssFeeds.map((f) => ({ ...f })),
   };
-  if (!box.exists) {
-    return [
-      { type: 'info', name: '尚未启用新闻数据源', desc: '聚合讯数据由外部「数据源守护」进程（obsidian-news）抓取入库。安装并启动后此处会显示数据源设置。' },
-      { type: 'button', name: '安装数据源', buttonText: '复制安装命令', cta: true, onClick: () => {
-        const cmd = 'npm install -g @jwbz/obsidian-news && obsidian-news start';
-        navigator.clipboard.writeText(cmd).then(
-          () => notice('安装命令已复制', 'success'),
-          () => notice('复制失败，请手动复制', 'error')
-        );
-      } },
-    ];
-  }
-
-  /** 双源开关绑定：读写字盒 sources 段，落盘整段合并写（数据层只声明 sources 段） */
+  /** 双源开关绑定：读写字盒 sources 段，落盘整段合并写（数据层只声明 sources 段）。
+   *  C4：写失败（news.json 损坏/读盘失败）时提示——不提示即「开关已改、磁盘未写、重开回弹」 */
   const sourceBinding = (key: 'zhihu' | 'guokr') => ({
     get: () => box.sources[key] === true,
     set: (v: boolean) => { box.sources[key] = v; },
-    save: () => writeSources({ ...box.sources }),
+    save: async () => {
+      if (!(await writeSources({ ...box.sources }))) notifyWriteFailed('数据源开关');
+    },
   });
   /** 名单行描述（动态计数；文案过 ticket 100 lint：8 字以上自然句） */
   const upListDesc = () =>
@@ -69,7 +63,30 @@ export function dataSourceGroupRows(init: DataSourceState): SettingsRow[] {
       ? `已订阅 ${box.rssFeeds.length} 个 RSS 源，添加与移除在管理弹窗`
       : '暂未订阅 RSS 源，添加与移除在管理弹窗';
 
+  /** 抓取间隔描述（动态展示当前档位语义；时间走 localDatetime 免斜杠串） */
+  const intervalDesc = () => {
+    const t = box.lastFetchAt > 0 ? localDatetime(box.lastFetchAt) : '还没有抓取过';
+    return `打开插件或剪藏本时超过该间隔自动抓取，上次抓取 ${t}`;
+  };
   return [
+    { type: 'button', name: '立即抓取', desc: intervalDesc(), buttonText: '抓取', cta: true,
+      onClick: async (ctx) => {
+        const r = await fetchNowNews();
+        notifyManualFetchResult(r);
+        const fresh = await readDataSourceState();
+        box.lastFetchAt = fresh.lastFetchAt;
+        box.fetchIntervalMin = fresh.fetchIntervalMin;
+        setRowDesc(ctx, intervalDesc());
+      } },
+    { type: 'select', name: '抓取间隔', desc: '打开插件或剪藏本时超过该间隔才自动抓取，最短 30 分钟',
+      options: FETCH_INTERVAL_STEPS.map((m) => ({ value: String(m), label: m >= 60 ? `${m / 60} 小时` : `${m} 分钟` })),
+      binding: {
+        get: () => String(box.fetchIntervalMin),
+        set: (v) => { box.fetchIntervalMin = normalizeFetchIntervalMin(v); },
+        save: async () => {
+          if (!(await writeFetchInterval(box.fetchIntervalMin))) notifyWriteFailed('抓取间隔');
+        },
+      } },
     { type: 'toggle', name: '知乎日报', desc: '抓取知乎日报每日文章', binding: sourceBinding('zhihu') },
     { type: 'toggle', name: '果壳科学人', desc: '抓取果壳科学人最新文章', binding: sourceBinding('guokr') },
     { type: 'button', name: 'UP 主名单', desc: upListDesc(), buttonText: '管理', cta: true,
@@ -99,7 +116,9 @@ export function dataSourceGroupRows(init: DataSourceState): SettingsRow[] {
       binding: {
         get: () => box.bilibiliMaxItems,
         set: (v) => { box.bilibiliMaxItems = v; },
-        save: () => writeBilibiliMaxItems(box.bilibiliMaxItems),
+        save: async () => {
+          if (!(await writeBilibiliMaxItems(box.bilibiliMaxItems))) notifyWriteFailed('B站抓取条数');
+        },
       } },
     { type: 'number', name: '文章保留天数', desc: '已读与跳过文章的数据超期自动清理，默认 30 天', min: 1, step: 1,
       binding: numStrBinding('newsRetentionUnsavedDays', 30) },
@@ -111,6 +130,12 @@ function setRowDesc(ctx: SettingsRowContext, text: string): void {
   const el = ctx.rowEl.querySelector<HTMLElement>('.bz-sp-set-desc')
     || ctx.rowEl.querySelector<HTMLElement>('.setting-item-description');
   if (el) el.textContent = text;
+}
+
+/** C4：设置/名单写失败提示——news.json 损坏或读盘失败时数据层放弃落盘（F8 保护），
+ *  调用方必须告知「改了但没存上」，不再给假成功反馈（正文无 emoji，类型用既有 error 档） */
+function notifyWriteFailed(what: string): void {
+  notice(`写入失败（${what}）：news.json 不可读或已损坏`, 'error');
 }
 
 // ===== UP 主名单管理弹窗（ticket 126 + 127）=====
@@ -178,18 +203,24 @@ export function upManagerSettingsSchema(opts: UpManagerSchemaOptions): SettingsS
               imageUrl: box.upInfo[uid]?.avatar,
             })),
             emptyText: '暂无跟踪 UP 主，在上方粘贴主页链接或视频链接添加',
-            onChange: (keys) => {
-              void (async () => {
-                const removed = box.ups.filter((u) => !keys.includes(u));
-                for (const uid of removed) {
-                  await removeBilibiliUp(uid);
-                  box.ups = box.ups.filter((u) => u !== uid);
-                  delete box.upInfo[uid];
-                  notice(`已移除 UP 主 ${uid}`, 'success');
+            // 返回 Promise 与 RSS 订阅行同口径：渲染器待落盘完成后重读重建——否则字盒变更晚于
+            // refresh，写失败保留的条目（或已移除条目）在弹窗内回显不准
+            onChange: (keys) => (async () => {
+              const removed = box.ups.filter((u) => !keys.includes(u));
+              let changed = false;
+              for (const uid of removed) {
+                // C4：以磁盘写结果决定成功通知与字盒变更——写失败保留条目 + 错误提示，不弹假成功
+                if (!(await removeBilibiliUp(uid))) {
+                  notifyWriteFailed(`移除 UP 主 ${uid}`);
+                  continue;
                 }
-                if (removed.length > 0) opts.onChanged();
-              })();
-            },
+                box.ups = box.ups.filter((u) => u !== uid);
+                delete box.upInfo[uid];
+                changed = true;
+                notice(`已移除 UP 主 ${uid}`, 'success');
+              }
+              if (changed) opts.onChanged();
+            })(),
           },
         ],
       },
@@ -211,24 +242,44 @@ async function addUpUid(raw: string | undefined, box: UpManagerBox, opts: UpMana
     notice('无法识别 UID，请粘贴 space.bilibili.com 内的主页链接', 'error');
     return;
   }
-  const added = await addBilibiliUp(uid);
-  if (!added) {
-    notice('该 UP 主已在名单中', 'info');
-    return;
+  // C4：数据层结果四分（已写入/已存在/入参非法/读盘失败），各给准确文案——不再把读盘失败说成「已在名单中」
+  const outcome = await addBilibiliUp(uid);
+  switch (outcome) {
+    case 'added':
+      box.inputValue = '';
+      box.ups = [...box.ups, uid];
+      opts.onChanged();
+      notice(`已添加 UP 主 ${uid}`, 'success');
+      return;
+    case 'exists':
+      notice('该 UP 主已在名单中', 'info');
+      return;
+    case 'invalid':
+      notice('无法识别 UID，请粘贴 space.bilibili.com 内的主页链接', 'error');
+      return;
+    default:
+      notifyWriteFailed('添加 UP 主');
+      return;
   }
-  box.inputValue = '';
-  box.ups = [...box.ups, uid];
-  opts.onChanged();
-  notice(`已添加 UP 主 ${uid}`, 'success');
 }
 
-/** 打开 UP 主名单管理弹窗：自建 overlay + 面板通用组件渲染（z 序与叠加行为零变化） */
+/**
+ * C25：UP 主管理弹窗「正在打开/已打开」单例标志。open 流程首段同步置位、close() 复位——
+ * 首开在动态加载 renderer 期间 mask 尚未挂 DOM，只查 mask 存在性会漏掉同帧连点（叠出第二层）。
+ */
+let upManagerOpen = false;
+
+/** 打开 UP 主名单管理弹窗：自建 overlay + 面板通用组件渲染（z 序与叠加行为零变化）。
+ *  C25：单例守卫——已开或正在打开即直接返回，消灭连点叠层（各层各持 esc 句柄、遮罩叠遮罩、Esc 只关最上层） */
 async function openUpManagerModal(opts: { ups: string[]; upInfo: Record<string, BilibiliUpInfo>; onChanged: () => void }): Promise<void> {
+  if (upManagerOpen || document.getElementById('bz-up-manager-mask')) return;
+  upManagerOpen = true;
   let handle: { unregister(): void } | null = null;
   function close(): void {
     mask.remove();
     popup.remove();
     if (handle) handle.unregister();
+    upManagerOpen = false;
   }
   const { mask, popup } = createOverlay({
     maskId: 'bz-up-manager-mask',
@@ -247,10 +298,16 @@ async function openUpManagerModal(opts: { ups: string[]; upInfo: Record<string, 
   const content = document.createElement('div');
   content.className = 'bz-settings-content';
 
-  // 内容 = 面板通用渲染器（renderPanelSchema，行/组卡与设置面板同组件单源）；
-  // 懒加载解析跨域环（settings-panel schemaLoaders ←→ 本域管理弹窗，函数级延迟解析）
-  const { renderPanelSchema } = await import('../settings-panel/renderer');
-  renderPanelSchema(content, upManagerSettingsSchema(opts));
+  try {
+    // 内容 = 面板通用渲染器（renderPanelSchema，行/组卡与设置面板同组件单源）；
+    // 懒加载解析跨域环（settings-panel schemaLoaders ←→ 本域管理弹窗，函数级延迟解析）
+    const { renderPanelSchema } = await import('../settings-panel/renderer');
+    renderPanelSchema(content, upManagerSettingsSchema(opts));
+  } catch (e) {
+    // 打开失败（动态加载/渲染异常）：close 复位守卫并清理半成品——否则单例标志滞留，「管理」此后无响应
+    close();
+    throw e;
+  }
 
   popup.appendChild(header);
   popup.appendChild(content);
@@ -283,8 +340,9 @@ interface RssManagerBox {
 }
 
 /** 试拉 RSS：取 XML 原文，须带 feed 结构标记（<rss>/<feed>/<RDF>，拦截恰好含 <title> 的
- *  普通 HTML 网页）再提取 feed 自带标题；10s 超时/非 2xx/非 feed 结构/解析不出 → null */
-async function fetchRssFeedTitle(url: string): Promise<string | null> {
+ *  普通 HTML 网页）再提取 feed 自带标题；10s 超时/非 2xx/非 feed 结构/解析不出 → null。
+ *  导出（C23 回归测试用；生产仅 addRssFeedUrl 消费） */
+export async function fetchRssFeedTitle(url: string): Promise<string | null> {
   try {
     const timer = new Promise<null>((resolve) => setTimeout(() => resolve(null), 10000));
     const req = requestUrl({ url, method: 'GET' }).then((resp) => {
@@ -292,6 +350,9 @@ async function fetchRssFeedTitle(url: string): Promise<string | null> {
       if (!looksLikeFeedXml(resp.text)) return null;
       return extractFeedTitleFromXml(resp.text);
     });
+    // C23：超时胜出后 req 若迟到 reject 会成为 unhandled rejection——挂空 catch 兜底
+    //（race 尚在等待时 rejection 仍由下方 await 经外层 try 捕获，行为不变）
+    req.catch(() => {});
     return await Promise.race([req, timer]);
   } catch {
     return null;
@@ -340,12 +401,18 @@ export function rssManagerSettingsSchema(opts: RssManagerSchemaOptions): Setting
             emptyText: '暂无订阅源，在上方粘贴 RSS 地址添加',
             onChange: (keys) => (async () => {
               const removed = box.feeds.filter((f) => !keys.includes(f.url));
+              let changed = false;
               for (const f of removed) {
-                await removeRssFeed(f.url);
+                // C4：以磁盘写结果决定成功通知与字盒变更——写失败保留条目 + 错误提示，不弹假成功
+                if (!(await removeRssFeed(f.url))) {
+                  notifyWriteFailed(`移除 RSS 源 ${f.title || f.url}`);
+                  continue;
+                }
                 box.feeds = box.feeds.filter((x) => x.url !== f.url);
+                changed = true;
                 notice(`已移除 RSS 源 ${f.title || f.url}`, 'success');
               }
-              if (removed.length > 0) opts.onChanged();
+              if (changed) opts.onChanged();
             })(),
           },
         ],
@@ -373,24 +440,41 @@ async function addRssFeedUrl(raw: string | undefined, box: RssManagerBox, opts: 
     notice('试拉失败：地址不可达或不是有效的 RSS 源，未添加', 'error');
     return;
   }
-  const added = await addRssFeed(url, title);
-  if (!added) {
-    notice('该 RSS 源已在订阅列表中', 'info');
-    return;
+  // C4：数据层结果四分（已写入/已存在/入参非法/读盘失败），各给准确文案——不再把读盘失败说成「已在订阅列表中」
+  const outcome = await addRssFeed(url, title);
+  switch (outcome) {
+    case 'added':
+      box.inputValue = '';
+      box.feeds = [...box.feeds, { url, title }];
+      opts.onChanged();
+      notice(`已订阅 ${title || url}`, 'success');
+      return;
+    case 'exists':
+      notice('该 RSS 源已在订阅列表中', 'info');
+      return;
+    case 'invalid':
+      notice('无效的 RSS 地址，请粘贴 http/https 开头的订阅链接', 'error');
+      return;
+    default:
+      notifyWriteFailed('添加 RSS 源');
+      return;
   }
-  box.inputValue = '';
-  box.feeds = [...box.feeds, { url, title }];
-  opts.onChanged();
-  notice(`已订阅 ${title || url}`, 'success');
 }
 
-/** 打开 RSS 订阅管理弹窗：自建 overlay + 面板通用组件渲染（范式同 UP 主管理弹窗） */
+/** C25：RSS 管理弹窗单例标志（语义同 upManagerOpen：首开异步加载期间 mask 未挂 DOM，同帧连点靠它拦住） */
+let rssManagerOpen = false;
+
+/** 打开 RSS 订阅管理弹窗：自建 overlay + 面板通用组件渲染（范式同 UP 主管理弹窗）。
+ *  C25：单例守卫——已开或正在打开即直接返回，消灭连点叠层 */
 async function openRssManagerModal(opts: { feeds: RssFeed[]; onChanged: () => void }): Promise<void> {
+  if (rssManagerOpen || document.getElementById('bz-rss-manager-mask')) return;
+  rssManagerOpen = true;
   let handle: { unregister(): void } | null = null;
   function close(): void {
     mask.remove();
     popup.remove();
     if (handle) handle.unregister();
+    rssManagerOpen = false;
   }
   const { mask, popup } = createOverlay({
     maskId: 'bz-rss-manager-mask',
@@ -409,8 +493,14 @@ async function openRssManagerModal(opts: { feeds: RssFeed[]; onChanged: () => vo
   const content = document.createElement('div');
   content.className = 'bz-settings-content';
 
-  const { renderPanelSchema } = await import('../settings-panel/renderer');
-  renderPanelSchema(content, rssManagerSettingsSchema(opts));
+  try {
+    const { renderPanelSchema } = await import('../settings-panel/renderer');
+    renderPanelSchema(content, rssManagerSettingsSchema(opts));
+  } catch (e) {
+    // 打开失败：close 复位守卫并清理半成品（同 UP 主弹窗口径）
+    close();
+    throw e;
+  }
 
   popup.appendChild(header);
   popup.appendChild(content);

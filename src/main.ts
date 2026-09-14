@@ -26,6 +26,7 @@ import { openTodoPanel, addTodoItem, unloadTodo, ensureTodoReminders, ensureFile
 import { addBelongingsItem, openBelongings, unloadBelongings } from './belongings';
 // 剪藏本融合域（clipbook，上游 ADR-0082/issue 177）：聚合讯未读流 + 剪藏笔记一体化工作台
 import { openClipbook, markAllUnreadRead, unloadClipbook } from './clipbook';
+import { maybeFetchNews, fetchNowNews, notifyManualFetchResult } from './clipbook/news-fetcher';
 import { openFavoritesPanel, addFavoriteItem, unloadFavorites } from './favorites';
 // 书架墙（bookshelf 域，上游并存式新域终局换血：数据同源，旧 library 退役）
 import { openBookshelf, openBookshelfReport, unloadBookshelf } from './bookshelf';
@@ -113,6 +114,11 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   // 剪藏本（clipbook 融合域，上游 ADR-0082：聚合讯未读流 + 剪藏笔记一体化工作台）
   { id: 'bz-clipbook-open', name: '剪藏本', icon: 'scissors', callback: () => openClipbook(getApp()) },
   { id: 'bz-clipbook-mark-all-read', name: '未读全部标为已读', icon: 'check-check', callback: () => markAllUnreadRead() },
+  // 立即抓取（issue 302 / ADR-0128）：插件内抓取的手动入口，忽略间隔
+  { id: 'bz-clipbook-fetch-now', name: '剪藏本抓取新文章', icon: 'rss', callback: () => {
+    // 命令触发无就地可见结果（面板可能没开）：完成态给反馈；面板开着由 reloadIfOpen 同步
+    void fetchNowNews().then(notifyManualFetchResult);
+  } },
   // 收藏本
   { id: 'bz-favorites-open', name: '收藏本', icon: 'star', callback: () => openFavoritesPanel(getApp()) },
   { id: 'bz-favorites-add', name: '加收藏', icon: 'bookmark', callback: () => addFavoriteItem(getApp()) },
@@ -316,6 +322,8 @@ export default class BzPlugin extends Plugin {
       if (this.settings.enableAutoNotify !== false) void ensureReview(this.app);
       // 番茄钟：启动即恢复（load+recover，正在倒计时则后台继续/按设置自动弹窗）
       void ensurePomodoro(this.app);
+      // 聚合讯自动抓取（issue 302 / ADR-0128）：启动延迟一拍后台抓一轮（间隔判定在 fetcher 内）
+      setTimeout(() => { void maybeFetchNews(); }, 0);
       // 小橘：启动按开关 + 关闭方式门控（ticket 103——开=装配显示；关+hide=隐藏启动装配；
       // 关+lazy/stop=不自动挂载（命令可召唤/完全停机））
       if (this.settings.smartcatEnabled) {
