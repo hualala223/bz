@@ -804,3 +804,10 @@
 - [x] 顺手收口：home 域快捷菜单补挂「视频生成文献笔记」（票 289 已有命令，票 288「本地无该命令」注记作废）
 - [x] 门禁全绿：tsc 0 错；vitest 全量 **303 文件 / 4763 用例通过**（+1 为存量别名兼容测试）；esbuild production 构建通过（build-css.mjs SOURCES 同步 src/knowledge/styles.css，产物已部署 vault 插件目录，构建产物不提交）
 - [x] 流程：git worktree 隔离（wt-knowledge-rename），门禁后显式路径落主仓
+
+
+## 2026-09-14 · 票 290 补漏 + 票 291：内容首页桌面端整页滚动
+
+- [x] 票 290 补漏：sync 脚本按文件名排除 styles.css（本意只排根构建产物），致 src/knowledge/styles.css 未同步、src/literature/styles.css 残留——tsc/vitest 不测 css，构建时「样式源缺失」才暴露。已从残留文件复原 knowledge/styles.css（仅头部注释正名，类名与 knowledge/ui.ts 零差集已验证）、删除 literature 残留；全仓 styles.css 残留 grep 清零
+- [x] 票 291：用户报告桌面端内容首页「看不到完整页面」——面板高锁 min(580px,92vh) + body overflow:hidden + grid 行高 minmax(0,1fr) 三重压死，超出内容被无声裁剪。改法：面板加高 min(860px,92vh)；body 桌面端纵向滚动（6px 细滚动条配纸感主题，暗色 hover 同步）；grid 去行高约束改 min-height:100%；时间线去内部滚动自然展开（消除双滚动嵌套）。移动端断点补 min-height:0 抵消，行为一字不变
+- [x] 构建 production 通过；两 vault（-0.笔记汇总库 / 1.阅读库）styles.css md5 与主仓根一致（dbf09851）
