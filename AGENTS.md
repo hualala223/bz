@@ -1,6 +1,6 @@
 # AGENTS.md — 包仔（bz）Obsidian 插件
 
-独立 Obsidian 插件，26 功能域（详见领域清单；2026-09 自上游线 yeshimei/bz 并入 home/recap/checkup/diary-wall/settings-panel 五域，memo 域由 todo 待办域换血接替、movie 域由 cinema 影院域换血接替、news+clipping 域由 clipbook 剪藏本融合域换血接替、password 域并入 encrypt 统一保险库；2026-09 collect 日常收集域换血接替外部 QuickAdd「日常收集」宏，ADR-0107，见 PROGRESS）。数据沿用既有格式（`CONFIG/STORAGE/*.json`、`我的/*.md`、frontmatter），旧数据直接可读。**项目语言：中文**。
+独立 Obsidian 插件，**24 功能域**（详见领域清单，逐一以 `src/<域>/` 目录为准；2026-09 自上游线 yeshimei/bz 并入 home/recap/checkup/diary-wall/settings-panel 五域，memo 域由 todo 待办域换血接替、movie 域由 cinema 影院域换血接替、news+clipping 域由 clipbook 剪藏本融合域换血接替、password 域并入 encrypt 统一保险库；2026-09 collect 日常收集域换血接替外部 QuickAdd「日常收集」宏，ADR-0107，见 PROGRESS）。2026-09-14 核正：原写「26 功能域」为文档漂移，逐项见下方领域清单脚注。数据沿用既有格式（`CONFIG/STORAGE/*.json`、`我的/*.md`、frontmatter），旧数据直接可读。**项目语言：中文**。
 
 ## 交互约定
 
@@ -18,7 +18,7 @@
 
 ## 架构
 
-- `src/main.ts`：命令裸注册表、设置页、懒加载、onunload（63 命令 = 静态注册 47（以 `tests/smoke.test.ts` 的 `EXPECTED_COMMAND_IDS` 为准，含 collect 面板/统一入口/选区收集 3 条；其中 45 条在 COMMANDS 数组，`bz-attach-move`/`bz-diary-open` 由 main.ts 裸注册）+ collect 汉字分类动态生成 16 条（`DEFAULT_COLLECT_CATEGORIES`）。2026-09-13 审计核正，原写「68 命令」为文档漂移；ticket 276 加「今日已复习」后 63 → 64；ticket 282 退役「当日待办事项」（bz-diary-todo-capture，ADR-0122）后 64 → 63）
+- `src/main.ts`：命令裸注册表、设置页、懒加载、onunload（**67 条命令** = `COMMANDS` 表 **65** 条 + 表外裸注册 1 条 + diary 域 init 内 1 条。表内 65 = 48 条显式字面量 + 1 条 `ATTACH_COMMAND_ID`（`bz-attach-move`，main.ts:163）+ 16 条 collect 汉字分类经 `...DEFAULT_COLLECT_CATEGORIES.map(categoryCommandId)` 展开（main.ts:181）；表外 = `bz-diary-open`（main.ts:297）；域内 init = `bz-diary-write`（`src/diary/ui/quote.ts:15`）。核算口径 = `tests/smoke.test.ts` 的 `EXPECTED_COMMAND_IDS`（50 字面量 + 16 条 collect 展开 = 66）另加 `bz-diary-write`。2026-09-14 重新核正：原写「63 命令 = 静态注册 47」为文档漂移，实际 67）
 - `src/core/`：共享层（不挂 window）——app/settings-provider/ai/json-store/domain-bus/obsidian-adapter/path-classify/esc-manager/flow-dialog/utils/dom/changelog/notice（自绘 toast）/settings-modal/settings-schema/settings-common
 - `src/<域>/`：index.ts + data + ui + styles.css（该域样式源头，聚合进根 `styles.css`）；`src/settings.ts`；根 `styles.css`（构建聚合产物，勿手改）；`docs/adr/`；`CONTEXT.md`；`.scratch/<feature>/`
 - **依赖方向（ADR-0002）**：`core ← config/state ← parser ← store ← ui ← main`。store 无 DOM；UI 刷新靠回调订阅；禁止模块顶层互访，函数级引用环须函数体内延迟解析。
@@ -43,23 +43,23 @@
 
 **统一视觉**：头部行用 `.bz-win-head`，关闭按钮用 `.bz-win-close`，按钮秩序：功能 → ⚙️ → 关闭；弹窗不放关闭按钮，靠 mask + ESC；全屏避让用全局规则。样式已集中 styles.css，勿另写差异。
 
-## 领域清单（数据均在 CONFIG/STORAGE/，表内只写文件名）
+## 领域清单（`CONFIG/STORAGE/` 下的数据只写文件名；共 **24 域**，与 `src/<域>/` 目录一一对应，`core` 为共享层不计入）
 
 | 域 | 数据 |
 |---|---|
 | diary | `我的/日记/*.md` |
 | todo（待办，上游换血接替 memo，ADR-0092） | memo.json（唯一属主） |
-| bookshelf（书架墙，上游换血接替 library） | `书库/*.md`、EPUB（weave-data.json） |
+| bookshelf（书架墙，上游换血接替 library） | `书库/*.md`、EPUB（weave-data.json）、读书报告内嵌面板（ADR-0091） |
 | belongings | belongings.json |
 | clipbook（剪藏本融合域，上游换血接替 news+clipping，ADR-0082） | news.json（未读流）+ `归档/网页剪藏/*.md` + clipbook.json（侧写） |
-| password | passwords.json |
 | favorites | favorites.json |
-| bookshelf（书架墙，上游换血接替 library） | `书库/*.md`、EPUB（weave-data.json）、读书报告内嵌面板（ADR-0091） |
 | reading-report | metadataCache 统计 |
 | cinema（影院，上游换血接替 movie，ADR-0087） | `我的/影视/*.md`（AI 分析页内嵌，ADR-0090） |
 | review | review.json |
 | quiz | quiz.json |
 | secondbrain（第二大脑） | secondbrain.json（meta/panel/link 三段）+ secondbrain.vec |
+| literature（文献盒，ADR-0072 自 bili-downloader 迁出并正名） | literature.json（视频转文献任务队列）+ 文献目录笔记（`文献盒/*.md`，设置键 `literatureDirectory`） |
+| smartcat（小橘） | smartcat.json + smartcat-behavior.json + smartcat-memory.json |
 | auto-summary | 剪藏 frontmatter |
 | home（内容首页，上游并入） | home.json（钉选偏好；各域只读快照） |
 | recap（今日回顾，上游并入） | 只读聚合五域当天痕迹 |
@@ -70,8 +70,9 @@
 | pomodoro | pomodoro.json |
 | attach | —（搬当前笔记引用的 vault 附件） |
 | collect（日常收集，issue 246：换血外部 QuickAdd「日常收集」宏，ADR-0107） | `我的/日常收集/*.md`（分类 → 目标文件映射存 data.json `collectCategories`） |
-| bili-downloader | bili-tasks.json |
 | encrypt（保险库，上游换血：password 并入，ADR-0085） | `CONFIG/.ENCRYPT/`（.safe.enc 清单 + 附件；密码=kind=password-vault SafeNote） |
+
+> **域数核正（2026-09-14）**：26 → **24**。删三处、补两处：① 删 `password` 行——`passwords.json` 全仓零代码读写点，password 域已并入 encrypt（ADR-0085）；② 删重复的第二行 `bookshelf`（原表列了两遍）；③ 删 `bili-downloader | bili-tasks.json`——ADR-0072 已迁出并正名为 literature 域，实际数据是 `literature.json`（`bili-tasks` 只剩注释与历史 ADR 里的残留说法）；④ 补 `literature` 行；⑤ 补 `smartcat` 行。**核对方法**：`src/` 下除 `core` 外的子目录数即域数（`ls src/`）。
 
 ## 测试与质量门禁
 

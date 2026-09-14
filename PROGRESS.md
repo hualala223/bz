@@ -698,3 +698,14 @@
 - [x] 门禁：tsc 0 错 + 全量测试绿（290 文件 / 4568 例，exit=0，2m13s）
 - [x] 文档：ADR-0123 + issues/283 + CONTEXT.md「日常时间记录」术语组同步（含历史漂移核正：`bz-diary-todo-capture` 已随 ADR-0122 退役，从入口清单移除）
 - [x] 遗留（用户自理，本次未动）：QuickAdd `data.json` 两条 Capture（`日常行为记录` / `当日代办事项`）及其旧层级 `after`；vault 内 `CONFIG/SCRIPTS/日常时间记录/` 6 个旧 js；磁盘另两份同名旧模板（属别的 vault）
+
+## 2026-09-14 · AGENTS.md 契约文档核正（域数 + 命令数）
+
+**状态：已交付**（用户授权「自行判断后自行决定」；纯文档修正，不动任何代码/数据，未新开 issue）
+
+- [x] 起因：核实「文献盒视频链路」时顺带发现 `AGENTS.md` 领域清单与代码实况不符，本次逐项量测后核正
+- [x] 域数 26 → **24**：① 删 `password` 行（`passwords.json` 全仓**零**代码读写点，password 域已并入 encrypt，ADR-0085）；② 删重复的第二行 `bookshelf`；③ 删 `bili-downloader | bili-tasks.json`（ADR-0072 已迁出正名为 literature 域，实际数据 `literature.json`；`bili-tasks` 仅剩注释/历史 ADR 残留说法）；④ 补 `literature` 行；⑤ 补 `smartcat` 行
+- [x] 命令数 63 → **67**：量测口径 = `src/main.ts` 的 `COMMANDS` 表 **65** 条（48 显式字面量 + 1 条 `ATTACH_COMMAND_ID`/`bz-attach-move`（main.ts:163）+ 16 条 collect 汉字分类 `...DEFAULT_COLLECT_CATEGORIES.map(categoryCommandId)`（main.ts:181））+ 表外裸注册 1 条 `bz-diary-open`（main.ts:297）+ diary 域 init 内 1 条 `bz-diary-write`（`src/diary/ui/quote.ts:15`）；与 smoke `EXPECTED_COMMAND_IDS`（50 字面量 + 16 展开 = 66，另加 `bz-diary-write`）交叉验证一致。原表述「静态注册 47（其中 45 条在 COMMANDS 数组，`bz-attach-move` 由 main.ts 裸注册）」两处均错——`bz-attach-move` 在 COMMANDS 表内（用常量），数组内实为 49 条
+- [x] 校验：脚本比对「清单行集合 == `src/` 下除 `core` 外的目录集合」→ 双向零差异（24 = 24）
+- [x] 门禁：本轮仅改 `AGENTS.md`（`.md` 文档），`src/` 与 `tests/` 一字未动 → 不触发重跑测试/类型检查；沿用当日 283 票的全绿结论（290 文件 / 4568 例，tsc 0 错）
+- [x] 核对脚本留存 `.scratch/`（`audit_agents_drift.py` / `audit_cmd_diff.py` / `audit_cmd_list.py` / `verify_agents_table.py`，未提交）
