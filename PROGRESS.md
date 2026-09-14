@@ -783,3 +783,13 @@
 - [x] 冻结防线：diary-format / 上游日记契约（304/305、ADR-0130/0131）零引入；review 域零改动（home 只读消费 reviewApp 既有 API）
 - [x] 门禁全绿：tsc 0 错；vitest 全量 **303 文件 / 4762 用例通过**；esbuild production 构建通过（产物已部署 vault 插件目录，构建产物不提交）
 - [x] 流程：git worktree 隔离（wt-home-sync，主仓零接触），门禁后显式路径落主仓；测试适配 tests/home 8 文件（上游 5 新 + 3 更新，日记夹具改本地条目标题行口径）
+
+
+## 2026-09-14 · ticket 289：知识盒剩余差量收口（上游 issue 278 命令入口 + 领域提示去枚举）
+
+- [x] 起因：用户点名「把上游的知识盒拿进来」；归一比对（knowledge→literature 词形）证明数据/逻辑层早已同步（269/262/298/278收窄均已在，275 为上游重建 UI 独有病灶、本地无对应弹层；票 284 短链为本地领先）
+- [x] 真实差量仅 2 项：bz-literature-note-video 命令注册（openLiteratureAddTask 函数本就存在，clipbook ADR-0068 在用，只缺命令入口）；note-gen 领域提示去示例枚举（上游 ff230b27）
+- [x] 命令数 71→72；smoke EXPECTED_COMMAND_IDS +1；AGENTS/PROGRESS 口径同步
+- [x] 明确排除：上游 data.ts migrateLegacy（上游自有正名迁移，本地无旧文件名）；291/277/settings-panel 通用化（全域 UI 体系，按两套体系策略排除）
+- [x] 门禁全绿：tsc 0 错；vitest 全量 303 文件/4762 用例；esbuild production 通过
+- [x] 流程说明：差量过小（2 文件 +1 测试清单 +2 文档），未走 worktree，主仓直改（沿用同日菜单两次直改先例），目标路径事前核对干净
