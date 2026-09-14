@@ -6,8 +6,9 @@
  *  - 添加：面板新增条目 → 投影行追加到今天小节末尾（序号 = 既有最大号 + 1）；
  *  - 勾选：面板完成 ↔ 日记打钩、面板恢复 ↔ 日记退回 `[ ]`；
  *  - 顺延：插件启动（onLayoutReady）/ 当天首次打开待办面板时，把所有历史未完成且今天
- *    尚无投影行的条目补写进今天小节（按 created 升序，去重只补一次；今天文件缺失按
- *    daily-capture 先例「标记 + 空行 + 首行」建档）。
+ *    尚无投影行的条目补写进今天小节（按 created 升序，去重只补一次；今天文件缺失时
+ *    读日记模板铺骨架建档——ADR-0123，与日程规划同源，故投影天然落进模板自带的
+ *    `# 日程规划` → `## 代办事项`）。
  *
  * 双向同步（用户裁决「都跟着改，不管是哪边」）：改标题双向、删除双向；同步窗口 =
  * **今天**的日期文件——历史日记是当天快照，永不回改、不触发反向。反向监听
@@ -22,6 +23,7 @@
 import { moment } from 'obsidian';
 import type { App, EventRef, TAbstractFile, TFile } from 'obsidian';
 import { TODO_HEADING, editSectionLines, insertBlockIntoSection, writeDiarySection } from '../diary/daily-capture';
+import { buildDiaryFileContent, readDiaryTemplate } from '../diary/daily';
 import { DIARY_DIRECTORY } from '../diary/config';
 import { enqueueFileTask } from '../core/storage';
 import { notify, notifyUndo } from '../core/notice';
@@ -107,9 +109,22 @@ async function refreshLastSeen(date: string): Promise<void> {
 // ===== 顺延（不变量补齐） =====
 
 /**
+ * 建档初稿（ADR-0123）：当天日记文件**缺失**时读日记模板（与日程规划同一条真源），
+ * 给出「骨架 + 日程三段」的完整初稿；文件已存在则返回 undefined（不读模板、不覆盖）。
+ * 只在文件确实缺失时才付出一次模板读取的代价。
+ */
+async function seedForMissing(date: string): Promise<string | undefined> {
+  const app = appRef;
+  if (!app) return undefined;
+  if (app.vault.getAbstractFileByPath(diaryPath(date))) return undefined;
+  return buildDiaryFileContent(await readDiaryTemplate(app), date);
+}
+
+/**
  * 顺延：把所有历史未完成且今天无投影行的条目补进今天小节。
- * 每天（每插件会话）只跑一次；文件缺失建档，小节缺失现场建节（不变量优先于「不建节」
- * 的捕获语义——捕获防破坏文体，顺延是数据补齐，ADR-0122 决策 3）。
+ * 每天（每插件会话）只跑一次；文件缺失按日记模板建档（含骨架与 `## 代办事项`），
+ * 小节缺失才现场建节（不变量优先于「不建节」的捕获语义——捕获防破坏文体，顺延是
+ * 数据补齐，ADR-0122 决策 3）。
  */
 export async function runTodoRollover(force = false): Promise<void> {
   const app = appRef;
@@ -122,10 +137,15 @@ export async function runTodoRollover(force = false): Promise<void> {
     const pending = items
       .filter((i) => !i.completed)
       .sort((a, b) => a.created.localeCompare(b.created));
-    await writeDiarySection(app, today, (existing) => ({
-      content: rollOverContent(existing, pending),
-      placed: 'section' as const,
-    }));
+    await writeDiarySection(
+      app,
+      today,
+      (existing) => ({
+        content: rollOverContent(existing, pending),
+        placed: 'section' as const,
+      }),
+      { seedWhenMissing: await seedForMissing(today) }
+    );
     await refreshLastSeen(today);
   } catch (e) {
     console.error('[todo-diary-sync] rollover', e);
@@ -133,10 +153,13 @@ export async function runTodoRollover(force = false): Promise<void> {
   }
 }
 
-/** 顺延内容变换（纯逻辑内联）：命中已有小节 → 补缺失行；无小节 → 建节；空文件 → 标记起头 */
+/**
+ * 顺延内容变换（纯逻辑内联）：命中已有小节 → 补缺失行；小节已存在但无行可补 → 一字不动；
+ * 无小节 → 文末建节；空文件（未给 seed 的旧口径兜底）→ 标记起头。
+ */
 function rollOverContent(existing: string, pending: TodoItem[]): string {
   if (!existing.trim()) {
-    // 空文件：标记 + 空行 + 首行起头（daily-capture 建档先例，不复制模板 frontmatter）
+    // 空文件：标记 + 空行 + 首行起头（文件缺失且未给模板初稿时的兜底，不复制模板 frontmatter）
     let seq = 0;
     const body: string[] = [];
     for (const it of pending) {
@@ -146,7 +169,9 @@ function rollOverContent(existing: string, pending: TodoItem[]): string {
     return body.length ? `${TODO_HEADING}\n\n${body.join('\n')}\n` : `${TODO_HEADING}\n`;
   }
 
+  let found = false;
   const res = editSectionLines(existing, TODO_HEADING, (section) => {
+    found = true;
     const keys = new Set(collectProjections(section).map(projectionKey));
     let seq = maxWrittenSeq(section);
     const add: string[] = [];
@@ -159,6 +184,9 @@ function rollOverContent(existing: string, pending: TodoItem[]): string {
     return add.length ? appendLines(section, add) : null;
   });
   if (res.changed) return res.content;
+  // 小节已存在、只是没有新行可补 → 文件一字不动。
+  // （旧实现把「无改动」当成「小节不存在」，会在文末再建一个空的 `## 代办事项`——ADR-0123 修）
+  if (found) return existing;
 
   // 小节不存在：文末建节（空行 + 标记 + 空行 + 行）
   let seq = 0;
@@ -199,7 +227,7 @@ export async function syncItemAdded(it: TodoItem): Promise<void> {
         createIfNotFound: true,
       });
       return { content: created.content, placed: created.placed };
-    });
+    }, { seedWhenMissing: await seedForMissing(today) });
     await refreshLastSeen(today);
   } catch (e) {
     handleSyncError(e, '写入日记待办');

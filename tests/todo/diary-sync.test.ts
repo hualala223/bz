@@ -129,13 +129,57 @@ describe('顺延（启动/首开面板）', () => {
     expect(out).not.toContain('- [ ] 1. B站视频');
   });
 
-  it('今天日记文件缺失：建档「标记 + 空行 + 首行」', async () => {
+  it('今天日记文件缺失：按日记模板铺骨架建档，投影落进 `# 日程规划` → `## 代办事项`', async () => {
     const vault = setup([item({ id: 'a', title: '任务', created: '2026-09-12 09:00:00' })]);
     const app = mockAppWithVault(vault);
     setApp(app);
     ensureTodoDiarySync(app);
     await flushAll();
-    expect(vault.files.get(diaryKey())).toBe('## 代办事项\n\n- [ ] 1. 任务-09:00\n');
+    const out = vault.files.get(diaryKey())!;
+    // vault 里没有模板文件 → 内置兜底骨架；frontmatter 按目标日期规整（ADR-0112 决策 3）
+    expect(out).toContain('card_type: 日记');
+    expect(out).toContain(`date_creation: ${today()} 00:00:00`);
+    for (const h of ['# 睡眠相关', '# 随笔', '# 新闻联播内容记录', '# 日常行为记录', '# 日程规划']) {
+      expect(out).toContain(h);
+    }
+    expect(out).toContain('## 代办事项');
+    expect(out).toContain('## 完成情况跟踪');
+    expect(out).toContain('## 备注');
+    // 投影写在 `# 日程规划` 之后的小节里，且全文件只有一个 `## 代办事项`
+    expect(out).toContain('- [ ] 1. 任务-09:00');
+    expect(out.indexOf('# 日程规划')).toBeLessThan(out.indexOf('- [ ] 1. 任务-09:00'));
+    expect(out.match(/^## 代办事项$/gm)).toHaveLength(1);
+    expect(out).not.toMatch(/^- \[ \]$/m); // 空占位已删（ADR-0123）
+  });
+
+  it('今天日记文件缺失且 vault 有模板：建档以模板原文为准（不再叠内置骨架）', async () => {
+    const vault = setup([item({ id: 'a', title: '任务', created: '2026-09-12 09:00:00' })]);
+    vault.files.set(
+      'CONFIG/TEMPLATE/模板-日记.md',
+      '---\ncard_type: 日记\ntitle: "残留.md"\n---\n\n# 随笔\n\n# 日程规划\n\n## 代办事项\n\n## 备注\n'
+    );
+    const app = mockAppWithVault(vault);
+    setApp(app);
+    ensureTodoDiarySync(app);
+    await flushAll();
+    const out = vault.files.get(diaryKey())!;
+    expect(out).toContain('# 随笔');
+    expect(out).toContain('## 代办事项');
+    expect(out).toContain('## 备注');
+    expect(out).toContain('- [ ] 1. 任务-09:00');
+    expect(out).not.toContain('title: "残留.md"'); // title 占位被规整掉
+    expect(out).toContain(`date_creation: ${today()} 00:00:00`);
+    expect(out).not.toContain('# 睡眠相关'); // 模板说了算，内置骨架不参与
+  });
+
+  it('回归（ADR-0123）：小节已存在且无新行可补 → 文件一字不动，不插多余空行', async () => {
+    const before = '# 日程规划\n\n## 代办事项\n- [ ] 1. 已在-09:00\n\n## 完成情况跟踪\n';
+    const vault = setup([item({ id: 'a', title: '已在', created: '2026-09-13 09:00:00' })], before);
+    const app = mockAppWithVault(vault);
+    setApp(app);
+    ensureTodoDiarySync(app);
+    await flushAll();
+    expect(vault.files.get(diaryKey())).toBe(before);
   });
 
   it('今天已有投影行的条目不重复补（去重）；序号接既有最大号', async () => {

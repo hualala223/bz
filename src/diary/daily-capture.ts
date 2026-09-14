@@ -228,14 +228,20 @@ async function ensureDiaryFolder(app: any): Promise<void> {
 
 /**
  * 日记小节写入薄壳（单行捕获 / 多行块共用）：确保目录 → 同路径串行队列内
- * 「读原文 → 纯函数变换 → modify/create」。transform 收到磁盘原文（文件缺失时为空串），
- * 返回下一版全文与落点；队列键 = 日记文件路径，与 diary store writeFile 互斥。
+ * 「读原文 → 纯函数变换 → modify/create」。transform 收到磁盘原文（文件缺失时为空串，
+ * 除非给了 `seedWhenMissing`——见下），返回下一版全文与落点；队列键 = 日记文件路径，
+ * 与 diary store writeFile 互斥。
  * 导出供 todo 域日记同步模块复用（ADR-0122：同一写壳，同一队列键，互斥不踩踏）。
+ *
+ * `seedWhenMissing`（ADR-0123）：文件缺失时把「建档初稿」交给 transform，而不再是空串。
+ * todo 域顺延建档借此读日记模板铺骨架，待办投影随即落进模板自带的 `## 代办事项`；
+ * 不传则维持「空串 + 自建标记」的旧口径（单行捕获等入口行为不变）。
  */
 export async function writeDiarySection(
   app: any,
   dateStr: string,
-  transform: (existing: string) => { content: string; placed: SectionBlockPlaced }
+  transform: (existing: string) => { content: string; placed: SectionBlockPlaced },
+  opts: { seedWhenMissing?: string } = {}
 ): Promise<DiaryCaptureResult> {
   await ensureDiaryFolder(app);
   const path = `${DIARY_DIRECTORY}/${dateStr}.md`;
@@ -250,7 +256,7 @@ export async function writeDiarySection(
       }
     }
     const created = existing === null;
-    const next = transform(existing ?? '');
+    const next = transform(existing ?? opts.seedWhenMissing ?? '');
     if (f) await app.vault.modify(f, next.content);
     else await app.vault.create(path, next.content);
     return { path, created, placed: next.placed };

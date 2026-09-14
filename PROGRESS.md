@@ -682,3 +682,19 @@
 - [x] 测试：新增 	ests/todo/diary-projection.test.ts 13 例 + 	ests/todo/diary-sync.test.ts 12 例；smoke 命令清单与 daily-capture 两文件同步修订
 - [x] 文档：ADR-0122 + issues/282 + CONTEXT.md 新增「待办日记同步」术语组（待办日记投影/日记行序号/同步窗口/顺延）+ AGENTS.md 命令数核正
 - [x] 门禁：tsc 0 错 + 全量测试 290 文件 4561 例绿 + 构建部署（根 main.js/styles.css 与 vault 插件目录同步）
+
+## 2026-09-14 · 日程三段真源迁进日记模板 + 删空占位 + 顺延建档同源（ADR-0123 / issue 283）
+
+**状态：已交付**
+
+- [x] 需求（用户报「日程规划的模板现在又不对了」）：回溯认定非日程规划代码被改坏，而是 todo 域顺延抢建顶格文件（不读模板）+ 日程规划只能文末追加 → 同一文件出现两个 `## 代办事项`、骨架全缺、正文落文末
+- [x] 用户裁定（三轮 grill-with-docs）：三段迁进模板当唯一真源（Q10-A）；删 `## 代办事项` 下三个 `- [ ] ` 空占位、其余内容不动（Q3/Q5）；重排 `2026-09-14.md` 且正文归位 `# 随笔`（Q11-A）；「日程规划」命令**完整保留**（Q13：代办不是每天都有遗留）；只修今天、09-13 快照不动（Q8）；落 ADR + 改断言（Q9）
+- [x] vault 模板 `CONFIG/TEMPLATE/模板-日记.md`：`# 日程规划` 下补 `## 代办事项`（空）/`## 完成情况跟踪`（空表）/`## 备注`（1.2.3.），不含空占位；改前备份 `.scratch/283-diary-plan-block-template-source/`
+- [x] diary 域：新增纯函数 `extractPlanBlock(template)`（从模板 `# 日程规划` 之后截三段，只收首尾空行）；`buildPlanContent()` 去空占位、降级为兜底块；`buildDiaryFileContent` 不再拼接（产物 = 模板原文 + frontmatter 规整）；`appendPlanToDiary(content, template)` 改从模板取块；`FALLBACK_DIARY_TEMPLATE` 补三段；`readDiaryTemplate` 改 export
+- [x] daily-capture：`writeDiarySection` 新增 `opts.seedWhenMissing`（文件缺失时把建档初稿交给 transform；不传维持旧口径，捕获入口行为不变）
+- [x] todo 域：新增 `seedForMissing(date)`（仅在文件缺失时读模板）；`runTodoRollover` / `syncItemAdded` 传入 seed → 投影天然落进模板自带的 `## 代办事项`；顺手修 `rollOverContent`「小节已存在但无新行」被误判为「小节不存在」（旧实现会往小节尾插空行，天天漂）
+- [x] 数据修复：`我的/日记/2026-09-14.md` 重排为骨架形态（5 条投影落 `## 代办事项`、`**📖 06:45**` + 正文归位 `# 随笔`），内容一行不丢
+- [x] 测试：daily-tasks 新增 2 例（兜底三段逐行快照 / `extractPlanBlock` 截取与兜底）；daily-flow 抽出 `TEMPLATE_SKELETON`、`PLAN_BODY` 去空占位、基准文件改「骨架 + 三段」；diary-sync 缺失建档改断言模板骨架 + 新增 2 例（vault 有模板时以模板为准 / 无新行可补→文件一字不动）
+- [x] 门禁：tsc 0 错 + 全量测试绿（290 文件 / 4568 例，exit=0，2m13s）
+- [x] 文档：ADR-0123 + issues/283 + CONTEXT.md「日常时间记录」术语组同步（含历史漂移核正：`bz-diary-todo-capture` 已随 ADR-0122 退役，从入口清单移除）
+- [x] 遗留（用户自理，本次未动）：QuickAdd `data.json` 两条 Capture（`日常行为记录` / `当日代办事项`）及其旧层级 `after`；vault 内 `CONFIG/SCRIPTS/日常时间记录/` 6 个旧 js；磁盘另两份同名旧模板（属别的 vault）

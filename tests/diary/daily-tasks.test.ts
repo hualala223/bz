@@ -13,6 +13,7 @@ import {
   TASK_STATUS_PATH,
   TASK_TIME_RESTRICTIONS,
   buildPlanContent,
+  extractPlanBlock,
   selectDueTasks,
 } from '../../src/diary/daily';
 
@@ -107,5 +108,33 @@ describe('模板', () => {
     // 顺序：代办 → 跟踪 → 备注
     expect(content.indexOf(PLAN_MARKER)).toBeLessThan(content.indexOf('## 完成情况跟踪'));
     expect(content.indexOf('## 完成情况跟踪')).toBeLessThan(content.indexOf('## 备注'));
+  });
+
+  it('ADR-0123：兜底三段不含 `- [ ] ` 空占位（待办行直接写在 ## 代办事项 下）', () => {
+    expect(buildPlanContent()).not.toContain('- [ ]');
+    // 空的小节标题保留：待办投影要落在 `## 代办事项` 里，完成跟踪/备注留着等手填
+    expect(buildPlanContent().split('\n')).toEqual([
+      '## 代办事项',
+      '',
+      '## 完成情况跟踪',
+      '| 计划完成 | 实际完成 |',
+      '| -------- | -------- |',
+      '|  |  |',
+      '|  |  |',
+      '|  |  |',
+      '',
+      '## 备注',
+      '1. ',
+      '2. ',
+      '3. ',
+    ]);
+  });
+
+  it('ADR-0123：`extractPlanBlock` 从模板截取三段，模板缺标题时退回兜底块', () => {
+    const tpl = '---\ncard_type: 日记\n---\n\n# 随笔\n\n# 日程规划\n\n## 代办事项\n- [ ] 手写的-09:00\n\n## 完成情况跟踪\n';
+    // 模板里那段优先（用户改了模板就跟着改），首尾空行收掉、行内逐字保留
+    expect(extractPlanBlock(tpl)).toBe('## 代办事项\n- [ ] 手写的-09:00\n\n## 完成情况跟踪');
+    // 模板没有 `# 日程规划` 标题 → 退回内置兜底块
+    expect(extractPlanBlock('---\ncard_type: 日记\n---\n\n# 随笔\n')).toBe(buildPlanContent());
   });
 });

@@ -5,10 +5,14 @@
  * 2. openReviewDialog —— 每日复盘：预填内层模板，写入 `# 当日复盘` 小节（缺失则写时新建，
  *    块首行为 `## 🪞 HH:mm`，ADR-0114）；
  * 3. openPlanPicker —— 日程规划：先选「当日 / 明日」，再按日记模板
- *    （CONFIG/TEMPLATE/模板-日记.md，与 QuickAdd 宏同源）为该日期新建日记文件并补
- *    代办事项/完成情况跟踪/备注三段；两目标共用同一模板，只有落盘日期不同（ADR-0112）。
+ *    （CONFIG/TEMPLATE/模板-日记.md，与 QuickAdd 宏同源）为该日期新建日记文件；
+ *    两目标共用同一模板，只有落盘日期不同（ADR-0112）。
  *    标题层级自 ADR-0113 起整体上提一级（骨架 `#`、日程三段 `##`）；读侧（判重 / 补写 /
  *    捕获插行）同时认旧层级，旧日记文件不受影响。
+ *    自 ADR-0123 起**骨架连同日程三段全部以模板文件为唯一真源**——`# 日程规划` 之下的
+ *    `## 代办事项` / `## 完成情况跟踪` / `## 备注` 由模板自带（不再由代码拼接 `- [ ] `
+ *    空占位），代码只负责 frontmatter 规整与「模板缺 `# 日程规划` 时兜底补块」。待办顺延
+ *    建档（todo 域）读同一模板，投影行因此天然落进 `# 日程规划` 内的 `## 代办事项`。
  * 写盘口径分两路：任务状态走 updateFileSections 段级合并；目录/规划按原文读写（文件级原样），
  * 不走 addEntry 条目链路——条目模型整文件重写产不出「模板骨架」形态的文件。
  * 复盘/写日记的落点同上，见 daily-write.ts（ADR-0114）。
@@ -187,13 +191,15 @@ export const PLAN_TRACK_MARKER = '## 完成情况跟踪';
 /** 日程规划目标：当日 = 今天，明日 = 明天 */
 export type PlanTarget = 'today' | 'tomorrow';
 
-/** 日程规划条目正文（三段结构沿用原 QuickAdd 宏；当日 / 明日共用同一模板，只有落盘日期不同） */
+/**
+ * 日程三段兜底块。**ADR-0123 起不含三个 `- [ ] ` 空占位**——空占位会被待办投影挤在下面
+ * 形成「先空三行再填」的观感，用户裁定直接删掉：待办行写在 `## 代办事项` 下即可。
+ * 正常路径三段由模板文件自带（`extractPlanBlock`），本函数只在「模板没有 `# 日程规划`
+ * 标题」或「存量旧文件有标题但内容空」时兜底，形态与模板逐字同构。
+ */
 export function buildPlanContent(): string {
   return [
     '## 代办事项',
-    '- [ ] ',
-    '- [ ] ',
-    '- [ ] ',
     '',
     '## 完成情况跟踪',
     '| 计划完成 | 实际完成 |',
@@ -207,6 +213,21 @@ export function buildPlanContent(): string {
     '2. ',
     '3. ',
   ].join('\n');
+}
+
+/**
+ * 纯函数（node 可测）：从模板原文截取「日程三段」块 = `# 日程规划` 标题之后的全部内容
+ * （去首尾空行）。**模板是唯一真源（ADR-0123）**：用户在模板里改三段（加行、改表头、
+ * 动备注），日程规划补写与待办顺延建档同步跟随，代码里不留第二份字面量。
+ * 模板缺 `# 日程规划` 标题、或其下为空 → 退回 `buildPlanContent()` 兜底。
+ */
+export function extractPlanBlock(template: string): string {
+  const lines = template.replace(/\r\n?/g, '\n').split('\n');
+  const idx = lines.findIndex((l) => headingLineRe('日程规划').test(l));
+  if (idx === -1) return buildPlanContent();
+  // 只收首尾空行，行内内容（含 `1. ` 这类行尾空格）与模板逐字一致
+  const block = lines.slice(idx + 1).join('\n').replace(/^\n+/, '').replace(/\n+$/, '');
+  return block.trim() ? block : buildPlanContent();
 }
 
 /** 纯函数（node 可测）：目标 → 日记日期 YYYY-MM-DD */
@@ -238,7 +259,7 @@ function headingLineRe(text: string): RegExp {
 export const DIARY_TEMPLATE_PATH = 'CONFIG/TEMPLATE/模板-日记.md';
 
 /**
- * 模板文件缺失时的内置兜底骨架（正文与模板文件同构）。
+ * 模板文件缺失时的内置兜底骨架（正文与模板文件同构，含 ADR-0123 的三段）。
  * 正常路径一律以模板文件为真源——用户改模板文件，宏与插件同步跟随，不产生第二份真源。
  */
 export const FALLBACK_DIARY_TEMPLATE = [
@@ -258,6 +279,8 @@ export const FALLBACK_DIARY_TEMPLATE = [
   '# 日常行为记录',
   '',
   '# 日程规划',
+  '',
+  buildPlanContent(),
 ].join('\n');
 
 /** frontmatter 块匹配（首行 `---` 到下一个 `---`） */
@@ -265,8 +288,10 @@ const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---/;
 
 /**
  * 纯函数（node 可测）：模板原文 + 目标日期 → 待落盘的新日记全文。
- * 拼装与 QuickAdd 宏「日程规划.js」逐字等价：`模板原文 + "\n" + 日程三段块`；
- * 差异只在 frontmatter 规整（ADR-0112 决策 3）：删 `title`（模板占位残留）、
+ * 自 ADR-0123 起**三段随模板走**（模板已是含三段的完整骨架），故这里不再拼接日程块——
+ * 产物 = 模板原文（frontmatter 规整后），与模板逐字同构。仅当模板里找不到 `# 日程规划`
+ * 标题（用户误删）时才用 `buildPlanContent()` 兜底补一段，不阻断创建。
+ * frontmatter 规整口径不变（ADR-0112 决策 3）：删 `title`（模板占位残留）、
  * `date_creation` 改写为 `{目标日期} 00:00:00`，缺失则补一行。
  */
 export function buildDiaryFileContent(template: string, date: string): string {
@@ -286,21 +311,26 @@ export function buildDiaryFileContent(template: string, date: string): string {
     const rest = src.slice(m[0].length).replace(/^\n+/, '\n');
     body = ['---', ...normalized, '---', rest].join('\n');
   }
-  return body.replace(/\s+$/, '') + '\n\n' + buildPlanContent() + '\n\n';
+  const normalizedBody = body.replace(/\n+$/, '');
+  const withPlan = headingLineRe('日程规划').test(normalizedBody)
+    ? normalizedBody
+    : normalizedBody + '\n\n' + PLAN_HEADING + '\n\n' + buildPlanContent();
+  return withPlan.replace(/\n+$/, '') + '\n\n';
 }
 
 /**
  * 纯函数（node 可测）：把日程规划补进**已存在**的日记原文（不新建文件，其余内容一字不动）。
- * 已有「日程规划」标题（任意层级，兼容旧文件的 `##`）→ 只补三段；没有 → 先补标题再补三段。
+ * 三段块取自 `extractPlanBlock(template)`（模板真源，ADR-0123；模板缺标题时退回内置兜底块）。
+ * 已有「日程规划」标题（任意层级，兼容旧文件的 `##`）→ 只补块；没有 → 先补标题再补块。
  */
-export function appendPlanToDiary(content: string): string {
+export function appendPlanToDiary(content: string, template: string): string {
   const src = content.replace(/\r\n?/g, '\n');
   const hasHeading = headingLineRe('日程规划').test(src);
   return (
     src.replace(/\s+$/, '') +
     '\n\n' +
     (hasHeading ? '' : PLAN_HEADING + '\n\n') +
-    buildPlanContent() +
+    extractPlanBlock(template) +
     '\n\n'
   );
 }
@@ -311,8 +341,11 @@ export function hasPlan(text: string): boolean {
   return headingLineRe('代办事项').test(src) && headingLineRe('完成情况跟踪').test(src);
 }
 
-/** 读模板文件原文；读不到（缺失/不可读）→ 内置兜底骨架（不阻断创建） */
-async function readDiaryTemplate(app: any): Promise<string> {
+/**
+ * 读模板文件原文；读不到（缺失/不可读）→ 内置兜底骨架（不阻断创建）。
+ * 导出供 todo 域日记同步模块复用（ADR-0123：两条建档路径读同一份模板，单一真源）。
+ */
+export async function readDiaryTemplate(app: any): Promise<string> {
   const f: any = app?.vault?.getAbstractFileByPath?.(DIARY_TEMPLATE_PATH) ?? null;
   if (f) {
     try {
@@ -341,10 +374,11 @@ async function ensureDiaryFolder(app: any): Promise<void> {
 }
 
 /**
- * 日程规划落盘（ADR-0112）：**按日记模板建文件**，与 QuickAdd 宏「日程规划.js」同产物形态。
- * - 目标日期文件不存在 → 读模板（缺失用内置兜底）→ 模板 + 日程三段 → 新建文件；
+ * 日程规划落盘（ADR-0112，真源口径见 ADR-0123）：**按日记模板建文件**。
+ * - 目标日期文件不存在 → 读模板（缺失用内置兜底）原样落盘（frontmatter 规整）→ 新建文件；
+ *   三段随模板自带，故新文件天然是「骨架 + 日程三段」的完整形态；
  * - 文件已存在且原文已有日程规划（双标记）→ 提示不重复创建，一个字节不写；
- * - 文件已存在但没有日程规划 → 只补 `# 日程规划` + 三段，其余内容一字不动。
+ * - 文件已存在但没有日程规划 → 只补 `# 日程规划` + 模板里的三段块，其余内容一字不动。
  * 不走 addEntry 条目链路：条目模型整文件重写无法产出「模板骨架」形态的文件。
  * 写盘走 core/storage 同路径串行队列（键 = 日记文件路径），与 diary store writeFile 互斥。
  */
@@ -369,10 +403,11 @@ export async function planDiary(target: PlanTarget): Promise<void> {
 
       if (existing !== null && hasPlan(existing)) return 'exists' as const;
 
+      const template = await readDiaryTemplate(app);
       const next =
         existing === null
-          ? buildDiaryFileContent(await readDiaryTemplate(app), date)
-          : appendPlanToDiary(existing);
+          ? buildDiaryFileContent(template, date)
+          : appendPlanToDiary(existing, template);
       if (f) await app.vault.modify(f, next);
       else await app.vault.create(path, next);
       return existing === null ? ('created' as const) : ('appended' as const);
