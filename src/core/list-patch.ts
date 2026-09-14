@@ -7,7 +7,7 @@
  * 只增/删/移/换差异卡片：目标 keys 里没有的移除，新 key 渲染插入，顺序按 keys 调整，
  * `changedKeys` 命中的 key 用 render 结果替换节点（内容未变的卡片连事件绑定一起原样复用）。
  *
- * 首批接入：literature / clipping（两域列表结构逐行同构，`dataset.path` 作 key）；
+ * 首批接入：knowledge / clipping（两域列表结构逐行同构，`dataset.path` 作 key）；
  * diary / movie 结构差异大（date-section 分组、无卡片 key、懒加载全铺），后续单列 ticket 接入。
  */
 

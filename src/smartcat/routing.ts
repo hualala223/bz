@@ -94,9 +94,9 @@ export const ROUTING_RULES: Record<string, RoutingRule> = {
   'library:added':      { stream: 'behavior' },
   'library:removed':    { stream: 'behavior' },
 
-  // === 文献盒（literature，ADR-0066 用户拍板仅行为流、不向量化；ADR-0072 迁出为 literature 域） ===
-  'literature:converted':      { stream: 'behavior' },
-  'literature:term-generated': { stream: 'behavior' },
+  // === 知识盒（knowledge，ADR-0066 用户拍板仅行为流、不向量化；ADR-0072 迁出为 knowledge 域） ===
+  'knowledge:converted':      { stream: 'behavior' },
+  'knowledge:term-generated': { stream: 'behavior' },
 
   // === 反思 ===
   'reflection:insight': { stream: 'memory', importance: 0.90, defaultEmotion: 'calm', credibility: 0.9 },

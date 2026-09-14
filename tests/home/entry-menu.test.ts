@@ -89,7 +89,7 @@ describe('DOMAIN_MENU 形状', () => {
       ['encrypt', 'bz-encrypt-lock'],
       ['clipping', 'bz-clipbook-mark-all-read'],
       ['collect', 'bz-collect-capture'],
-      ['literature', 'bz-literature-note-term'],
+      ['knowledge', 'bz-knowledge-note-term'],
       // 复习：今日复习=按数量复习（bz-review-count）；今日已复习=历史查看（bz-review-today）
       ['review', 'bz-review-count'],
       ['review', 'bz-review-today'],
@@ -112,7 +112,7 @@ describe('DOMAIN_MENU 形状', () => {
     expect(byId('clipping', 'bz-clipbook-mark-all-read')!.keepHome).toBe(true);
     // 即时类：不关首页；开别域面板类（随机抽一部/术语生成文献笔记）保持默认关首页
     expect(byId('encrypt', 'bz-encrypt-lock')!.keepHome).toBe(true);
-    expect(byId('literature', 'bz-literature-note-term')!.keepHome).toBeUndefined();
+    expect(byId('knowledge', 'bz-knowledge-note-term')!.keepHome).toBeUndefined();
     // 番茄钟的「跳过休息 / 暂停·继续」不进表：它们是相位派发的结果（见下个 describe）
     expect(byId('pomodoro', 'bz-pomodoro-skip')).toBeUndefined();
   });

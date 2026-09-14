@@ -42,7 +42,7 @@ describe('设置面板域清单（本地口径）', () => {
   it('包含本地 20 域与上游并入新域，且不含上游独占域', () => {
     const ids = DOMAINS.map((d) => d.id);
     // 本地既有域
-    for (const id of ['global', 'ai', 'diary', 'todo', 'belongings', 'clipping', 'favorites', 'cinema', 'bookshelf', 'review', 'secondbrain', 'pomodoro', 'encrypt', 'literature', 'smartcat']) {
+    for (const id of ['global', 'ai', 'diary', 'todo', 'belongings', 'clipping', 'favorites', 'cinema', 'bookshelf', 'review', 'secondbrain', 'pomodoro', 'encrypt', 'knowledge', 'smartcat']) {
       expect(ids, `缺本地域 ${id}`).toContain(id);
     }
     // 上游并入新域

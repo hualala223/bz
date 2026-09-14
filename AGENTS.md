@@ -18,7 +18,7 @@
 
 ## 架构
 
-- `src/main.ts`：命令裸注册表、设置页、懒加载、onunload（**72 条命令** = `COMMANDS` 表 **70** 条 + 表外裸注册 1 条 + diary 域 init 内 1 条。表内 70 = 53 条显式字面量 + 1 条 `ATTACH_COMMAND_ID`（`bz-attach-move`）+ 16 条 collect 汉字分类经 `...DEFAULT_COLLECT_CATEGORIES.map(categoryCommandId)` 展开；表外 = `bz-diary-open`；域内 init = `bz-diary-write`（`src/diary/ui/quote.ts:15`）。核算口径 = `tests/smoke.test.ts` 的 `EXPECTED_COMMAND_IDS`（55 字面量 + 16 条 collect 展开 = 71）另加 `bz-diary-write`。2026-09-14 票 288：新增 `bz-pomodoro-focus-toggle/skip/pause` 3 条（68→71）；同日票 289：新增 `bz-literature-note-video`（71→72，上游 issue 278 命令入口，函数本就存在））
+- `src/main.ts`：命令裸注册表、设置页、懒加载、onunload（**72 条命令** = `COMMANDS` 表 **70** 条 + 表外裸注册 1 条 + diary 域 init 内 1 条。表内 70 = 53 条显式字面量 + 1 条 `ATTACH_COMMAND_ID`（`bz-attach-move`）+ 16 条 collect 汉字分类经 `...DEFAULT_COLLECT_CATEGORIES.map(categoryCommandId)` 展开；表外 = `bz-diary-open`；域内 init = `bz-diary-write`（`src/diary/ui/quote.ts:15`）。核算口径 = `tests/smoke.test.ts` 的 `EXPECTED_COMMAND_IDS`（55 字面量 + 16 条 collect 展开 = 71）另加 `bz-diary-write`。2026-09-14 票 288：新增 `bz-pomodoro-focus-toggle/skip/pause` 3 条（68→71）；同日票 289：新增视频生成文献笔记命令（71→72，上游 issue 278 命令入口，函数本就存在）；同日票 290：知识盒域正名，`bz-literature-*` 三条 id 更名 `bz-knowledge-*`（条数不变））
 - `src/core/`：共享层（不挂 window）——app/settings-provider/ai/json-store/domain-bus/obsidian-adapter/path-classify/esc-manager/flow-dialog/utils/dom/changelog/notice（自绘 toast）/settings-modal/settings-schema/settings-common
 - `src/<域>/`：index.ts + data + ui + styles.css（该域样式源头，聚合进根 `styles.css`）；`src/settings.ts`；根 `styles.css`（构建聚合产物，勿手改）；`docs/adr/`；`CONTEXT.md`；`.scratch/<feature>/`
 - **依赖方向（ADR-0002）**：`core ← config/state ← parser ← store ← ui ← main`。store 无 DOM；UI 刷新靠回调订阅；禁止模块顶层互访，函数级引用环须函数体内延迟解析。
@@ -58,7 +58,7 @@
 | review | review.json |
 | quiz | quiz.json |
 | secondbrain（第二大脑） | secondbrain.json（meta/panel/link 三段）+ secondbrain.vec |
-| literature（文献盒，ADR-0072 自 bili-downloader 迁出并正名） | literature.json（视频转文献任务队列）+ 文献目录笔记（`文献盒/*.md`，设置键 `literatureDirectory`） |
+| knowledge（知识盒，ADR-0072 自 bili-downloader 迁出；票 290/ADR-0126 正名，旧名 literature/文献盒） | knowledge.json（视频转文献任务队列；旧 literature.json 一次性迁移）+ 文献目录笔记（`文献盒/*.md` 文件夹名不变，设置键 `knowledgeDirectory`） |
 | smartcat（小橘） | smartcat.json + smartcat-behavior.json + smartcat-memory.json |
 | auto-summary | 剪藏 frontmatter |
 | home（内容首页，上游并入） | home.json（钉选偏好；各域只读快照） |

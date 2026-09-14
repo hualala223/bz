@@ -1,5 +1,5 @@
 /**
- * 自动双链管线（ticket 111）：embedding 可达性门 → 增量索引 → 文献盒内向量近邻 Top-K →
+ * 自动双链管线（ticket 111）：embedding 可达性门 → 增量索引 → 知识盒内向量近邻 Top-K →
  * core AI 裁判（ADR-0052 统一通道）→ 单侧写入 related。
  *
  * 流程对齐 spec `.scratch/secondbrain-link-agent/spec.md`「核心流程」②③④⑥（范围词按需求变更
@@ -108,7 +108,7 @@ const JUDGE_PROMPT_PREFIX = [
   '输出要求：严格 JSON 数组 [{"id":<候选编号>,"reason":"一句话理由"}]，按关联强度降序；无关联输出 []；不要输出 JSON 以外的任何文字。',
 ].join('');
 
-/** 候选池倍数：先取全局近邻大池，再过滤到文献盒范围截断 Top-K */
+/** 候选池倍数：先取全局近邻大池，再过滤到知识盒范围截断 Top-K */
 const CANDIDATE_POOL_MIN = 24;
 
 function settingNumber(v: unknown, fallback: number): number {

@@ -79,16 +79,16 @@ describe('store-file 一次性迁移（ticket 120）', () => {
     const { vault } = makeEnv();
     vault.files.set(OLD_META, JSON.stringify({ version: 9, notes: { 'a.md': { mtime: 1, chunks: [{ text: 't' }] } }, _dim: 2 }));
     vault.files.set(OLD_PANEL, JSON.stringify({ summary: '概括', generatedAt: 123 }));
-    vault.files.set(OLD_QUEUE, JSON.stringify([{ path: '文献盒/q.md', hash: 'h', queuedAt: 't' }]));
-    vault.files.set(OLD_STATE, JSON.stringify({ '文献盒/s.md': { hash: 'h2', linkedAt: 't2' } }));
+    vault.files.set(OLD_QUEUE, JSON.stringify([{ path: '知识盒/q.md', hash: 'h', queuedAt: 't' }]));
+    vault.files.set(OLD_STATE, JSON.stringify({ '知识盒/s.md': { hash: 'h2', linkedAt: 't2' } }));
 
     const store = await loadStore();
     expect(vault.files.has(getSecondBrainStorePath())).toBe(true); // 迁移落盘
     expect((store.meta as any).version).toBe(9);
     expect((store.meta as any).notes['a.md'].chunks).toEqual([{ text: 't' }]);
     expect(store.panel).toEqual({ summary: '概括', generatedAt: 123 });
-    expect(store.link.queue).toEqual([{ path: '文献盒/q.md', hash: 'h', queuedAt: 't' }]);
-    expect(store.link.state['文献盒/s.md']).toEqual({ hash: 'h2', linkedAt: 't2' });
+    expect(store.link.queue).toEqual([{ path: '知识盒/q.md', hash: 'h', queuedAt: 't' }]);
+    expect(store.link.state['知识盒/s.md']).toEqual({ hash: 'h2', linkedAt: 't2' });
 
     // 旧文件全部删除
     expect(vault.files.has(OLD_META)).toBe(false);
@@ -189,17 +189,17 @@ describe('store-file 串行写链（防并发覆盖）', () => {
 
   it('经 link-agent/data 打通：enqueuePaths 与 upsertLinkState 写入 store 段，读回一致', async () => {
     const { vault } = makeEnv();
-    await enqueuePaths(['文献盒/a.md'], { '文献盒/a.md': 'h1' });
-    await upsertLinkState('文献盒/b.md', 'h2');
+    await enqueuePaths(['知识盒/a.md'], { '知识盒/a.md': 'h1' });
+    await upsertLinkState('知识盒/b.md', 'h2');
 
-    expect((await loadQueue()).map((i) => i.path)).toEqual(['文献盒/a.md']);
-    expect((await loadLinkState())['文献盒/b.md'].hash).toBe('h2');
+    expect((await loadQueue()).map((i) => i.path)).toEqual(['知识盒/a.md']);
+    expect((await loadLinkState())['知识盒/b.md'].hash).toBe('h2');
     // 两段同文件共存
     const store = await loadStore();
-    expect(store.link.queue[0].path).toBe('文献盒/a.md');
-    expect(store.link.state['文献盒/b.md'].hash).toBe('h2');
+    expect(store.link.queue[0].path).toBe('知识盒/a.md');
+    expect(store.link.state['知识盒/b.md'].hash).toBe('h2');
 
-    await dequeuePath('文献盒/a.md');
+    await dequeuePath('知识盒/a.md');
     expect(await loadQueue()).toEqual([]);
   });
 
@@ -292,12 +292,12 @@ describe('store-file chatHistory 段（ticket 141 加法扩展）', () => {
 
   it('与其他段共存：chatHistory 写入不覆盖 link/meta（串行链同文件多段）', async () => {
     makeEnv(); // 新 env（前序用例的 app 单例不串扰）
-    await enqueuePaths(['文献盒/a.md'], { '文献盒/a.md': 'h1' });
+    await enqueuePaths(['知识盒/a.md'], { '知识盒/a.md': 'h1' });
     await mutateStore((s) => { (s.meta as any).kept = true; });
     await appendChatHistory({ role: 'user', content: '共存问题' });
     const store = await loadStore();
     expect((store.meta as any).kept).toBe(true);
-    expect(store.link.queue.map((q) => q.path)).toEqual(['文献盒/a.md']);
+    expect(store.link.queue.map((q) => q.path)).toEqual(['知识盒/a.md']);
     expect(store.chatHistory).toEqual([{ role: 'user', content: '共存问题' }]);
   });
 });
@@ -313,8 +313,8 @@ describe('store-file Syncthing 冲突自愈（ticket 152）', () => {
       version: 9,
       _dim: dim,
       notes: {
-        '文献盒/a.md': { mtime: 100, chunks: [{ text: 'a1' }] },
-        '文献盒/b.md': { mtime: 100, chunks: [{ text: 'b1' }] },
+        '知识盒/a.md': { mtime: 100, chunks: [{ text: 'a1' }] },
+        '知识盒/b.md': { mtime: 100, chunks: [{ text: 'b1' }] },
       },
     };
     vault.files.set(
@@ -327,9 +327,9 @@ describe('store-file Syncthing 冲突自愈（ticket 152）', () => {
       version: 9,
       _dim: dim,
       notes: {
-        '文献盒/a.md': { mtime: 100, chunks: [{ text: 'a1' }] },
-        '文献盒/b.md': { mtime: 100, chunks: [{ text: 'b1' }] },
-        '文献盒/c.md': { mtime: 200, chunks: [{ text: 'c1' }, { text: 'c2' }] },
+        '知识盒/a.md': { mtime: 100, chunks: [{ text: 'a1' }] },
+        '知识盒/b.md': { mtime: 100, chunks: [{ text: 'b1' }] },
+        '知识盒/c.md': { mtime: 200, chunks: [{ text: 'c1' }, { text: 'c2' }] },
       },
     };
     vault.files.set(
@@ -338,7 +338,7 @@ describe('store-file Syncthing 冲突自愈（ticket 152）', () => {
         version: 1,
         meta: confMeta,
         panel: { summary: '冲突', generatedAt: 200 },
-        link: { queue: [{ path: '文献盒/q.md' }], state: { '文献盒/b.md': { hash: 'h-new', linkedAt: '2026-08-30T10:00:00Z' } } },
+        link: { queue: [{ path: '知识盒/q.md' }], state: { '知识盒/b.md': { hash: 'h-new', linkedAt: '2026-08-30T10:00:00Z' } } },
         chatHistory: [{ role: 'user', content: '冲突提问' }],
       })
     );
@@ -350,13 +350,13 @@ describe('store-file Syncthing 冲突自愈（ticket 152）', () => {
     const { vault } = setupConflictScenario();
     const store = await loadStore();
     // meta：并入冲突侧 c.md（主侧没有）
-    expect(Object.keys((store.meta as any).notes)).toEqual(['文献盒/a.md', '文献盒/b.md', '文献盒/c.md']);
-    expect((store.meta as any).notes['文献盒/c.md']).toBeTruthy();
+    expect(Object.keys((store.meta as any).notes)).toEqual(['知识盒/a.md', '知识盒/b.md', '知识盒/c.md']);
+    expect((store.meta as any).notes['知识盒/c.md']).toBeTruthy();
     // panel：取 generatedAt 大者（冲突 200 > 主 100）
     expect(store!.panel!.generatedAt).toBe(200);
     // link.queue/state 并集
-    expect(store.link.queue.map((q) => q.path)).toEqual(['文献盒/q.md']);
-    expect(store.link.state['文献盒/b.md'].hash).toBe('h-new');
+    expect(store.link.queue.map((q) => q.path)).toEqual(['知识盒/q.md']);
+    expect(store.link.state['知识盒/b.md'].hash).toBe('h-new');
     // chatHistory 并集
     expect(store.chatHistory).toEqual([{ role: 'user', content: '冲突提问' }]);
     // 冲突文件删除
@@ -364,7 +364,7 @@ describe('store-file Syncthing 冲突自愈（ticket 152）', () => {
     expect(vault.binaryFiles.has(CONFLICT_VEC)).toBe(false);
     // 主文件已合并写回
     const raw = JSON.parse(vault.files.get(STORE())!);
-    expect(Object.keys(raw.meta.notes)).toEqual(['文献盒/a.md', '文献盒/b.md', '文献盒/c.md']);
+    expect(Object.keys(raw.meta.notes)).toEqual(['知识盒/a.md', '知识盒/b.md', '知识盒/c.md']);
   });
 
   it('.vec 行级重排：c.md 的 2 行从冲突 vec 按键序补入主 vec（行序 = 合并后键序 × chunks）', async () => {
@@ -388,14 +388,14 @@ describe('store-file Syncthing 冲突自愈（ticket 152）', () => {
   it('meta 未变（冲突仅 link 段）→ 主 .vec 权威直接复用，仅删冲突 .vec', async () => {
     const { vault } = makeEnv();
     const dim = 2;
-    const priMeta = { version: 9, _dim: dim, notes: { '文献盒/a.md': { mtime: 100, chunks: [{ text: 'a1' }] } } };
+    const priMeta = { version: 9, _dim: dim, notes: { '知识盒/a.md': { mtime: 100, chunks: [{ text: 'a1' }] } } };
     vault.files.set(STORE(), JSON.stringify({ version: 1, meta: priMeta, panel: null, link: { queue: [], state: {} }, chatHistory: [] }));
     const priVec = vecFromMeta(priMeta, dim);
     vault.binaryFiles.set(VEC(), priVec);
     // 冲突 json：meta 与主完全一致，仅 link 段不同
     vault.files.set(
       CONFLICT_JSON,
-      JSON.stringify({ version: 1, meta: priMeta, panel: null, link: { queue: [{ path: '文献盒/x.md' }], state: {} }, chatHistory: [] })
+      JSON.stringify({ version: 1, meta: priMeta, panel: null, link: { queue: [{ path: '知识盒/x.md' }], state: {} }, chatHistory: [] })
     );
     vault.binaryFiles.set(CONFLICT_VEC, makeVec(dim, [[999, 9]]));
     await loadStore();
@@ -405,26 +405,26 @@ describe('store-file Syncthing 冲突自愈（ticket 152）', () => {
     // 主 vec 原样保留（未重写）
     expect(vault.binaryFiles.get(VEC())).toBe(priVec);
     // queue 已并入
-    expect((await loadStore()).link.queue.map((q) => q.path)).toEqual(['文献盒/x.md']);
+    expect((await loadStore()).link.queue.map((q) => q.path)).toEqual(['知识盒/x.md']);
   });
 
   it('损坏冲突 JSON → 不合并、不删除（保留待人工处置），主库不受影响', async () => {
     const { vault } = makeEnv();
     const dim = 2;
-    const priMeta = { version: 9, _dim: dim, notes: { '文献盒/a.md': { mtime: 100, chunks: [{ text: 'a1' }] } } };
+    const priMeta = { version: 9, _dim: dim, notes: { '知识盒/a.md': { mtime: 100, chunks: [{ text: 'a1' }] } } };
     vault.files.set(STORE(), JSON.stringify({ version: 1, meta: priMeta, panel: null, link: { queue: [], state: {} }, chatHistory: [] }));
     vault.binaryFiles.set(VEC(), vecFromMeta(priMeta, dim));
     vault.files.set(CONFLICT_JSON, 'not-json{{{');
     const store = await loadStore();
     expect(vault.files.has(CONFLICT_JSON)).toBe(true); // 保留
-    expect(Object.keys((store.meta as any).notes)).toEqual(['文献盒/a.md']);
+    expect(Object.keys((store.meta as any).notes)).toEqual(['知识盒/a.md']);
     expect(vault.files.get(STORE())).toBe(vault.files.get(STORE())); // 主文件未被改动
   });
 
   it('无冲突文件 → 加载零行为（不落盘、不删文件、不改内容）', async () => {
     const { vault } = makeEnv();
     const dim = 2;
-    const priMeta = { version: 9, _dim: dim, notes: { '文献盒/a.md': { mtime: 100, chunks: [{ text: 'a1' }] } } };
+    const priMeta = { version: 9, _dim: dim, notes: { '知识盒/a.md': { mtime: 100, chunks: [{ text: 'a1' }] } } };
     const raw = JSON.stringify({ version: 1, meta: priMeta, panel: null, link: { queue: [], state: {} }, chatHistory: [] });
     vault.files.set(STORE(), raw);
     const priVec = vecFromMeta(priMeta, dim);
@@ -468,9 +468,9 @@ describe('store-file Syncthing 冲突自愈（ticket 152）', () => {
   it('adapter 无 list 能力 → 静默跳过自愈（不阻断加载）', async () => {
     const { vault, app } = makeEnv();
     (app.vault.adapter as any).list = undefined;
-    const priMeta = { version: 9, _dim: 2, notes: { '文献盒/a.md': { mtime: 100, chunks: [{ text: 'a1' }] } } };
+    const priMeta = { version: 9, _dim: 2, notes: { '知识盒/a.md': { mtime: 100, chunks: [{ text: 'a1' }] } } };
     vault.files.set(STORE(), JSON.stringify({ version: 1, meta: priMeta, panel: null, link: { queue: [], state: {} }, chatHistory: [] }));
     const store = await loadStore();
-    expect(Object.keys((store.meta as any).notes)).toEqual(['文献盒/a.md']);
+    expect(Object.keys((store.meta as any).notes)).toEqual(['知识盒/a.md']);
   });
 });

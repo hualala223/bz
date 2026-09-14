@@ -1,11 +1,11 @@
 /**
- * 文献盒（literature 域）UI 测试（ticket 136 改版 + ticket 138 UX 修复）：
+ * 知识盒（knowledge 域）UI 测试（ticket 136 改版 + ticket 138 UX 修复）：
  * - 主面板（文献笔记列表）：标题/头部五按钮（emoji、🔍 在 ⚙️ 前，ticket 138 §3.1）/领域筛选行
  *   （类型分类栏已移除）/空态、卡片渲染（标题+领域徽标+简介+日期[formatRelativeTime 相对显示，ticket 146]，
  *   无类型徽章 ticket 138 §3.2）与
  *   最近创建降序、🔍 搜索 300ms 防抖、领域筛选、双击打开（click 计数 300ms）、
  *   抽屉（打开/复制双链/复制原文链接[video]/删除 danger+确认，删除同步清理指向该笔记的任务记录）、
- *   懒加载（批次 20 + 触底 + 尾部提示）、literature:file-* 四通道 300ms 防抖增量刷新、
+ *   懒加载（批次 20 + 触底 + 尾部提示）、knowledge:file-* 四通道 300ms 防抖增量刷新、
  *   文献目录设置变更清缓存全量重载。
  * - 视频录入面板（任务队列）：去 ⚙️/⬇️ 与独立 ⏹ 终止钮；单钮态机 ➕/**纯 emoji ▶️ ↔ ⏹**（ticket 146 单钮态机 + ticket 148 按钮去文字，区分移到 title hover）/🕘/✕；
  *   移动端仅 ➕+✕；添加弹窗（校验/编辑回填/预填叠开）、历史独立弹窗（分组/清空历史）、批量处理行内进度
@@ -21,8 +21,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import { Platform } from 'obsidian';
-import { UIManager, literatureSettingsSchema } from '../../src/literature/ui';
-import { LiteratureData } from '../../src/literature/data';
+import { UIManager, knowledgeSettingsSchema } from '../../src/knowledge/ui';
+import { KnowledgeData } from '../../src/knowledge/data';
 import { setApp } from '../../src/core/app';
 import { setSettingsProvider, setSettingsSaver } from '../../src/core/settings-provider';
 import { emitDomainEvent, onDomainEvent } from '../../src/core/domain-bus';
@@ -37,7 +37,7 @@ const noteGen = vi.hoisted(() => ({
   summarizeTermSummary: vi.fn(),
   backfillNotes: vi.fn(),
 }));
-vi.mock('../../src/literature/note-gen', () => noteGen);
+vi.mock('../../src/knowledge/note-gen', () => noteGen);
 
 function strNotices(): string {
   return getNoticeMessages().join('\n');
@@ -65,25 +65,25 @@ function makeApp(vault: MockVault) {
 }
 
 const BASE_SETTINGS: Record<string, any> = {
-  literatureDirectory: '文献盒',
-  literatureDomainList: '',
-  literatureMobileDefaultFullscreen: false,
-  literatureProgressDetail: true,
-  literatureKeepVideo: true,
-  literatureQuality: 'highest',
-  literatureStopOnFailure: false,
-  literatureOutputDir: '',
-  literatureCompress: true,
-  literatureCrf: 23,
-  literatureFfmpegPath: 'ffmpeg',
-  literatureFfprobePath: 'ffprobe',
-  literaturePythonPath: '',
-  literatureWhisperModel: 'small',
-  literatureCacheDir: '',
-  literatureCacheRetentionDays: 7,
+  knowledgeDirectory: '知识盒',
+  knowledgeDomainList: '',
+  knowledgeMobileDefaultFullscreen: false,
+  knowledgeProgressDetail: true,
+  knowledgeKeepVideo: true,
+  knowledgeQuality: 'highest',
+  knowledgeStopOnFailure: false,
+  knowledgeOutputDir: '',
+  knowledgeCompress: true,
+  knowledgeCrf: 23,
+  knowledgeFfmpegPath: 'ffmpeg',
+  knowledgeFfprobePath: 'ffprobe',
+  knowledgePythonPath: '',
+  knowledgeWhisperModel: 'small',
+  knowledgeCacheDir: '',
+  knowledgeCacheRetentionDays: 7,
 };
 
-describe('文献盒 UI（ticket 136）', () => {
+describe('知识盒 UI（ticket 136）', () => {
   let vault: MockVault;
   let openFile: ReturnType<typeof vi.fn>;
   let app: any;
@@ -96,7 +96,7 @@ describe('文献盒 UI（ticket 136）', () => {
     document.body.innerHTML = '';
     vault = new MockVault();
     ({ app, openFile } = makeApp(vault));
-    LiteratureData.init({ storagePath: 'CONFIG/STORAGE' });
+    KnowledgeData.init({ storagePath: 'CONFIG/STORAGE' });
     clearNotices();
     settings = { ...BASE_SETTINGS };
     setSettingsProvider(() => settings as any);
@@ -121,12 +121,12 @@ describe('文献盒 UI（ticket 136）', () => {
 
   // ==================== 主面板：结构与空态 ====================
 
-  it('showMain 渲染主面板：标题文献盒（ticket 143 拍板保留）/头部五按钮（emoji、功能→🔍→⚙️→✕）/领域筛选行/空态', async () => {
+  it('showMain 渲染主面板：标题知识盒（ticket 143 拍板保留）/头部五按钮（emoji、功能→🔍→⚙️→✕）/领域筛选行/空态', async () => {
     ui.showMain();
-    await vi.waitFor(() => expect(document.getElementById('literature-popup')!.style.display).toBe('flex'));
-    const popup = document.getElementById('literature-popup')!;
-    // ticket 143：主面板保留原标题（用户拍板）——bz-win-head「文献盒」+ 动作钮；chips 筛选行仍在下独立成行
-    expect(popup.querySelector('.bz-win-head h3')!.textContent).toBe('文献盒');
+    await vi.waitFor(() => expect(document.getElementById('knowledge-popup')!.style.display).toBe('flex'));
+    const popup = document.getElementById('knowledge-popup')!;
+    // ticket 143：主面板保留原标题（用户拍板）——bz-win-head「知识盒」+ 动作钮；chips 筛选行仍在下独立成行
+    expect(popup.querySelector('.bz-win-head h3')!.textContent).toBe('知识盒');
     // 头部按钮秩序：📝文字 → 🎬视频 → 🔍搜索 → ⚙️设置 → ✕关闭（ticket 138 §3.1：emoji、🔍 在 ⚙️ 前）
     const btns = Array.from(popup.querySelectorAll<HTMLElement>('.bz-lit-head-btns button')).map((b) => b.id);
     expect(btns).toEqual(['lit-btn-text', 'lit-btn-video', 'lit-btn-search', 'lit-btn-settings', 'lit-btn-close']);
@@ -136,17 +136,17 @@ describe('文献盒 UI（ticket 136）', () => {
     expect((popup.querySelector('#lit-btn-settings') as HTMLElement).textContent).toBe('⚙️');
     expect(popup.querySelector('#lit-btn-close')!.classList.contains('bz-win-close')).toBe(true);
     // 类型分类栏已移除（ticket 138 §3.1），仅保留领域筛选行
-    expect(popup.querySelector('#literature-typebar')).toBeNull();
-    expect(popup.querySelector('#literature-sitebar')).toBeTruthy();
+    expect(popup.querySelector('#knowledge-typebar')).toBeNull();
+    expect(popup.querySelector('#knowledge-sitebar')).toBeTruthy();
     // 搜索框无 placeholder（简洁版：盒内 🔍 图标自明，ticket 143）
-    expect((document.getElementById('literature-search-input') as HTMLInputElement).placeholder).toBe('');
-    await vi.waitFor(() => expect(document.getElementById('literature-list')!.textContent).toContain('还没有文献笔记'));
+    expect((document.getElementById('knowledge-search-input') as HTMLInputElement).placeholder).toBe('');
+    await vi.waitFor(() => expect(document.getElementById('knowledge-list')!.textContent).toContain('还没有文献笔记'));
   });
 
   it('主面板列表：标题 + 领域徽标（无类型徽章）+ 简介 + 日期，最近创建降序', async () => {
-    vault.files.set('文献盒/视频A.md', noteMd({ title: '视频A', type: 'video', domain: '物理', date: '2026-08-30 10:00:00', summary: '简介A' }));
-    vault.files.set('文献盒/术语B.md', noteMd({ title: '术语B', type: 'term', domain: '数学', date: '2026-08-28 10:00:00', summary: '简介B' }));
-    vault.files.set('文献盒/视频C.md', noteMd({ title: '视频C', type: 'video', domain: '物理', date: '2026-09-01 10:00:00', summary: '简介C' }));
+    vault.files.set('知识盒/视频A.md', noteMd({ title: '视频A', type: 'video', domain: '物理', date: '2026-08-30 10:00:00', summary: '简介A' }));
+    vault.files.set('知识盒/术语B.md', noteMd({ title: '术语B', type: 'term', domain: '数学', date: '2026-08-28 10:00:00', summary: '简介B' }));
+    vault.files.set('知识盒/视频C.md', noteMd({ title: '视频C', type: 'video', domain: '物理', date: '2026-09-01 10:00:00', summary: '简介C' }));
     ui.showMain();
     await vi.waitFor(() => expect(document.querySelectorAll('.bz-lit-card').length).toBe(3));
     const titles = Array.from(document.querySelectorAll('.bz-lit-card-title')).map((el) => el.textContent);
@@ -161,9 +161,9 @@ describe('文献盒 UI（ticket 136）', () => {
   });
 
   it('主面板日期（ticket 146）：formatRelativeTime 相对显示；空日期不显示、无效日期回退原文', async () => {
-    vault.files.set('文献盒/A.md', noteMd({ title: 'A', date: '2026-09-01 10:00:00' }));
-    vault.files.set('文献盒/B.md', '---\ntitle: B\nsummary: "无日期"\n---\n\n正文');
-    vault.files.set('文献盒/C.md', noteMd({ title: 'C', date: '不是日期' }));
+    vault.files.set('知识盒/A.md', noteMd({ title: 'A', date: '2026-09-01 10:00:00' }));
+    vault.files.set('知识盒/B.md', '---\ntitle: B\nsummary: "无日期"\n---\n\n正文');
+    vault.files.set('知识盒/C.md', noteMd({ title: 'C', date: '不是日期' }));
     ui.showMain();
     await vi.waitFor(() => expect(document.querySelectorAll('.bz-lit-card').length).toBe(3));
     const dateOf = (marker: string) =>
@@ -176,19 +176,19 @@ describe('文献盒 UI（ticket 136）', () => {
   });
 
   it('嵌套子目录笔记也显示（扫描口径与 backfillNotes 一致，P3-5）', async () => {
-    vault.files.set('文献盒/物理课/量子.md', noteMd({ title: '量子', type: 'term', domain: '物理', date: '2026-08-02 10:00:00' }));
+    vault.files.set('知识盒/物理课/量子.md', noteMd({ title: '量子', type: 'term', domain: '物理', date: '2026-08-02 10:00:00' }));
     ui.showMain();
     await vi.waitFor(() => expect(document.querySelectorAll('.bz-lit-card').length).toBe(1));
     expect(document.querySelector('.bz-lit-card')!.textContent).toContain('量子');
   });
 
   it('领域筛选行：全部 (N) + 各领域按钮带数量，按 count 降序；点击筛选/回退', async () => {
-    vault.files.set('文献盒/A.md', noteMd({ title: 'A', type: 'video', domain: '物理' }));
-    vault.files.set('文献盒/B.md', noteMd({ title: 'B', type: 'video', domain: '数学' }));
-    vault.files.set('文献盒/C.md', noteMd({ title: 'C', type: 'term', domain: '物理' }));
+    vault.files.set('知识盒/A.md', noteMd({ title: 'A', type: 'video', domain: '物理' }));
+    vault.files.set('知识盒/B.md', noteMd({ title: 'B', type: 'video', domain: '数学' }));
+    vault.files.set('知识盒/C.md', noteMd({ title: 'C', type: 'term', domain: '物理' }));
     ui.showMain();
     await vi.waitFor(() => expect(document.querySelectorAll('.bz-lit-card').length).toBe(3));
-    const bar = document.getElementById('literature-sitebar')!;
+    const bar = document.getElementById('knowledge-sitebar')!;
     expect(bar.textContent).toContain('全部 (3)');
     const domainBtns = Array.from(bar.querySelectorAll<HTMLElement>('button'));
     // 物理 2 条在前（count 降序），数学 1 条在后
@@ -197,7 +197,7 @@ describe('文献盒 UI（ticket 136）', () => {
     // 领域筛选：物理 → 2 条（A 与 C 同属物理，B 数学被排除）
     domainBtns[1].click();
     await vi.waitFor(() => expect(document.querySelectorAll('.bz-lit-card').length).toBe(2));
-    const listTxt = document.getElementById('literature-list')!.textContent!;
+    const listTxt = document.getElementById('knowledge-list')!.textContent!;
     expect(listTxt).toContain('A');
     expect(listTxt).toContain('C');
     expect(listTxt).not.toContain('数学'); // B 被领域筛选排除
@@ -205,7 +205,7 @@ describe('文献盒 UI（ticket 136）', () => {
     domainBtns[0].click();
     await vi.waitFor(() => expect(document.querySelectorAll('.bz-lit-card').length).toBe(3));
     // 高亮同步回归（applyFilter 内 rebuildDomainBar）：切回「全部」后 active 必须回到全部按钮
-    const bar2 = document.getElementById('literature-sitebar')!;
+    const bar2 = document.getElementById('knowledge-sitebar')!;
     const btns2 = Array.from(bar2.querySelectorAll<HTMLElement>('button'));
     expect(btns2[0].classList.contains('active')).toBe(true); // 全部高亮
     expect(btns2[1].classList.contains('active')).toBe(false); // 物理不再高亮
@@ -217,16 +217,16 @@ describe('文献盒 UI（ticket 136）', () => {
   });
 
   it('🔍 搜索：切换显隐 + 300ms 防抖按标题/简介过滤', async () => {
-    vault.files.set('文献盒/A.md', noteMd({ title: '黑洞', date: '2026-08-02 10:00:00' }));
-    vault.files.set('文献盒/B.md', noteMd({ title: '贝叶斯', summary: '概率论方法', date: '2026-08-01 10:00:00' }));
+    vault.files.set('知识盒/A.md', noteMd({ title: '黑洞', date: '2026-08-02 10:00:00' }));
+    vault.files.set('知识盒/B.md', noteMd({ title: '贝叶斯', summary: '概率论方法', date: '2026-08-01 10:00:00' }));
     ui.showMain();
     await vi.waitFor(() => expect(document.querySelectorAll('.bz-lit-card').length).toBe(2));
     // 搜索框默认隐藏，🔍 打开
-    const container = document.getElementById('literature-search-container')!;
+    const container = document.getElementById('knowledge-search-container')!;
     expect(container.style.display).toBe('none');
     (document.getElementById('lit-btn-search') as HTMLButtonElement).click();
     expect(container.style.display).toBe('block');
-    const input = document.getElementById('literature-search-input') as HTMLInputElement;
+    const input = document.getElementById('knowledge-search-input') as HTMLInputElement;
     // 标题命中
     input.value = '黑洞';
     input.dispatchEvent(new Event('input'));
@@ -239,7 +239,7 @@ describe('文献盒 UI（ticket 136）', () => {
     // 无结果空态
     input.value = '不存在的词';
     input.dispatchEvent(new Event('input'));
-    await vi.waitFor(() => expect(document.getElementById('literature-list')!.textContent).toContain('没有符合条件的文献笔记'));
+    await vi.waitFor(() => expect(document.getElementById('knowledge-list')!.textContent).toContain('没有符合条件的文献笔记'));
     // 再次点 🔍 收起：清空关键字恢复全部
     (document.getElementById('lit-btn-search') as HTMLButtonElement).click();
     expect(container.style.display).toBe('none');
@@ -247,7 +247,7 @@ describe('文献盒 UI（ticket 136）', () => {
   });
 
   it('双击卡片打开笔记（click 计数 300ms，单击不打开）', async () => {
-    vault.files.set('文献盒/A.md', noteMd({ title: 'A' }));
+    vault.files.set('知识盒/A.md', noteMd({ title: 'A' }));
     ui.showMain();
     await vi.waitFor(() => expect(document.querySelector('.bz-lit-card')).toBeTruthy());
     const card = document.querySelector('.bz-lit-card') as HTMLElement;
@@ -260,8 +260,8 @@ describe('文献盒 UI（ticket 136）', () => {
   // ==================== 主面板：抽屉与删除联动 ====================
 
   it('抽屉（桌面右键）：打开/复制双链/复制原文链接[video]/删除；术语笔记无原文链接', async () => {
-    vault.files.set('文献盒/A.md', noteMd({ title: '视频A', type: 'video', domain: '物理', url: 'https://www.bilibili.com/video/BV1xx411c7mD' }));
-    vault.files.set('文献盒/T.md', noteMd({ title: '术语T', type: 'term', domain: '数学' }));
+    vault.files.set('知识盒/A.md', noteMd({ title: '视频A', type: 'video', domain: '物理', url: 'https://www.bilibili.com/video/BV1xx411c7mD' }));
+    vault.files.set('知识盒/T.md', noteMd({ title: '术语T', type: 'term', domain: '数学' }));
     ui.showMain();
     await vi.waitFor(() => expect(document.querySelectorAll('.bz-lit-card').length).toBe(2));
     // 视频卡片
@@ -276,7 +276,7 @@ describe('文献盒 UI（ticket 136）', () => {
     const linkItem = Array.from(menu.querySelectorAll<HTMLElement>('.bz-item-menu-item')).find((el) => el.textContent!.includes('复制双链'))!;
     linkItem.click();
     await vi.waitFor(() => expect(clipWrite).toHaveBeenCalled());
-    expect(String(clipWrite.mock.calls[0][0])).toContain('[[文献盒/A.md|视频A]]');
+    expect(String(clipWrite.mock.calls[0][0])).toContain('[[知识盒/A.md|视频A]]');
     // 复制原文链接
     clipWrite.mockClear();
     (document.querySelectorAll('.bz-lit-card')[0] as HTMLElement).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 }));
@@ -291,10 +291,10 @@ describe('文献盒 UI（ticket 136）', () => {
     expect(menuText).not.toContain('复制原文链接');
   });
 
-  it('删除笔记（抽屉 danger + 确认）：删除文件 + 同步清理 literature.json 指向它的任务记录', async () => {
-    vault.files.set('文献盒/A.md', noteMd({ title: '视频A', type: 'video', domain: '物理' }));
-    const t = await LiteratureData.addTask({ url: 'BV1xx411c7mD' });
-    await LiteratureData.updateTask(t.id, { status: 'success', notePath: '文献盒/A.md' } as any);
+  it('删除笔记（抽屉 danger + 确认）：删除文件 + 同步清理 knowledge.json 指向它的任务记录', async () => {
+    vault.files.set('知识盒/A.md', noteMd({ title: '视频A', type: 'video', domain: '物理' }));
+    const t = await KnowledgeData.addTask({ url: 'BV1xx411c7mD' });
+    await KnowledgeData.updateTask(t.id, { status: 'success', notePath: '知识盒/A.md' } as any);
     ui.showMain();
     await vi.waitFor(() => expect(document.querySelector('.bz-lit-card')).toBeTruthy());
     (document.querySelector('.bz-lit-card') as HTMLElement).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 }));
@@ -305,8 +305,8 @@ describe('文献盒 UI（ticket 136）', () => {
     expect(document.body.textContent).toContain('删除文献笔记');
     expect(document.body.textContent).not.toContain('从 vault 删除');
     (document.getElementById('__shared_confirm_ok__') as HTMLButtonElement).click();
-    await vi.waitFor(() => expect(vault.files.has('文献盒/A.md')).toBe(false));
-    const tasks = await LiteratureData.loadTasks();
+    await vi.waitFor(() => expect(vault.files.has('知识盒/A.md')).toBe(false));
+    const tasks = await KnowledgeData.loadTasks();
     expect(tasks).toHaveLength(0); // 指向该笔记的任务记录同步清理（避免悬挂 notePath）
   });
 
@@ -315,12 +315,12 @@ describe('文献盒 UI（ticket 136）', () => {
   it('懒加载：首批 20 条，scroll 触底（50px 阈值）批次加载到 25，尾部「已显示所有笔记」', async () => {
     for (let i = 0; i < 25; i++) {
       const day = String((i % 28) + 1).padStart(2, '0');
-      vault.files.set(`文献盒/N${i}.md`, noteMd({ title: `笔记${i}`, date: `2026-08-${day} 10:00:00` }));
+      vault.files.set(`知识盒/N${i}.md`, noteMd({ title: `笔记${i}`, date: `2026-08-${day} 10:00:00` }));
     }
     ui.showMain();
     await vi.waitFor(() => expect(document.querySelectorAll('.bz-lit-card').length).toBe(20));
-    expect(document.getElementById('literature-list')!.textContent).not.toContain('已显示所有笔记');
-    const list = document.getElementById('literature-list')!;
+    expect(document.getElementById('knowledge-list')!.textContent).not.toContain('已显示所有笔记');
+    const list = document.getElementById('knowledge-list')!;
     Object.defineProperty(list, 'scrollTop', { value: 25000, configurable: true });
     Object.defineProperty(list, 'scrollHeight', { value: 20000, configurable: true });
     Object.defineProperty(list, 'clientHeight', { value: 500, configurable: true });
@@ -329,41 +329,41 @@ describe('文献盒 UI（ticket 136）', () => {
     expect(list.textContent).toContain('已显示所有笔记');
   });
 
-  it('自动刷新：literature:file-* 四通道 + 300ms 防抖增量更新', async () => {
-    vault.files.set('文献盒/A.md', noteMd({ title: 'A', date: '2026-08-02 10:00:00' }));
+  it('自动刷新：knowledge:file-* 四通道 + 300ms 防抖增量更新', async () => {
+    vault.files.set('知识盒/A.md', noteMd({ title: 'A', date: '2026-08-02 10:00:00' }));
     ui.showMain();
     await vi.waitFor(() => expect(document.querySelectorAll('.bz-lit-card').length).toBe(1));
     // created：新增文件
-    emitDomainEvent('literature:file-created', { path: '文献盒/B.md' });
-    vault.files.set('文献盒/B.md', noteMd({ title: 'B', date: '2026-08-03 10:00:00' }));
+    emitDomainEvent('knowledge:file-created', { path: '知识盒/B.md' });
+    vault.files.set('知识盒/B.md', noteMd({ title: 'B', date: '2026-08-03 10:00:00' }));
     await vi.waitFor(() => expect(document.querySelectorAll('.bz-lit-card').length).toBe(2));
     // modified：改标题就地更新
-    emitDomainEvent('literature:file-modified', { path: '文献盒/A.md' });
-    vault.files.set('文献盒/A.md', noteMd({ title: 'A改', date: '2026-08-02 10:00:00' }));
+    emitDomainEvent('knowledge:file-modified', { path: '知识盒/A.md' });
+    vault.files.set('知识盒/A.md', noteMd({ title: 'A改', date: '2026-08-02 10:00:00' }));
     await vi.waitFor(() => expect(document.body.textContent).toContain('A改'));
     // deleted：移除卡片
-    emitDomainEvent('literature:file-deleted', { path: '文献盒/B.md' });
-    vault.files.delete('文献盒/B.md');
+    emitDomainEvent('knowledge:file-deleted', { path: '知识盒/B.md' });
+    vault.files.delete('知识盒/B.md');
     await vi.waitFor(() => expect(document.querySelectorAll('.bz-lit-card').length).toBe(1));
     // renamed：旧路径移除 + 新路径增量（movedOut=false）
-    emitDomainEvent('literature:file-renamed', { oldPath: '文献盒/A.md', newPath: '文献盒/A2.md', movedOut: false });
-    vault.files.delete('文献盒/A.md');
-    vault.files.set('文献盒/A2.md', noteMd({ title: 'A2', date: '2026-08-02 10:00:00' }));
+    emitDomainEvent('knowledge:file-renamed', { oldPath: '知识盒/A.md', newPath: '知识盒/A2.md', movedOut: false });
+    vault.files.delete('知识盒/A.md');
+    vault.files.set('知识盒/A2.md', noteMd({ title: 'A2', date: '2026-08-02 10:00:00' }));
     await vi.waitFor(() => expect(document.body.textContent).toContain('A2'));
     expect(document.body.textContent).not.toContain('A改');
     // 目录边界：非文献目录的 modify 不干扰
-    emitDomainEvent('literature:file-modified', { path: '文献盒备选/x.md' });
-    vault.files.set('文献盒备选/x.md', noteMd({ title: 'X' }));
+    emitDomainEvent('knowledge:file-modified', { path: '知识盒备选/x.md' });
+    vault.files.set('知识盒备选/x.md', noteMd({ title: 'X' }));
     await new Promise((r) => setTimeout(r, 350));
     expect(document.querySelectorAll('.bz-lit-card').length).toBe(1);
   });
 
   it('文献目录设置变更：清缓存全量重载（旧目录内容不残留）', async () => {
-    vault.files.set('文献盒/A.md', noteMd({ title: '旧目录笔记' }));
+    vault.files.set('知识盒/A.md', noteMd({ title: '旧目录笔记' }));
     vault.files.set('新文献库/B.md', noteMd({ title: '新目录笔记' }));
     ui.showMain();
     await vi.waitFor(() => expect(document.body.textContent).toContain('旧目录笔记'));
-    settings.literatureDirectory = '新文献库'; // 模拟设置面板改目录
+    settings.knowledgeDirectory = '新文献库'; // 模拟设置面板改目录
     ui.showMain(); // refreshPanel 检测目录变更 → 清缓存重载
     await vi.waitFor(() => expect(document.body.textContent).toContain('新目录笔记'));
     expect(document.body.textContent).not.toContain('旧目录笔记');
@@ -373,8 +373,8 @@ describe('文献盒 UI（ticket 136）', () => {
 
   it('视频录入面板（ticket 146）：➕/▶️ 批量处理单钮/🕘/✕ 存在；去 ⏹ 独立终止钮、⚙️ 设置与 ⬇️ 下载', async () => {
     ui.showVideoEntry();
-    expect(document.getElementById('literature-video-popup')!.style.display).toBe('flex');
-    const popup = document.getElementById('literature-video-popup')!;
+    expect(document.getElementById('knowledge-video-popup')!.style.display).toBe('flex');
+    const popup = document.getElementById('knowledge-video-popup')!;
     expect(popup.querySelector('#lit-btn-video-add')).toBeTruthy();
     expect(popup.querySelector('#lit-btn-video-run')).toBeTruthy();
     expect(popup.querySelector('#lit-btn-video-abort')).toBeNull(); // 单钮态机：初始无独立终止钮（ticket 146）
@@ -392,8 +392,8 @@ describe('文献盒 UI（ticket 136）', () => {
 
   it('showVideoEntry(prefill) 打开视频面板并叠开添加弹窗（聚合讯入口预填链接/标题/UP主，新增模式）', () => {
     ui.showVideoEntry({ url: 'https://www.bilibili.com/video/BV1xx411c7mD', title: '预填标题', uploader: '预填UP' });
-    expect(document.getElementById('literature-video-popup')!.style.display).toBe('flex');
-    expect(document.getElementById('literature-add-popup')!.style.display).toBe('flex');
+    expect(document.getElementById('knowledge-video-popup')!.style.display).toBe('flex');
+    expect(document.getElementById('knowledge-add-popup')!.style.display).toBe('flex');
     // ticket 143：无标题，新增模式无编辑标签
     expect(document.getElementById('lit-add-mode')!.style.display).toBe('none');
     expect((document.getElementById('lit-add-url') as HTMLInputElement).value).toContain('BV1xx411c7mD');
@@ -403,7 +403,7 @@ describe('文献盒 UI（ticket 136）', () => {
 
   it('视频面板标题（ticket 143 拍板）：保留 h3「视频录入」+ 动作钮；标题后灰色计数小字去掉', () => {
     ui.showVideoEntry();
-    const popup = document.getElementById('literature-video-popup')!;
+    const popup = document.getElementById('knowledge-video-popup')!;
     expect(popup.querySelector('.bz-win-head h3')!.textContent).toBe('视频录入');
     expect(document.getElementById('lit-video-counts')).toBeNull();
     expect(popup.querySelector('#lit-btn-video-add')).toBeTruthy();
@@ -416,8 +416,8 @@ describe('文献盒 UI（ticket 136）', () => {
     expect(document.getElementById('lit-add-title')).toBeNull();
     expect((document.getElementById('lit-add-url') as HTMLInputElement).placeholder).toBe('');
     // 链接输入行：label 在上，整片/剪辑开关与输入同行
-    expect(document.querySelector('#literature-add-popup .bz-lit-url-row #lit-add-range')).toBeTruthy();
-    const labels = Array.from(document.querySelectorAll('#literature-add-popup label')).map((l) => l.textContent);
+    expect(document.querySelector('#knowledge-add-popup .bz-lit-url-row #lit-add-range')).toBeTruthy();
+    const labels = Array.from(document.querySelectorAll('#knowledge-add-popup label')).map((l) => l.textContent);
     expect(labels).toContain('视频链接 / BV 号');
     expect(labels.find((t) => t && t.startsWith('分P'))).toBe('分P'); // 无括号说明
     // 默认剪辑片段 + 时间输入可见
@@ -439,13 +439,13 @@ describe('文献盒 UI（ticket 136）', () => {
   it('添加弹窗：无取消按钮、遮罩点击关闭；ESC 先关添加弹窗再关视频面板', () => {
     ui.showVideoEntry();
     (document.getElementById('lit-btn-video-add') as HTMLButtonElement).click();
-    expect(document.getElementById('literature-add-popup')!.style.display).toBe('flex');
+    expect(document.getElementById('knowledge-add-popup')!.style.display).toBe('flex');
     expect(document.getElementById('lit-add-cancel')).toBeNull();
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    expect(document.getElementById('literature-add-popup')!.style.display).toBe('none');
-    expect(document.getElementById('literature-video-popup')!.style.display).toBe('flex');
+    expect(document.getElementById('knowledge-add-popup')!.style.display).toBe('none');
+    expect(document.getElementById('knowledge-video-popup')!.style.display).toBe('flex');
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    expect(document.getElementById('literature-video-popup')!.style.display).toBe('none');
+    expect(document.getElementById('knowledge-video-popup')!.style.display).toBe('none');
   });
 
   it('添加弹窗：保存入库 + 整片/剪辑开关 + 宽松时间归一 + 编辑回填', async () => {
@@ -461,13 +461,13 @@ describe('文献盒 UI（ticket 136）', () => {
     (document.getElementById('lit-add-end') as HTMLInputElement).value = '12-30';
     (document.getElementById('lit-add-save') as HTMLButtonElement).click();
     await vi.waitFor(() => expect(strNotices()).toContain('已保存'));
-    let all = await LiteratureData.loadTasks();
+    let all = await KnowledgeData.loadTasks();
     expect(all).toHaveLength(1);
     expect(all[0]).toMatchObject({ url: 'https://www.bilibili.com/video/BV1xx411c7mD', start: '12:02', end: '12:30', status: 'pending' });
     // 点击待处理行 → 编辑回填（保存后弹窗已关闭，需点击行打开编辑态）；带 start/end → 剪辑模式回显
     await vi.waitFor(() => expect(document.querySelector('.bz-bili-task-card')).toBeTruthy());
     (document.querySelector('.bz-bili-task-card') as HTMLElement).click();
-    await vi.waitFor(() => expect(document.getElementById('literature-add-popup')!.style.display).toBe('flex'));
+    await vi.waitFor(() => expect(document.getElementById('knowledge-add-popup')!.style.display).toBe('flex'));
     expect((document.getElementById('lit-add-url') as HTMLInputElement).value).toContain('BV1xx411c7mD');
     expect((document.getElementById('lit-add-start') as HTMLInputElement).value).toBe('12:02');
     expect(document.querySelector('#lit-add-range button[data-range="clip"]')!.classList.contains('active')).toBe(true);
@@ -479,15 +479,15 @@ describe('文献盒 UI（ticket 136）', () => {
   });
 
   it('任务行渲染：状态徽标 + 时间范围 + 失败原因行内直显（头部灰色计数小字已去掉，ticket 143）', async () => {
-    const t1 = await LiteratureData.addTask({ url: 'BV1xx411c7mD', start: '1:02:03', end: '1:05:00' });
-    await LiteratureData.updateTask(t1.id, { status: 'processing', reason: '下载中…' } as any);
-    const t2 = await LiteratureData.addTask({ url: 'BV1xx411c7mE' });
-    await LiteratureData.updateTask(t2.id, { status: 'success', notePath: '文献盒/测试.md' } as any);
-    await LiteratureData.updateTask(t2.id, { status: 'failed', reason: '视频已删除' } as any);
-    await LiteratureData.addTask({ url: 'BV1xx411c7mG' });
+    const t1 = await KnowledgeData.addTask({ url: 'BV1xx411c7mD', start: '1:02:03', end: '1:05:00' });
+    await KnowledgeData.updateTask(t1.id, { status: 'processing', reason: '下载中…' } as any);
+    const t2 = await KnowledgeData.addTask({ url: 'BV1xx411c7mE' });
+    await KnowledgeData.updateTask(t2.id, { status: 'success', notePath: '知识盒/测试.md' } as any);
+    await KnowledgeData.updateTask(t2.id, { status: 'failed', reason: '视频已删除' } as any);
+    await KnowledgeData.addTask({ url: 'BV1xx411c7mG' });
     ui.showVideoEntry();
-    await vi.waitFor(() => expect(document.getElementById('literature-video-list')!.children.length).toBeGreaterThan(0));
-    const list = document.getElementById('literature-video-list')!;
+    await vi.waitFor(() => expect(document.getElementById('knowledge-video-list')!.children.length).toBeGreaterThan(0));
+    const list = document.getElementById('knowledge-video-list')!;
     expect(list.textContent).toContain('待处理');
     expect(list.textContent).toContain('处理中');
     expect(list.textContent).toContain('失败');
@@ -505,7 +505,7 @@ describe('文献盒 UI（ticket 136）', () => {
     try {
       ui.showVideoEntry();
       await new Promise((r) => setTimeout(r, 0));
-      await LiteratureData.addTask({ url: 'BV1xx411c7mD' });
+      await KnowledgeData.addTask({ url: 'BV1xx411c7mD' });
       await ui.refreshVideoPanel();
       // ticket 146 单钮态机：空闲「▶️ 批量处理」→ 点击 → 运行中「⏹ 终止」
       const runBtn = document.getElementById('lit-btn-video-run') as HTMLButtonElement;
@@ -549,7 +549,7 @@ describe('文献盒 UI（ticket 136）', () => {
       const runBtn = document.getElementById('lit-btn-video-run') as HTMLButtonElement;
       // 无工作 → 禁用；有待处理 → 启用（初始无独立 ⏹ 按钮已由前面用例覆盖）
       await vi.waitFor(() => expect(runBtn.disabled).toBe(true));
-      await LiteratureData.addTask({ url: 'BV1xx411c7mD' });
+      await KnowledgeData.addTask({ url: 'BV1xx411c7mD' });
       await ui.refreshVideoPanel();
       expect(runBtn.disabled).toBe(false);
       expect(runBtn.textContent).toBe('▶️');
@@ -575,28 +575,28 @@ describe('文献盒 UI（ticket 136）', () => {
   });
 
   it('历史独立弹窗：🕘 打开 + 归档分组 + 清空历史（设置入口，确认后记录清空）', async () => {
-    const ok = await LiteratureData.addTask({ url: 'https://www.bilibili.com/video/BV1xx411c7mD' });
-    await LiteratureData.updateTask(ok.id, { status: 'success', archived: true, archivedAt: '2026-08-28 21:00:00', title: '从零开始学B站', notePath: '文献盒/从零开始学B站.md' } as any);
-    const pend = await LiteratureData.addTask({ url: 'BV1xx411c7mE' });
+    const ok = await KnowledgeData.addTask({ url: 'https://www.bilibili.com/video/BV1xx411c7mD' });
+    await KnowledgeData.updateTask(ok.id, { status: 'success', archived: true, archivedAt: '2026-08-28 21:00:00', title: '从零开始学B站', notePath: '知识盒/从零开始学B站.md' } as any);
+    const pend = await KnowledgeData.addTask({ url: 'BV1xx411c7mE' });
     expect(pend).toBeTruthy();
     ui.showVideoEntry();
-    await vi.waitFor(() => expect(document.getElementById('literature-video-list')!.textContent).toContain('BV1xx411c7mE'));
-    expect(document.getElementById('literature-video-list')!.textContent).not.toContain('从零开始学B站');
+    await vi.waitFor(() => expect(document.getElementById('knowledge-video-list')!.textContent).toContain('BV1xx411c7mE'));
+    expect(document.getElementById('knowledge-video-list')!.textContent).not.toContain('从零开始学B站');
     (document.getElementById('lit-btn-video-history') as HTMLButtonElement).click();
-    await vi.waitFor(() => expect(document.getElementById('literature-history-popup')!.style.display).toBe('flex'));
-    const hList = document.getElementById('literature-history-list')!;
+    await vi.waitFor(() => expect(document.getElementById('knowledge-history-popup')!.style.display).toBe('flex'));
+    const hList = document.getElementById('knowledge-history-list')!;
     await vi.waitFor(() => expect(hList.textContent).toContain('从零开始学B站'));
     expect(hList.textContent).toContain('📄 从零开始学B站'); // 去目录去 .md（ticket 143）
-    expect(hList.textContent).not.toContain('文献盒/从零开始学B站.md');
+    expect(hList.textContent).not.toContain('知识盒/从零开始学B站.md');
     expect(document.getElementById('lit-history-counts')!.textContent).toContain('共 1 条');
     expect(hList.querySelector('.bz-bili-status')).toBeNull(); // 无成功徽标
     // 清空历史（设置面板按钮行触发）
-    const schema = literatureSettingsSchema({ onClearHistory: () => (ui as any).confirmClearHistory() });
+    const schema = knowledgeSettingsSchema({ onClearHistory: () => (ui as any).confirmClearHistory() });
     (schema.groups[4].rows[0] as any).onClick({});
     await vi.waitFor(() => expect(document.getElementById('__shared_confirm_ok__')).toBeTruthy());
     (document.getElementById('__shared_confirm_ok__') as HTMLButtonElement).click();
     await vi.waitFor(async () => {
-      const all = await LiteratureData.loadTasks();
+      const all = await KnowledgeData.loadTasks();
       expect(all.some((x) => x.archived)).toBe(false);
     });
     await vi.waitFor(() => expect(hList.textContent).toContain('暂无历史记录'));
@@ -606,12 +606,12 @@ describe('文献盒 UI（ticket 136）', () => {
     const pad = (n: number) => String(n).padStart(2, '0');
     const past = new Date(Date.now() - 2 * 3600e3); // 2 小时前（相对时间稳定落在「N小时前」）
     const ts = `${past.getFullYear()}-${pad(past.getMonth() + 1)}-${pad(past.getDate())} ${pad(past.getHours())}:${pad(past.getMinutes())}:${pad(past.getSeconds())}`;
-    const a = await LiteratureData.addTask({ url: 'https://www.bilibili.com/video/BV1xx411c7mD', title: '量子纠缠' });
-    await LiteratureData.updateTask(a.id, { status: 'success', archived: true, archivedAt: ts, processedAt: ts, uploader: '物理所', notePath: '文献盒/物理/量子纠缠.md', videoPath: 'D:/vids/纠缠.mp4' } as any);
-    const b = await LiteratureData.addTask({ url: 'https://www.bilibili.com/video/BV1xx411c7mD', title: '量子纠缠' });
-    await LiteratureData.updateTask(b.id, { status: 'success', archived: true, archivedAt: ts, processedAt: ts, uploader: '物理所', notePath: '文献盒/物理/量子纠缠_2.md' } as any);
+    const a = await KnowledgeData.addTask({ url: 'https://www.bilibili.com/video/BV1xx411c7mD', title: '量子纠缠' });
+    await KnowledgeData.updateTask(a.id, { status: 'success', archived: true, archivedAt: ts, processedAt: ts, uploader: '物理所', notePath: '知识盒/物理/量子纠缠.md', videoPath: 'D:/vids/纠缠.mp4' } as any);
+    const b = await KnowledgeData.addTask({ url: 'https://www.bilibili.com/video/BV1xx411c7mD', title: '量子纠缠' });
+    await KnowledgeData.updateTask(b.id, { status: 'success', archived: true, archivedAt: ts, processedAt: ts, uploader: '物理所', notePath: '知识盒/物理/量子纠缠_2.md' } as any);
     ui.showHistory();
-    const hList = document.getElementById('literature-history-list')!;
+    const hList = document.getElementById('knowledge-history-list')!;
     await vi.waitFor(() => expect(hList.textContent).toContain('量子纠缠'));
     // 组头：UP主名直接跟在标题后（无「UP主」前缀、无「N 条笔记」计数）
     const up = hList.querySelector('.bz-bili-hup') as HTMLElement;
@@ -651,9 +651,9 @@ describe('文献盒 UI（ticket 136）', () => {
   it('术语面板简洁版（ticket 142）：无标题/术语 label/placeholder/状态行，输入行下无提示文字', () => {
     ui.showTermEntry();
     // 无标题：bz-win-head 不再挂术语弹窗
-    expect(document.querySelector('#literature-term-popup .bz-win-head')).toBeNull();
+    expect(document.querySelector('#knowledge-term-popup .bz-win-head')).toBeNull();
     // 无 label：术语 label 与预览字段 label 全部移除
-    expect(document.querySelectorAll('#literature-term-popup label').length).toBe(0);
+    expect(document.querySelectorAll('#knowledge-term-popup label').length).toBe(0);
     // 输入框无 placeholder
     expect((document.getElementById('lit-term-input') as HTMLInputElement).placeholder).toBe('');
     // 无「生成中」状态行（ts 载并入按钮文案，输入行下方无文字节点）
@@ -667,7 +667,7 @@ describe('文献盒 UI（ticket 136）', () => {
   it('术语流程（ticket 138 §2.1）：生成 → 纯 AI 预览（未确认不落盘）；确认写入 → generateTermNote 传面板值落盘 + 自动打开 + term-generated + 面板关闭', async () => {
     noteGen.generateTermDraft.mockImplementation(async (term: string) => ({ summary: `${term}的百科式简介`, domain: '物理' }));
     noteGen.generateTermNote.mockImplementation(async ({ term, summary, domain, source }: { term: string; summary?: string; domain?: string; source?: unknown }) => {
-      const path = `文献盒/${term}.md`;
+      const path = `知识盒/${term}.md`;
       vault.files.set(path, `---
 title: "${term}"
 type: term
@@ -680,7 +680,7 @@ ${summary ?? `${term}的百科式简介`}`);
       return path;
     });
     const events: any[] = [];
-    const off = onDomainEvent<any>('literature:tasks', (e) => events.push(e));
+    const off = onDomainEvent<any>('knowledge:tasks', (e) => events.push(e));
     try {
       ui.showTermEntry();
       (document.getElementById('lit-term-input') as HTMLInputElement).value = '黑洞';
@@ -694,7 +694,7 @@ ${summary ?? `${term}的百科式简介`}`);
       expect((document.getElementById('lit-term-content') as HTMLElement).textContent).toContain('黑洞的百科式简介');
       // 未确认不落盘：生成/预览后 vault 无新增 md、generateTermNote 未被调用
       expect(noteGen.generateTermNote).not.toHaveBeenCalled();
-      expect(vault.files.has('文献盒/黑洞.md')).toBe(false);
+      expect(vault.files.has('知识盒/黑洞.md')).toBe(false);
       // 确认写入 → 此刻才落盘一次，且传的是面板当前值（所见即所得，P1-4 不重跑 AI）
       (document.getElementById('lit-term-save') as HTMLButtonElement).click();
       await vi.waitFor(() => expect(noteGen.generateTermNote).toHaveBeenCalledTimes(1));
@@ -703,9 +703,9 @@ ${summary ?? `${term}的百科式简介`}`);
       // term-generated 行为流事件
       expect(events).toContainEqual(expect.objectContaining({ kind: 'term-generated', term: '黑洞' }));
       // 面板关闭
-      await vi.waitFor(() => expect(document.getElementById('literature-term-popup')!.style.display).toBe('none'));
+      await vi.waitFor(() => expect(document.getElementById('knowledge-term-popup')!.style.display).toBe('none'));
       // 落盘文件存在（仅确认时落盘一次，未被误删）
-      expect(vault.files.has('文献盒/黑洞.md')).toBe(true);
+      expect(vault.files.has('知识盒/黑洞.md')).toBe(true);
       expect(strNotices()).toContain('已生成术语文献笔记');
     } finally {
       off();
@@ -715,7 +715,7 @@ ${summary ?? `${term}的百科式简介`}`);
   it('术语流程：预览只读所见即所得——无领域/正文输入框，确认写入传 AI 预览值（不重跑 AI、无二次覆盖）', async () => {
     noteGen.generateTermDraft.mockResolvedValue({ summary: 'AI 生成的简介', domain: '物理' });
     noteGen.generateTermNote.mockImplementation(async ({ term, summary, domain, source }: { term: string; summary?: string; domain?: string; source?: unknown }) => {
-      const path = `文献盒/${term}.md`;
+      const path = `知识盒/${term}.md`;
       vault.files.set(path, `---
 title: "${term}"
 type: term
@@ -741,7 +741,7 @@ ${summary ?? 'AI 生成的简介'}`);
     expect(noteGen.generateTermNote).toHaveBeenCalledTimes(1); // 预览不落盘，确认仅落一次
     // 所见即所得：确认写入直接用 AI 预览值，不重跑 AI、无二次覆盖
     expect(noteGen.generateTermNote).toHaveBeenCalledWith({ term: '黑洞', summary: 'AI 生成的简介', domain: '物理', source: null });
-    const content = vault.files.get('文献盒/黑洞.md')!;
+    const content = vault.files.get('知识盒/黑洞.md')!;
     expect(content).toContain('domain: "物理"');
     expect(content).toContain('AI 生成的简介');
   });
@@ -773,14 +773,14 @@ ${summary ?? 'AI 生成的简介'}`);
     // 全程只预览未落盘
     expect(noteGen.generateTermNote).not.toHaveBeenCalled();
     // 无预览直接确认 → 提示先点击「生成」
-    (document.getElementById('literature-term-mask') as HTMLElement).click();
+    (document.getElementById('knowledge-term-mask') as HTMLElement).click();
     ui.showTermEntry();
     (document.getElementById('lit-term-input') as HTMLInputElement).value = '黑洞'; // 只有术语没有预览
     (document.getElementById('lit-term-save') as HTMLButtonElement).click();
     expect(strNotices()).toContain('请先点击「生成」');
     expect(noteGen.generateTermNote).not.toHaveBeenCalled();
     // 未确认关闭 → vault 无新增 md
-    (document.getElementById('literature-term-mask') as HTMLElement).click();
+    (document.getElementById('knowledge-term-mask') as HTMLElement).click();
     expect(vault.files.size).toBe(0);
     expect(openFile).not.toHaveBeenCalled();
   });
@@ -789,7 +789,7 @@ ${summary ?? 'AI 生成的简介'}`);
     noteGen.generateTermDraft.mockResolvedValue({ summary: 'AI 生成的简介', domain: '物理' });
     noteGen.summarizeTermSummary.mockResolvedValue('精简后的简介');
     noteGen.generateTermNote.mockImplementation(async ({ term, summary, domain, source }: { term: string; summary?: string; domain?: string; source?: unknown }) => {
-      const path = `文献盒/${term}.md`;
+      const path = `知识盒/${term}.md`;
       vault.files.set(path, `---
 title: "${term}"
 type: term
@@ -835,7 +835,7 @@ ${summary ?? ''}`);
 
   it('术语来源：URL 回车 → 外部 chip + 属性卡来源行（净化尾标点）；点来源行开浏览器；确认写入落 source', async () => {
     noteGen.generateTermDraft.mockResolvedValue({ summary: 'AI 生成的简介', domain: '物理' });
-    noteGen.generateTermNote.mockResolvedValue('文献盒/心流.md');
+    noteGen.generateTermNote.mockResolvedValue('知识盒/心流.md');
     ui.showTermEntry();
     (document.getElementById('lit-term-input') as HTMLInputElement).value = '心流';
     (document.getElementById('lit-term-generate') as HTMLButtonElement).click();
@@ -866,7 +866,7 @@ ${summary ?? ''}`);
     noteGen.generateTermDraft.mockResolvedValue({ summary: '', domain: '' });
     const noteSrc = { kind: 'note' as const, path: '我的/日记/心流体验.md' };
     ui.showTermEntry('心流', noteSrc);
-    await vi.waitFor(() => expect(document.getElementById('literature-term-popup')!.style.display).toBe('flex'));
+    await vi.waitFor(() => expect(document.getElementById('knowledge-term-popup')!.style.display).toBe('flex'));
     const chip = document.getElementById('lit-term-src-chip')!;
     expect(chip.style.display).toBe('inline-flex');
     expect(chip.textContent).toContain('内 部');
@@ -884,8 +884,8 @@ ${summary ?? ''}`);
 
   // ==================== 设置 schema 与设置弹窗 ====================
 
-  it('literatureSettingsSchema：五组键齐全；清空历史 button 行回调', () => {
-    const schema = literatureSettingsSchema({ onClearHistory: () => {} });
+  it('knowledgeSettingsSchema：五组键齐全；清空历史 button 行回调', () => {
+    const schema = knowledgeSettingsSchema({ onClearHistory: () => {} });
     expect(schema.groups).toHaveLength(5);
     expect(schema.groups[0].name).toBe('目录与分类');
     expect(schema.groups[1].name).toBe('视频处理');
@@ -899,7 +899,7 @@ ${summary ?? ''}`);
     expect(schema.groups[2].rows).toHaveLength(6);
     // 清空历史回调
     const cleared = vi.fn();
-    const schema2 = literatureSettingsSchema({ onClearHistory: cleared });
+    const schema2 = knowledgeSettingsSchema({ onClearHistory: cleared });
     const row = schema2.groups[4].rows[0] as any;
     expect(row.type).toBe('button');
     expect(row.buttonText).toBe('清空历史');
@@ -907,13 +907,13 @@ ${summary ?? ''}`);
     expect(cleared).toHaveBeenCalledTimes(1);
   });
 
-  it('主面板 ⚙️ 打开文献盒设置弹窗（schema 渲染，目录与分类/视频处理/工具/维护）', async () => {
+  it('主面板 ⚙️ 打开知识盒设置弹窗（schema 渲染，目录与分类/视频处理/工具/维护）', async () => {
     ui.showMain();
     await new Promise((r) => setTimeout(r, 10));
     (document.getElementById('lit-btn-settings') as HTMLButtonElement).click();
     await vi.waitFor(() => expect(document.getElementById('bz-settings-modal-popup')).toBeTruthy());
     const txt = document.getElementById('bz-settings-modal-popup')!.textContent!;
-    expect(txt).toContain('文献盒设置');
+    expect(txt).toContain('知识盒设置');
     expect(txt).toContain('目录与分类');
     expect(txt).toContain('视频处理');
     expect(txt).toContain('工具');
@@ -926,32 +926,32 @@ ${summary ?? ''}`);
   // ==================== ticket 139：增量卡片级刷新 / 白话失败 / 范围开关 / ❌ 统一 ====================
 
   it('增量刷新卡片级 patch：modified 只重建对应卡片，其余卡片节点引用不变（滚动不跳根因修复）', async () => {
-    vault.files.set('文献盒/A.md', noteMd({ title: 'A', date: '2026-08-02 10:00:00' }));
-    vault.files.set('文献盒/B.md', noteMd({ title: 'B', date: '2026-08-01 10:00:00' }));
+    vault.files.set('知识盒/A.md', noteMd({ title: 'A', date: '2026-08-02 10:00:00' }));
+    vault.files.set('知识盒/B.md', noteMd({ title: 'B', date: '2026-08-01 10:00:00' }));
     ui.showMain();
     await vi.waitFor(() => expect(document.querySelectorAll('.bz-lit-card').length).toBe(2));
-    const cardA = document.querySelector('.bz-lit-card[data-path="文献盒/A.md"]') as HTMLElement;
-    const cardB = document.querySelector('.bz-lit-card[data-path="文献盒/B.md"]') as HTMLElement;
-    emitDomainEvent('literature:file-modified', { path: '文献盒/A.md' });
-    vault.files.set('文献盒/A.md', noteMd({ title: 'A改', date: '2026-08-02 10:00:00' }));
+    const cardA = document.querySelector('.bz-lit-card[data-path="知识盒/A.md"]') as HTMLElement;
+    const cardB = document.querySelector('.bz-lit-card[data-path="知识盒/B.md"]') as HTMLElement;
+    emitDomainEvent('knowledge:file-modified', { path: '知识盒/A.md' });
+    vault.files.set('知识盒/A.md', noteMd({ title: 'A改', date: '2026-08-02 10:00:00' }));
     await vi.waitFor(() => expect(document.body.textContent).toContain('A改'));
-    const cardA2 = document.querySelector('.bz-lit-card[data-path="文献盒/A.md"]');
-    const cardB2 = document.querySelector('.bz-lit-card[data-path="文献盒/B.md"]');
+    const cardA2 = document.querySelector('.bz-lit-card[data-path="知识盒/A.md"]');
+    const cardB2 = document.querySelector('.bz-lit-card[data-path="知识盒/B.md"]');
     expect(cardA2).not.toBe(cardA); // A 内容变 → 替换节点
     expect(cardB2).toBe(cardB);     // B 未变 → 原节点复用（不清列表）
   });
 
   it('主面板加载中状态：首载显示「正在扫描文献目录…」，加载完替换为列表/空态', async () => {
-    vault.files.set('文献盒/A.md', noteMd({ title: 'A', date: '2026-08-02 10:00:00' }));
+    vault.files.set('知识盒/A.md', noteMd({ title: 'A', date: '2026-08-02 10:00:00' }));
     ui.showMain();
     // refreshPanel 同步段先渲染加载态
-    expect(document.getElementById('literature-list')!.textContent).toContain('正在扫描文献目录…');
+    expect(document.getElementById('knowledge-list')!.textContent).toContain('正在扫描文献目录…');
     await vi.waitFor(() => expect(document.querySelector('.bz-lit-card')).toBeTruthy());
-    expect(document.getElementById('literature-list')!.textContent).not.toContain('正在扫描文献目录…');
+    expect(document.getElementById('knowledge-list')!.textContent).not.toContain('正在扫描文献目录…');
   });
 
   it('humanizeError：常见失败模式白话化，未命中保留原文，原文超长截断（ticket 139）', async () => {
-    const { humanizeError } = await import('../../src/literature/ui');
+    const { humanizeError } = await import('../../src/knowledge/ui');
     expect(humanizeError('未找到 bili-dl。请先运行 npm install -g @jwbz/bili-downloader')).toContain('下载工具未安装');
     expect(humanizeError('ffmpeg exited with code 1')).toContain('ffmpeg');
     expect(humanizeError('ffprobe: No such file')).toContain('ffprobe');
@@ -975,8 +975,8 @@ ${summary ?? ''}`);
   });
 
   it('失败任务点击 → 编辑弹窗带失败原因提示条（白话展示 + title 保留原文，ticket 139）', async () => {
-    const t = await LiteratureData.addTask({ url: 'BV1xx411c7mD' });
-    await LiteratureData.updateTask(t.id, { status: 'failed', reason: 'connect ETIMEDOUT 1.2.3.4:443' } as any);
+    const t = await KnowledgeData.addTask({ url: 'BV1xx411c7mD' });
+    await KnowledgeData.updateTask(t.id, { status: 'failed', reason: 'connect ETIMEDOUT 1.2.3.4:443' } as any);
     ui.showVideoEntry();
     await vi.waitFor(() => expect(document.querySelector('.bz-bili-task-card')).toBeTruthy());
     // 行内白话 + title 原文
@@ -985,7 +985,7 @@ ${summary ?? ''}`);
     expect(errEl.title).toContain('ETIMEDOUT');
     // 点击失败卡片 → 编辑弹窗 + 提示条
     (document.querySelector('.bz-bili-task-card') as HTMLElement).click();
-    await vi.waitFor(() => expect(document.getElementById('literature-add-popup')!.style.display).toBe('flex'));
+    await vi.waitFor(() => expect(document.getElementById('knowledge-add-popup')!.style.display).toBe('flex'));
     const alert = document.getElementById('lit-add-fail')!;
     expect(alert.style.display).toBe('block');
     expect(alert.textContent).toContain('网络超时');
@@ -1003,24 +1003,24 @@ ${summary ?? ''}`);
     (document.getElementById('lit-add-end') as HTMLInputElement).value = '2:00';
     (document.getElementById('lit-add-save') as HTMLButtonElement).click();
     await vi.waitFor(() => expect(strNotices()).toContain('已保存'));
-    const all = await LiteratureData.loadTasks();
+    const all = await KnowledgeData.loadTasks();
     expect(all).toHaveLength(1);
     expect(all[0]).toMatchObject({ start: null, end: null });
     // 剪辑模式缺时间 → 报错 + 不入库
-    await LiteratureData.deleteTask(all[0].id);
+    await KnowledgeData.deleteTask(all[0].id);
     (document.getElementById('lit-btn-video-add') as HTMLButtonElement).click();
     (document.querySelector('#lit-add-range button[data-range="clip"]') as HTMLButtonElement).click();
     (document.getElementById('lit-add-url') as HTMLInputElement).value = 'BV1xx411c7mE';
     (document.getElementById('lit-add-save') as HTMLButtonElement).click();
     expect(strNotices()).toContain('剪辑片段需填写开始与结束时间');
-    expect(await LiteratureData.loadTasks()).toHaveLength(0);
+    expect(await KnowledgeData.loadTasks()).toHaveLength(0);
     // 填一对时间 → 入库成功（先清掉残留 notice，防 waitFor 撞上上一轮「已保存」）
     (document.getElementById('lit-add-start') as HTMLInputElement).value = '12.2';
     (document.getElementById('lit-add-end') as HTMLInputElement).value = '12-30';
     clearNotices();
     (document.getElementById('lit-add-save') as HTMLButtonElement).click();
     await vi.waitFor(() => expect(strNotices()).toContain('已保存'));
-    const saved = await LiteratureData.loadTasks();
+    const saved = await KnowledgeData.loadTasks();
     expect(saved).toHaveLength(1);
     expect(saved[0]).toMatchObject({ start: '12:02', end: '12:30' });
   });
@@ -1035,14 +1035,14 @@ ${summary ?? ''}`);
       '【【配音】彼得希夫|股债开启同步杀跌-哔哩哔哩】 https://b23.tv/sHBBikh';
     (document.getElementById('lit-add-save') as HTMLButtonElement).click();
     expect(strNotices()).toContain('链接里没找到 BV 号');
-    expect(await LiteratureData.loadTasks()).toHaveLength(0);
+    expect(await KnowledgeData.loadTasks()).toHaveLength(0);
     // 换成含 BV 的链接 → 正常入队，且落库值已抠链接 + 剥追踪参数（不再整段存分享文本）
     clearNotices();
     (document.getElementById('lit-add-url') as HTMLInputElement).value =
       '【推荐】https://www.bilibili.com/video/BV1awbg6XELn?p=2&vd_source=x，然后呢';
     (document.getElementById('lit-add-save') as HTMLButtonElement).click();
     await vi.waitFor(() => expect(strNotices()).toContain('已保存'));
-    const saved = await LiteratureData.loadTasks();
+    const saved = await KnowledgeData.loadTasks();
     expect(saved).toHaveLength(1);
     expect(saved[0].url).toBe('https://www.bilibili.com/video/BV1awbg6XELn?p=2');
   });
@@ -1059,10 +1059,10 @@ ${summary ?? ''}`);
   it('移动端全屏：showVideoEntry 挂 bz-win-mfs（三件事补齐视频面板，ticket 139）', () => {
     ui.destroy();
     (Platform as any).isMobile = true;
-    settings.literatureMobileDefaultFullscreen = true;
+    settings.knowledgeMobileDefaultFullscreen = true;
     ui = new UIManager(app);
     ui.showVideoEntry();
-    expect(document.getElementById('literature-video-popup')!.classList.contains('bz-win-mfs')).toBe(true);
+    expect(document.getElementById('knowledge-video-popup')!.classList.contains('bz-win-mfs')).toBe(true);
   });
 
   it('术语输入框 Enter 直接生成（ticket 139）', async () => {
@@ -1079,28 +1079,28 @@ ${summary ?? ''}`);
   it('主面板入口：文字录入 → 术语面板；视频录入 → 视频面板（主面板保持显示，ticket 139 叠开）', () => {
     ui.showMain();
     (document.getElementById('lit-btn-text') as HTMLButtonElement).click();
-    expect(document.getElementById('literature-popup')!.style.display).toBe('flex'); // 不再隐藏主面板
-    expect(document.getElementById('literature-term-popup')!.style.display).toBe('flex');
-    (document.getElementById('literature-term-mask') as HTMLElement).click();
+    expect(document.getElementById('knowledge-popup')!.style.display).toBe('flex'); // 不再隐藏主面板
+    expect(document.getElementById('knowledge-term-popup')!.style.display).toBe('flex');
+    (document.getElementById('knowledge-term-mask') as HTMLElement).click();
     // 关闭术语面板 → 主面板仍在（导航闭环）
-    expect(document.getElementById('literature-popup')!.style.display).toBe('flex');
-    expect(document.getElementById('literature-term-popup')!.style.display).toBe('none');
+    expect(document.getElementById('knowledge-popup')!.style.display).toBe('flex');
+    expect(document.getElementById('knowledge-term-popup')!.style.display).toBe('none');
     (document.getElementById('lit-btn-video') as HTMLButtonElement).click();
-    expect(document.getElementById('literature-video-popup')!.style.display).toBe('flex');
-    expect(document.getElementById('literature-popup')!.style.display).toBe('flex');
+    expect(document.getElementById('knowledge-video-popup')!.style.display).toBe('flex');
+    expect(document.getElementById('knowledge-popup')!.style.display).toBe('flex');
   });
 
   it('destroy 清空全部 DOM、退订文件监听与键盘监听', async () => {
     ui.showMain();
     await new Promise((r) => setTimeout(r, 10));
     ui.destroy();
-    expect(document.getElementById('literature-popup')).toBeNull();
-    expect(document.getElementById('literature-mask')).toBeNull();
-    expect(document.getElementById('literature-video-popup')).toBeNull();
-    expect(document.getElementById('literature-add-popup')).toBeNull();
-    expect(document.getElementById('literature-history-popup')).toBeNull();
-    expect(document.getElementById('literature-term-popup')).toBeNull();
+    expect(document.getElementById('knowledge-popup')).toBeNull();
+    expect(document.getElementById('knowledge-mask')).toBeNull();
+    expect(document.getElementById('knowledge-video-popup')).toBeNull();
+    expect(document.getElementById('knowledge-add-popup')).toBeNull();
+    expect(document.getElementById('knowledge-history-popup')).toBeNull();
+    expect(document.getElementById('knowledge-term-popup')).toBeNull();
     // 文件监听已退订：destroy 后 emit 事件不再有 handler 报错（总线空通道）
-    expect(() => emitDomainEvent('literature:file-modified', { path: '文献盒/A.md' })).not.toThrow();
+    expect(() => emitDomainEvent('knowledge:file-modified', { path: '知识盒/A.md' })).not.toThrow();
   });
 });

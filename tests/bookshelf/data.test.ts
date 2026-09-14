@@ -42,7 +42,7 @@ tags: [book]
 author: CLRS
 ---`);
   // 目录下非 book 标签的书：不出现
-  vault.files.set('书库/别处.md', '---\ntags: [literature]\n---');
+  vault.files.set('书库/别处.md', '---\ntags: [knowledge]\n---');
   const app = makeApp(vault);
   return { vault, app };
 }

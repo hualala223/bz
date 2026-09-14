@@ -4,7 +4,7 @@
  * 覆盖：B站保存分流回写已处理态（enh 包 11，防重复建任务）、rail 源「全部标为已读」
  * 批量单次写回（enh 包 4）、误标/误删撤销恢复 raw 快照与统计回退（enh 包 5）。
  * 注：jsdom 而非 node——flowSave B 站分支经 core/notice 弹通知（需 document）；
- * literature 动态 import 打桩，避免拉起文献盒 UI。
+ * knowledge 动态 import 打桩，避免拉起知识盒 UI。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { resetObsidianMocks } from '../mock-obsidian-entry';
@@ -15,8 +15,8 @@ import { getNewsFilePath, readNewsData } from '../../src/clipbook/news-data';
 import { drainNewsWritesForTests } from '../../src/clipbook/write-queue';
 import { flowSave, flowMarkRead, flowMarkAllRead, flowUndoHandled, flowUndoDeleteNews, flowDeleteNews } from '../../src/clipbook/flow';
 
-vi.mock('../../src/literature', () => ({ openLiteratureAddTask: vi.fn() }));
-const { openLiteratureAddTask } = await import('../../src/literature');
+vi.mock('../../src/knowledge', () => ({ openKnowledgeAddTask: vi.fn() }));
+const { openKnowledgeAddTask } = await import('../../src/knowledge');
 
 function seedDisk(articles: any[]): MockVault {
   const vault = new MockVault();
@@ -41,17 +41,17 @@ const diskJson = (vault: MockVault) => JSON.parse(vault.files.get(getNewsFilePat
 beforeEach(() => {
   resetObsidianMocks();
   setSettingsProvider(() => ({ storagePath: 'CONFIG/STORAGE', articleDirectory: '归档/网页剪藏' } as any));
-  vi.mocked(openLiteratureAddTask).mockClear();
+  vi.mocked(openKnowledgeAddTask).mockClear();
 });
 
 describe('B站保存分流回写（enh 包 11）', () => {
-  it('B站链接保存 → 打开文献盒 + 回写已处理（read/saved/stats）+ 通知，不写剪藏笔记', async () => {
+  it('B站链接保存 → 打开知识盒 + 回写已处理（read/saved/stats）+ 通知，不写剪藏笔记', async () => {
     const vault = seedDisk([
       { platform: 'B站', title: '视频一', url: 'https://b23.tv/1', author: '影视飓风', body: '简介', date: '2026-09-01 08:00:00' },
     ]);
     const ok = await flowSave({ raw: diskJson(vault).articles[0] });
     expect(ok).toBe(true);
-    expect(openLiteratureAddTask).toHaveBeenCalledTimes(1);
+    expect(openKnowledgeAddTask).toHaveBeenCalledTimes(1);
     await drainNewsWritesForTests();
     const disk = diskJson(vault);
     const a = disk.articles.find((x: any) => x.url === 'https://b23.tv/1');
@@ -156,7 +156,7 @@ describe('已处理正文保留（issue 274）', () => {
     expect(store.queryBySource(disk.articles, sidecar, new Set(), [], { kind: 'all' }, {})).toHaveLength(0);
   });
 
-  it('已收态（未命中剪藏目录，如 B 站转文献盒）→ 会话目录已收段条目可取正文', async () => {
+  it('已收态（未命中剪藏目录，如 B 站转知识盒）→ 会话目录已收段条目可取正文', async () => {
     const vault = seedDisk([
       { platform: 'B站', title: '视频一', url: 'https://b23.tv/1', author: '影视飓风', body: '简介', date: '2026-09-01 08:00:00', read: true, state: 'saved' },
     ]);

@@ -50,8 +50,8 @@ export const DOMAINS: HomeDomain[] = [
   { id: 'clipping', commandId: 'bz-clipbook-open', name: '剪藏本', sub: '未读流与剪藏', icon: iconOf('clipping') },
   // 日常收集（collect 域，issue 246）：本地独有域入口
   { id: 'collect', commandId: 'bz-collect-open', name: '日常收集', sub: '灵感与素材收集', icon: iconOf('collect') },
-  // 文献盒（literature 域，ADR-0072；上游 knowledge 的本地命名 ADR-0118）
-  { id: 'literature', commandId: 'bz-literature-open', name: '文献盒', sub: '文献笔记与录入', icon: iconOf('literature') },
+  // 知识盒（knowledge 域，ADR-0072；上游 knowledge 的本地命名 ADR-0118）
+  { id: 'knowledge', commandId: 'bz-knowledge-open', name: '知识盒', sub: '文献笔记与录入', icon: iconOf('knowledge') },
   // 旧书库（library）域退役：本卡由书架墙（bookshelf）承接（id 变更后旧 home.json 里钉选的 library 自动失效，可在编辑模式重钉）
   { id: 'bookshelf', commandId: 'bz-bookshelf-open', name: '书库', sub: '藏书与读书笔记', icon: iconOf('bookshelf') },
   // 第二大脑（secondbrain 域，issue 251）：主面板统一入口（检索/对话/灵感参考都从面板进；票 288 补入）
@@ -77,7 +77,7 @@ export const DOMAIN_DOT: Record<string, string> = {
   pomodoro: '#e5534b',
   favorites: '#f0b429',
   clipping: '#2f9e5f',
-  literature: '#c2559d',
+  knowledge: '#c2559d',
   bookshelf: '#3d7bd6',
   secondbrain: '#a33d2a',
   'reading-report': '#3fa7a0',
@@ -261,9 +261,10 @@ export const DOMAIN_MENU: Record<string, DomainMenuAction[]> = {
   clipping: [
     { label: '未读全部标为已读', commandId: 'bz-clipbook-mark-all-read', icon: 'check-check', kind: 'danger', keepHome: true },
   ],
-  literature: [
-    { label: '术语生成文献笔记', commandId: 'bz-literature-note-term', icon: 'file-text' },
-    // 上游「视频生成文献笔记」（bz-knowledge-note-video）本地无该命令，不挂（票 288）
+  knowledge: [
+    { label: '术语生成文献笔记', commandId: 'bz-knowledge-note-term', icon: 'file-text' },
+    // 视频生成文献笔记（bz-knowledge-note-video）：票 289 已补命令入口，票 290 起挂入（票 288 时的「本地无该命令」注记作废）
+    { label: '视频生成文献笔记', commandId: 'bz-knowledge-note-video', icon: 'list-video' },
   ],
   bookshelf: [
     { label: '阅读分析报告', commandId: 'bz-reading-report-open', icon: 'bar-chart-3' },
@@ -694,7 +695,7 @@ export function riverCountText(id: string, data: RiverData): string | null {
     case 'collect':
       return `今日 ${c.collectToday} 条`;
     default:
-      return null; // recap/literature/reading-report/attach/encrypt/smartcat/settings/pomodoro 走域副题
+      return null; // recap/knowledge/reading-report/attach/encrypt/smartcat/settings/pomodoro 走域副题
   }
 }
 

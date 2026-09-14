@@ -49,10 +49,10 @@ describe('behaviorSourceDomain（行为流 source → 首页域 id）', () => {
     expect(behaviorSourceDomain('movie')).toBe('cinema');
     expect(behaviorSourceDomain('news')).toBe('clipping');
     expect(behaviorSourceDomain('memo')).toBe('todo');
-    expect(behaviorSourceDomain('knowledge')).toBe('literature');
+    expect(behaviorSourceDomain('knowledge')).toBe('knowledge');
     // 知识盒旧域名存量来源（ADR-0072 迁出后 source 值不迁移）
-    expect(behaviorSourceDomain('literature')).toBe('literature');
-    expect(behaviorSourceDomain('bili-downloader')).toBe('literature');
+    expect(behaviorSourceDomain('knowledge')).toBe('knowledge');
+    expect(behaviorSourceDomain('bili-downloader')).toBe('knowledge');
     expect(behaviorSourceDomain('favorites')).toBe('favorites');
     expect(behaviorSourceDomain('review')).toBe('review');
     expect(behaviorSourceDomain('library')).toBe('bookshelf');
@@ -85,17 +85,17 @@ describe('mapBehaviorEvent（ADR-0132 映射表）', () => {
     expect(mapBehaviorEvent(item('memo', 'completed', '买牛奶'))).toMatchObject({ kind: 'produce', text: '完成『买牛奶』' });
   });
 
-  it('文献盒：knowledge/literature 双 source 同口径（term-generated / converted）', () => {
-    expect(mapBehaviorEvent(item('knowledge', 'term-generated', '熵'))).toMatchObject({ domain: 'literature', kind: 'produce', text: '生成术语『熵』' });
-    expect(mapBehaviorEvent(item('literature', 'term-generated', '熵'))).toMatchObject({ domain: 'literature', kind: 'produce', text: '生成术语『熵』' });
+  it('知识盒：knowledge/knowledge 双 source 同口径（term-generated / converted）', () => {
+    expect(mapBehaviorEvent(item('knowledge', 'term-generated', '熵'))).toMatchObject({ domain: 'knowledge', kind: 'produce', text: '生成术语『熵』' });
+    expect(mapBehaviorEvent(item('knowledge', 'term-generated', '熵'))).toMatchObject({ domain: 'knowledge', kind: 'produce', text: '生成术语『熵』' });
     expect(mapBehaviorEvent(item('knowledge', 'converted', '一部视频'))).toMatchObject({ kind: 'produce', text: '转化『一部视频』' });
-    expect(mapBehaviorEvent(item('literature', 'converted', '一部视频'))).toMatchObject({ kind: 'produce', text: '转化『一部视频』' });
+    expect(mapBehaviorEvent(item('knowledge', 'converted', '一部视频'))).toMatchObject({ kind: 'produce', text: '转化『一部视频』' });
   });
 
   it('收藏夹 / 视频下载 / 复习', () => {
     expect(mapBehaviorEvent(item('favorites', 'added', 'Anthropic'))).toMatchObject({ domain: 'favorites', kind: 'produce', text: '收藏站点『Anthropic』' });
-    expect(mapBehaviorEvent(item('bili-downloader', 'added', '某视频'))).toMatchObject({ domain: 'literature', kind: 'progress', text: '添加下载『某视频』' });
-    expect(mapBehaviorEvent(item('bili-downloader', 'converted', '某视频'))).toMatchObject({ domain: 'literature', kind: 'produce', text: '下载完成『某视频』' });
+    expect(mapBehaviorEvent(item('bili-downloader', 'added', '某视频'))).toMatchObject({ domain: 'knowledge', kind: 'progress', text: '添加下载『某视频』' });
+    expect(mapBehaviorEvent(item('bili-downloader', 'converted', '某视频'))).toMatchObject({ domain: 'knowledge', kind: 'produce', text: '下载完成『某视频』' });
     // 复习启动条目无名（coverage-source 只发 {review, started}）→ 仍要能进时间线
     expect(mapBehaviorEvent(item('review', 'started', ''))).toMatchObject({ domain: 'review', kind: 'produce', text: '开始复习' });
   });

@@ -41,7 +41,7 @@ const SOURCES = [
   "src/encrypt/styles.css",
   "src/belongings/styles.css",
   "src/cinema/styles.css",
-  "src/literature/styles.css",
+  "src/knowledge/styles.css",
   "src/collect/styles.css",
   "src/secondbrain/styles.css",
   "src/smartcat/styles.css",

@@ -9,7 +9,7 @@
  * - ticket 111：自动双链管线（link agent）——linkAgentEnabled 开关注册监听与队列消费；
  * - ticket 115：启动存量补链（队列消费后串行）+ 手动命令 bz-secondbrain-link-all 兜底；
  * - ticket 119（v1.4）：正文大改自动重跑——修改监听按基准哈希过滤，内容实质变化才重跑建链；
- * - issue 298：文献笔记生成即跑——文献盒生成视频/术语文献笔记后经 'literature:tasks' 立即建链
+ * - issue 298：文献笔记生成即跑——知识盒生成视频/术语文献笔记后经 'knowledge:tasks' 立即建链
  *   （不等批次防抖、不受关联范围限制）；
  * - unload 全量清理：定时器、订阅、面板 DOM、DeepSeek 服务、link agent。
  */

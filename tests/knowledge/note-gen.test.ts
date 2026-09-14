@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * 文献笔记生成层测试（src/literature/note-gen.ts）：
+ * 文献笔记生成层测试（src/knowledge/note-gen.ts）：
  * parseDomainList / chunkTranscript / parseAiJson / parseFrontmatter / injectFrontmatter 纯函数，
  * generateVideoNote / generateTermDraft / generateTermNote 生成链路（AI 打桩 + MockVault 落盘断言），
  * 以及 backfillNotes 超时跳过继续（ticket 138 §1.3）。
@@ -21,7 +21,7 @@ import {
   summarizeTermSummary,
   generateTermNote,
   backfillNotes,
-} from '../../src/literature/note-gen';
+} from '../../src/knowledge/note-gen';
 
 // AI 打桩：createAI 返回固定 json/chat（元数据一次 JSON、分块润色逐块 chat，各可计数断言）
 const aiStub = vi.hoisted(() => ({
@@ -136,7 +136,7 @@ describe('generateVideoNote（视频文献：九键 frontmatter + 润色正文�
     vi.clearAllMocks();
     vault = new MockVault();
     setApp({ vault } as any);
-    setSettingsProvider(() => ({ literatureDirectory: '文献盒', literatureDomainList: '心理, 计算机' }) as any);
+    setSettingsProvider(() => ({ knowledgeDirectory: '知识盒', knowledgeDomainList: '心理, 计算机' }) as any);
   });
 
   afterEach(() => {
@@ -148,7 +148,7 @@ describe('generateVideoNote（视频文献：九键 frontmatter + 润色正文�
     const transcript = '长'.repeat(3000) + '。' + '长'.repeat(3000);
     const path = await generateVideoNote({ transcript, videoTitle: '测试视频', url: 'https://b23.tv/xxx', uploader: '某UP' });
 
-    expect(path).toBe('文献盒/T.md'); // 文件名取 AI title：sanitizeMdTitle('T')
+    expect(path).toBe('知识盒/T.md'); // 文件名取 AI title：sanitizeMdTitle('T')
     expect(aiStub.json).toHaveBeenCalledTimes(1);
     expect(String(aiStub.json.mock.calls[0][0])).toContain('心理、计算机'); // 领域词表进入判定指令
     // 上游 issue 276：标题指令收敛为完整陈述句（禁疑问语气），旧口径「陈述句或疑问句」移除
@@ -193,7 +193,7 @@ describe('generateVideoNote（视频文献：九键 frontmatter + 润色正文�
 
   it('短转录单块：一次 chat，正文为单段润色', async () => {
     const path = await generateVideoNote({ transcript: '第一段。第二段！', videoTitle: '短视频', url: 'BV1xx411c7mD', uploader: 'UP主' });
-    expect(path).toBe('文献盒/T.md');
+    expect(path).toBe('知识盒/T.md');
     expect(aiStub.chat).toHaveBeenCalledTimes(1);
     expect(vault.files.get(path)!).toContain('润色');
   });
@@ -206,7 +206,7 @@ describe('generateTermDraft（纯 AI 预览，不落盘；ticket 138 §2.1 契�
     vi.clearAllMocks();
     vault = new MockVault();
     setApp({ vault } as any);
-    setSettingsProvider(() => ({ literatureDirectory: '文献盒', literatureDomainList: '心理, 计算机' }) as any);
+    setSettingsProvider(() => ({ knowledgeDirectory: '知识盒', knowledgeDomainList: '心理, 计算机' }) as any);
   });
 
   afterEach(() => {
@@ -234,7 +234,7 @@ describe('summarizeTermSummary（术语简介 AI 精简，ticket 155）', () => 
     vi.clearAllMocks();
     vault = new MockVault();
     setApp({ vault } as any);
-    setSettingsProvider(() => ({ literatureDirectory: '文献盒', literatureDomainList: '心理, 计算机' }) as any);
+    setSettingsProvider(() => ({ knowledgeDirectory: '知识盒', knowledgeDomainList: '心理, 计算机' }) as any);
     aiStub.chat.mockResolvedValue('精简后的一段话');
   });
 
@@ -267,7 +267,7 @@ describe('generateTermNote（术语文献：五键 frontmatter（+可选来源 s
     vi.clearAllMocks();
     vault = new MockVault();
     setApp({ vault } as any);
-    setSettingsProvider(() => ({ literatureDirectory: '文献盒', literatureDomainList: '心理, 计算机' }) as any);
+    setSettingsProvider(() => ({ knowledgeDirectory: '知识盒', knowledgeDomainList: '心理, 计算机' }) as any);
   });
 
   afterEach(() => {
@@ -277,7 +277,7 @@ describe('generateTermNote（术语文献：五键 frontmatter（+可选来源 s
   it('术语词作文件名与 title，落盘五键 frontmatter（title/type/domain/term/date）+ 简介正文', async () => {
     const path = await generateTermNote({ term: '心理' });
 
-    expect(path).toBe('文献盒/心理.md');
+    expect(path).toBe('知识盒/心理.md');
     expect(aiStub.json).toHaveBeenCalledTimes(1);
 
     const content = vault.files.get(path)!;
@@ -300,8 +300,8 @@ describe('generateTermNote（术语文献：五键 frontmatter（+可选来源 s
   it('重名加序号：连续两次同术语 → _2（uniquePath 永不覆盖）', async () => {
     const p1 = await generateTermNote({ term: '心理' });
     const p2 = await generateTermNote({ term: '心理' });
-    expect(p1).toBe('文献盒/心理.md');
-    expect(p2).toBe('文献盒/心理_2.md');
+    expect(p1).toBe('知识盒/心理.md');
+    expect(p2).toBe('知识盒/心理_2.md');
     // 两份都在，内容完整（不互相覆盖）
     expect(vault.files.get(p1)).toContain('type: term');
     expect(vault.files.get(p2)).toContain('type: term');
@@ -315,7 +315,7 @@ describe('generateTermNote（术语文献：五键 frontmatter（+可选来源 s
 
   it('传 summary/domain → 跳过 AI、所见即所得（终审 P1-4：确认写入不重跑 AI 不调用第二次）', async () => {
     const path = await generateTermNote({ term: '黑洞', summary: '手改后的简介', domain: '天体物理' });
-    expect(path).toBe('文献盒/黑洞.md');
+    expect(path).toBe('知识盒/黑洞.md');
     expect(aiStub.json).not.toHaveBeenCalled(); // 未重跑 AI
     const content = vault.files.get(path)!;
     const fm = vaultParseFrontmatter(content)!;
@@ -396,7 +396,7 @@ describe('backfillNotes（旧笔记自动补全；ticket 138 §1.3：单次 AI �
     vi.clearAllMocks();
     vault = new MockVault();
     setApp({ vault } as any);
-    setSettingsProvider(() => ({ literatureDirectory: '文献盒', literatureDomainList: '物理, 数学' }) as any);
+    setSettingsProvider(() => ({ knowledgeDirectory: '知识盒', knowledgeDomainList: '物理, 数学' }) as any);
   });
 
   afterEach(() => {
@@ -405,8 +405,8 @@ describe('backfillNotes（旧笔记自动补全；ticket 138 §1.3：单次 AI �
 
   it('AI 挂起超时 → 跳过该条并继续补全后续笔记（aiSkipped 语义保持为 false）', async () => {
     // 两条缺 domain 的旧笔记（type 已启发式补好，进 AI 补全队列）
-    vault.files.set('文献盒/A.md', '---\ntype: video\n---\n\n正文A');
-    vault.files.set('文献盒/B.md', '---\ntype: term\n---\n\n正文B');
+    vault.files.set('知识盒/A.md', '---\ntype: video\n---\n\n正文A');
+    vault.files.set('知识盒/B.md', '---\ntype: term\n---\n\n正文B');
     // 第一条 AI 调用挂起（永不 settle）→ 40ms 注入超时；第二条正常返回领域
     aiStub.json.mockImplementationOnce(() => new Promise(() => {}));
     aiStub.json.mockImplementationOnce(async () => '{"domain":"物理"}');
@@ -415,28 +415,28 @@ describe('backfillNotes（旧笔记自动补全；ticket 138 §1.3：单次 AI �
 
     // 整批跑完：只补了 B（filled=1）；超时条 A 保持原样；不是 AI 未配置（aiSkipped=false）
     expect(res).toEqual({ scanned: 2, filled: 1, aiSkipped: false });
-    expect(vault.files.get('文献盒/A.md')).not.toContain('domain');
-    expect(vault.files.get('文献盒/B.md')).toContain('domain: "物理"');
+    expect(vault.files.get('知识盒/A.md')).not.toContain('domain');
+    expect(vault.files.get('知识盒/B.md')).toContain('domain: "物理"');
   });
 
   it('普通补全不设超时也逐条成功（回归：默认分支行为不变）', async () => {
-    vault.files.set('文献盒/A.md', '---\ntype: term\n---\n\n正文A');
+    vault.files.set('知识盒/A.md', '---\ntype: term\n---\n\n正文A');
     aiStub.json.mockImplementationOnce(async () => '{"domain":"数学"}');
 
     const res = await backfillNotes();
     expect(res).toEqual({ scanned: 1, filled: 1, aiSkipped: false });
-    expect(vault.files.get('文献盒/A.md')).toContain('domain: "数学"');
+    expect(vault.files.get('知识盒/A.md')).toContain('domain: "数学"');
   });
 
   it('双缺（type 启发式 + AI domain）：两处都落盘且不互覆盖（P1-2 回归：domain 写回不回滚 type 补丁）', async () => {
     // 旧笔记只有 url（启发式 → type: video），缺 type 与 domain——ADR-0073 主目标人群
-    vault.files.set('文献盒/旧A.md', '---\nurl: "https://www.bilibili.com/video/BV1xx411c7mD"\n---\n\n正文A');
+    vault.files.set('知识盒/旧A.md', '---\nurl: "https://www.bilibili.com/video/BV1xx411c7mD"\n---\n\n正文A');
     aiStub.json.mockImplementationOnce(async () => '{"domain":"物理"}');
 
     const res = await backfillNotes();
 
     expect(res).toEqual({ scanned: 1, filled: 2, aiSkipped: false }); // type 补丁写盘 + domain 写盘
-    const content = vault.files.get('文献盒/旧A.md')!;
+    const content = vault.files.get('知识盒/旧A.md')!;
     expect(content).toContain('type: "video"');
     expect(content).toContain('domain: "物理"');
     // type/domain 各恰出现一次（未被重复注入/覆盖）
@@ -445,27 +445,27 @@ describe('backfillNotes（旧笔记自动补全；ticket 138 §1.3：单次 AI �
   });
 
   it('单缺 type（已有 domain）：只做启发式补 type，不调 AI', async () => {
-    vault.files.set('文献盒/B.md', '---\ndomain: "物理"\nterm: "贝叶斯"\n---\n\n正文B');
+    vault.files.set('知识盒/B.md', '---\ndomain: "物理"\nterm: "贝叶斯"\n---\n\n正文B');
 
     const res = await backfillNotes();
 
     expect(res).toEqual({ scanned: 1, filled: 1, aiSkipped: false });
-    expect(vault.files.get('文献盒/B.md')).toContain('type: "term"');
+    expect(vault.files.get('知识盒/B.md')).toContain('type: "term"');
     expect(aiStub.json).not.toHaveBeenCalled(); // 有 domain 不进 AI 补全队列
   });
 
   it('单缺 domain（已有 type）：只 AI 补 domain', async () => {
-    vault.files.set('文献盒/C.md', '---\ntype: video\n---\n\n正文C');
+    vault.files.set('知识盒/C.md', '---\ntype: video\n---\n\n正文C');
     aiStub.json.mockImplementationOnce(async () => '{"domain":"数学"}');
 
     const res = await backfillNotes();
 
     expect(res).toEqual({ scanned: 1, filled: 1, aiSkipped: false });
-    expect(vault.files.get('文献盒/C.md')).toContain('domain: "数学"');
+    expect(vault.files.get('知识盒/C.md')).toContain('domain: "数学"');
   });
 
   it('已补全（type+domain 双全）：不重跑、不写盘', async () => {
-    vault.files.set('文献盒/D.md', '---\ntype: video\ndomain: "物理"\n---\n\n正文D');
+    vault.files.set('知识盒/D.md', '---\ntype: video\ndomain: "物理"\n---\n\n正文D');
 
     const res = await backfillNotes();
 
@@ -474,24 +474,24 @@ describe('backfillNotes（旧笔记自动补全；ticket 138 §1.3：单次 AI �
   });
 
   it('引号包裹 type（P3-3）：type: "video" 视为已补全，不被重复注入', async () => {
-    vault.files.set('文献盒/E.md', '---\ntype: "video"\n---\n\n正文E');
+    vault.files.set('知识盒/E.md', '---\ntype: "video"\n---\n\n正文E');
     aiStub.json.mockImplementationOnce(async () => '{"domain":"心理"}');
 
     const res = await backfillNotes();
 
     expect(res).toEqual({ scanned: 1, filled: 1, aiSkipped: false });
-    const content = vault.files.get('文献盒/E.md')!;
+    const content = vault.files.get('知识盒/E.md')!;
     expect((content.match(/^type:/gm) || []).length).toBe(1); // type 恰一次
     expect(content).toContain('domain: "心理"');
   });
 
   it('AI 未配置：整批跳过并标记 aiSkipped=true，不落盘', async () => {
-    vault.files.set('文献盒/F.md', '---\ntype: video\n---\n\n正文F');
+    vault.files.set('知识盒/F.md', '---\ntype: video\n---\n\n正文F');
     aiStub.json.mockImplementationOnce(async () => { throw new Error('未配置 OpenCode Go API Key：插件设置 → AI 配置'); });
 
     const res = await backfillNotes();
 
     expect(res).toEqual({ scanned: 1, filled: 0, aiSkipped: true });
-    expect(vault.files.get('文献盒/F.md')).not.toContain('domain');
+    expect(vault.files.get('知识盒/F.md')).not.toContain('domain');
   });
 });

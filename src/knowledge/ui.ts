@@ -1,16 +1,16 @@
 /**
- * 文献盒（literature 域）UI（ticket 136 改版，ADR-0072）
+ * 知识盒（knowledge 域）UI（ticket 136 改版，ADR-0072）
  *
  * 三窗口 + 两弹窗：
- * - 主面板（showMain，文献笔记列表）：扫描 settings.literatureDirectory（缺省「文献盒」）下 .md，
+ * - 主面板（showMain，文献笔记列表）：扫描 settings.knowledgeDirectory（缺省「文献盒」文件夹）下 .md，
  *   经 metadataCache 读 frontmatter（title/type/domain/summary/date…），固定最近创建降序；
  *   领域筛选行（剪藏本 rebuildSiteBar 同款，按 count 降序）+ 类型过滤（全部/视频/术语，可叠加）、
  *   🔍 搜索（标题/简介，300ms 防抖）、scroll 触底懒加载（50px 阈值，批次 20，尾部「已显示所有笔记」）、
- *   literature:file-* 四通道 300ms 防抖增量刷新（照抄剪藏本 attachFileListener/scheduleRefreshFlush）、
+ *   knowledge:file-* 四通道 300ms 防抖增量刷新（照抄剪藏本 attachFileListener/scheduleRefreshFlush）、
  *   文献目录设置变更时清缓存全量重载；卡片 = 标题 + 领域徽标 + 简介两行省略 + 日期（ticket 138 §3.2 去类型徽章），
  *   双击打开笔记（click 计数 300ms，影视先例）、attachItemActions 抽屉（打开/复制双链/
  *   复制原文链接[仅视频有 url]/删除 danger+flow-dialog 确认——删除视频笔记时同步清理
- *   literature.json 指向该笔记的任务记录）；打开主面板时调 backfillNotes() 补全旧笔记。
+ *   knowledge.json 指向该笔记的任务记录）；打开主面板时调 backfillNotes() 补全旧笔记。
  * - 视频录入面板（showVideoEntry，任务队列）：原 bili-tasks 面板整体搬入，去掉 ⚙️ 设置 /
  *   ⬇️ 下载按钮；保留 ➕ 添加 / 单钮（纯 emoji ▶️ ↔ ⏹，文字移到 title hover，ticket 148）/ 🕘 历史 / ❌；
  *   移动端仅 ➕ 添加 + ❌（ticket 139/144：批量按钮与历史全部隐藏，移动端无处理能力）。
@@ -20,16 +20,16 @@
  *   generateTermDraft(term) 纯 AI 预览（只读展示、纯内存，不写盘；ticket 142 简洁版：无标题/label/
  *   placeholder/状态行，生成中并入按钮文案；预览上属性卡[术语/领域/日期]下内容卡，无输入框不可编辑、
  *   无手改覆盖守卫）→「确认写入」= 调 generateTermNote 传面板当前 term/summary/domain
- *   （所见即所得、不重跑 AI）→ 自动打开新笔记 → emitDomainEvent('literature:tasks',
+ *   （所见即所得、不重跑 AI）→ 自动打开新笔记 → emitDomainEvent('knowledge:tasks',
  *   { kind:'term-generated', term, title }) → 关闭面板。预览阶段不产生任何文件（ticket 138 §2.1）。
- * - 设置面板：主面板 ⚙️ → openSettingsModal（五组声明式 schema，见 literatureSettingsSchema）。
+ * - 设置面板：主面板 ⚙️ → openSettingsModal（五组声明式 schema，见 knowledgeSettingsSchema）。
  *
  * 移动端默认全屏（ticket 68 三件事）：主面板 + 历史弹窗 + 视频录入面板三处 applyMobileWindowFullscreen
  * （ticket 139 补齐视频面板）。
  *
  * ticket 139 交互修订：📝/🎬 打开子面板不再隐藏主面板（topifyZ 叠开，关闭子面板回列表）；
  * 文件事件增量刷新走 core patchKeyedCards 只动对应卡片（不再全列表重建，滚动不跳顶）；
- * 打开文献笔记即收起文献盒全部窗口；失败原因行内白话化（humanizeError，原文见 title）；
+ * 打开文献笔记即收起知识盒全部窗口；失败原因行内白话化（humanizeError，原文见 title）；
  * 添加任务弹窗「整片/剪辑」分段开关 + 校验失败聚焦定位；术语面板重设计 + 重新生成手改确认。
  * ticket 142 术语面板简洁版（拍板）：删标题/术语 label/placeholder/状态行（加载并入按钮「生成中…」），
  * 预览只读——上属性卡（术语/领域/日期）下内容卡，无输入框不可编辑，「重新生成」手改守卫随之删除。
@@ -59,15 +59,15 @@ import { topifyZ } from '../core/z-order';
 import { emitDomainEvent, onDomainEvent } from '../core/domain-bus';
 import { getApp } from '../core/app';
 import type BzSettings from '../settings';
-import { LiteratureData, normalizeLooseTime, normalizeUrl } from './data';
+import { KnowledgeData, normalizeLooseTime, normalizeUrl } from './data';
 import { cleanSourceTitle, isUrlLikeSourceText, normalizeSourceUrl, noteSourceName, type TermSource } from './source';
 import { fetchVideoMeta, parseBvid, resolveBvidFromShortLink } from './video-meta';
-import type { LiteratureTask } from './types';
+import type { KnowledgeTask } from './types';
 import { BatchRunner, type BatchEvents } from './processor';
 import { backfillNotes, generateTermDraft, generateTermNote, summarizeTermSummary } from './note-gen';
 
 interface StatusMeta { label: string; cls: string; }
-const STATUS_META: Record<LiteratureTask['status'], StatusMeta> = {
+const STATUS_META: Record<KnowledgeTask['status'], StatusMeta> = {
   pending: { label: '待处理', cls: 'bz-bili-pending' },
   processing: { label: '处理中', cls: 'bz-bili-processing' },
   success: { label: '成功', cls: 'bz-bili-success' },
@@ -109,7 +109,7 @@ export function humanizeError(reason: string | null | undefined): string {
   }
   // pythonPath 未配置（设置留空且工具 rc/DEFAULTS 也无兜底）
   if (/未配置 pythonPath/i.test(s)) {
-    return '语音转写未配置：文献盒设置「Python 路径」填 python 即可（一般装了 Python 就能用，走系统 PATH），或填绝对路径（Windows 在命令提示符运行 where python 可查）';
+    return '语音转写未配置：知识盒设置「Python 路径」填 python 即可（一般装了 Python 就能用，走系统 PATH），或填绝对路径（Windows 在命令提示符运行 where python 可查）';
   }
   if (/pip install faster-whisper|faster-whisper 环境已安装/i.test(s)) {
     return '语音转写失败：faster-whisper 未安装，请在目标 Python 中运行 pip install faster-whisper';
@@ -129,7 +129,7 @@ export function humanizeError(reason: string | null | undefined): string {
   if (/^-352|\b412\b|风控|请求过于频繁/i.test(s)) return 'B 站风控拦截：稍后再试，或在设置里配置登录 Cookie';
   // ticket 284：CLI 的 extractBv 只认 BV 号（短链/av 号/番剧 ep 一律无 BV）——原生报错太干，给人话
   if (/无法从链接中识别\s*BV\s*号/i.test(s)) {
-    return '链接里没找到 BV 号：b23.tv 短链请在浏览器打开后复制完整链接；文献盒只认含 BV 号的 B站 视频链接';
+    return '链接里没找到 BV 号：b23.tv 短链请在浏览器打开后复制完整链接；知识盒只认含 BV 号的 B站 视频链接';
   }
   if (/视频不存在|稿件不存在|\b404\b|not found/i.test(s)) return '视频不存在或已删除：请检查链接是否正确';
   return s.length > 160 ? s.slice(0, 160) + '…' : s;
@@ -168,9 +168,9 @@ const fmtElapsed = (ms: number): string => {
   return h > 0 ? `${h}:${String(m % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` : `${m}:${String(s % 60).padStart(2, '0')}`;
 };
 
-/** 文献目录（设置缺省「文献盒」，去首尾斜杠） */
+/** 文献目录（设置缺省「文献盒」文件夹，去首尾斜杠） */
 function litDirOf(s: Partial<BzSettings> | undefined): string {
-  const raw = s && (s as any).literatureDirectory ? String((s as any).literatureDirectory) : '文献盒';
+  const raw = s && (s as any).knowledgeDirectory ? String((s as any).knowledgeDirectory) : '文献盒';
   return raw.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
 }
 
@@ -184,8 +184,8 @@ function parseDateRaw(raw: string | undefined | null): number {
   return d2.valueOf();
 }
 
-/** 主面板文献笔记条目（parseNoteFile 产物；数据源 = 文献目录文件夹实况，不依赖 literature.json） */
-interface LiteratureNoteEntry {
+/** 主面板文献笔记条目（parseNoteFile 产物；数据源 = 文献目录文件夹实况，不依赖 knowledge.json） */
+interface KnowledgeNoteEntry {
   file: any;
   path: string;
   title: string;
@@ -202,44 +202,44 @@ interface LiteratureNoteEntry {
 }
 
 /**
- * 文献盒设置 schema（ticket 136 §7，声明式五组，参考 diarySettingsSchema）：
+ * 知识盒设置 schema（ticket 136 §7，声明式五组，参考 diarySettingsSchema）：
  * 「目录与分类」folder-open / 「视频处理」settings-2 / 「工具」wrench /
  * mobileFullscreenGroup（移动端仅显示）/ 「维护」wrench（清空历史 button 行 + 确认弹窗由调用方接）。
  */
-export function literatureSettingsSchema(opts?: { onClearHistory?: () => void | Promise<void> }): SettingsSchema {
+export function knowledgeSettingsSchema(opts?: { onClearHistory?: () => void | Promise<void> }): SettingsSchema {
   return {
     groups: [
       {
         icon: 'folder-open', name: '目录与分类',
         rows: [
-          { type: 'path', mode: 'single', name: '文献目录', desc: '文献笔记所在文件夹，列表实时扫描该目录', binding: { key: 'literatureDirectory' } },
-          { type: 'textarea', name: '领域词表', desc: '逗号分隔的领域词；留空 = AI 自由写领域', binding: { key: 'literatureDomainList' }, placeholder: '物理,医学,计算机,经济,文史哲…' },
+          { type: 'path', mode: 'single', name: '文献目录', desc: '文献笔记所在文件夹，列表实时扫描该目录', binding: { key: 'knowledgeDirectory' } },
+          { type: 'textarea', name: '领域词表', desc: '逗号分隔的领域词；留空 = AI 自由写领域', binding: { key: 'knowledgeDomainList' }, placeholder: '物理,医学,计算机,经济,文史哲…' },
         ],
       },
       {
         icon: 'settings-2', name: '视频处理',
         rows: [
-          { type: 'toggle', name: '详细进度提示', desc: '处理中显示当前步骤、耗时、百分比与步骤时间线；关闭则仅显示步骤徽章', binding: { key: 'literatureProgressDetail' } },
-          { type: 'toggle', name: '保留视频原件', desc: '转文献完成后保留视频文件；关闭则只生成文献笔记', binding: { key: 'literatureKeepVideo' } },
-          { type: 'select', name: '下载清晰度', desc: '以视频源可用档位为准，低档优先命中缓存', binding: { key: 'literatureQuality' }, options: [{ value: 'highest', label: '最高' }, { value: '1080', label: '1080P' }, { value: '720', label: '720P' }] },
-          { type: 'toggle', name: '遇错即停', desc: '单条失败后停止处理剩余任务；关闭则失败后继续', binding: { key: 'literatureStopOnFailure' } },
-          { type: 'text', name: '输出目录', desc: '视频文件落地目录；留空跟随工具配置', binding: { key: 'literatureOutputDir' }, placeholder: '如 D:/videos' },
-          { type: 'toggle', name: '压缩', desc: '转文字前压缩视频，默认开启', binding: { key: 'literatureCompress' } },
-          { type: 'number', name: '压缩质量（CRF）', desc: '数值越小画质越高；范围 18-28', binding: { key: 'literatureCrf' }, min: 18, max: 28, step: 1 },
+          { type: 'toggle', name: '详细进度提示', desc: '处理中显示当前步骤、耗时、百分比与步骤时间线；关闭则仅显示步骤徽章', binding: { key: 'knowledgeProgressDetail' } },
+          { type: 'toggle', name: '保留视频原件', desc: '转文献完成后保留视频文件；关闭则只生成文献笔记', binding: { key: 'knowledgeKeepVideo' } },
+          { type: 'select', name: '下载清晰度', desc: '以视频源可用档位为准，低档优先命中缓存', binding: { key: 'knowledgeQuality' }, options: [{ value: 'highest', label: '最高' }, { value: '1080', label: '1080P' }, { value: '720', label: '720P' }] },
+          { type: 'toggle', name: '遇错即停', desc: '单条失败后停止处理剩余任务；关闭则失败后继续', binding: { key: 'knowledgeStopOnFailure' } },
+          { type: 'text', name: '输出目录', desc: '视频文件落地目录；留空跟随工具配置', binding: { key: 'knowledgeOutputDir' }, placeholder: '如 D:/videos' },
+          { type: 'toggle', name: '压缩', desc: '转文字前压缩视频，默认开启', binding: { key: 'knowledgeCompress' } },
+          { type: 'number', name: '压缩质量（CRF）', desc: '数值越小画质越高；范围 18-28', binding: { key: 'knowledgeCrf' }, min: 18, max: 28, step: 1 },
         ],
       },
       {
         icon: 'terminal', name: '工具',
         rows: [
-          { type: 'text', name: 'ffmpeg 路径', desc: '视频处理用；留空跟随工具配置', binding: { key: 'literatureFfmpegPath' }, placeholder: '如 ffmpeg 或 D:/tools/ffmpeg.exe' },
-          { type: 'text', name: 'ffprobe 路径', desc: '探测视频元数据用；留空跟随工具配置', binding: { key: 'literatureFfprobePath' }, placeholder: '如 ffprobe 或 D:/tools/ffprobe.exe' },
-          { type: 'text', name: 'Python 路径', desc: '装了 Python 一般填 python 即可（走系统 PATH）；或填绝对路径（命令提示符运行 where python 可查）；留空跟随工具配置', binding: { key: 'literaturePythonPath' }, placeholder: '如 python 或 D:/tools/python.exe' },
-          { type: 'text', name: 'Whisper 模型', desc: '转写模型档位（tiny/base/small/medium/large）', binding: { key: 'literatureWhisperModel' }, placeholder: '如 small' },
-          { type: 'text', name: '缓存目录', desc: '剪辑产物与转写稿缓存；留空 = 系统临时目录', binding: { key: 'literatureCacheDir' }, placeholder: '如 D:/bili-dl-cache' },
-          { type: 'number', name: '缓存保留天数', desc: '超过该天数的缓存自动清理', binding: { key: 'literatureCacheRetentionDays' }, min: 1, step: 1 },
+          { type: 'text', name: 'ffmpeg 路径', desc: '视频处理用；留空跟随工具配置', binding: { key: 'knowledgeFfmpegPath' }, placeholder: '如 ffmpeg 或 D:/tools/ffmpeg.exe' },
+          { type: 'text', name: 'ffprobe 路径', desc: '探测视频元数据用；留空跟随工具配置', binding: { key: 'knowledgeFfprobePath' }, placeholder: '如 ffprobe 或 D:/tools/ffprobe.exe' },
+          { type: 'text', name: 'Python 路径', desc: '装了 Python 一般填 python 即可（走系统 PATH）；或填绝对路径（命令提示符运行 where python 可查）；留空跟随工具配置', binding: { key: 'knowledgePythonPath' }, placeholder: '如 python 或 D:/tools/python.exe' },
+          { type: 'text', name: 'Whisper 模型', desc: '转写模型档位（tiny/base/small/medium/large）', binding: { key: 'knowledgeWhisperModel' }, placeholder: '如 small' },
+          { type: 'text', name: '缓存目录', desc: '剪辑产物与转写稿缓存；留空 = 系统临时目录', binding: { key: 'knowledgeCacheDir' }, placeholder: '如 D:/bili-dl-cache' },
+          { type: 'number', name: '缓存保留天数', desc: '超过该天数的缓存自动清理', binding: { key: 'knowledgeCacheRetentionDays' }, min: 1, step: 1 },
         ],
       },
-      mobileFullscreenGroup('literatureMobileDefaultFullscreen', { desc: '' }),
+      mobileFullscreenGroup('knowledgeMobileDefaultFullscreen', { desc: '' }),
       {
         icon: 'wrench', name: '维护',
         rows: [
@@ -259,8 +259,8 @@ export class UIManager {
   mask: HTMLElement | null = null;
   popup: HTMLElement | null = null;
   list: HTMLElement | null = null;
-  private allNotes: LiteratureNoteEntry[] = [];
-  private filteredNotes: LiteratureNoteEntry[] = [];
+  private allNotes: KnowledgeNoteEntry[] = [];
+  private filteredNotes: KnowledgeNoteEntry[] = [];
   private selectedDomain: string | null = null;
   private searchKeyword = '';
   private currentDisplayCount = 0;
@@ -338,24 +338,24 @@ export class UIManager {
 
   createMainUI(): void {
     // 幂等重入守卫（review createMainUI 先例，ticket 138 §1.2）：掩码/窗口已挂载在 DOM 则复用；
-    // 节点被外部移除时自动重建（showMain 每次调此）——保证 bz-literature-open 单击即开、幂等。
+    // 节点被外部移除时自动重建（showMain 每次调此）——保证 bz-knowledge-open 单击即开、幂等。
     if ((this.mask && this.mask.isConnected) || (this.popup && this.popup.isConnected)) return;
     const mask = document.createElement('div');
-    mask.id = 'literature-mask';
+    mask.id = 'knowledge-mask';
     mask.className = 'bz-lit-mask';
     mask.style.display = 'none';
     mask.onclick = () => this.hideMain();
 
     const popup = document.createElement('div');
-    popup.id = 'literature-popup';
+    popup.id = 'knowledge-popup';
     popup.className = 'bz-lit-window';
     popup.style.display = 'none';
 
-    // 主面板保留原标题（用户拍板，ticket 143）：bz-win-head「文献盒」+ 动作钮；领域筛选 chips 在下方独立行
+    // 主面板保留原标题（用户拍板，ticket 143）：bz-win-head「知识盒」+ 动作钮；领域筛选 chips 在下方独立行
     const header = document.createElement('div');
     header.className = 'bz-win-head';
     header.innerHTML = `
-      <h3 class="bz-lit-title">文献盒</h3>
+      <h3 class="bz-lit-title">知识盒</h3>
       <div class="bz-lit-head-btns">
         <button id="lit-btn-text" title="文字录入：术语生成文献笔记">📝</button>
         <button id="lit-btn-video" title="视频录入：添加转文献任务并批处理">🎬</button>
@@ -367,14 +367,14 @@ export class UIManager {
     const barBox = document.createElement('div');
     barBox.className = 'bz-lit-filterbar';
     const siteBar = document.createElement('div');
-    siteBar.id = 'literature-sitebar';
+    siteBar.id = 'knowledge-sitebar';
     siteBar.className = 'bz-lit-sitebar';
     barBox.appendChild(siteBar);
     popup.appendChild(barBox);
 
     // 搜索框（🔍 按钮切换显隐，剪藏本同款；简洁版：无 placeholder，盒内 🔍 图标自明，ticket 143）
     const searchContainer = document.createElement('div');
-    searchContainer.id = 'literature-search-container';
+    searchContainer.id = 'knowledge-search-container';
     searchContainer.className = 'bz-lit-search';
     searchContainer.style.display = 'none';
     const searchBox = document.createElement('div');
@@ -383,7 +383,7 @@ export class UIManager {
     searchIc.className = 'bz-lit-search-ic';
     searchIc.textContent = '🔍';
     const searchInput = document.createElement('input');
-    searchInput.id = 'literature-search-input';
+    searchInput.id = 'knowledge-search-input';
     searchInput.type = 'text';
     searchInput.addEventListener('input', (e) => {
       const keyword = (e.target as HTMLInputElement).value.trim();
@@ -399,7 +399,7 @@ export class UIManager {
     popup.appendChild(searchContainer);
 
     const list = document.createElement('div');
-    list.id = 'literature-list';
+    list.id = 'knowledge-list';
     list.className = 'bz-lit-list';
     popup.appendChild(list);
 
@@ -427,15 +427,15 @@ export class UIManager {
     if (!p) return;
     // 🔍 搜索切换显示（剪藏本同款：开=聚焦，关=清空并应用筛选）
     q<HTMLButtonElement>(p, '#lit-btn-search')!.onclick = () => {
-      const container = q<HTMLElement>(p, '#literature-search-container');
+      const container = q<HTMLElement>(p, '#knowledge-search-container');
       if (!container) return;
       const isHidden = container.style.display === 'none' || getComputedStyle(container).display === 'none';
       container.style.display = isHidden ? 'block' : 'none';
       if (isHidden) {
-        const input = q<HTMLInputElement>(p, '#literature-search-input');
+        const input = q<HTMLInputElement>(p, '#knowledge-search-input');
         if (input) setTimeout(() => input.focus(), 100);
       } else {
-        const input = q<HTMLInputElement>(p, '#literature-search-input');
+        const input = q<HTMLInputElement>(p, '#knowledge-search-input');
         if (input) {
           input.value = '';
           this.searchKeyword = '';
@@ -454,9 +454,9 @@ export class UIManager {
     };
     q<HTMLButtonElement>(p, '#lit-btn-settings')!.onclick = () =>
       openSettingsModal({
-        title: '文献盒设置',
+        title: '知识盒设置',
         maxWidth: 560,
-        schema: literatureSettingsSchema({ onClearHistory: () => this.confirmClearHistory() }),
+        schema: knowledgeSettingsSchema({ onClearHistory: () => this.confirmClearHistory() }),
         // 目录设置变更 → 主面板清缓存全量重载（ticket 136 §3）；refreshPanel 亦有兜底检测
         onClose: () => this.reloadIfDirChanged(),
       });
@@ -467,7 +467,7 @@ export class UIManager {
   showMain(): void {
     this.createMainUI(); // 自愈（ticket 138 §1.2）：DOM 丢失时重建，单击即开、幂等
     if (!this.popup || !this.mask) return;
-    applyMobileWindowFullscreen(this.popup, tryGetSettings().literatureMobileDefaultFullscreen === true);
+    applyMobileWindowFullscreen(this.popup, tryGetSettings().knowledgeMobileDefaultFullscreen === true);
     topifyZ(this.mask, this.popup); // ADR-0067：显示即发号，谁后显示谁在上
     this.mask.style.display = 'block';
     this.popup.style.display = 'flex';
@@ -513,14 +513,14 @@ export class UIManager {
     const dir = litDirOf(tryGetSettings());
     const prefix = dir + '/';
     const mdFiles = (app.vault.getFiles() || []).filter((f: any) => f.path.startsWith(prefix) && f.extension === 'md');
-    let entries: LiteratureNoteEntry[] = [];
-    entries = (await Promise.all(mdFiles.map((f: any) => this.parseNoteFile(f)))).filter((e): e is LiteratureNoteEntry => e !== null);
+    let entries: KnowledgeNoteEntry[] = [];
+    entries = (await Promise.all(mdFiles.map((f: any) => this.parseNoteFile(f)))).filter((e): e is KnowledgeNoteEntry => e !== null);
     entries.sort((a, b) => (b.created - a.created) || a.path.localeCompare(b.path));
     this.allNotes = entries;
     this.loadedDir = dir;
   }
 
-  private async parseNoteFile(file: any): Promise<LiteratureNoteEntry | null> {
+  private async parseNoteFile(file: any): Promise<KnowledgeNoteEntry | null> {
     const app = getApp();
     try {
       const cache = app.metadataCache.getFileCache(file);
@@ -564,7 +564,7 @@ export class UIManager {
     this.pendingRefreshPaths.clear();
     this.pendingDeletePaths.clear();
     if (this.popup) {
-      const input = q<HTMLInputElement>(this.popup, '#literature-search-input');
+      const input = q<HTMLInputElement>(this.popup, '#knowledge-search-input');
       if (input) input.value = '';
     }
   }
@@ -596,7 +596,7 @@ export class UIManager {
 
   /** 领域筛选行（剪藏本 rebuildSiteBar 同款：全部 (N) + 各领域按钮带数量，按 count 降序） */
   private rebuildDomainBar(): void {
-    const container = this.popup ? q<HTMLElement>(this.popup, '#literature-sitebar') : null;
+    const container = this.popup ? q<HTMLElement>(this.popup, '#knowledge-sitebar') : null;
     if (!container) return;
     const counts = new Map<string, number>();
     for (const n of this.allNotes) {
@@ -735,7 +735,7 @@ export class UIManager {
   }
 
   /** 文献笔记卡片：标题 + 领域徽标 + 简介两行省略 + 日期；双击打开 + 抽屉（类型徽章已移除，ticket 138 §3.2） */
-  private renderNoteCard(n: LiteratureNoteEntry): HTMLElement {
+  private renderNoteCard(n: KnowledgeNoteEntry): HTMLElement {
     const card = document.createElement('div');
     card.className = 'bz-lit-card';
     card.dataset.path = n.path;
@@ -769,7 +769,7 @@ export class UIManager {
     return card;
   }
 
-  private buildNoteSheetHead(n: LiteratureNoteEntry): HTMLElement {
+  private buildNoteSheetHead(n: KnowledgeNoteEntry): HTMLElement {
     const head = document.createElement('div');
     head.className = 'bz-lit-sheet-head';
     const title = document.createElement('div');
@@ -783,7 +783,7 @@ export class UIManager {
     return head;
   }
 
-  private buildNoteActions(n: LiteratureNoteEntry): ItemAction[] {
+  private buildNoteActions(n: KnowledgeNoteEntry): ItemAction[] {
     const actions: ItemAction[] = [
       { icon: 'book-open', label: '打开', title: '打开文献笔记', onClick: () => this.openNote(n.path) },
       { icon: 'link', label: '复制双链', title: '复制双链', onClick: () => void this.copyWikilink(n) },
@@ -794,12 +794,12 @@ export class UIManager {
       try { sub = new URL(n.url).hostname; } catch { /* 忽略非法链接 */ }
       actions.push({ icon: 'globe', label: '复制原文链接', sub: sub || undefined, title: '复制原文链接', onClick: () => void this.copyText(n.url) });
     }
-    // 删除 danger + flow-dialog 确认；删除时同步清理 literature.json 指向该笔记的任务记录
+    // 删除 danger + flow-dialog 确认；删除时同步清理 knowledge.json 指向该笔记的任务记录
     actions.push({ icon: 'trash-2', label: '删除', kind: 'danger', title: '删除文献笔记', onClick: () => void this.confirmDeleteNote(n) });
     return actions;
   }
 
-  private async confirmDeleteNote(n: LiteratureNoteEntry): Promise<void> {
+  private async confirmDeleteNote(n: KnowledgeNoteEntry): Promise<void> {
     const v = await openFlowDialog({
       title: '删除文献笔记',
       message: `将删除「${n.title}」；视频转文献历史中指向该笔记的记录会同步移除。\n此操作不可撤销。`,
@@ -821,15 +821,15 @@ export class UIManager {
     }
   }
 
-  /** 删除视频笔记时同步清理 literature.json 里指向该笔记的任务记录（避免悬挂 notePath，ticket 136 §3） */
+  /** 删除视频笔记时同步清理 knowledge.json 里指向该笔记的任务记录（避免悬挂 notePath，ticket 136 §3） */
   private async cleanupTaskRecordsForNote(path: string): Promise<void> {
-    const tasks = await LiteratureData.loadTasks();
+    const tasks = await KnowledgeData.loadTasks();
     for (const t of tasks) {
-      if (t.notePath === path) await LiteratureData.deleteTask(t.id);
+      if (t.notePath === path) await KnowledgeData.deleteTask(t.id);
     }
   }
 
-  // ---- 主面板增量刷新（literature:file-* 四通道 300ms 防抖，照抄剪藏本 attachFileListener） ----
+  // ---- 主面板增量刷新（knowledge:file-* 四通道 300ms 防抖，照抄剪藏本 attachFileListener） ----
 
   private removeNoteByPath(path: string): void {
     const idx = this.allNotes.findIndex((n) => n.path === path);
@@ -894,12 +894,12 @@ export class UIManager {
       if (!evt.movedOut && inDir(evt.newPath)) this.pendingRefreshPaths.add(evt.newPath);
       this.scheduleRefreshFlush();
     };
-    // 换线：原生 vault 事件 → 域事件总线 literature:file-*（obsidian-adapter 统一派发，仅 md）
+    // 换线：原生 vault 事件 → 域事件总线 knowledge:file-*（obsidian-adapter 统一派发，仅 md）
     this.fileListenerRefs = [
-      onDomainEvent<{ path: string }>('literature:file-created', (evt) => fileModifyHandler(evt.path)),
-      onDomainEvent<{ path: string }>('literature:file-modified', (evt) => fileModifyHandler(evt.path)),
-      onDomainEvent<{ path: string }>('literature:file-deleted', fileDeleteHandler),
-      onDomainEvent<{ oldPath: string; newPath: string; movedOut: boolean }>('literature:file-renamed', fileRenameHandler),
+      onDomainEvent<{ path: string }>('knowledge:file-created', (evt) => fileModifyHandler(evt.path)),
+      onDomainEvent<{ path: string }>('knowledge:file-modified', (evt) => fileModifyHandler(evt.path)),
+      onDomainEvent<{ path: string }>('knowledge:file-deleted', fileDeleteHandler),
+      onDomainEvent<{ oldPath: string; newPath: string; movedOut: boolean }>('knowledge:file-renamed', fileRenameHandler),
     ];
     this.fileListenerAttached = true;
   }
@@ -908,12 +908,12 @@ export class UIManager {
 
   createVideoUI(): void {
     const mask = document.createElement('div');
-    mask.id = 'literature-video-mask';
+    mask.id = 'knowledge-video-mask';
     mask.className = 'bz-lit-mask';
     mask.style.display = 'none';
     mask.onclick = () => this.hideVideo();
     const popup = document.createElement('div');
-    popup.id = 'literature-video-popup';
+    popup.id = 'knowledge-video-popup';
     popup.className = 'bz-lit-window';
     popup.style.display = 'none';
     // 视频录入保留原标题（用户拍板，ticket 143）：bz-win-head「视频录入」+ 动作钮；
@@ -929,7 +929,7 @@ export class UIManager {
         <button id="lit-btn-video-close" class="bz-win-close" title="关闭">❌</button>
       </div>`;
     const list = document.createElement('div');
-    list.id = 'literature-video-list';
+    list.id = 'knowledge-video-list';
     list.className = 'bz-lit-list';
     popup.appendChild(header);
     popup.appendChild(list);
@@ -966,7 +966,7 @@ export class UIManager {
    *  移动端默认全屏（ticket 139：主面板/历史弹窗同款三件事对齐）。 */
   showVideoEntry(prefill?: { url: string; title?: string | null; uploader?: string | null }): void {
     if (!this.videoPopup || !this.videoMask) return;
-    applyMobileWindowFullscreen(this.videoPopup, tryGetSettings().literatureMobileDefaultFullscreen === true);
+    applyMobileWindowFullscreen(this.videoPopup, tryGetSettings().knowledgeMobileDefaultFullscreen === true);
     topifyZ(this.videoMask, this.videoPopup);
     this.videoMask.style.display = 'block';
     this.videoPopup.style.display = 'flex';
@@ -982,7 +982,7 @@ export class UIManager {
   }
 
   async refreshVideoPanel(): Promise<void> {
-    const tasks = await LiteratureData.loadTasks();
+    const tasks = await KnowledgeData.loadTasks();
     if (!this.videoList) return; // await 期间面板被销毁（unload/测试清理）→ 放弃渲染
     this.videoList.innerHTML = '';
     const active = tasks.filter((t) => !t.archived);
@@ -1009,10 +1009,10 @@ export class UIManager {
   }
 
   /** 头部状态计数（ADR-0070）：待处理/处理中/失败 非零项，一眼看清队列健康度 */
-  private _syncStatusCounts(tasks: LiteratureTask[]): void {
+  private _syncStatusCounts(tasks: KnowledgeTask[]): void {
     const el = this.videoPopup ? q<HTMLElement>(this.videoPopup, '#lit-video-counts') : null;
     if (!el) return;
-    const count = (s: LiteratureTask['status']) => tasks.filter((t) => t.status === s).length;
+    const count = (s: KnowledgeTask['status']) => tasks.filter((t) => t.status === s).length;
     const parts: string[] = [];
     if (count('pending')) parts.push(`${count('pending')} 待处理`);
     if (count('processing')) parts.push(`${count('processing')} 处理中`);
@@ -1025,7 +1025,7 @@ export class UIManager {
    * 空闲 = 「▶️」（无工作禁用；完成有失败仍在 → 可再点续跑）；运行中 = 该按钮即终止控制「⏹」——
    * 整批 title「中止批量处理」/ 仅失败项续跑 title「中止整批（处理失败任务中）」；移动端整钮隐藏（isMobileEnv）。
    */
-  private _syncRunButton(tasks: LiteratureTask[]): void {
+  private _syncRunButton(tasks: KnowledgeTask[]): void {
     if (!this.videoPopup) return;
     const run = q<HTMLButtonElement>(this.videoPopup, '#lit-btn-video-run');
     if (!run) return;
@@ -1044,7 +1044,7 @@ export class UIManager {
     }
   }
 
-  private renderRow(task: LiteratureTask): HTMLElement {
+  private renderRow(task: KnowledgeTask): HTMLElement {
     const card = document.createElement('div');
     card.className = 'bz-bili-task-card';
     card.dataset.id = task.id;
@@ -1077,7 +1077,7 @@ export class UIManager {
     return card;
   }
 
-  private buildCardActions(task: LiteratureTask): ItemAction[] {
+  private buildCardActions(task: KnowledgeTask): ItemAction[] {
     const actions: ItemAction[] = [];
     if (task.status === 'success') {
       if (task.notePath) actions.push({ icon: 'book-open', label: '打开文献笔记', onClick: () => this.openNote(task.notePath!) });
@@ -1107,9 +1107,9 @@ export class UIManager {
       if (meta) meta.after(box);
       else card.appendChild(box);
     }
-    // 简要模式（设置 literatureProgressDetail=false 显式关闭）：仅当前步骤文本；
+    // 简要模式（设置 knowledgeProgressDetail=false 显式关闭）：仅当前步骤文本；
     // 缺省/未注入（=undefined）走详细模式——默认值即详细
-    if (tryGetSettings().literatureProgressDetail === false) {
+    if (tryGetSettings().knowledgeProgressDetail === false) {
       const cur = st.steps[st.steps.length - 1] || '处理中…';
       box.innerHTML = `<div class="bz-bili-progress">${esc(cur)}</div>`;
       return;
@@ -1149,7 +1149,7 @@ export class UIManager {
       return;
     }
     if (BatchRunner.running) return;
-    const tasks = await LiteratureData.loadTasks();
+    const tasks = await KnowledgeData.loadTasks();
     // ADR-0067 断点续跑：待处理 + 失败 项一起处理（失败项从出错步骤继续，成功项已归档不重跑）
     const work = tasks.filter((t) => !t.archived && (t.status === 'pending' || t.status === 'failed'));
     if (work.length === 0) { notice('没有待处理或失败的任务', 'info'); return; }
@@ -1213,7 +1213,7 @@ export class UIManager {
     await this.refreshVideoPanel();
   }
 
-  private async confirmDelete(task: LiteratureTask): Promise<void> {
+  private async confirmDelete(task: KnowledgeTask): Promise<void> {
     const v = await openFlowDialog({
       title: '删除转文献任务',
       message: '仅从列表移除记录，已生成的文献笔记与视频不受影响。',
@@ -1223,7 +1223,7 @@ export class UIManager {
       ],
     });
     if (v !== 'ok') return;
-    await LiteratureData.deleteTask(task.id);
+    await KnowledgeData.deleteTask(task.id);
     await this.refreshVideoPanel();
     await this.refreshHistory();
   }
@@ -1239,7 +1239,7 @@ export class UIManager {
       ],
     });
     if (v !== 'ok') return;
-    await LiteratureData.clearHistory();
+    await KnowledgeData.clearHistory();
     await this.refreshHistory();
   }
 
@@ -1247,12 +1247,12 @@ export class UIManager {
 
   createAddDialog(): void {
     const addMask = document.createElement('div');
-    addMask.id = 'literature-add-mask';
+    addMask.id = 'knowledge-add-mask';
     addMask.className = 'bz-lit-mask';
     addMask.style.display = 'none';
     addMask.onclick = () => this.hideAddDialog();
     const popup = document.createElement('div');
-    popup.id = 'literature-add-popup';
+    popup.id = 'knowledge-add-popup';
     popup.className = 'bz-lit-dialog';
     popup.style.display = 'none';
     // ticket 143 简洁版（拍板布局 A）：无标题（编辑态右上角小标签 #lit-add-mode 表意）、
@@ -1332,7 +1332,7 @@ export class UIManager {
     }
   }
 
-  showAddDialog(editItem?: Partial<LiteratureTask>): void {
+  showAddDialog(editItem?: Partial<KnowledgeTask>): void {
     if (!this.addPopup || !this.addMask) return;
     // 重开即全新：清防抖定时器 + 序列号失效在途解析（编辑态预填不触发 input，改 URL 才走回填）
     this.addUrlReset();
@@ -1455,11 +1455,11 @@ export class UIManager {
       // 不带 remark：编辑旧任务时保留既有备注（数据格式兼容冻结），新任务备注恒空
       const patch = { url, start: start || null, end: end || null, quality, page, title: vtitle || null, uploader: uploader || null };
       // 域事件观察收敛（P3-2）：新增/编辑不再发射 added/edited（smartcat 对其返回 null），
-      // literature:tasks 只剩 converted（processor）与 term-generated（术语面板）两类
+      // knowledge:tasks 只剩 converted（processor）与 term-generated（术语面板）两类
       if (this.editingId) {
-        await LiteratureData.updateTask(this.editingId, patch);
+        await KnowledgeData.updateTask(this.editingId, patch);
       } else {
-        await LiteratureData.addTask(patch);
+        await KnowledgeData.addTask(patch);
       }
       notice('已保存');
       this.hideAddDialog();
@@ -1473,12 +1473,12 @@ export class UIManager {
 
   createHistoryUI(): void {
     const mask = document.createElement('div');
-    mask.id = 'literature-history-mask';
+    mask.id = 'knowledge-history-mask';
     mask.className = 'bz-lit-mask';
     mask.style.display = 'none';
     mask.onclick = () => this.hideHistory();
     const popup = document.createElement('div');
-    popup.id = 'literature-history-popup';
+    popup.id = 'knowledge-history-popup';
     popup.className = 'bz-lit-window';
     popup.style.display = 'none';
     // 简洁工具栏（ticket 143）：无标题，历史计数 + 关闭钮同行
@@ -1494,7 +1494,7 @@ export class UIManager {
     toolbar.appendChild(counts);
     toolbar.appendChild(headBtns);
     const list = document.createElement('div');
-    list.id = 'literature-history-list';
+    list.id = 'knowledge-history-list';
     list.className = 'bz-lit-list';
     popup.appendChild(toolbar);
     popup.appendChild(list);
@@ -1509,7 +1509,7 @@ export class UIManager {
   /** 历史独立弹窗（ADR-0070）：视频面板之上叠开，遮罩 + ✕/ESC/点遮罩关闭 */
   showHistory(): void {
     if (!this.historyPopup || !this.historyMask) return;
-    applyMobileWindowFullscreen(this.historyPopup, tryGetSettings().literatureMobileDefaultFullscreen === true);
+    applyMobileWindowFullscreen(this.historyPopup, tryGetSettings().knowledgeMobileDefaultFullscreen === true);
     topifyZ(this.historyMask, this.historyPopup);
     this.historyMask.style.display = 'block';
     this.historyPopup.style.display = 'flex';
@@ -1524,7 +1524,7 @@ export class UIManager {
   /** 历史列表（ADR-0070）：无条带无成功徽标；同一视频的多条文献笔记归并在一张卡片内分组列出 */
   private async refreshHistory(): Promise<void> {
     if (!this.historyList) return;
-    const tasks = await LiteratureData.loadTasks();
+    const tasks = await KnowledgeData.loadTasks();
     if (!this.historyList) return;
     this.historyList.innerHTML = '';
     const rows = tasks.filter((t) => t.archived);
@@ -1539,7 +1539,7 @@ export class UIManager {
       return;
     }
     // 按 url 分组（同一视频不同分P/起止 = 多条任务 → 多份文献笔记），组内按完成时间正序，组间按最新完成倒序
-    const groups = new Map<string, LiteratureTask[]>();
+    const groups = new Map<string, KnowledgeTask[]>();
     for (const t of rows) {
       const key = t.url || t.id;
       const g = groups.get(key);
@@ -1560,7 +1560,7 @@ export class UIManager {
 
   /** 历史分组卡片：标题链接 + UP主名（ticket 143：去掉「UP主」前缀与「N 条笔记」计数）；
    *  每条任务一行「📄 笔记名（去目录去 .md）⏱ 相对时间（formatRelativeTime）」 */
-  private renderHistoryGroup(group: LiteratureTask[]): HTMLElement {
+  private renderHistoryGroup(group: KnowledgeTask[]): HTMLElement {
     const head = group[0];
     const card = document.createElement('div');
     card.className = 'bz-bili-task-card bz-bili-hgroup';
@@ -1602,12 +1602,12 @@ export class UIManager {
 
   createTermUI(): void {
     const mask = document.createElement('div');
-    mask.id = 'literature-term-mask';
+    mask.id = 'knowledge-term-mask';
     mask.className = 'bz-lit-mask';
     mask.style.display = 'none';
     mask.onclick = () => this.hideTermEntry();
     const popup = document.createElement('div');
-    popup.id = 'literature-term-popup';
+    popup.id = 'knowledge-term-popup';
     popup.className = 'bz-lit-dialog bz-lit-term-dialog';
     popup.style.display = 'none';
     const body = document.createElement('div');
@@ -1912,7 +1912,7 @@ export class UIManager {
       // 2) 自动打开新笔记
       this.openNote(path);
       // 3) 行为流观察（ticket 136 §10：term-generated，载荷 term/title）
-      emitDomainEvent('literature:tasks', { kind: 'term-generated', term, title: term });
+      emitDomainEvent('knowledge:tasks', { kind: 'term-generated', term, title: term });
       // 4) 关闭面板（预览纯内存，置空即可，无文件误删风险）
       this.termPreview = null;
       this.hideTermEntry();
@@ -1939,7 +1939,7 @@ export class UIManager {
     const file = app.vault.getAbstractFileByPath(path);
     if (file) {
       void app.workspace.getLeaf(false).openFile(file as any);
-      // 打开笔记即收起文献盒全部窗口（ticket 139）：面板浮层盖着笔记，用户得先关面板才看得到
+      // 打开笔记即收起知识盒全部窗口（ticket 139）：面板浮层盖着笔记，用户得先关面板才看得到
       this.hideMain();
       this.hideVideo();
       this.hideHistory();
@@ -1948,7 +1948,7 @@ export class UIManager {
     }
   }
 
-  private async copyWikilink(n: LiteratureNoteEntry): Promise<void> {
+  private async copyWikilink(n: KnowledgeNoteEntry): Promise<void> {
     const link = `[[${n.path}|${n.title}]]`;
     try { await navigator.clipboard.writeText(link); notice('已复制双链引用：' + link, 'success'); }
     catch { notice('复制失败', 'error'); }

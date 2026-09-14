@@ -793,3 +793,14 @@
 - [x] 明确排除：上游 data.ts migrateLegacy（上游自有正名迁移，本地无旧文件名）；291/277/settings-panel 通用化（全域 UI 体系，按两套体系策略排除）
 - [x] 门禁全绿：tsc 0 错；vitest 全量 303 文件/4762 用例；esbuild production 通过
 - [x] 流程说明：差量过小（2 文件 +1 测试清单 +2 文档），未走 worktree，主仓直改（沿用同日菜单两次直改先例），目标路径事前核对干净
+
+
+## 2026-09-14 · ticket 290：知识盒域正名（literature → knowledge，ADR-0126）
+
+- [x] 起因：用户点名「改成知识盒」；预检发现上游 knowledge 已 ADR-0112（上游编号）三部重构（ui/styles 归一差千行级），本地另持 ticket 284 短链解析 → 用户拍板 Q1(a) 纯改名、功能一字不动，不吸三部重构
+- [x] 骨架改名：src/literature→src/knowledge、tests/literature→tests/knowledge、smartcat/literature-source.ts→knowledge-source.ts；命令 id bz-literature-open/note-term/note-video → bz-knowledge-*（条数仍 72）；设置键 literature* 16 键 → knowledge*；域事件 literature:tasks / literature:file-* → knowledge:*；DOM id 与导出符号同步（全局替换 1315 处）
+- [x] 数据零丢失迁移（照上游 ADR-0112 范式）：KnowledgeData.migrateLegacy（literature.json → knowledge.json 原样复制、旧文件保留，D3 WHITELIST 豁免注明理由）；main.ts onload 一次性平移 literatureDirectory 值并删旧键
+- [x] 边界保留：vault 文件夹默认「文献盒」与「文献笔记」术语不动（上游同口径）；smartcat-behavior 旧条目实体 literature（含更早 bili/bili-downloader）经别名表与 case 分支继续命中「知识盒」文案（新增 1 条兼容测试）；home.json 钉选 literature 卡 id 失效可在编辑模式重钉（同 library 先例）
+- [x] 顺手收口：home 域快捷菜单补挂「视频生成文献笔记」（票 289 已有命令，票 288「本地无该命令」注记作废）
+- [x] 门禁全绿：tsc 0 错；vitest 全量 **303 文件 / 4763 用例通过**（+1 为存量别名兼容测试）；esbuild production 构建通过（build-css.mjs SOURCES 同步 src/knowledge/styles.css，产物已部署 vault 插件目录，构建产物不提交）
+- [x] 流程：git worktree 隔离（wt-knowledge-rename），门禁后显式路径落主仓

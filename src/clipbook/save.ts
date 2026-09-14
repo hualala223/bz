@@ -7,7 +7,7 @@
  *   ——UTC+8 凌晨不落昨日；date 转 UTC 本地串）
  * - 正文剥离 frontmatter/dataviewjs 块后写入，尾部嵌 dataviewjs 摘要 view
  * - 同名文件已存在 → 覆盖确认（自绘遮罩小弹窗 + escManager，对齐 reader 语义）
- * - B站视频条目保存分流文献盒（ADR-0068：openLiteratureAddTask），不写剪藏
+ * - B站视频条目保存分流知识盒（ADR-0068：openKnowledgeAddTask），不写剪藏
  *
  * 调用方：UI 保存动作（doAct save）。成功后由调用方触发重渲染 + 目录刷新。
  */

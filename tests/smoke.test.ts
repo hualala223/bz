@@ -85,7 +85,7 @@ const EXPECTED_COMMAND_IDS = [
   'bz-pomodoro-open',
   // 首页入口菜单三支（票 288 / 上游 issue 288）：相位敏感动作
   'bz-pomodoro-focus-toggle', 'bz-pomodoro-skip', 'bz-pomodoro-pause',
-  'bz-literature-open', 'bz-literature-note-term', 'bz-literature-note-video',
+  'bz-knowledge-open', 'bz-knowledge-note-term', 'bz-knowledge-note-video',
   'bz-attach-move',
   'bz-encrypt-open', 'bz-encrypt-lock',
   'bz-smartcat-open', 'bz-smartcat-chat', 'bz-smartcat-hide', 'bz-smartcat-dashboard',

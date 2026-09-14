@@ -51,8 +51,12 @@ const WHITELIST: Array<{ file: RegExp; reason: string; /** 防回归哨兵：预
     reason: 'secondbrain.vec 二进制写，不在 json 段写原语范围；写时机受 store-file 串行链约束',
   },
   {
-    file: /^src\/literature\/note-gen\.ts$/,
+    file: /^src\/knowledge\/note-gen\.ts$/,
     reason: '文献/笔记类用户文档写：视频转文献笔记生成与 frontmatter 回填（md 用户笔记，非插件私有数据）',
+  },
+  {
+    file: /^src\/knowledge\/data\.ts$/,
+    reason: '票 290 一次性数据迁移：literature.json → knowledge.json 原样复制（vault.create 只在迁移路径命中，任务历史零丢失，照上游 ADR-0112 范式）；后续读写全走 jsonFileStore 契约',
   },
   {
     file: /^src\/clipbook\/save\.ts$/,

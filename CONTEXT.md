@@ -59,7 +59,7 @@ _Avoid_: 自动移动待办到明天（是「今天补投影」，不是改 due/
 
 **聚合讯 (News Aggregator)**: 抓取新闻写入 `归档/网页剪藏`（CLIP_DIR），管理 `CONFIG/STORAGE/news.json`（**ticket 124 起四段结构**：articles/stats/bilibiliUps/sources，兼容旧纯数组自动迁移；stats 由旧 news-stats.json 并入；**ticket 126 起可含第五段 `bilibiliUpInfo`**：uid → {name, avatar} 的 UP 主资料回填；**ticket 127 起可含 `bilibiliMaxItems`/`bilibiliCookie`**：每 UP 最近 N 条 与 Cookie 配置）；把 `dataviewjs` 代码块（`dv.view('CONFIG/SCRIPTS/DataView/摘要')`）写进笔记由 **Dataview 插件**渲染。
 
-**保存至文献 (Save to Literature)**: 聚合讯阅读器对 B站视频条目（platform='B站' 且 url 非空）的保存动作（ticket 134，ADR-0068）——底栏按钮替换「保存至剪藏」，点击打开文献盒主面板 + 添加转文献任务弹窗（预填视频链接/标题/UP主）；不落剪藏、不标已读、不发 'news' 域事件（不进小橘行为流），阅读器留在本篇未读；普通文章仍是「保存至剪藏」原行为（B站条目 url 异常缺失回退剪藏按钮）。B站条目「下一篇/完成阅读」同样不进行为流（部分推翻 ticket 123「跳过也发」，普通文章保留）。_Avoid_: 保存至剪藏（指 B站条目按钮时）、剪藏视频（无此动作）
+**保存至文献 (Save to Literature)**: 聚合讯阅读器对 B站视频条目（platform='B站' 且 url 非空）的保存动作（ticket 134，ADR-0068）——底栏按钮替换「保存至剪藏」，点击打开知识盒主面板 + 添加转文献任务弹窗（预填视频链接/标题/UP主）；不落剪藏、不标已读、不发 'news' 域事件（不进小橘行为流），阅读器留在本篇未读；普通文章仍是「保存至剪藏」原行为（B站条目 url 异常缺失回退剪藏按钮）。B站条目「下一篇/完成阅读」同样不进行为流（部分推翻 ticket 123「跳过也发」，普通文章保留）。_Avoid_: 保存至剪藏（指 B站条目按钮时）、剪藏视频（无此动作）
 
 **聚合讯抓取 (News Fetch in Plugin)**: 抓取执行方自 2026-09-14 起 = **插件内** `src/clipbook/news-fetcher.ts`（上游 issue 302 / ADR-0128）——外部 PM2 守护 `obsidian-news watch` **退役**（进程停，npm 包 `@jwbz/obsidian-news` 与 `tools/news-watcher/` 源码留存可回滚）。HTTP 通道 = Obsidian `requestUrl`（15s 超时，桌面/移动端一致、无 CORS），四源照搬（知乎日报 + 果壳科学人 + B站 UP 动态 + RSS）：24h 窗口、URL+标题双去重、逐篇正文抓取（入库即全文）。**触发链**：main.ts onload（延迟一拍）+ 打开剪藏本，均走 `maybeFetchNews()` 间隔判定；命令 `bz-clipbook-fetch-now` 忽略间隔。**news.json 新增两段**：`lastFetchAt`（epoch ms；全源失败轮不推进，下次打开即重试）、`fetchIntervalMin`（档位 30/60/120/360，默认 30，跨设备随库同步）。抓取期互斥锁防重入；通知静默，仅失败时报。写入方唯一化，消灭双写竞争。
 _Avoid_: 数据源守护（已退役）、news watcher 进程（已退役）、新闻爬虫
@@ -84,7 +84,7 @@ _Avoid_: 数据源守护（已退役）、news watcher 进程（已退役）、�
 _Avoid_: GitHub 收藏管理（旧口径，实际已泛化到全部链接类型）
 
 **归档 (Archive)**: 收藏本条目的冷存状态（ADR-0074）——归档后从界面彻底消失（主列表/搜索/标签计数均不含），数据保留在 favorites.json，无查看入口、无 UI 反悔（观察流是归档过什么的可读痕迹）；批量余额不查冷存条目。
-_Avoid_: 完成归档（备忘录语义）、历史归档（文献盒语义）、取消归档（本域无此动作）
+_Avoid_: 完成归档（备忘录语义）、历史归档（知识盒语义）、取消归档（本域无此动作）
 
 **AI 整理 (AI Tidy)**: 收藏本添加弹窗内的字段整理动作（按钮 ✨ AI 整理）——按已输入内容补全标题/链接/简介并从固定标签中选标签；GitHub 仓库链接先经 GitHub API 取真实仓库信息（仓库名预填标题、简介忠实翻译成中文、强制含 GitHub 标签）。反馈走动态消息模板（progress「AI 分析中…」→ 阶段 setMessage → success/error），与影视 AI 荐片同一套。
 _Avoid_: AI 推荐（旧名，名不符实——它整理字段而非推荐内容）
@@ -112,27 +112,27 @@ _Avoid_: 影视数据分析弹窗（旧词条口径——指本域窗口时用�
 **影院豆瓣抓取 (Cinema Douban Fetch)**: 抓取执行方自 2026-09-14 起 = **插件内** `src/cinema/douban-fetcher.ts`（上游 issue 303 / ADR-0129）。**海报链**：豆瓣搜索页提 `posterUrl` → `upgradePosterUrl` 高清 → `requestUrl` arrayBuffer 下载 → `adapter.writeBinary` 写 `CONFIG/MOVIE POSTER/<安全名>_<时间戳>.<ext>` → frontmatter 海报 + 正文 `![[…]]` embed（`vault.process` 原子改写）。**字段链**：ApiZero 首选（评分/导演/主演/类型/制片地区/片长/上映年份/热门短评）→ 缺导演主演或需编剧时 **rexxar 演职员接口兜底**；语言/又名/IMDb/简介四字段退役（详情页 HTML 不再抓）；所有字段一律「缺失才填」，防重抓覆盖手工修正。搜索被判风控（响应 <2000B 或无结果结构）→ 该条失败。**队列** `douban-queue.ts`：执行器从 spawn 换为插件内 `fetchNote`（完成信号 = 返回值，字段落盘轮询兜底退役），移动端启用。设置组「数据抓取」= ApiZero Key（apizero.cn，Bearer 鉴权，默认空 → 字段落 rexxar 兜底）+ 豆瓣 Cookie（可选，风控时提高成功率）；key 存 data.json **随库同步、不进仓库**。spawn 链退役：全局包 `@jwbz/obsidian-douban-poster` 与 `tools/obsidian-douban-poster/` 留存（手动 CLI 仍可用，对齐 news 先例）。
 _Avoid_: 抓海报、豆瓣补全、poster fetch（旧守护口径）；douban-poster 守护、spawn 抓取（均已退役）
 
-**桌面端专属能力 (Desktop-only Capability)**: 依赖 Node.js 外部进程（child_process）、移动端（Capacitor）不可用的功能。门禁：`window.require('child_process')` 为 null 即非桌面端；移动端不注册事件监听，设置项置灰标注「仅桌面端可用」，不静默降级。（当前实例：文献盒批量处理等外部工具；影院豆瓣抓取已迁入插件（issue 303），不再是桌面专属）
+**桌面端专属能力 (Desktop-only Capability)**: 依赖 Node.js 外部进程（child_process）、移动端（Capacitor）不可用的功能。门禁：`window.require('child_process')` 为 null 即非桌面端；移动端不注册事件监听，设置项置灰标注「仅桌面端可用」，不静默降级。（当前实例：知识盒批量处理等外部工具；影院豆瓣抓取已迁入插件（issue 303），不再是桌面专属）
 
 
 **自动摘要 (Auto Summary)**: 常驻监听 `归档/网页剪藏` 新文件 → AI（deepseek-v4-flash）生成摘要/标签写回 frontmatter。详设（ticket 124）三键：autoSummaryLength（simple/standard/detailed 摘要长度档位）、autoSummaryTagsEnabled + autoSummaryTagCount（标签生成开关与数量区间）、autoSummaryTiming（见「摘要时机」）。AI 配置走主设置页 core AI（ADR-0052）。
 
 **B站下载 (Bilibili Downloader)**: 输入链接 → B站 API 解析（封面/标题/清晰度）→ 下载合并（ffmpeg spawn）→ 多段剪辑（对一个下载原件定义 0..N 段落，时间 0.1s/HH:MM:SS(.S)）/合并（段序拼接）/压缩（ffmpeg，产物 ffprobe 校验兜底）→ 转文字（faster-whisper，python -c 内嵌代码）。**ticket 136 起（ADR-0071）外部工具去 AI 去网页版**：`tools/bili-downloader`（bin `bili-dl`）只保留无头批处理（`cli.js --batch`，解析/下载/剪辑/压缩/转文字/交付），产出**转录临时文件**交 bz 插件做文献笔记 AI 与落盘；网页版（server.js/public）与插件 `bz-bili-open` 命令已删除。**经 shell 启动时 `--batch` 的 JSON 改传 `b64:<base64>` 前缀**（ticket 147：JSON 引号/空格会被 cmd 对消破坏 argv，base64 无引号空格 shell 安全；cli.js `decodeBatchArg` 双形态皆收，手动命令行直传 JSON 照旧）。文献盒批处理见「文献盒」词条。术语见 `tools/bili-downloader/CONTEXT.md`。
 
-**文献盒 (Literature Box)**: literature 域的面板+队列能力（ticket 136/ADR-0072 自 bili-downloader 迁出并正名）——主面板像剪藏本列出「文献目录」文件夹里的文献笔记（.md，扫描 + metadataCache 解析 frontmatter，**不从数据文件派生**）：顶部**领域筛选**（各领域带数量标签）+ **类型过滤**（全部/视频/术语）+ 搜索，滚动触底懒加载，域事件四通道自动刷新，**双击打开** + 统一抽屉（打开/复制双链/复制原文链接/删除，删除视频笔记同步清理任务记录）。右上角三按钮：**文字录入**（术语生成流程，见「术语文献」）/ **视频录入**（视频转文献任务队列：添加/处理/历史；**移动端仅添加+历史**；无 ⚙️ 无 ⬇️，设置全并入主面板设置面板）/ **设置**。数据 `CONFIG/STORAGE/literature.json` 单一文件（视频任务结构沿用 bili-tasks.json，**术语不留任务**；旧文件不迁移不做兼容）。命令 `bz-literature-open` / `bz-literature-note-term`。批处理 = spawn `cli.js --batch`（**ticket 147 起 JSON 改 base64 `b64:` 前缀传输**——.cmd shim 需 shell:true，JSON 引号/空格会被 shell 对消，报「不是合法 JSON：Expected property name at position 1」），**AI（元数据+润色+type/domain）与笔记落盘在插件侧**（CLI 去 AI，产出转录临时文件）；压缩默认开（CRF 默认 23）；**视频录入批量按钮为单钮纯 emoji**（ticket 146 单钮态机 + ticket 148 去文字：空闲「▶️」/运行中「⏹」，终止与终止整批靠 title hover 区分，移动端整钮隐藏）。**options 里「留空=跟随工具配置」的键（pythonPath/outputDir/ffmpegPath/ffprobePath/whisperModel/cacheDir）留空时不下发**——空串会覆盖 rc/DEFAULTS 兜底致转写环节报「未配置 pythonPath」（ticket 149）。**Python 路径可填命令名 `python`（走系统 PATH）或绝对路径**（ticket 150：DEFAULTS 已通用化，Windows 可用 `where python` 查绝对路径；ENOENT 时引导填写方式）。断点续跑、行内进度、历史归档等语义自 ADR-0065/0066/0067/0070 承继（CLI 缓存仅机械产物）。
+**知识盒 (Knowledge Box)**: knowledge 域的面板+队列能力（票 290/ADR-0126 正名，旧名「文献盒」/literature）（ticket 136/ADR-0072 自 bili-downloader 迁出并正名）——主面板像剪藏本列出「文献目录」文件夹里的文献笔记（.md，扫描 + metadataCache 解析 frontmatter，**不从数据文件派生**）：顶部**领域筛选**（各领域带数量标签）+ **类型过滤**（全部/视频/术语）+ 搜索，滚动触底懒加载，域事件四通道自动刷新，**双击打开** + 统一抽屉（打开/复制双链/复制原文链接/删除，删除视频笔记同步清理任务记录）。右上角三按钮：**文字录入**（术语生成流程，见「术语文献」）/ **视频录入**（视频转文献任务队列：添加/处理/历史；**移动端仅添加+历史**；无 ⚙️ 无 ⬇️，设置全并入主面板设置面板）/ **设置**。数据 `CONFIG/STORAGE/literature.json` 单一文件（视频任务结构沿用 bili-tasks.json，**术语不留任务**；旧文件不迁移不做兼容）。命令 `bz-literature-open` / `bz-literature-note-term`。批处理 = spawn `cli.js --batch`（**ticket 147 起 JSON 改 base64 `b64:` 前缀传输**——.cmd shim 需 shell:true，JSON 引号/空格会被 shell 对消，报「不是合法 JSON：Expected property name at position 1」），**AI（元数据+润色+type/domain）与笔记落盘在插件侧**（CLI 去 AI，产出转录临时文件）；压缩默认开（CRF 默认 23）；**视频录入批量按钮为单钮纯 emoji**（ticket 146 单钮态机 + ticket 148 去文字：空闲「▶️」/运行中「⏹」，终止与终止整批靠 title hover 区分，移动端整钮隐藏）。**options 里「留空=跟随工具配置」的键（pythonPath/outputDir/ffmpegPath/ffprobePath/whisperModel/cacheDir）留空时不下发**——空串会覆盖 rc/DEFAULTS 兜底致转写环节报「未配置 pythonPath」（ticket 149）。**Python 路径可填命令名 `python`（走系统 PATH）或绝对路径**（ticket 150：DEFAULTS 已通用化，Windows 可用 `where python` 查绝对路径；ENOENT 时引导填写方式）。断点续跑、行内进度、历史归档等语义自 ADR-0065/0066/0067/0070 承继（CLI 缓存仅机械产物）。
 _Avoid_: 备忘录场景（用户拍板不走备忘录域）、视频剪切列表
 
 **快速流程 (Quick Flow)**: B站下载「转文字」之后的一键后续——ticket 136 起（ADR-0071）AI（标题/标签/简介/润色 + 文献类型/领域）与文献笔记落盘由 **bz 插件**完成（CLI 去 AI，产出转录临时文件交插件）；视频本体交付仍走工具，笔记嵌入交付文件。_Avoid_: 一键流程、AI 后处理
 
 **文献笔记 (Literature Note)**: 存于「文献目录」的 AI 生成笔记，两种文献类型（ADR-0073）——**视频文献**（type: video）：frontmatter 九键（title/tags/summary/url/date/author/videoTitle/type/domain），正文逐段「润色正文 + 视频双链」（ticket 151 补回：CLI 交付的 mp4 以 `![[路径]]` 嵌正文尾部「## 视频」段，keepVideo=false 未交付则无视频段）；**术语文献**（type: term）：frontmatter 五键（title/type/domain/term/date），正文一段简介（百科总结式）。区别于书库「读书笔记」与聚合讯「剪藏文章」。_Avoid_: 读书笔记、视频笔记（指本词时）
 
-**文献目录 (Literature Folder)**: 存放文献笔记的 vault 内目录，设置键 `literatureDirectory`，默认 vault 根下「文献盒」。_Avoid_: 笔记夹、输出目录
+**文献目录 (Literature Folder)**: 存放文献笔记的 vault 内目录，设置键 `knowledgeDirectory`（票 290 前为 `literatureDirectory`，旧键值 onload 一次性平移），默认 vault 根下「文献盒」（文件夹名不随域正名改动）。_Avoid_: 笔记夹、输出目录
 
 **文献类型 (Literature Type)**: 文献笔记 frontmatter `type` 键，`'video'`（视频文献，视频转文献生成）| `'term'`（术语文献，术语生成流程产出）——区分两种生成来源，主面板按此做类型过滤与徽标。_Avoid_: 类型、分类（泛称时）
 
 **领域 (Subject)**: 文献笔记 frontmatter `domain` 键，中文值——来自可配置词表（设置面板维护，逗号分隔，**缺省空 = AI 自由写**）或 AI 直接产出；AI 自动分类、用户在术语预览/笔记编辑时可改；主面板按领域筛选 + 数量标签。_Avoid_: 学科分类（非本义）
 
-**术语文献 (Term Note)**: 术语生成流程（文字录入）产出的文献笔记——选中/输入术语（命令 `bz-literature-note-term` 预填编辑器选中词）→ AI 生成一段简介（百科总结式）→ 预览可改（术语/领域/正文）→ 确认写入「文献目录」并自动打开；frontmatter title/type:term/domain/term/date；生成成功入小橘行为流（term-generated）。_Avoid_: 名词笔记（非术语）
+**术语文献 (Term Note)**: 术语生成流程（文字录入）产出的文献笔记——选中/输入术语（命令 `bz-knowledge-note-term` 预填编辑器选中词）→ AI 生成一段简介（百科总结式）→ 预览可改（术语/领域/正文）→ 确认写入「文献目录」并自动打开；frontmatter title/type:term/domain/term/date；生成成功入小橘行为流（term-generated）。_Avoid_: 名词笔记（非术语）
 
 **视频缓存 (Video Cache)**: 「下载原件」的跨任务持久缓存——同 BV 同分 P 同清晰度的重复下载优先复用缓存、跳过下载阶段，超期（默认 7 天）清理。_Avoid_: 产物缓存、中间缓存（剪辑/压缩件不进缓存）
 
@@ -237,7 +237,7 @@ _Avoid_: 主页、启动台、dashboard、控制台
 **幽灵磁贴 (Ghost Tile)**: 命令失效（所属插件被禁用等）后磁贴的保留态——保留位置与配置，灰色不可用，可删除，命令恢复后自动复活。
 _Avoid_: 无效磁贴、死磁贴
 
-### 文献盒录入（ADR-0124）
+### 知识盒录入（ADR-0124）
 
 **视频任务链接 (Video Task URL)**: 文献盒「视频录入」任务里指向 B站 视频的地址，**必须含 BV 号**——外部下载器 `bili-dl` 的 `extractBv` 只做 `BV[0-9A-Za-z]{10}` 字符串匹配、**不解析 302**，故 b23.tv 短链、av 号、番剧 ep 链接一律解不出（报「无法从链接中识别 BV 号」）。落库前经三步净化：`extractUrlFromText`（从手机分享文本 `【标题】 https://…` 里抠出链接）→ `cleanUrlText`（剥尾随标点）→ `normalizeSourceUrl`（剥追踪参数），入口单点是数据层 `normalizeUrl`。短链在录入防抖与保存前尝试解成规范链接 `https://www.bilibili.com/video/<BV>`（已含 BV 零请求；否则看响应头 `location`、再扫响应文本兜底），解不出则拒收并提示改用完整链接。
 _Avoid_: 把手机分享的整段文本当链接存进任务——`normalizeSourceUrl` 要求整串以 `http(s)://` 开头，带 `【标题】` 前缀时净化变成空操作，库里会存下整段文本
@@ -465,7 +465,7 @@ _Avoid_: 大面板、完整面板、功能面板
 **快捷创建 (Quick Create)**: 不经主面板、直接弹出某域单条数据新建/录入界面的交互形态（命令 `bz-<域>-add` 与 `bz-diary-write`）。主页统计条曾以数字旁文字承载此形态，2026-08 用户决策全部移除，点击一律改开主面板。
 _Avoid_: 创建面板、快捷添加、快速录入
 
-**主页统计条 (Home Stats Bar)**: vault 根 `主页.md` 经 Dataview 渲染的统计区块（外部脚本 `CONFIG/SCRIPTS/DataView/主页.js`，非插件代码）——书库/影视/收藏等各域计数与天数行。点击数字或其后的文字一律打开对应域主面板；仅「N 在看」「N 想看」保留影视筛选预设直达，「主题/卡片」为文件夹/无动作特例（ticket 154：原「索引」特例已改为「文献」入口，计数取 `文献盒/` 笔记数，点击开文献盒主面板）。
+**主页统计条 (Home Stats Bar)**: vault 根 `主页.md` 经 Dataview 渲染的统计区块（外部脚本 `CONFIG/SCRIPTS/DataView/主页.js`，非插件代码）——书库/影视/收藏等各域计数与天数行。点击数字或其后的文字一律打开对应域主面板；仅「N 在看」「N 想看」保留影视筛选预设直达，「主题/卡片」为文件夹/无动作特例（ticket 154：原「索引」特例已改为「文献」入口，计数取 `文献盒/` 笔记数，点击开知识盒主面板）。
 _Avoid_: 首页、仪表盘、索引（主页统计条旧特例入口，已改「文献」）
 
 **域设置弹窗 (Domain Settings Modal)**: 各功能主面板右上角 ⚙️ 打开的该功能专属设置弹窗，承载该域的行为设置（归物本/收藏本为空弹窗）。与全局设置页互补，设置就近。
@@ -513,7 +513,7 @@ _Avoid_: toast、气泡、原生通知、Notice
 | 实体 | 本地叫法（本仓库） | 上游叫法 | 共享的东西 |
 |---|---|---|---|
 | 待办 | `todo` 域、`bz-todo-*`、TodoItem | `memo` 域、`bz-memo-*`、MemoItem（上游 ADR-0117 正名） | `memo.json`，结构与字段零变化 |
-| 文献盒 | `literature` 域、`bz-literature-*` | `knowledge` 域、`bz-knowledge-*`（上游 ADR-0112 改名） | 同一份条目数据；上游把 `literature.json` 复制为 `knowledge.json`（只复制不改写） |
+| 知识盒 | ~~`literature` 域、`bz-literature-*`~~（票 290 前） | `knowledge` 域、`bz-knowledge-*`（票 290/ADR-0126 起两侧同名，上游 ADR-0112 改名） | 同一份条目数据；本侧照上游范式把 `literature.json` 一次性复制为 `knowledge.json`（只复制不改写），旧文件保留 |
 | 做题家 | 独立 `quiz` 域 | `review/quiz-core` 子模块 | `quiz.json` |
 | 密码本 | 并入 `encrypt`（ADR-0085） | 独立 `password-vault` 域（上游 ADR-0109/0110 回拆） | `CONFIG/.ENCRYPT/` 与 `kind=password-vault` |
 | 回忆墙 | 独立 `diary-wall` 域（ADR-0081） | 升格进 `diary` 域（上游 ADR-0115） | `我的/日记/*.md` 只读派生 |

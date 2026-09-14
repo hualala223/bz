@@ -94,7 +94,7 @@ const schemaLoaders: Record<string, () => Promise<SettingsSchema>> = {
   secondbrain: async () => (await import('../secondbrain/panel')).secondBrainSettingsSchema(),
   pomodoro: async () => (await import('../pomodoro/ui')).pomodoroSettingsSchema(),
   encrypt: async () => (await import('../encrypt/ui')).encryptSettingsSchema(),
-  literature: async () => (await import('../literature/ui')).literatureSettingsSchema(),
+  knowledge: async () => (await import('../knowledge/ui')).knowledgeSettingsSchema(),
   smartcat: async () => {
     const { loadSmartCatData } = await import('../smartcat/data');
     const { smartcatSettingsSchema } = await import('../smartcat/ui');
@@ -149,7 +149,7 @@ export const DOMAINS: DomainDef[] = [
   { id: 'attach', name: '附件搬移', icon: DOMAIN_ICONS.attach, desc: '附件整理', noSettings: true },
   { id: 'encrypt', name: '保险库', icon: DOMAIN_ICONS.encrypt, desc: '密码、加密笔记与加密日记', schemaLoader: schemaLoaders.encrypt },
   { id: 'smartcat', name: '小橘陪伴猫', icon: DOMAIN_ICONS.smartcat, desc: '桌面宠物陪伴', schemaLoader: schemaLoaders.smartcat },
-  { id: 'literature', name: '文献盒', icon: DOMAIN_ICONS.literature, desc: '文献笔记与术语录入', schemaLoader: schemaLoaders.literature },
+  { id: 'knowledge', name: '知识盒', icon: DOMAIN_ICONS.knowledge, desc: '文献笔记与术语录入', schemaLoader: schemaLoaders.knowledge },
 ];
 
 /** 导航语义分组（拍板原型 P1：基础/记录/媒体与知识/工具 四组；不在表内的域归「其他」尾组）。
@@ -157,7 +157,7 @@ export const DOMAINS: DomainDef[] = [
 export const NAV_SECS: Array<{ title: string; ids: string[] }> = [
   { title: '基础', ids: ['global', 'appearance', 'ai'] },
   { title: '记录', ids: ['diary', 'diary-wall', 'todo', 'belongings', 'clipping', 'favorites'] },
-  { title: '媒体与知识', ids: ['cinema', 'bookshelf', 'review', 'secondbrain', 'literature'] },
+  { title: '媒体与知识', ids: ['cinema', 'bookshelf', 'review', 'secondbrain', 'knowledge'] },
   { title: '工具', ids: ['pomodoro', 'encrypt', 'smartcat'] },
 ];
 

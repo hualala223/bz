@@ -46,7 +46,7 @@
   const NAV = [
     { title: '基础', ids: ['global', 'appearance', 'ai'] },
     { title: '记录', ids: ['diary', 'diary-wall', 'todo', 'belongings', 'clipbook', 'favorites'] },
-    { title: '媒体与知识', ids: ['cinema', 'bookshelf', 'review', 'secondbrain', 'literature'] },
+    { title: '媒体与知识', ids: ['cinema', 'bookshelf', 'review', 'secondbrain', 'knowledge'] },
     { title: '工具', ids: ['pomodoro', 'encrypt', 'smartcat'] },
   ];
 
@@ -281,30 +281,30 @@
         { t: 'button', n: '重新索引', d: '清空现有向量索引并按当前白名单重嵌入，期间检索降级为文本匹配', btn: '开始' },
       ] },
     ] },
-    literature: { name: '文献盒', icon: 'list-video', desc: '文献笔记与术语录入', groups: [
+    knowledge: { name: '知识盒', icon: 'list-video', desc: '文献笔记与术语录入', groups: [
       { icon: 'folder-open', name: '目录与分类', rows: [
-        { t: 'path', mode: 'single', n: '文献目录', d: '文献笔记所在文件夹，列表实时扫描该目录', k: 'literatureDirectory' },
-        { t: 'textarea', n: '领域词表', d: '逗号分隔的领域词；留空 = AI 自由写领域', k: 'literatureDomainList', ph: '物理,医学,计算机,经济,文史哲…' },
+        { t: 'path', mode: 'single', n: '文献目录', d: '文献笔记所在文件夹，列表实时扫描该目录', k: 'knowledgeDirectory' },
+        { t: 'textarea', n: '领域词表', d: '逗号分隔的领域词；留空 = AI 自由写领域', k: 'knowledgeDomainList', ph: '物理,医学,计算机,经济,文史哲…' },
       ] },
       { icon: 'settings-2', name: '视频处理', rows: [
-        { t: 'toggle', n: '详细进度提示', d: '处理中显示当前步骤、耗时、百分比与步骤时间线；关闭则仅显示步骤徽章', k: 'literatureProgressDetail' },
-        { t: 'toggle', n: '保留视频原件', d: '转文献完成后保留视频文件；关闭则只生成文献笔记', k: 'literatureKeepVideo' },
-        { t: 'select', n: '下载清晰度', d: '以视频源可用档位为准，低档优先命中缓存', k: 'literatureQuality', opts: [{ v: 'highest', l: '最高' }, { v: '1080', l: '1080P' }, { v: '720', l: '720P' }] },
-        { t: 'toggle', n: '遇错即停', d: '单条失败后停止处理剩余任务；关闭则失败后继续', k: 'literatureStopOnFailure' },
-        { t: 'text', n: '输出目录', d: '视频文件落地目录；留空跟随工具配置', k: 'literatureOutputDir', ph: '如 D:/videos' },
-        { t: 'toggle', n: '压缩', d: '转文字前压缩视频，默认开启', k: 'literatureCompress' },
-        { t: 'number', n: '压缩质量（CRF）', d: '数值越小画质越高；范围 18-28', k: 'literatureCrf', min: 18, max: 28, step: 1 },
+        { t: 'toggle', n: '详细进度提示', d: '处理中显示当前步骤、耗时、百分比与步骤时间线；关闭则仅显示步骤徽章', k: 'knowledgeProgressDetail' },
+        { t: 'toggle', n: '保留视频原件', d: '转文献完成后保留视频文件；关闭则只生成文献笔记', k: 'knowledgeKeepVideo' },
+        { t: 'select', n: '下载清晰度', d: '以视频源可用档位为准，低档优先命中缓存', k: 'knowledgeQuality', opts: [{ v: 'highest', l: '最高' }, { v: '1080', l: '1080P' }, { v: '720', l: '720P' }] },
+        { t: 'toggle', n: '遇错即停', d: '单条失败后停止处理剩余任务；关闭则失败后继续', k: 'knowledgeStopOnFailure' },
+        { t: 'text', n: '输出目录', d: '视频文件落地目录；留空跟随工具配置', k: 'knowledgeOutputDir', ph: '如 D:/videos' },
+        { t: 'toggle', n: '压缩', d: '转文字前压缩视频，默认开启', k: 'knowledgeCompress' },
+        { t: 'number', n: '压缩质量（CRF）', d: '数值越小画质越高；范围 18-28', k: 'knowledgeCrf', min: 18, max: 28, step: 1 },
       ] },
       { icon: 'terminal', name: '工具', rows: [
-        { t: 'text', n: 'ffmpeg 路径', d: '视频处理用；留空跟随工具配置', k: 'literatureFfmpegPath', ph: '如 ffmpeg 或 D:/tools/ffmpeg.exe' },
-        { t: 'text', n: 'ffprobe 路径', d: '探测视频元数据用；留空跟随工具配置', k: 'literatureFfprobePath', ph: '如 ffprobe 或 D:/tools/ffprobe.exe' },
-        { t: 'text', n: 'Python 路径', d: '装了 Python 一般填 python 即可；留空跟随工具配置', k: 'literaturePythonPath', ph: '如 python 或 D:/tools/python.exe' },
-        { t: 'text', n: 'Whisper 模型', d: '转写模型档位（tiny/base/small/medium/large）', k: 'literatureWhisperModel', ph: '如 small' },
-        { t: 'text', n: '缓存目录', d: '剪辑产物与转写稿缓存；留空 = 系统临时目录', k: 'literatureCacheDir', ph: '如 D:/bili-dl-cache' },
-        { t: 'number', n: '缓存保留天数', d: '超过该天数的缓存自动清理', k: 'literatureCacheRetentionDays', min: 1, step: 1 },
+        { t: 'text', n: 'ffmpeg 路径', d: '视频处理用；留空跟随工具配置', k: 'knowledgeFfmpegPath', ph: '如 ffmpeg 或 D:/tools/ffmpeg.exe' },
+        { t: 'text', n: 'ffprobe 路径', d: '探测视频元数据用；留空跟随工具配置', k: 'knowledgeFfprobePath', ph: '如 ffprobe 或 D:/tools/ffprobe.exe' },
+        { t: 'text', n: 'Python 路径', d: '装了 Python 一般填 python 即可；留空跟随工具配置', k: 'knowledgePythonPath', ph: '如 python 或 D:/tools/python.exe' },
+        { t: 'text', n: 'Whisper 模型', d: '转写模型档位（tiny/base/small/medium/large）', k: 'knowledgeWhisperModel', ph: '如 small' },
+        { t: 'text', n: '缓存目录', d: '剪辑产物与转写稿缓存；留空 = 系统临时目录', k: 'knowledgeCacheDir', ph: '如 D:/bili-dl-cache' },
+        { t: 'number', n: '缓存保留天数', d: '超过该天数的缓存自动清理', k: 'knowledgeCacheRetentionDays', min: 1, step: 1 },
       ] },
       { icon: 'smartphone', name: '移动端', m: true, rows: [
-        { t: 'toggle', n: '移动端默认全屏', k: 'literatureMobileDefaultFullscreen' },
+        { t: 'toggle', n: '移动端默认全屏', k: 'knowledgeMobileDefaultFullscreen' },
       ] },
       { icon: 'wrench', name: '维护', rows: [
         { t: 'button', n: '清空历史', d: '移除全部成功归档的转文献记录；文献笔记与视频文件保留在 vault 中', btn: '清空历史' },
@@ -448,10 +448,10 @@
     linkAgentNotify: true, linkAgentAutoClean: true, linkAgentRespectRelated: true, linkAgentScopes: '我的',
     secondBrainTopK: '8', secondBrainChatTopK: '8', secondBrainChunkMinLength: '200', secondBrainContextLimit: '2000',
     secondBrainDebounceDelay: '300', secondBrainCursorPollInterval: '1500', secondBrainMaxHistory: '10', secondBrainMobileDefaultFullscreen: false,
-    literatureDirectory: '文献盒', literatureDomainList: '', literatureProgressDetail: false, literatureKeepVideo: false,
-    literatureQuality: '1080', literatureStopOnFailure: false, literatureOutputDir: '', literatureCompress: true, literatureCrf: 23,
-    literatureFfmpegPath: '', literatureFfprobePath: '', literaturePythonPath: '', literatureWhisperModel: 'small',
-    literatureCacheDir: '', literatureCacheRetentionDays: 14, literatureMobileDefaultFullscreen: false,
+    knowledgeDirectory: '文献盒', knowledgeDomainList: '', knowledgeProgressDetail: false, knowledgeKeepVideo: false,
+    knowledgeQuality: '1080', knowledgeStopOnFailure: false, knowledgeOutputDir: '', knowledgeCompress: true, knowledgeCrf: 23,
+    knowledgeFfmpegPath: '', knowledgeFfprobePath: '', knowledgePythonPath: '', knowledgeWhisperModel: 'small',
+    knowledgeCacheDir: '', knowledgeCacheRetentionDays: 14, knowledgeMobileDefaultFullscreen: false,
     pomodoroPreset: 'classic', pomodoroWorkMin: '25', pomodoroShortBreakMin: '5', pomodoroLongBreakMin: '15',
     pomodoroLongBreakInterval: '4', pomodoroForceFocus: false, pomodoroAutoCycle: false, pomodoroAutoSkipBreak: false,
     pomodoroSound: true, pomodoroAutoPauseOnHide: true, pomodoroVolume: 100, pomodoroRestoreMode: 'background', pomodoroMobileDefaultFullscreen: false,
@@ -471,7 +471,7 @@
     'CODE', 'CODE/obsidian 插件', 'CONFIG', 'CONFIG/APPENDIX', 'CONFIG/BOOK', 'CONFIG/BOOK/东野圭吾全集',
     'CONFIG/BOOK/卡片笔记写作法', 'CONFIG/STORAGE', 'CONFIG/SCRIPTS', '归档', '归档/网页剪藏', '书库', '我的',
     '我的/日记', '我的/日记/2024', '我的/日记/2025', '我的/现代诗', '我的/现代诗/2024', '我的/现代诗/2025',
-    '我的/随笔', '我的/读书笔记', '我的/仓库', '我的/信件', '我的/影视', '文献盒', '文献盒/物理', '模板', '索引',
+    '我的/随笔', '我的/读书笔记', '我的/仓库', '我的/信件', '我的/影视', '知识盒', '知识盒/物理', '模板', '索引',
   ];
 
   window.SP_DEMO = { NAV, DOMAINS, VALUES, SMARTCAT, DIRS, PROVIDERS };

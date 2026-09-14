@@ -6,7 +6,7 @@
  *   基准哈希过滤（filterChangedForRelink：内容未实质变化 / 自写 related 不重跑），
  *   只对真正改动的存量笔记重跑建链（正文大改自动重跑）；
  * - 删除事件订阅 → 防抖合并触发死链清理（低频巡检 30 分钟兜底）；删除同时移除该篇基准哈希；
- * - 文献笔记生成即跑（issue 298）：订阅 'literature:tasks'（文献盒生成视频/术语文献笔记的域事件）
+ * - 文献笔记生成即跑（issue 298）：订阅 'knowledge:tasks'（知识盒生成视频/术语文献笔记的域事件）
  *   → 立即对该篇跑 processNoteNow，不等批次防抖、不受 linkAgentScopes 限制；
  * - linkAgentScopes 中出现白名单未包含目录时一次性引导提示（只提示，不代改配置）。
  * 依赖方向：本层经 index.ts 接线；refresh 类副作用全部收敛在 LinkAgent。
@@ -38,7 +38,7 @@ export function __resetLinkAgentGuideForTests(): void {
 }
 
 /**
- * 文献盒生成事件载荷（'literature:tasks' 通道；只取本链路关心的两个字段，
+ * 知识盒生成事件载荷（'knowledge:tasks' 通道；只取本链路关心的两个字段，
  * 其余字段由派发方定义——本层不复制业务结构）。
  */
 export interface KnowledgeNoteEvent {
@@ -86,8 +86,8 @@ export class LinkAgentWatcher {
       onDomainEvent<{ path: string }>('vault:md-created', (evt) => this.onCreated(evt.path)),
       onDomainEvent<{ path: string }>('vault:md-modified', (evt) => this.onModified(evt.path)),
       onDomainEvent<{ path: string }>('vault:md-deleted', (evt) => this.onDeleted(evt.path)),
-      // 文献笔记生成即跑（issue 298）：文献盒 converted / term-generated
-      onDomainEvent<KnowledgeNoteEvent>('literature:tasks', (evt) => this.onNoteGenerated(evt))
+      // 文献笔记生成即跑（issue 298）：知识盒 converted / term-generated
+      onDomainEvent<KnowledgeNoteEvent>('knowledge:tasks', (evt) => this.onNoteGenerated(evt))
     );
     this.sweepTimer = setInterval(() => {
       void this.runDeadLinkSweep();
@@ -137,7 +137,7 @@ export class LinkAgentWatcher {
   }
 
   /**
-   * 文献笔记生成即跑（issue 298）：文献盒生成视频 / 术语文献笔记后经 'literature:tasks' 域事件
+   * 文献笔记生成即跑（issue 298）：知识盒生成视频 / 术语文献笔记后经 'knowledge:tasks' 域事件
    * **立即**对该篇建链——不等约 60 秒批次防抖，也不受 linkAgentScopes 范围限制
    * （生成即显式目标，语义同手动重跑）。
    * 只认 converted / term-generated 两类且 notePath 非空的成功事件（failed 与缺路径一律忽略）；

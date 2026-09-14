@@ -24,7 +24,7 @@ describe('票 277 / S3-b：全仓遮罩毛玻璃 token 单源', () => {
     ['src/quiz/styles.css', ['#quiz-mask'], 'quiz'],
     ['src/encrypt/styles.css', ['.bz-encrypt-dialog-mask', '.bz-encrypt-health-mask', '.bz-vault-dlg-mask'], 'encrypt×3'],
     ['src/favorites/styles.css', ['.bz-fav-form-mask'], 'favorites（品牌底色保留只加 blur）'],
-    ['src/literature/styles.css', ['.bz-lit-mask'], 'literature（--background-modifier-cover 收编 --bz-overlay）'],
+    ['src/knowledge/styles.css', ['.bz-lit-mask'], 'knowledge（--background-modifier-cover 收编 --bz-overlay）'],
     ['src/settings-panel/styles.css', ['.bz-sp-picker-mask'], 'settings-panel（暖黑底色保留只加 blur）'],
     ['src/diary/styles.css', ['#add-diary-mask', '#diary-tag-selector-mask', '#diary-date-filter-mask'], 'diary×3（原 blur(2px) 换 token）'],
   ];

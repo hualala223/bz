@@ -16,16 +16,16 @@ import type { RiverEvent, TimelineEventKind } from './shared';
 const BEHAVIOR_SIDECAR = 'smartcat-behavior.json';
 
 /** 行为流 source → **首页域 id**（渲染取图标/色/名，彩点 hasEvent 也认这个 id）。
- *  语义先例见 smartcat/dashboard.ts 的来源标签表：literature / bili-downloader 是文献盒
- *  旧域名的存量来源（ADR-0072 迁出后 source 值不迁移）；目标 id 走本地命名（memo→todo、
- *  knowledge→literature，ADR-0118，票 288）。未收录来源原样透传（渲染回退显示源名）。 */
+ *  语义先例见 smartcat/dashboard.ts 的来源标签表：knowledge 是知识盒本名；literature（票 290 改名前）
+ *  与 bili-downloader（ADR-0072 迁出前）是旧存量来源（source 值不迁移）；目标 id 走本地命名（memo→todo）。
+ *  未收录来源原样透传（渲染回退显示源名）。 */
 const SOURCE_DOMAIN: Record<string, string> = {
   movie: 'cinema',
   news: 'clipping',
   memo: 'todo',
-  knowledge: 'literature',
-  literature: 'literature',
-  'bili-downloader': 'literature',
+  knowledge: 'knowledge',
+  literature: 'knowledge',
+  'bili-downloader': 'knowledge',
   favorites: 'favorites',
   review: 'review',
   diary: 'diary',
@@ -107,7 +107,7 @@ export function mapBehaviorEvent(item: BehaviorItemLite): TimelineEvent | null {
       return { ...base, kind: 'progress', text: `新增待办『${name}』` };
     case 'memo:completed':
       return { ...base, kind: 'produce', text: `完成『${name}』` };
-    // 知识盒 / 文献盒
+    // 知识盒（literature: 前缀为票 290 改名前存量条目遗留）
     case 'knowledge:term-generated':
     case 'literature:term-generated':
       return { ...base, kind: 'produce', text: `生成术语${wrap(name, '『', '』')}` };

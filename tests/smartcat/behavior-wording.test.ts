@@ -173,14 +173,14 @@ describe('buildBehaviorWording：reflection / weekly-report / dossier / secondbr
   });
 });
 
-describe('buildBehaviorWording：literature（文献盒，ADR-0066/0072）', () => {
-  it('literature:converted → 你把《标题》转成了文献', () => {
-    const item = makeItem('literature', 'converted', { entityType: 'literature', action: 'converted', name: '从零开始学B站', extras: { notePath: '文献盒/从零开始学B站.md' } });
+describe('buildBehaviorWording：knowledge（知识盒，ADR-0066/0072）', () => {
+  it('knowledge:converted → 你把《标题》转成了文献', () => {
+    const item = makeItem('knowledge', 'converted', { entityType: 'knowledge', action: 'converted', name: '从零开始学B站', extras: { notePath: '知识盒/从零开始学B站.md' } });
     expect(buildBehaviorWording(item)).toBe('你把《从零开始学B站》转成了文献');
   });
 
-  it('literature:term-generated → 你为「术语」生成了一篇术语文献', () => {
-    const item = makeItem('literature', 'term-generated', { entityType: 'literature', action: 'term-generated', name: '习得性无助' });
+  it('knowledge:term-generated → 你为「术语」生成了一篇术语文献', () => {
+    const item = makeItem('knowledge', 'term-generated', { entityType: 'knowledge', action: 'term-generated', name: '习得性无助' });
     expect(buildBehaviorWording(item)).toBe('你为「习得性无助」生成了一篇术语文献');
   });
 
@@ -189,9 +189,14 @@ describe('buildBehaviorWording：literature（文献盒，ADR-0066/0072）', () 
     expect(buildBehaviorWording(item)).toBe('你把《旧视频笔记》转成了文献');
   });
 
-  it('literature 未知动作 → 实体默认', () => {
-    const item = makeItem('literature', 'weird', { entityType: 'literature', action: 'weird', name: 'X' });
-    expect(buildBehaviorWording(item)).toBe('文献动态：X');
+  it('遗留 literature:converted 存量条目同样命中（票 290 改名前旧实体，别名兼容）', () => {
+    const item = makeItem('literature', 'converted', { entityType: 'literature', action: 'converted', name: '旧视频笔记' });
+    expect(buildBehaviorWording(item)).toBe('你把《旧视频笔记》转成了文献');
+  });
+
+  it('knowledge 未知动作 → 实体默认', () => {
+    const item = makeItem('knowledge', 'weird', { entityType: 'knowledge', action: 'weird', name: 'X' });
+    expect(buildBehaviorWording(item)).toBe('知识盒动态：X');
   });
 });
 

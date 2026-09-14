@@ -48,8 +48,8 @@ import {
 } from './secondbrain';
 import { openPomodoro, unloadPomodoro, ensurePomodoro, toggleFocus, skipBreak, togglePause } from './pomodoro';
 import { mountPomodoroStatusBar, unmountPomodoroStatusBar } from './pomodoro/statusbar';
-// 文献盒（literature 域，ADR-0072 自 bili-downloader 迁出；网页版已移除，见 tools/bili-downloader）
-import { openLiteraturePanel, openLiteratureAddTask, openTermNote, unloadLiterature } from './literature';
+// 知识盒（knowledge 域，ADR-0072 自 bili-downloader 迁出；网页版已移除，见 tools/bili-downloader）
+import { openKnowledgePanel, openKnowledgeAddTask, openTermNote, unloadKnowledge } from './knowledge';
 // 附件搬移（ticket 65 新域：移动当前笔记附件，fileManager 自动更新内部链接 + 入口页磁贴播种）
 import { openAttachMove, ensureAttachSeed, ATTACH_COMMAND_ID } from './attach';
 // 保险箱（encrypt 域：移出式清单容器加密，正文+图片/视频附件；原名「加密保险箱」，ticket 68 更名仅文案）
@@ -166,12 +166,12 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-pomodoro-focus-toggle', name: '开始专注', icon: 'timer', callback: () => toggleFocus(getApp()) },
   { id: 'bz-pomodoro-skip', name: '跳过休息', icon: 'skip-forward', callback: () => skipBreak(getApp()) },
   { id: 'bz-pomodoro-pause', name: '暂停/继续专注', icon: 'pause', callback: () => togglePause(getApp()) },
-  // 文献盒（literature 域：主面板=文献笔记列表 + 视频录入/文字录入/设置；ADR-0072 迁出、ADR-0071 AI 回迁）
-  { id: 'bz-literature-open', name: '文献盒', icon: 'list-video', callback: () => openLiteraturePanel(getApp()) },
-  { id: 'bz-literature-note-term', name: '术语生成文献笔记', icon: 'book-type', callback: () => openTermNote(getApp()) },
-  // 视频生成文献笔记（上游 issue 278 命令入口，2026-09-14 吸收）：openLiteratureAddTask 函数早已存在
+  // 知识盒（knowledge 域：主面板=文献笔记列表 + 视频录入/文字录入/设置；ADR-0072 迁出、ADR-0071 AI 回迁）
+  { id: 'bz-knowledge-open', name: '知识盒', icon: 'list-video', callback: () => openKnowledgePanel(getApp()) },
+  { id: 'bz-knowledge-note-term', name: '术语生成文献笔记', icon: 'book-type', callback: () => openTermNote(getApp()) },
+  // 视频生成文献笔记（上游 issue 278 命令入口，2026-09-14 吸收）：openKnowledgeAddTask 函数早已存在
   //（clipbook「保存至文献」分流在用，ADR-0068），此前只缺命令入口；prefill 空参=弹视频录入窗手填
-  { id: 'bz-literature-note-video', name: '视频生成文献笔记', icon: 'list-video', callback: () => openLiteratureAddTask(getApp()) },
+  { id: 'bz-knowledge-note-video', name: '视频生成文献笔记', icon: 'list-video', callback: () => openKnowledgeAddTask(getApp()) },
   // 附件搬移（ticket 65 新域：移动当前笔记附件到指定文件夹，fileManager 自动更新内部链接）
   { id: ATTACH_COMMAND_ID, name: '移动附件', icon: 'folder-down', callback: () => openAttachMove(getApp()) },
   // 统一保险库（encrypt 域，上游 ADR-0085：密码/加密笔记/加密日记三资产单一面板）
@@ -250,6 +250,14 @@ export default class BzPlugin extends Plugin {
     }
     // ticket 103 迁移：闪念 16 键 → secondBrain* 更名平移（META_PATH/VEC_PATH 废弃清除）
     if (migrateSecondBrainSettings(this.settings)) migrated = true;
+    // 票 290 迁移：知识盒域正名——旧设置键 literatureDirectory 值平移到 knowledgeDirectory（旧键删除）
+    if (old.literatureDirectory !== undefined) {
+      if ((this.settings as any).knowledgeDirectory === DEFAULT_SETTINGS.knowledgeDirectory && typeof old.literatureDirectory === 'string' && old.literatureDirectory.trim()) {
+        (this.settings as any).knowledgeDirectory = old.literatureDirectory;
+      }
+      delete old.literatureDirectory;
+      migrated = true;
+    }
     // P2：迁移完成立即落盘——storagePath/手势结果写回 data.json，迁移 warning 不随每次启动重播
     if (migrated) void this.saveSettings();
     setApp(this.app);
@@ -381,8 +389,8 @@ export default class BzPlugin extends Plugin {
     unloadReadingReport();
     unloadClipbook();
     unloadAutoSummary();
-    // 文献盒（ADR-0072 迁出：面板 DOM + 模块单例复位）
-    unloadLiterature();
+    // 知识盒（ADR-0072 迁出：面板 DOM + 模块单例复位）
+    unloadKnowledge();
     // 上游线并入新域卸载（均幂等空清理，未初始化时不引起无谓装载）
     unloadHome();
     unloadRecap();

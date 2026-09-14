@@ -1,13 +1,13 @@
 /**
- * literature 域（文献盒）入口：ADR-0072 自 bili-downloader 迁出。
+ * knowledge 域（知识盒）入口：ADR-0072 自 bili-downloader 迁出。
  * 主面板 = 文献目录下的文献笔记列表（右上角：文字录入 / 视频录入 / 设置，见 ui.ts）；
  * 视频转文献批处理的 AI/笔记落盘在插件侧（ADR-0071），CLI 只产转录临时文件 + 交付视频。
- * 数据 CONFIG/STORAGE/literature.json（视频任务）；术语生成不留任务记录（ticket 136 §2）。
+ * 数据 CONFIG/STORAGE/knowledge.json（视频任务）；术语生成不留任务记录（ticket 136 §2）。
  */
 import type { App } from 'obsidian';
 import { MarkdownView } from 'obsidian';
 import { tryGetSettings } from '../core/settings-provider';
-import { LiteratureData } from './data';
+import { KnowledgeData } from './data';
 import { UIManager } from './ui';
 
 let initialized = false;
@@ -18,21 +18,21 @@ let uiManager: UIManager | null = null;
  * ticket 138 §1.2：initialized 在构造成功后置位；构造函数若在真实环境抛错（jsdom 掩盖），
  * 保持未初始化 → 下次命令自动重试，杜绝「构造失败后 uiManager 恒 null、面板永不再开」。
  */
-export function ensureLiterature(app: App): void {
+export function ensureKnowledge(app: App): void {
   if (initialized) return;
   try {
-    LiteratureData.init({ storagePath: (tryGetSettings() as any)?.storagePath });
+    KnowledgeData.init({ storagePath: (tryGetSettings() as any)?.storagePath });
     uiManager = new UIManager(app);
     initialized = true;
   } catch (e) {
-    console.error('bz: 文献盒初始化失败（下次打开命令将自动重试）', e);
+    console.error('bz: 知识盒初始化失败（下次打开命令将自动重试）', e);
     uiManager = null;
   }
 }
 
-/** 打开文献盒主面板（bz-literature-open 命令回调） */
-export function openLiteraturePanel(app: App): void {
-  ensureLiterature(app);
+/** 打开知识盒主面板（bz-knowledge-open 命令回调） */
+export function openKnowledgePanel(app: App): void {
+  ensureKnowledge(app);
   uiManager?.showMain();
 }
 
@@ -41,20 +41,20 @@ export function openLiteraturePanel(app: App): void {
  * 注意：该入口打开的是视频录入面板（任务队列 + 添加转文献任务弹窗），而非文献列表主面板；
  * prefill 含链接/标题/UP主 时输入框预填。层级/ESC 由面板自理，调用方不碰。
  */
-export function openLiteratureAddTask(app: App, prefill?: { url: string; title?: string | null; uploader?: string | null }): void {
-  ensureLiterature(app);
+export function openKnowledgeAddTask(app: App, prefill?: { url: string; title?: string | null; uploader?: string | null }): void {
+  ensureKnowledge(app);
   uiManager?.showVideoEntry(prefill);
 }
 
 /**
- * 术语生成入口（bz-literature-note-term 命令回调）：打开「文字录入」面板（ticket 136 §6）。
+ * 术语生成入口（bz-knowledge-note-term 命令回调）：打开「文字录入」面板（ticket 136 §6）。
  * 显式 term 预填输入框；为空时读取当前激活 Markdown 编辑器选区预填（选中词），
  * 无选区则空输入框手动填。
  * 来源预填（上游 ADR-0116）：命令入口带当前活动笔记上下文（选中词场景十有八九出自正在读的这篇）——
  * 以该笔记为可选「来源」（内部笔记方向），可一键清除；主窗「文字录入」按钮入口不带上下文、不预填。
  */
 export function openTermNote(app: App, term?: string): void {
-  ensureLiterature(app);
+  ensureKnowledge(app);
   let t = term?.trim();
   let src: { kind: 'note'; path: string } | undefined;
   if (!t) {
@@ -70,7 +70,7 @@ export function openTermNote(app: App, term?: string): void {
 }
 
 /** 卸载（main.ts onunload 调用；幂等空清理） */
-export function unloadLiterature(): void {
+export function unloadKnowledge(): void {
   uiManager?.destroy();
   uiManager = null;
   initialized = false;

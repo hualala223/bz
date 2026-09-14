@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * 术语来源纯函数测试（src/literature/source.ts，ADR-0116）：
+ * 术语来源纯函数测试（src/knowledge/source.ts，ADR-0116）：
  * isUrlLikeSourceText（宽松域名判定）/ cleanUrlText / extractUrlFromText（ticket 284）/
  * normalizeSourceUrl / noteSourceName / serializeTermSource（落键唯一入口）。
  * 纯数据层：无 DOM，node 环境直跑。
@@ -14,7 +14,7 @@ import {
   cleanSourceTitle,
   noteSourceName,
   serializeTermSource,
-} from '../../src/literature/source';
+} from '../../src/knowledge/source';
 
 describe('extractUrlFromText（ticket 284：从自由文本里抠出首个链接）', () => {
   it('手机分享文本 `【标题】 https://…` → 只留链接（用户实例）', () => {

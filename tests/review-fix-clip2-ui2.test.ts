@@ -32,8 +32,8 @@ import { localDayKey } from '../src/clipbook/constants';
 import { flowSave, flowMarkRead } from '../src/clipbook/flow';
 import { setClipDir } from './clipbook/helpers';
 
-// flowSave B 站分流分支动态 import 文献盒 → 打桩，避免拉起其 UI 依赖
-vi.mock('../src/literature', () => ({ openLiteratureAddTask: vi.fn() }));
+// flowSave B 站分流分支动态 import 知识盒 → 打桩，避免拉起其 UI 依赖
+vi.mock('../src/knowledge', () => ({ openKnowledgeAddTask: vi.fn() }));
 
 /** news.json 种子（lastFetchAt 拦 openClipbook 自动抓取，同 enhance.test.ts 口径） */
 function seedNews(articles: any[], stats?: any): string {
