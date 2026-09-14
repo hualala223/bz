@@ -1,4 +1,4 @@
-/* ==================== 文献盒域样式（src/literature/styles.css，ticket 136 改版 + ticket 138 主面板质感对齐） ==================== */
+/* ==================== 知识盒域样式（src/knowledge/styles.css，ticket 136 改版 + ticket 138 主面板质感对齐；票 290 自 literature 正名，ADR-0126） ==================== */
 /* bz-bili-* 任务队列样式（视频录入面板/历史弹窗沿用，ticket 136 迁移时丢失、ticket 138 恢复）；
    新增 bz-lit-* 主面板/术语面板样式；主面板视觉细节对齐日记本（ticket 138 §4）。 */
 
