@@ -2,6 +2,35 @@
 
 > 进度同步总表（AGENTS.md）。每票一节，状态：计划中 → 进行中 → 门禁 → 已交付。
 
+## 用户实跑两 bug 修复（票 284 / 票 285）— 2026-09-14
+
+**状态：已交付**。用户实跑报两个问题，各自独立成票、独立提交、各自落 ADR（不混一票）。
+
+### 票 284 — 文献盒录入解析（手机分享文本 + b23.tv 短链认 BV）
+
+- [x] 症状：控制台 `无法从链接中识别BV号`；盘上失败任务 `url` = 整段手机分享文本 `【【配音】彼得希夫|…-哔哩哔哩】 https://b23.tv/sHBBikh`
+- [x] 成因（双叠加）：`normalizeSourceUrl` 要求整串以 `http(s)://` 开头 → `【…】` 前缀命中不了，净化对分享文本是个**空操作**（整段原样落库）；b23.tv 短码**本身不含 BV**，CLI `extractBv` 只做字符串硬找、不跟 302 → 必报错。且插件 spawn 的是**全局包** `bili-dl`，改仓库 `tools/` 对运行态无效
+- [x] 关键实测：`https://b23.tv/sHBBikh` 的 302 `Location` **自带 BV**（`https://www.bilibili.com/video/BV1RdYi6jEGJ`），但**落地页 HTML 内不含 BV**（JS 壳）→ 短链解析必须读响应头 `location`，扫描文本只作兜底
+- [x] 实现：`source.ts` 新增 `extractUrlFromText`（抠文本首个链接）；`data.ts` `normalizeUrl` 收口为「抠链接 → 剥尾随标点 → 剥追踪参数」；`video-meta.ts` 新增 `resolveBvidFromShortLink`（已含 BV 零请求，否则读 `headers.location` 再扫文本，10s 超时）；`ui.ts` 录入防抖解短链写回规范链接 + **保存时 BV 校验**（拦下必败任务，不再等批处理跑完才报错）+ `humanizeError` 补映射
+- [x] 测试：`tests/literature/{source,data,video-meta,ui}.test.ts` 补 4 组用例
+- [x] 文档：`issues/284-…md` + `docs/adr/0124-…md`
+
+### 票 285 — core 留底对点目录改走 adapter（`CONFIG/.CORRUPT`）
+
+- [x] 症状：控制台刷屏 `[storage] … 写前留底失败（不影响本次写入）Error: File already exists.`
+- [x] 成因（根因单点）：`CONFIG/.CORRUPT` 是**点开头目录**，Obsidian 不收进 vault 索引 → `getAbstractFileByPath` 恒 `null` 而文件在盘上真实存在 → 判「不存在」走 `vault.create` → 撞已存在抛错 → 被 `catch` 成 warn。同根因另有两处：建目录每次都试 `createFolder`（靠 `catch{}` 吞）、**同秒撞名判重失效致留档静默丢失**
+- [x] 影响面：数据无损（正式写入走普通目录），但 **`-prev.bak` 永远停在首次内容 →「有上一版可回滚」承诺实际失效**；波及全部 JSON 域（`core/storage.ts` 共用）
+- [x] 实现：新增 `corruptAdapter` / `ensureCorruptDir`（adapter 是点前缀目录唯一合法通道，同 `src/encrypt/data.ts` 惯例）；`rotatePrevBackup` 与 `backupOriginal` 的建目录/判重/落盘全改走 adapter（`write` 覆盖写等价原「存在 modify／不存在 create」两分支）；源文件读取与返回语义、通知文案、去重窗口一律不变
+- [x] 测试：`tests/core/storage-reliability.test.ts` 新增 describe「点目录留底」2 例（局部模拟真实 Obsidian：`getAbstractFileByPath` 对点目录返回 null）；既有 2 例 + `json-store.test.ts` 1 例的 mock 拦截点随实现由 `vault.create` 迁到 `adapter.write`（**只改拦截点不迁 mock 会假过**——`MockVault.create` 是静默覆盖）
+- [x] **回归有效性自证**：临时把 `storage.ts` 换回 HEAD 版，新用例如期失败 → 还原（证明用例真拦得住旧 bug）
+- [x] 文档：`issues/285-…md` + `docs/adr/0125-…md`
+
+### 门禁
+
+- [x] `tsc --noEmit` 0 错；全量 290 文件 / 4582 例全绿；production 构建通过并部署至 vault 插件目录
+- [x] 提交纪律：两票各自独立提交（仅显式路径 `git add`）；构建产物（根 `main.js`/`styles.css`/`src/*/prototype-render.js`）不提交，已还原
+- [ ] 待办（用户侧）：vault 里那条失败任务未代为改动，用户可自行删除或用新版本重录
+
 ## 票号冲突处置 + 读书报告收编（票 278 改编 / 票 279）— 2026-09-13 晚
 
 - [x] 票号冲突处置（`ba2d361c`）：第二大脑重建索引票 276 双占，按用户裁决改编 **278**（`issues/278-secondbrain-rebuild-index-command.md`，改名提交，git 史不改写）；并行会话保留 276（复习域今日已复习列表）。后续新票从 279 起编。

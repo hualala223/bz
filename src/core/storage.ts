@@ -164,6 +164,27 @@ function baseNameOf(p: string): string {
 }
 
 /**
+ * 留档目录的读写通道（ticket 285）：CONFIG/.CORRUPT 是**点开头目录**，Obsidian 不收进 vault 文件索引 ——
+ * `vault.getAbstractFileByPath` 对它恒返回 null，而文件在盘上真实存在。据此走 vault API 会把「已存在」
+ * 误判成「不存在」→ `vault.create` 抛 File already exists → 写前留底永久失效（且每次写刷一条告警）。
+ * 故这一目录的判存/读/写一律走 adapter（与 CONFIG/.ENCRYPT 同惯例，见 src/encrypt/data.ts:439）。
+ * 无 adapter（纯数据层替身）时返回 null，由调用方原样降级。
+ */
+function corruptAdapter(app: any): any | null {
+  const a = app?.vault?.adapter;
+  return a && typeof a.exists === 'function' && typeof a.write === 'function' ? a : null;
+}
+
+/** 确保留档目录存在（adapter.mkdir 递归建，点前缀可用）；无 adapter 静默跳过，由调用方落盘报错走 null */
+async function ensureCorruptDir(app: any): Promise<void> {
+  const a = corruptAdapter(app);
+  if (!a) return;
+  try {
+    if (!(await a.exists(CORRUPT_BACKUP_DIR))) await a.mkdir(CORRUPT_BACKUP_DIR);
+  } catch { /* 并发建目录竞态：已建则继续；真建不了由调用方落盘报错走 null */ }
+}
+
+/**
  * 原样留档到 CONFIG/.CORRUPT/<原文件名>.<yyyymmdd-hhmmss>.bak（目录不存在则创建；
  * 同秒多条留档追加 -2/-3 序号防撞名）。raw 缺省时读盘取当前内容。
  * 返回留档路径；任何一步失败返回 null（留档失败不阻塞原流程——降级初始化照常走）。
@@ -175,18 +196,18 @@ export async function backupOriginal(app: any, filePath: string, raw?: string): 
     const f = app.vault.getAbstractFileByPath(filePath);
     if (!f) return null;
     const content = raw !== undefined ? raw : await app.vault.read(f);
-    if (!app.vault.getAbstractFileByPath(CORRUPT_BACKUP_DIR)) {
-      try {
-        await app.vault.createFolder(CORRUPT_BACKUP_DIR);
-      } catch { /* 并发建目录竞态：已建则继续；真建不了由下方 create 报错走 null */ }
-    }
+    const a = corruptAdapter(app);
+    if (!a) return null;
+    await ensureCorruptDir(app);
     const base = baseNameOf(filePath);
     const stamp = corruptStamp();
     let backupPath = `${CORRUPT_BACKUP_DIR}/${base}.${stamp}.bak`;
-    for (let i = 2; app.vault.getAbstractFileByPath(backupPath); i++) {
+    // 同秒撞名判重同样走 adapter（ticket 285）：点目录不在 vault 索引里，getAbstractFileByPath 恒 null
+    // 会让判重失效 → 同秒第二次留档 create 撞已存在抛错，留档静默丢失
+    for (let i = 2; await a.exists(backupPath); i++) {
       backupPath = `${CORRUPT_BACKUP_DIR}/${base}.${stamp}-${i}.bak`;
     }
-    await app.vault.create(backupPath, content);
+    await a.write(backupPath, content);
     return backupPath;
   } catch (e) {
     console.warn('[storage] ' + filePath + ' 留档失败（' + CORRUPT_BACKUP_DIR + '），继续原流程', e);
@@ -316,22 +337,19 @@ export function jsonFileStore<T>(filePath: string, opts: JsonFileStoreOptions<T>
   /**
    * 写前留底（P1-33）：把盘上现内容轮换存为 CONFIG/.CORRUPT/<原文件名>.prev.bak（每文件只留
    * 一份，每次写前覆盖）——写坏了/误写了有上一版可手工回滚。留底失败只告警，不阻塞本次写入。
+   * 读写走 adapter（ticket 285）：点目录不在 vault 索引里，用 vault.getAbstractFileByPath 判存
+   * 恒为「不存在」→ 每次都去 create 已存在的文件 → 抛 File already exists，留底永不更新。
    */
   async function rotatePrevBackup(app: any, f: any): Promise<void> {
     try {
       const cur = await app.vault.read(f);
       if (!cur) return; // 空内容无留底价值
+      const a = corruptAdapter(app);
+      if (!a) return;
+      await ensureCorruptDir(app);
       const bakPath = `${CORRUPT_BACKUP_DIR}/${baseNameOf(filePath)}-prev.bak`;
-      const bf = app.vault.getAbstractFileByPath(bakPath);
-      if (bf) await app.vault.modify(bf, cur);
-      else {
-        if (!app.vault.getAbstractFileByPath(CORRUPT_BACKUP_DIR)) {
-          try {
-            await app.vault.createFolder(CORRUPT_BACKUP_DIR);
-          } catch { /* 并发建目录竞态：已建则继续 */ }
-        }
-        await app.vault.create(bakPath, cur);
-      }
+      // adapter.write 覆盖写：等价原「已存在则 modify / 不存在则 create」两条分支
+      await a.write(bakPath, cur);
     } catch (e) {
       console.warn('[storage] ' + filePath + ' 写前留底失败（不影响本次写入）', e);
     }

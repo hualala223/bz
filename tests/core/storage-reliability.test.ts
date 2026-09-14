@@ -201,12 +201,12 @@ describe('冲突留档：解析失败（D1 原语 3）', () => {
     }
   });
 
-  it('留档失败（create 抛错）→ 原流程继续：降级重建照常、read 不抛', async () => {
+  it('留档失败（落盘抛错）→ 原流程继续：降级重建照常、read 不抛', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const origCreate = vault.create.bind(vault);
-    vault.create = async (path: string, content: string) => {
+    const origWrite = vault.adapter.write.bind(vault.adapter);
+    vault.adapter.write = async (path: string, content: string) => {
       if (path.startsWith('CONFIG/.CORRUPT/')) throw new Error('disk full');
-      return origCreate(path, content);
+      return origWrite(path, content);
     };
     try {
       vault.files.set('CONFIG/STORAGE/bad.json', '{broken');
@@ -214,7 +214,7 @@ describe('冲突留档：解析失败（D1 原语 3）', () => {
       expect([...vault.files.keys()].filter((p) => p.startsWith('CONFIG/.CORRUPT/'))).toHaveLength(0);
       expect(JSON.parse(vault.files.get('CONFIG/STORAGE/bad.json')!)).toEqual([]);
     } finally {
-      vault.create = origCreate;
+      vault.adapter.write = origWrite;
       warnSpy.mockRestore();
     }
   });
@@ -408,12 +408,12 @@ describe('读重试与空读防护（P1-33：映射盘/同步盘空读不得清�
     expect(vault.files.get('CONFIG/STORAGE/fresh-p33.json')).toBe('[\n  1\n]');
   });
 
-  it('留底失败（.CORRUPT create 抛错）→ 只告警不阻塞本次写入', async () => {
+  it('留底失败（.CORRUPT 落盘抛错）→ 只告警不阻塞本次写入', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const origCreate = vault.create.bind(vault);
-    vault.create = async (path: string, content: string) => {
+    const origWrite = vault.adapter.write.bind(vault.adapter);
+    vault.adapter.write = async (path: string, content: string) => {
       if (path.includes('-prev.bak')) throw new Error('disk full');
-      return origCreate(path, content);
+      return origWrite(path, content);
     };
     try {
       vault.files.set('CONFIG/STORAGE/rb.json', JSON.stringify({ v: 1 }));
@@ -421,8 +421,76 @@ describe('读重试与空读防护（P1-33：映射盘/同步盘空读不得清�
       expect(JSON.parse(vault.files.get('CONFIG/STORAGE/rb.json')!)).toEqual({ v: 2 }); // 写入照常完成
       expect(warnSpy).toHaveBeenCalled(); // 留底失败留了告警痕迹
     } finally {
-      vault.create = origCreate;
+      vault.adapter.write = origWrite;
       warnSpy.mockRestore();
     }
+  });
+
+  /**
+   * 点目录不在 vault 索引里（ticket 285 回归）：真实 Obsidian 下 `getAbstractFileByPath` 对
+   * `CONFIG/.CORRUPT/**` 恒返回 null，而文件在 adapter 里真实存在。旧实现据此误判「不存在」→ 每次
+   * 写都去 create 已存在的文件 → 抛 File already exists（留底永不更新 + 每次写刷一条告警）。
+   * 这里局部把索引对点目录打盲，模拟真实行为（不改 MockVault 通用语义，免波及全仓既有测试）。
+   */
+  describe('点目录留底（ticket 285：索引对 CONFIG/.CORRUPT 不可见）', () => {
+    /**
+     * 模拟真实 Obsidian 的两条关键行为（MockVault 默认都太宽松，掩盖了本 bug）：
+     * ① vault 文件索引看不见点目录 → `getAbstractFileByPath` 对其恒返回 null（文件仍在 adapter 里）；
+     * ② `vault.create` 撞已存在文件**抛错**（File already exists），而 MockVault 默认是静默覆盖写。
+     * 两条合起来才是线上现象：判存恒「不存在」→ 去 create 已存在的文件 → 抛错 → 留底永不更新。
+     */
+    function simulateRealDotDir(): void {
+      const origGet = vault.getAbstractFileByPath.bind(vault);
+      vault.getAbstractFileByPath = (path: string) =>
+        path === 'CONFIG/.CORRUPT' || path.startsWith('CONFIG/.CORRUPT/') ? null : origGet(path);
+      const origCreate = vault.create.bind(vault);
+      vault.create = async (path: string, content: string) => {
+        if (vault.files.has(path)) throw new Error('File already exists.');
+        return origCreate(path, content);
+      };
+    }
+
+    it('写前留底：索引打盲后仍能覆盖更新上一版内容，且不再刷「File already exists」告警', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      simulateRealDotDir();
+      try {
+        vault.files.set('CONFIG/STORAGE/dot.json', JSON.stringify({ v: 1 }));
+        const store = jsonFileStore<{ v: number }>('CONFIG/STORAGE/dot.json');
+        const bak = 'CONFIG/.CORRUPT/dot.json-prev.bak';
+        await store.write({ v: 2 });
+        expect(await vault.adapter.read(bak)).toBe(JSON.stringify({ v: 1 }));
+        // 第二次写：留底必须轮换成「本次写前」的内容（旧实现此处抛错 → 停在第 1 版）
+        await store.write({ v: 3 });
+        expect(await vault.adapter.read(bak)).toBe(JSON.stringify({ v: 2 }, null, 2));
+        expect(JSON.parse(vault.files.get('CONFIG/STORAGE/dot.json')!)).toEqual({ v: 3 });
+        expect(warnSpy).not.toHaveBeenCalled();
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('同秒撞名：索引打盲后判重仍生效，退到 -2.bak 而不抛错丢档', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      simulateRealDotDir();
+      try {
+        vi.useFakeTimers({ toFake: ['Date'] }); // 只冻结 Date：冻结 setTimeout 会让读重试的 sleep 永不 settle
+        vi.setSystemTime(new Date('2026-09-04T10:08:00'));
+        vault.files.set('CONFIG/STORAGE/same.json', '{a');
+        await jsonFileStore<unknown[]>('CONFIG/STORAGE/same.json', { defaultValue: [] }).read();
+        vault.files.set('CONFIG/STORAGE/same.json', '{b');
+        await jsonFileStore<unknown[]>('CONFIG/STORAGE/same.json', { defaultValue: [] }).read();
+        const backups = [...vault.files.keys()]
+          .filter((p) => p.startsWith('CONFIG/.CORRUPT/same.json.'))
+          .sort();
+        expect(backups).toEqual([
+          'CONFIG/.CORRUPT/same.json.20260904-100800-2.bak',
+          'CONFIG/.CORRUPT/same.json.20260904-100800.bak',
+        ]);
+        expect(warnSpy).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+        warnSpy.mockRestore();
+      }
+    });
   });
 });

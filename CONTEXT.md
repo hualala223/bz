@@ -237,6 +237,13 @@ _Avoid_: 主页、启动台、dashboard、控制台
 **幽灵磁贴 (Ghost Tile)**: 命令失效（所属插件被禁用等）后磁贴的保留态——保留位置与配置，灰色不可用，可删除，命令恢复后自动复活。
 _Avoid_: 无效磁贴、死磁贴
 
+### 文献盒录入（ADR-0124）
+
+**视频任务链接 (Video Task URL)**: 文献盒「视频录入」任务里指向 B站 视频的地址，**必须含 BV 号**——外部下载器 `bili-dl` 的 `extractBv` 只做 `BV[0-9A-Za-z]{10}` 字符串匹配、**不解析 302**，故 b23.tv 短链、av 号、番剧 ep 链接一律解不出（报「无法从链接中识别 BV 号」）。落库前经三步净化：`extractUrlFromText`（从手机分享文本 `【标题】 https://…` 里抠出链接）→ `cleanUrlText`（剥尾随标点）→ `normalizeSourceUrl`（剥追踪参数），入口单点是数据层 `normalizeUrl`。短链在录入防抖与保存前尝试解成规范链接 `https://www.bilibili.com/video/<BV>`（已含 BV 零请求；否则看响应头 `location`、再扫响应文本兜底），解不出则拒收并提示改用完整链接。
+_Avoid_: 把手机分享的整段文本当链接存进任务——`normalizeSourceUrl` 要求整串以 `http(s)://` 开头，带 `【标题】` 前缀时净化变成空操作，库里会存下整段文本
+_Avoid_: 把无 BV 号的链接放进队列——CLI 只有 `--batch <url>` 一个入口且只认 BV，必失败；应在录入时拦下并给出解法
+_Avoid_: 改仓库 `tools/bili-downloader/` 去支持短链——插件 spawn 的是**全局安装**的 `bili-dl`（`AppData\Roaming\npm\...`），改仓库源码对运行态零影响
+
 ### 番茄钟域（规划中，ticket 26）
 
 **番茄钟 (Pomodoro)**: bz 的专注计时域——中央弹窗 + 状态栏双承载的番茄工作法计时器，数据 `CONFIG/STORAGE/pomodoro.json`。原 QuickAdd 宏脚本代码已丢失，按使用手册重建（ADR-0012），无旧数据兼容义务。
@@ -434,6 +441,10 @@ _Avoid_: hover 操作条、行内图标排、行内按钮组（指列表卡片�
 **Q3 / __utils**: QuickAdd 共享脚本（`CONFIG/SCRIPTS/Quickadd/Q/Q3.js`，1034 行），挂载 `window.__utils`，21 个导出：escManager、confirm、notice、generateId、jsonStore、longPress、injectStyles、createSiteIcon、createIconBtn、formatRelativeTime、formatFileSize、displayChangelog、checkAndShowChangelog、AIService、createAI、extractUrlAndDisplay、getPlatformName、getCurrentNoteInfo、getCurrentCursorPosition、fetchPageTitle、createOverlay。**新插件移植后为内部共享层（core），不再挂 window**。
 
 **jsonStore**: Q3 提供的 JSON 文件存储工具（不存在自动建目录建文件返回 `[]`，解析失败重置 `[]`；写 = 存在 modify / 不存在 create；**原实现无锁**），备忘录/归物本/密码本/复习计划等均使用 `CONFIG/STORAGE/*.json`。
+
+**留底 (Prev Backup)**: 写 JSON 前的上一版快照（`src/core/storage.ts`）——把盘上现内容轮换存为 `CONFIG/.CORRUPT/<原文件名>.prev.bak`，每文件只留一份、**每次写前覆盖**，写坏了/误写了可手工回滚；失败只告警、不阻塞本次写入。与之并列的是**留档**：损坏/写失败现场原样存为 `<原文件名>.<yyyymmdd-hhmmss>.bak` 逐次累积（同秒撞名追加 `-2`/`-3`）。
+_Avoid_: 用 vault API 判存/读写点前缀目录（`CONFIG/.CORRUPT`、`CONFIG/.ENCRYPT`）——Obsidian **不索引点开头目录**，`getAbstractFileByPath` 恒返回 null 而文件真实存在，会把「已存在」误判成「不存在」→ 留底永不更新 + 每次写刷 `File already exists` 告警（ADR-0125）；这一目录一律走 `vault.adapter`
+_Avoid_: 把「留底」与「留档」混说——留底是写前的一版、每次覆盖；留档是出事实场的快照、逐次累积
 
 **条目抽屉 (Item Sheet)**: 跨域统一的条目操作浮层（`core/item-actions.ts`）——移动端长按卡片滑出底部抽屉（遮罩 + 顶部条目信息 + 功能项逐行；顶部精简两行（标题+简介，两行省略号截断）），桌面端右键弹跟手菜单（fbf7830 全局方案，preventDefault 拦原生右键、longPressFilter 让位区放行）。动作随域定义；keepOpen 动作执行后抽屉保持并由域动态刷新；附属浮层（评分/影评等小弹窗）叠于抽屉之上。已接入域：备忘录、日记本、影视、收藏本、剪藏本。两种特例：剪藏本是唯一「单击整卡直接打开」的域（ticket 69，Q7a）；且其桌面端浮层关闭（`desktopActions=false`，右键菜单统一方案落地前接受空窗）。
 _Avoid_: 长按菜单、底部菜单（泛指时）、右键菜单（桌面端尚未实现的形态）

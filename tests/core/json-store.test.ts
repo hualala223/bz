@@ -66,10 +66,12 @@ describe('jsonStore', () => {
 
   it('P1-32 留档失败 → 容错原地重建空库（不抛错）', async () => {
     vault.files.set('CONFIG/STORAGE/memo.json', '{broken');
-    const rawCreate = vault.create.bind(vault);
-    vault.create = async (path: string, content: string) => {
-      if (path.startsWith('CONFIG/.CORRUPT/')) throw new Error('create failed');
-      return rawCreate(path, content);
+    // 留档通道是 adapter.write（ticket 285：CONFIG/.CORRUPT 是点目录，不在 vault 索引里，
+    // 走 vault.create 会恒撞「已存在」；故拦截点必须在 adapter 上，mock vault.create 拦不住）
+    const rawWrite = vault.adapter.write.bind(vault.adapter);
+    vault.adapter.write = async (path: string, content: string) => {
+      if (path.startsWith('CONFIG/.CORRUPT/')) throw new Error('write failed');
+      return rawWrite(path, content);
     };
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
