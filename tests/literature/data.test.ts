@@ -78,6 +78,19 @@ describe('isTerminal / normalizeUrl', () => {
     const once = normalizeUrl('https://www.bilibili.com/video/BV1awbg6XELn/?spm_id_from=3&t=30');
     expect(normalizeUrl(once)).toBe(once);
   });
+
+  it('normalizeUrl 从手机分享文本里抠出链接（ticket 284：`【标题】 https://…` 整段粘贴）', () => {
+    // 用户实例：手机 App「复制链接」→ 标题 + 短链整段进输入框，此前会被原样存进任务、送 CLI 报
+    // 「无法从链接中识别 BV 号」（短链本身不含 BV）
+    expect(normalizeUrl('【【配音】彼得希夫|股债开启同步杀跌-哔哩哔哩】 https://b23.tv/sHBBikh'))
+      .toBe('https://b23.tv/sHBBikh');
+    // 中文说明紧跟链接（无空格）不并进路径；追踪参数照剥
+    expect(normalizeUrl('看这个 https://www.bilibili.com/video/BV1awbg6XELn?p=2&vd_source=x，然后呢'))
+      .toBe('https://www.bilibili.com/video/BV1awbg6XELn?p=2');
+    // 无链接文本原样（裸 BV 号 / 纯文本）——既有口径不变
+    expect(normalizeUrl('BV1xx411c7mD')).toBe('BV1xx411c7mD');
+    expect(normalizeUrl('随便一段话不是链接')).toBe('随便一段话不是链接');
+  });
 });
 
 describe('LiteratureData（literature.json）', () => {

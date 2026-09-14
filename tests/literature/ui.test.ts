@@ -966,6 +966,9 @@ ${summary ?? ''}`);
     expect(humanizeError('connect ETIMEDOUT 1.2.3.4:443')).toContain('网络超时');
     expect(humanizeError('getaddrinfo ENOTFOUND b23.tv')).toContain('网络连接失败');
     expect(humanizeError('请求过于频繁(-352)')).toContain('风控');
+    // ticket 284：CLI 原生「无法从链接中识别 BV 号」→ 白话 + 给出解法
+    expect(humanizeError('无法从链接中识别 BV 号')).toContain('没找到 BV 号');
+    expect(humanizeError('无法从链接中识别 BV 号')).toContain('b23.tv');
     expect(humanizeError('某个完全未知的错误')).toBe('某个完全未知的错误');
     expect(humanizeError('x'.repeat(200))).toHaveLength(161);
     expect(humanizeError('')).toBe('');
@@ -1020,6 +1023,28 @@ ${summary ?? ''}`);
     const saved = await LiteratureData.loadTasks();
     expect(saved).toHaveLength(1);
     expect(saved[0]).toMatchObject({ start: '12:02', end: '12:30' });
+  });
+
+  it('录入校验（ticket 284）：分享文本抠链接入队；无 BV 的短链当场拦下、不出必败任务', async () => {
+    ui.showVideoEntry();
+    await new Promise((r) => setTimeout(r, 0));
+    (document.getElementById('lit-btn-video-add') as HTMLButtonElement).click();
+    (document.querySelector('#lit-add-range button[data-range="whole"]') as HTMLButtonElement).click();
+    // 手机分享文本整段粘：链接里没有 BV（b23.tv 短码）→ 保存前拦下，不产生注定失败的任务
+    (document.getElementById('lit-add-url') as HTMLInputElement).value =
+      '【【配音】彼得希夫|股债开启同步杀跌-哔哩哔哩】 https://b23.tv/sHBBikh';
+    (document.getElementById('lit-add-save') as HTMLButtonElement).click();
+    expect(strNotices()).toContain('链接里没找到 BV 号');
+    expect(await LiteratureData.loadTasks()).toHaveLength(0);
+    // 换成含 BV 的链接 → 正常入队，且落库值已抠链接 + 剥追踪参数（不再整段存分享文本）
+    clearNotices();
+    (document.getElementById('lit-add-url') as HTMLInputElement).value =
+      '【推荐】https://www.bilibili.com/video/BV1awbg6XELn?p=2&vd_source=x，然后呢';
+    (document.getElementById('lit-add-save') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(strNotices()).toContain('已保存'));
+    const saved = await LiteratureData.loadTasks();
+    expect(saved).toHaveLength(1);
+    expect(saved[0].url).toBe('https://www.bilibili.com/video/BV1awbg6XELn?p=2');
   });
 
   it('关闭按钮 ❌ 统一（ticket 139）：主面板/视频面板/历史弹窗三处 bz-win-close', () => {

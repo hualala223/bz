@@ -1,18 +1,45 @@
 // @vitest-environment node
 /**
  * 术语来源纯函数测试（src/literature/source.ts，ADR-0116）：
- * isUrlLikeSourceText（宽松域名判定）/ cleanUrlText / noteSourceName / serializeTermSource（落键唯一入口）。
+ * isUrlLikeSourceText（宽松域名判定）/ cleanUrlText / extractUrlFromText（ticket 284）/
+ * normalizeSourceUrl / noteSourceName / serializeTermSource（落键唯一入口）。
  * 纯数据层：无 DOM，node 环境直跑。
  */
 import { describe, it, expect } from 'vitest';
 import {
   isUrlLikeSourceText,
   cleanUrlText,
+  extractUrlFromText,
   normalizeSourceUrl,
   cleanSourceTitle,
   noteSourceName,
   serializeTermSource,
 } from '../../src/literature/source';
+
+describe('extractUrlFromText（ticket 284：从自由文本里抠出首个链接）', () => {
+  it('手机分享文本 `【标题】 https://…` → 只留链接（用户实例）', () => {
+    expect(extractUrlFromText('【【配音】彼得希夫|股债开启同步杀跌-哔哩哔哩】 https://b23.tv/sHBBikh'))
+      .toBe('https://b23.tv/sHBBikh');
+  });
+
+  it('中文说明紧跟链接（无空格）→ 在中文标点处断开，不把说明并进 URL', () => {
+    expect(extractUrlFromText('看这个 https://b23.tv/x，然后呢')).toBe('https://b23.tv/x');
+    expect(extractUrlFromText('【推荐】https://www.bilibili.com/video/BV1xx411c7mD?p=2』'))
+      .toBe('https://www.bilibili.com/video/BV1xx411c7mD?p=2');
+  });
+
+  it('多个链接取首个；链接后无分隔直接接尾随标点照常截断', () => {
+    expect(extractUrlFromText('a https://a.com/1 b https://b.com/2')).toBe('https://a.com/1');
+    expect(extractUrlFromText('https://b23.tv/jL9bKaX。')).toBe('https://b23.tv/jL9bKaX');
+  });
+
+  it('无链接文本原样返回（裸 BV 号 / 纯中文 / 空串）——既有输入零变化', () => {
+    expect(extractUrlFromText('BV1xx411c7mD')).toBe('BV1xx411c7mD');
+    expect(extractUrlFromText('随便一段话不是链接')).toBe('随便一段话不是链接');
+    expect(extractUrlFromText('   ')).toBe('');
+    expect(extractUrlFromText('')).toBe('');
+  });
+});
 
 describe('isUrlLikeSourceText（整串无空白 + URL/域名样式 → 外部链接；其余归笔记搜索）', () => {
   it('http(s) 前缀 → 外部（含查询串/路径）', () => {

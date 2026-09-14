@@ -10,7 +10,7 @@ import moment from 'moment';
 import { enqueueFileTask, jsonFileStore, storageFile, type JsonFileStore } from '../core/storage';
 import { tryGetSettings } from '../core/settings-provider';
 import { generateId } from '../core/utils';
-import { cleanUrlText, normalizeSourceUrl } from './source';
+import { cleanUrlText, extractUrlFromText, normalizeSourceUrl } from './source';
 import type { LiteratureTask, LiteratureTaskStatus } from './types';
 
 export interface LiteratureSettingsLike {
@@ -61,9 +61,10 @@ export function normalizeLooseTime(t: string | null | undefined): string | null 
   return TIME_RE.test(canon) ? canon : null;
 }
 
-/** 提取展示用链接文本：BV 号原样，链接取完整串；带参链接走净化剥追踪参数（上游 issue 278），裸 BV/非 http 文本原样返回 */
+/** 提取展示用链接文本：BV 号原样，链接取完整串；带参链接走净化剥追踪参数（上游 issue 278），裸 BV/非 http 文本原样返回。
+ *  ticket 284：先抠出文本里的链接——手机分享文本 `【标题】 https://…` 整段粘进来时，净化不再空转。 */
 export function normalizeUrl(raw: string): string {
-  return normalizeSourceUrl(cleanUrlText(raw));
+  return normalizeSourceUrl(cleanUrlText(extractUrlFromText(raw)));
 }
 
 /** 状态是否终态（成功/失败） */

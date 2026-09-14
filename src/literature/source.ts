@@ -36,6 +36,21 @@ export function cleanUrlText(text: string): string {
   return String(text ?? '').trim().replace(/[，。！？；、,;.!?…'"’”\])}>】」』]+$/, '');
 }
 
+/**
+ * 自由文本里的首个 http(s) 链接（ticket 284）：手机 App「复制链接」给的是
+ * `【标题】 https://b23.tv/xxx` 这种整段分享文本，直接交给 normalizeSourceUrl 会因
+ * 「整串须以 http(s) 开头」而原样放过（净化变空操作）→ 落库/送 CLI 的是带标题前缀的整段。
+ * 命中即返回该链接；无链接（含裸 BV 号、纯文本）返回原串 trim，保证既有输入零变化。
+ * 字符类显式排除中日韩标点与引号尖括号：中文说明常紧跟链接且无空格，靠 cleanUrlText 只剥
+ * 尾随标点救不回来（会把「，然后」并进路径）。
+ */
+const INLINE_URL_RE = /https?:\/\/[^\s<>"'`，。！？；、（）【】「」『』《》]+/i;
+export function extractUrlFromText(text: string): string {
+  const s = String(text ?? '').trim();
+  const m = s.match(INLINE_URL_RE);
+  return m ? m[0] : s;
+}
+
 /** 通用追踪参数黑名单（B 站 vd_source/seid、分享 share_*、通用 refer/scene 等；utm_-/spm- 前缀另剥） */
 const TRACK_KEYS = new Set([
   'vd_source', 'vd_src', 'seid', 'unique_k', 'from', 'share_source', 'share_medium',

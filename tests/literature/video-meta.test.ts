@@ -2,11 +2,13 @@
 /**
  * 视频录入元信息抓取测试（src/literature/video-meta.ts，issue 278）：
  * parseBvid 各形态、view API 成功/风控/网络异常/超时、页面标题兜底（剔 B 站尾巴）、
- * 双失败 null、非 B 站 URL 零请求（联网范围仅限 B 站域，b23.tv 短链命中）、非 URL 文本零请求。mock requestUrl 走共用 obsidian 替身。
+ * 双失败 null、非 B 站 URL 零请求（联网范围仅限 B 站域，b23.tv 短链命中）、非 URL 文本零请求。
+ * ticket 284 补：resolveBvidFromShortLink 短链 → BV（location 头主路径 + 响应文本兜底 + 失败/超时）。
+ * mock requestUrl 走共用 obsidian 替身。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { requestUrl } from 'obsidian';
-import { parseBvid, fetchVideoMeta } from '../../src/literature/video-meta';
+import { parseBvid, fetchVideoMeta, resolveBvidFromShortLink } from '../../src/literature/video-meta';
 
 // 宽松 mock 类型（先例随 tests/clipbook/rss-ui.test.ts）：罐头只补 status/text，免 RequestUrlResponse 形状体操
 const reqMock = requestUrl as ReturnType<typeof vi.fn>;
@@ -131,5 +133,58 @@ describe('fetchVideoMeta', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+});
+
+describe('resolveBvidFromShortLink（ticket 284：短链解成 BV 号，供录入校验/改写）', () => {
+  beforeEach(() => {
+    reqMock.mockReset();
+    reqMock.mockImplementation(async () => httpResp(200, ''));
+  });
+
+  it('已含 BV（完整链接/裸号）→ 直接返回且零请求', async () => {
+    expect(await resolveBvidFromShortLink('https://www.bilibili.com/video/BV1awbg6XELn/?spm_id_from=333'))
+      .toBe('BV1awbg6XELn');
+    expect(await resolveBvidFromShortLink('BV1xx411c7mD')).toBe('BV1xx411c7mD');
+    expect(reqMock).not.toHaveBeenCalled();
+  });
+
+  it('短链：请求头 location 带 302 目标 → 抠出 BV（主路径，实测线上形态）', async () => {
+    reqMock.mockImplementationOnce(async () => ({
+      status: 302,
+      text: '',
+      headers: { location: 'https://www.bilibili.com/video/BV1RdYi6jEGJ?buvid=X&unique_k=sHBBikh' },
+    }));
+    expect(await resolveBvidFromShortLink('https://b23.tv/sHBBikh')).toBe('BV1RdYi6jEGJ');
+    expect(reqMock).toHaveBeenCalledTimes(1);
+    expect(String((reqMock.mock.calls[0][0] as any).url)).toBe('https://b23.tv/sHBBikh');
+  });
+
+  it('若已跟随重定向、页面里带 BV → 从响应文本扫出（兜底路径）', async () => {
+    reqMock.mockImplementationOnce(async () =>
+      httpResp(200, '<html><script>window.__INITIAL_STATE__={"bvid":"BV1awbg6XELn"}</script></html>'));
+    expect(await resolveBvidFromShortLink('https://b23.tv/jL9bKaX')).toBe('BV1awbg6XELn');
+  });
+
+  it('两路都拿不到（跳转后是 JS 壳、HTML 内无 BV）→ null，调用方据此给提示', async () => {
+    reqMock.mockImplementationOnce(async () => httpResp(200, '<html><body>app shell</body></html>'));
+    expect(await resolveBvidFromShortLink('https://b23.tv/jL9bKaX')).toBeNull();
+  });
+
+  it('请求抛错 → null（不把网络异常抛给调用方）', async () => {
+    reqMock.mockRejectedValueOnce(new Error('网络炸了'));
+    expect(await resolveBvidFromShortLink('https://b23.tv/jL9bKaX')).toBeNull();
+  });
+
+  it('10s 超时（请求挂起）→ null', async () => {
+    vi.useFakeTimers();
+    try {
+      reqMock.mockImplementationOnce(() => new Promise(() => { /* 永不 resolve */ }));
+      const p = resolveBvidFromShortLink('https://b23.tv/jL9bKaX');
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(await p).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

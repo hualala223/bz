@@ -59,9 +59,9 @@ import { topifyZ } from '../core/z-order';
 import { emitDomainEvent, onDomainEvent } from '../core/domain-bus';
 import { getApp } from '../core/app';
 import type BzSettings from '../settings';
-import { LiteratureData, normalizeLooseTime } from './data';
+import { LiteratureData, normalizeLooseTime, normalizeUrl } from './data';
 import { cleanSourceTitle, isUrlLikeSourceText, normalizeSourceUrl, noteSourceName, type TermSource } from './source';
-import { fetchVideoMeta } from './video-meta';
+import { fetchVideoMeta, parseBvid, resolveBvidFromShortLink } from './video-meta';
 import type { LiteratureTask } from './types';
 import { BatchRunner, type BatchEvents } from './processor';
 import { backfillNotes, generateTermDraft, generateTermNote, summarizeTermSummary } from './note-gen';
@@ -127,6 +127,10 @@ export function humanizeError(reason: string | null | undefined): string {
     return '网络连接失败：请检查网络或代理设置后重试';
   }
   if (/^-352|\b412\b|风控|请求过于频繁/i.test(s)) return 'B 站风控拦截：稍后再试，或在设置里配置登录 Cookie';
+  // ticket 284：CLI 的 extractBv 只认 BV 号（短链/av 号/番剧 ep 一律无 BV）——原生报错太干，给人话
+  if (/无法从链接中识别\s*BV\s*号/i.test(s)) {
+    return '链接里没找到 BV 号：b23.tv 短链请在浏览器打开后复制完整链接；文献盒只认含 BV 号的 B站 视频链接';
+  }
   if (/视频不存在|稿件不存在|\b404\b|not found/i.test(s)) return '视频不存在或已删除：请检查链接是否正确';
   return s.length > 160 ? s.slice(0, 160) + '…' : s;
 }
@@ -1390,13 +1394,23 @@ export class UIManager {
   /**
    * 录入 URL 防抖触发（issue 262，上游 issue 278 同款）：先净化写回（值有变才写，用户可见），再抓元信息。
    * 回填只补空字段（trim 后为空才算空）；序列号 + 输入值双校验丢弃过期响应；全程静默。
+   * ticket 284：净化前先抠出文本里的链接（手机分享文本整段粘），短链再尝试解成含 BV 的规范链接写回。
    */
   private async addUrlResolve(input: HTMLInputElement): Promise<void> {
     const popup = this.addPopup;
     if (!popup) return;
     const seq = this.addUrlSeq;
-    const cleaned = normalizeSourceUrl(input.value);
+    let cleaned = normalizeUrl(input.value); // 与落库同口径：抠链接 → 剥尾随标点 → 剥追踪参数
     if (cleaned && cleaned !== input.value) input.value = cleaned;
+    if (cleaned && !parseBvid(cleaned)) {
+      // 短链无 BV 字样，CLI 必然报「无法从链接中识别 BV 号」；解出来写回输入框（用户可见），
+      // 保存环节的 BV 校验也就自然通过。解不出则保持原样，交由保存时的提示引导用户。
+      const bv = await resolveBvidFromShortLink(cleaned);
+      if (bv) {
+        cleaned = `https://www.bilibili.com/video/${bv}`;
+        if (seq === this.addUrlSeq && this.addPopup === popup) input.value = cleaned;
+      }
+    }
     const meta = await fetchVideoMeta(cleaned);
     // 序列号（期间改过输入/开关弹窗）或输入值（用户又动过）变了 → 迟到响应，丢弃
     if (seq !== this.addUrlSeq || this.addPopup !== popup || input.value !== cleaned) return;
@@ -1408,7 +1422,8 @@ export class UIManager {
 
   private async _handleAddSave(): Promise<void> {
     if (!this.addPopup) return;
-    const url = (q<HTMLInputElement>(this.addPopup, '#lit-add-url')?.value ?? '').trim();
+    // ticket 284：落库前按数据层同一口径净化（抠链接 → 剥标点/追踪参数），避免把分享文本整段存进任务
+    const url = normalizeUrl((q<HTMLInputElement>(this.addPopup, '#lit-add-url')?.value ?? '').trim());
     const clipMode = q<HTMLElement>(this.addPopup, '#lit-add-range')?.querySelector('button[data-range].active')?.getAttribute('data-range') === 'clip';
     const startRaw = (q<HTMLInputElement>(this.addPopup, '#lit-add-start')?.value ?? '').trim();
     const endRaw = (q<HTMLInputElement>(this.addPopup, '#lit-add-end')?.value ?? '').trim();
@@ -1420,6 +1435,13 @@ export class UIManager {
     const uploader = (q<HTMLInputElement>(this.addPopup, '#lit-add-uploader')?.value ?? '').trim();
     const focusField = (sel: string): void => q<HTMLInputElement>(this.addPopup!, sel)?.focus();
     if (!url) { notice('请填写视频链接或 BV 号', 'error'); focusField('#lit-add-url'); return; }
+    // ticket 284：CLI 只认含 BV 号的链接（短链/av 号/番剧 ep 一律解不出）——当场拦下，
+    // 不让一条注定失败的任务进队列（此前要等批处理跑完才报「无法从链接中识别 BV 号」）
+    if (!parseBvid(url)) {
+      notice('链接里没找到 BV 号：b23.tv 短链请先在浏览器打开、复制带 BV 号的完整链接再粘', 'error');
+      focusField('#lit-add-url');
+      return;
+    }
     if (clipMode && !startRaw && !endRaw) { notice('剪辑片段需填写开始与结束时间', 'error'); focusField('#lit-add-start'); return; }
     if (start === null || end === null) { notice('时间格式看不懂：支持 12.2 / 12-2 / 1:30:05 等，单个数字按分钟算', 'error'); focusField(start === null ? '#lit-add-start' : '#lit-add-end'); return; }
     if ((!start && end) || (start && !end)) { notice('开始与结束时间需成对填写', 'error'); focusField(start ? '#lit-add-end' : '#lit-add-start'); return; }

@@ -5,6 +5,7 @@
  * 联网范围仅限 B 站域（bilibili.com / b23.tv）：非 B 站链接只净化（调用方/落库收口）、零请求（Q4 拍板）。
  * 已知限制：b23.tv 短链拿不到重定向目标（requestUrl 响应无 url 字段），只抓标题、UP主 留空——
  * 下载阶段 CLI 的 [bz-info] 会按「只补空」补齐（processor.ts 同口径）。
+ * ticket 284 补：`resolveBvidFromShortLink` 用响应头 location 把短链解成 BV 号，供录入侧校验/改写。
  */
 import { requestUrl } from 'obsidian';
 import { fetchPageTitle } from '../core/utils';
@@ -65,6 +66,38 @@ async function fetchFromPageTitle(url: string): Promise<VideoMeta | null> {
     const raw = await fetchPageTitle(url);
     const title = raw ? cleanSourceTitle(raw) : '';
     return title ? { title } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 短链解析超时（ms）：与 view API 同档；超时即放弃，交由录入提示引导用户换完整链接 */
+const SHORT_LINK_TIMEOUT_MS = 10000;
+
+/**
+ * 短链 → BV 号（ticket 284）：b23.tv 短码本身不含 BV，只有跟随 302 才拿得到，而 CLI 的
+ * `extractBv` 只做字符串硬找 → 短链必然报「无法从链接中识别 BV 号」。插件侧补上这一步：
+ *  - 已含 BV（完整链接/裸号）→ 直接返回，**零请求**；
+ *  - 否则请求一次短链，**先**读响应头 location（requestUrl 未跟随重定向时能拿到 302 目标），
+ *    **再**扫响应文本兜底（若已跟随，落地的视频页里找 BV）；
+ *  - 都拿不到 → null，由调用方给明确提示，不让必败任务进队列。
+ * 已实测：`https://b23.tv/<码>` 的 302 Location 自带 BV（`https://www.bilibili.com/video/BV…`），
+ * 但跳转后的页面是 JS 壳、HTML 内**不含** BV —— 故 location 头是主路径，文本扫描只作兜底。
+ */
+export async function resolveBvidFromShortLink(url: string): Promise<string | null> {
+  const direct = parseBvid(url);
+  if (direct) return direct;
+  try {
+    const timer = new Promise<null>((resolve) => setTimeout(() => resolve(null), SHORT_LINK_TIMEOUT_MS));
+    const req = requestUrl({ url, method: 'GET' }).then((resp: any): string | null => {
+      const loc = resp?.headers?.location ?? resp?.headers?.Location;
+      if (typeof loc === 'string' && loc) {
+        const bv = parseBvid(loc);
+        if (bv) return bv;
+      }
+      return parseBvid(typeof resp?.text === 'string' ? resp.text : '');
+    });
+    return await Promise.race([req, timer]);
   } catch {
     return null;
   }
