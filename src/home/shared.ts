@@ -223,7 +223,14 @@ export function pomodoroMenuAction(phase: PomodoroPhase): DomainMenuAction {
  * 其中即时类带 `keepHome`（不关首页）；清空类带 `kind: 'danger'`（红字 + 二次确认）。
  */
 export const DOMAIN_MENU: Record<string, DomainMenuAction[]> = {
-  // 日记菜单不挂（上游 bz-diary-write 属日记冻结域产物，ADR-0121；票 288）
+  // 日记四动作（2026-09-14 用户点名；解冻上游「日记不挂菜单」的票 288 口径——
+  // 均为既有 bz 命令直呼，不新增命令面，diary 域本身零改动）：
+  diary: [
+    { label: '写日记', commandId: 'bz-diary-write', icon: 'pen-line' },
+    { label: '日程规划', commandId: 'bz-diary-plan', icon: 'calendar-plus' },
+    { label: '每日复盘', commandId: 'bz-diary-review', icon: 'notebook-pen' },
+    { label: '日常行为记录', commandId: 'bz-diary-activity-capture', icon: 'footprints' },
+  ],
   todo: [
     { label: '写待办', commandId: 'bz-todo-add', icon: 'clipboard-list' },
     // 上游「给当前笔记记一笔」（bz-memo-note-binding）本地无等价命令，不挂（票 288）

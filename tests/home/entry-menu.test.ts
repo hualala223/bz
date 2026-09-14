@@ -91,6 +91,11 @@ describe('DOMAIN_MENU 形状', () => {
       ['collect', 'bz-collect-capture'],
       ['literature', 'bz-literature-note-term'],
       ['review', 'bz-review-today'],
+      // 日记四动作（2026-09-14 用户点名；既有命令直呼，diary 域零改动）
+      ['diary', 'bz-diary-write'],
+      ['diary', 'bz-diary-plan'],
+      ['diary', 'bz-diary-review'],
+      ['diary', 'bz-diary-activity-capture'],
     ];
     for (const [domain, commandId] of added) {
       expect(byId(domain, commandId), commandId).toBeTruthy();
