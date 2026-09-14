@@ -2,18 +2,51 @@
  * 影院（cinema）域设置 schema（接入设置面板；窗口内无设置按钮，收敛进 Obsidian 设置面板）
  * issue 194：补「显示」组——默认排序/默认状态筛选（打开面板时读，非法值回落，见 index.ts readDefaultView）。
  */
-import { mobileFullscreenGroup, numStrBinding } from '../core/settings-common';
+import { numStrBinding } from '../core/settings-common';
 import type { SettingsSchema } from '../core/settings-schema';
 
 export function cinemaSettingsSchema(): SettingsSchema {
   return {
     groups: [
       {
+        // 外观组（issue 246）：布局行收编真键 cinemaStyle——午夜场上岸单卡（gaz/booth 未实现不暴露，
+        // 非法值域内回落午夜场，重开面板生效）；主题行占位，域消费待皮肤设计时接入
+        icon: 'palette',
+        name: '外观',
+        rows: [
+          {
+            type: 'choiceCards',
+            name: '面板布局',
+            binding: { key: 'cinemaStyle' },
+            options: [
+              { value: 'midnight', label: '午夜场', prevClass: 'bz-sp-prev-panel' },
+            ],
+          },
+          {
+            type: 'choiceCards',
+            name: '面板主题',
+            binding: { key: 'cinemaSkinTheme' },
+            layoutKey: 'cinemaStyle',
+            options: [
+              { value: 'nightfall', label: '夜幕', layout: 'midnight', prevClass: 'bz-sp-prev-nightfall' },
+            ],
+          },
+        ],
+      },
+      {
         icon: 'folder-open',
         name: '目录',
         rows: [
-          { type: 'path', mode: 'single', name: '影视文件夹', desc: '影院读取的影视文件夹，日记本设置的影视目录仅用于归类', binding: { key: 'cinemaFolderPath' } },
+          { type: 'path', mode: 'single', name: '影视文件夹', desc: '影院读取的影视文件夹，日记本也从这里读影视', binding: { key: 'cinemaFolderPath' } },
           // 旧「每批加载数量」（cinemaPageSize）已删除：全仓无消费点（列表一次全量渲染），属死配置
+        ],
+      },
+      {
+        icon: 'rss',
+        name: '数据抓取',
+        rows: [
+          { type: 'text', name: 'ApiZero Key', desc: '豆瓣字段接口的密钥，不填时字段走豆瓣演职员接口兜底', binding: { key: 'cinemaApizeroKey' } },
+          { type: 'text', name: '豆瓣 Cookie', desc: '搜索被风控时粘贴浏览器Cookie可提高成功率，不填也能抓', binding: { key: 'cinemaDoubanCookie' } },
         ],
       },
       {
@@ -54,7 +87,6 @@ export function cinemaSettingsSchema(): SettingsSchema {
           },
         ],
       },
-      mobileFullscreenGroup('cinemaMobileDefaultFullscreen', { desc: '' }),
     ],
   };
 }

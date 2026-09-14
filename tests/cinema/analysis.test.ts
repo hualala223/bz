@@ -9,7 +9,7 @@ import { MockVault, mockAppWithVault } from '../mock-vault';
 import { resetObsidianMocks } from '../mock-obsidian-entry';
 import { M, resetCinemaState } from '../../src/cinema/state';
 import { rebuildItems } from '../../src/cinema/data';
-import { buildAnalysisData, buildAnalysisHTML, buildStatPageHtml } from '../../src/cinema/analysis';
+import { buildAnalysisData, buildAnalysisHTML } from '../../src/cinema/analysis';
 
 function seed(vault: MockVault) {
   vault.files.set('我的/影视/《星际穿越》.md', `---
@@ -123,6 +123,23 @@ describe('cinema buildAnalysisData', () => {
   });
 });
 
+describe('cinema buildAnalysisHTML · G9 想看清单豆瓣评分', () => {
+  beforeEach(() => {
+    resetObsidianMocks();
+    resetCinemaState();
+    M.folderPath = '我的/影视';
+    const vault = new MockVault();
+    seed(vault);
+    rebuildItems(mockAppWithVault(vault));
+  });
+
+  it('G9 回归：想看清单行显示豆瓣评分（wantList 条目读 doubanRating，而非不存在的 it.douban）', () => {
+    const html = buildAnalysisHTML();
+    // YAML 数字 8.0 解析为 8 → doubanRating='8'
+    expect(html).toContain('想看片 · 豆瓣 8');
+  });
+});
+
 describe('cinema buildAnalysisHTML', () => {
   beforeEach(() => {
     resetObsidianMocks();
@@ -148,11 +165,6 @@ describe('cinema buildAnalysisHTML', () => {
     expect(html).toContain('我的高分');
     expect(html).toContain('想看清单');
     expect(html).toContain('评分趋势');
-  });
-
-  it('G9：想看清单带豆瓣分（读存在的 doubanRating——原 it.douban 恒空不显示）', () => {
-    const html = buildAnalysisHTML();
-    expect(html).toContain('想看片 · 豆瓣 8');
   });
 
   it('空库 → 引导文案', () => {
@@ -282,7 +294,7 @@ describe('ADR-0090 头行小计 + 空态动作 + 整页组装', () => {
   });
 
   it('空库整页：引导文案 + 「添加影视」动作按钮（data-cinema-analysis-add）', () => {
-    const html = buildStatPageHtml();
+    const html = buildAnalysisHTML();
     expect(html).toContain('还没有可统计的影视记录');
     expect(html).toContain('data-cinema-analysis-add');
     expect(html).toContain('添加影视');
@@ -292,7 +304,7 @@ describe('ADR-0090 头行小计 + 空态动作 + 整页组装', () => {
     const vault = new MockVault();
     seed(vault);
     rebuildItems(mockAppWithVault(vault));
-    const html = buildStatPageHtml();
+    const html = buildAnalysisHTML();
     expect(html).not.toContain('bz-cinema-page-head'); // 页头退役：sp-head 在 ui.ts
     expect(html).toContain('stat-cards');
     expect(html).toContain('data-lucide="bar-chart-3"');

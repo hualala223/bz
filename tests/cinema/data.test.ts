@@ -1,6 +1,7 @@
+import { makeApp } from '../helpers/app';
 // @vitest-environment node
 /**
- * 影院（cinema）数据层测试：解析/排序/筛选/相对日期
+ * 影院（cinema）数据层测试：解析/排序/筛选
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { MockVault, mockAppWithVault } from '../mock-vault';
@@ -8,11 +9,7 @@ import { resetObsidianMocks } from '../mock-obsidian-entry';
 import { M, resetCinemaState, type CinemaItem } from '../../src/cinema/state';
 import { rebuildItems, getDisplayItems, sortByDateDesc, sortByCreatedDesc, dateVal } from '../../src/cinema/data';
 import { getStarString, getGroupForTag, getGroupSafe } from '../../src/cinema/constants';
-import { relDate } from '../../src/cinema/ui';
 
-function makeApp(vault: MockVault) {
-  return mockAppWithVault(vault);
-}
 
 function md(content: string): string {
   return content;
@@ -94,6 +91,37 @@ tags:
     const items = rebuildItems(app);
     items.forEach((i) => expect(i.group).toBe('剧集'));
   });
+
+  it('rebuildItems：metadataCache 未就绪（cache null）的文件保留内存既有条目，防新建闪失（issue 256）', () => {
+    const vault = new MockVault();
+    // 无 frontmatter 也无 embeds → mock cache 返回 null（≈ 真库中新建文件尚未被 metadataCache 索引）
+    vault.files.set('我的/影视/《缓存未就绪》.md', '正文');
+    const app = makeApp(vault);
+    const tfile = vault.getMarkdownFiles()[0];
+    const handItem: CinemaItem = {
+      file: tfile, name: '缓存未就绪', typeTag: '电影', group: '电影', watchDate: null, rating: null,
+      status: 2, poster: null, review: null, genre: null, director: null, actors: null,
+      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null,
+    };
+    M.items.push(handItem);
+    const items = rebuildItems(app);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toBe(handItem);
+  });
+
+  it('rebuildItems：已索引但无效的文件（frontmatter 无 tags）不被保留分支救回', () => {
+    const vault = new MockVault();
+    vault.files.set('我的/影视/《无效》.md', '---\n评分: 8\n---');
+    const app = makeApp(vault);
+    const tfile = vault.getMarkdownFiles()[0];
+    M.items.push({
+      file: tfile, name: '无效', typeTag: '电影', group: '电影', watchDate: null, rating: null,
+      status: 2, poster: null, review: null, genre: null, director: null, actors: null,
+      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null,
+    });
+    rebuildItems(app);
+    expect(M.items).toHaveLength(0);
+  });
 });
 
 describe('cinema 排序与筛选', () => {
@@ -126,13 +154,6 @@ describe('cinema 排序与筛选', () => {
     expect(getDisplayItems().map((i) => i.name)).toEqual(['新片', '旧片', '无日期']);
     M.typeFilter = null;
     expect(getDisplayItems().length).toBe(4);
-  });
-
-  it('二级筛选（subFilter）', () => {
-    seed();
-    M.subFilter = '美剧';
-    M.typeFilter = '剧集';
-    expect(getDisplayItems().map((i) => i.name)).toEqual(['剧']);
   });
 
   it('状态筛选', () => {
@@ -197,21 +218,4 @@ describe('cinema 工具函数', () => {
     expect(getGroupSafe('未知tag')).toBe('其他');
   });
 
-  it('相对日期（收编 core formatRelativeTime；enh-sweep B 包）', () => {
-    // 固定 now：2026-09-02 12:00 本地时区
-    const now = new Date(2026, 8, 2, 12, 0, 0);
-    const iso = (ms: number) => new Date(now.getTime() - ms).toISOString();
-    expect(relDate(iso(30 * 1000), now)).toBe('刚刚');
-    expect(relDate(iso(5 * 60 * 1000), now)).toBe('5分钟前');
-    expect(relDate(iso(3 * 3600 * 1000), now)).toBe('3小时前');
-    // 含时刻的输入：昨天/前天带 HH:mm（core 全站口径）
-    expect(relDate(iso(26 * 3600 * 1000), now)).toBe('昨天 10:00');
-    expect(relDate(iso(2.5 * 86400000), now)).toBe('前天 00:00');
-    // 跨年纯日期字符串（YYYY-MM-DD）→ 不带时刻
-    expect(relDate('2025-12-31', now)).toBe('2025-12-31');
-    // 未来 → 原样日期（含时刻）
-    expect(relDate(iso(-86400000), now)).toBe('2026-09-03 12:00');
-    expect(relDate(null, now)).toBe('未标注日期');
-    expect(relDate('not-a-date', now)).toBe('未标注日期');
-  });
 });

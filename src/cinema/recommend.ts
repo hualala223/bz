@@ -1,19 +1,20 @@
 /**
  * 影院（cinema）AI 荐片：复刻 movie/recommend.ts（真实 AI 调用 + 页内等待/结果 + 加入想看）
  * - 口味画像 buildTasteProfile（加权统计类型/题材/导演/主演/地区 + 最近观影）
- * - 提示词 buildRecommendPrompt（要求真实存在、引用画像偏好）
+ * - 提示词（2026-09-11 方案 A，用户拍板）：prompt 只发画像 + 最近已看，不发全量片名；
+ *   要 20 部按匹配度排序 → 结果层去重（在库/重复/空名）取前 5 → 不足补问一轮（排除已见名单）
  * - AI 页内化（用户拍板）：点入口切 AI 页 → 等待消息就地在页内显示 → 完成后结果列表就地渲染（不弹窗）
  * - ADR-0087：自旧 movie 迁入 runSimilarRecommend/buildSimilarPrompt（找同类）
  */
 import type { App } from 'obsidian';
 import { notice, notifySaveError } from '../core/notice';
+import { localNow } from '../core/ui/str';
 import { createAI } from '../core/ai';
 import { emitDomainEvent } from '../core/domain-bus';
-import { STATUS_WANT, STATUS_WATCHED } from './constants';
+import { STATUS_WATCHED } from './constants';
 import type { CinemaItem } from './state';
 import { M } from './state';
 import { refreshDataAndView } from './data';
-import { localNow } from '../core/ui/str';
 import { enqueueDoubanFetch } from './douban-queue';
 
 /** 类型 → 默认 tag（加入想看用） */
@@ -62,13 +63,14 @@ export function buildTasteProfile(): any {
   };
 }
 
-/** 荐片配额（方案 A，2026-09-11 拍板）：首轮要 20 → 本地去重 → 取匹配度前 5；不足 5 部补问一轮 */
+/** 荐片配额（方案 A，用户拍板 2026-09-11）：首轮要 20 → 本地去重 → 取匹配度前 5；不足 5 部补问一轮 */
 const RECOMMEND_ASK = 20;
 const RECOMMEND_TAKE = 5;
 const FOLLOWUP_ASK = 10;
 
-/** 构建推荐提示词（方案 A：不再打包全量片名做排除清单——prompt 只发正向信号（画像 + 最近已看），
- *  要求多给（20 部按匹配度排序），「不荐库内已有」职责移到结果层去重；token 从随库规模线性降为常量级） */
+/** 构建推荐提示词（2026-09-11 方案 A：不再打包全量片名做排除清单——
+ *  prompt 只发正向信号（画像 + 最近已看），要求多给（20 部按匹配度排序），
+ *  「不荐库内已有」职责移到结果层去重；token 从库规模线性降为常量级） */
 export function buildRecommendPrompt(profile: any, recent: string[]): string {
   return `你是资深影视推荐官。用户已看 ${profile.total} 部影视，以下是其口味画像（个人评分1~10加权统计，数值为加权分）：
 品类分布：${profile.groups.join('、') || '无'}
@@ -106,8 +108,10 @@ function recTitle(r: any): string {
   return String(r?.title || r?.name || '').trim();
 }
 
-/** 结果层去重：跳过空名 / 已拾取或已见过的名字 / 在库已有（it.name 精确匹配）；
- *  每个见过的名字都记入 taken——补问轮的排除清单据此构造（在库的也不再返回） */
+/**
+ * 结果层去重：跳过空名 / 已拾取或已见过的名字 / 在库已有（it.name 精确匹配）；
+ * 每个见过的名字都记入 taken——补问轮的排除清单据此构造（在库的也不再返回）
+ */
 function dedupeRecommendations(cands: any[], taken: Set<string>): any[] {
   const out: any[] = [];
   for (const r of cands ?? []) {
@@ -123,13 +127,13 @@ function dedupeRecommendations(cands: any[], taken: Set<string>): any[] {
 /**
  * 荐片结果精修（refine）：首轮候选去重后取前 5（AI 排序即相关性序）；
  * 不足 5 部 → 带已见名单补问一轮（FOLLOWUP_ASK），再去重补足；补问失败保留首轮所得。
- * 全程不抛错（内部兜底），空列表由 runAIRecommend 落错误文案。
+ * 全程不抛错（内部兜底），空列表由 runAIPage 落错误文案。
  */
 async function refineRecommend(first: any[]): Promise<any[]> {
   const taken = new Set<string>();
   const picked = dedupeRecommendations(first, taken).slice(0, RECOMMEND_TAKE);
   if (picked.length >= RECOMMEND_TAKE) return picked;
-  M.aiWaitMsg = '首轮候选在库较多，正在补充推荐…';
+  M.aiWaitMsg = `首轮候选在库较多，正在补充推荐…`;
   M.renderFn?.();
   try {
     const profile = buildTasteProfile();
@@ -162,8 +166,6 @@ export function parseRecommendJson(raw: string): any[] | null {
   }
 }
 
-// localNowFormat 已退役：localNow 单源收敛至 core/ui/str（票 275 遗留③，实现逐字节等价）
-
 /** 加入想看（AI 推荐条目 → 建笔记，评分 -1） */
 export async function quickAddWant(app: App, name: string, type: string): Promise<void> {
   const trimmedName = typeof name === 'string' ? name.trim() : '';
@@ -193,7 +195,7 @@ tags:
     notice(`已加入想看：${trimmedName}`, 'success');
     // 事件补发（smartcat 行为流观察；ADR-0087 cinema 接管）：created want
     emitDomainEvent('movie', { kind: 'created', name: trimmedName, status: 'want', rating: null, review: null });
-    // 豆瓣抓取队列接管（issue 261）：入队串行补抓，完成后自动刷新上卡
+    // 入抓取队列（ADR-0113）：卡片 loading 反馈，无通知
     enqueueDoubanFetch(f, trimmedName);
     refreshDataAndView(app);
   } catch (e) {
@@ -202,28 +204,35 @@ tags:
   }
 }
 
+/** AI 页请求参数：初始等待消息 + prompt/waitMsg 构造器（荐片与找同类仅此不同） */
+interface AIPageOpts {
+  /** 荐片传 null；找同类传基准影片（「换一批」按基准重跑） */
+  base: CinemaItem | null;
+  initWaitMsg: string;
+  prepare: () => { prompt: string; waitMsg: string };
+  /** 可选结果精修（荐片专用）：首轮结果 → 去重 + 不足补问 → 最终列表；找同类不传 */
+  refine?: (first: any[]) => Promise<any[]>;
+}
+
 /**
- * AI 荐片（页内化）：等待消息与结果都就地渲染在 AI 页内，不弹窗。
- * 触发方确保 M.view 已切到 'ai' 且 renderAll 已渲染（页内「开始/重试/换一批」按钮统一走 runAIRecommend；
- * 左栏工具钮只切页不发请求——增强包需求 4 按需触发）。
+ * AI 页状态机 runner（荐片/找同类共用骨架）：
+ * 重入防护 → 置等待态切 AI 页 → 构造 prompt 发请求 → 解析回填结果 / 错误。
+ * 结果与等待消息都就地渲染在 AI 页内，不弹窗。
  */
-export async function runAIRecommend(app: App): Promise<void> {
+async function runAIPage(app: App, opts: AIPageOpts): Promise<void> {
   // 重入防护：AI 运行中再点入口/开始按钮直接忽略（防双倍 token 消耗与并发写 M.aiResult 互相覆盖）
   if (M.aiRunning) return;
-  // 若从非 AI 页触发（如详情「找同类」外的按钮），先切页让等待态可见
   M.aiRunning = true;
-  M.aiWaitMsg = 'AI 正在分析你的观影口味…';
+  M.aiWaitMsg = opts.initWaitMsg;
   M.aiResult = null;
   M.aiError = null;
-  M.aiTitle = 'AI 荐片';
-  M.aiBase = null; // 荐片模式（「换一批」重跑荐片而非找同类）
+  M.aiBase = opts.base;
   M.view = 'ai';
   M.renderFn?.();
 
   try {
-    const profile = buildTasteProfile();
-    const prompt = buildRecommendPrompt(profile, profile.recent);
-    M.aiWaitMsg = `已分析 ${profile.total} 部观影历史，正在生成推荐…`;
+    const { prompt, waitMsg } = opts.prepare();
+    M.aiWaitMsg = waitMsg;
     M.renderFn?.();
     const ai = createAI();
     const raw = await ai.json(prompt, {});
@@ -234,11 +243,11 @@ export async function runAIRecommend(app: App): Promise<void> {
       M.renderFn?.();
       return;
     }
-    // 补问轮（含第二次 AI 往返）期间 aiRunning 保持 true：提前翻 false 会落在
-    // 「aiRunning=false/aiResult=null/aiError=null」的三空态上——AI 页整页回落待机 guide、
-    // 「开始推荐」重新可点、重入守卫失效（可触发第二次并发 AI 双倍 token、两轮结果互相覆盖）。
-    // 翻 false 推迟到 refine 结束、结果/错误落定之后
-    const final = await refineRecommend(parsed);
+    // B（补扫 cinema P2）：refine（荐片补问轮，含第二次 AI 往返）期间保持 aiRunning=true——
+    // 提前翻 false 会落在「aiRunning=false/aiResult=null/aiError=null」的三空态上：AI 页整页
+    // 回落待机 guide、「开始推荐」重新可点、重入守卫失效（可触发第二次并发 AI 双倍 token、
+    // 两轮结果互相覆盖）。翻 false 推迟到 refine 结束、结果/错误落定之后
+    const final = opts.refine ? await opts.refine(parsed) : parsed;
     M.aiRunning = false;
     if (!final.length) {
       M.aiError = '没有凑齐可推荐的库外新片，换一批再试';
@@ -255,43 +264,39 @@ export async function runAIRecommend(app: App): Promise<void> {
 }
 
 /**
+ * AI 荐片（页内化）。
+ * 触发方确保 M.view 已切到 'ai' 且 renderAll 已渲染（页内「开始/重试/换一批」按钮统一走 runAIRecommend；
+ * 左栏工具钮只切页不发请求——增强包需求 4 按需触发）。
+ */
+export function runAIRecommend(app: App): Promise<void> {
+  return runAIPage(app, {
+    base: null, // 荐片模式（「换一批」重跑荐片而非找同类）
+    initWaitMsg: 'AI 正在分析你的观影口味…',
+    prepare: () => {
+      const profile = buildTasteProfile();
+      return {
+        prompt: buildRecommendPrompt(profile, profile.recent),
+        waitMsg: `已分析 ${profile.total} 部观影历史，正在生成推荐…`,
+      };
+    },
+    refine: refineRecommend,
+  });
+}
+
+/**
  * 找同类（ADR-0087 自旧 movie/recommend.ts runSimilarRecommend 迁入）：
- * 以基准影片 + 已看库为输入，推荐同类佳作。结果走页内渲染（AI 页状态机，不弹窗）。
+ * 以基准影片 + 已看库为输入，推荐同类佳作。
  * @param item 当前详情/基准影片
  */
-export async function runSimilarRecommend(item: CinemaItem, app: App): Promise<void> {
-  // 重入防护：与 AI 荐片共用 aiRunning 状态机，运行中再触发直接忽略
-  if (M.aiRunning) return;
-  // 页内等待态（复用 AI 页状态机；标题区分「找同类 ·《X》」）；记录基准影片供「换一批」重跑
-  M.aiRunning = true;
-  M.aiWaitMsg = 'AI 正在分析同类影片…';
-  M.aiResult = null;
-  M.aiError = null;
-  M.aiTitle = `找同类 ·《${item.name}》`;
-  M.aiBase = item;
-  M.view = 'ai';
-  M.renderFn?.();
-  try {
-    const watched = M.items.filter((i) => i.status === STATUS_WATCHED && i.name !== item.name);
-    M.aiWaitMsg = `已分析 ${M.items.length} 部影视，正在生成同类推荐…`;
-    M.renderFn?.();
-    const ai = createAI();
-    const raw = await ai.json(buildSimilarPrompt(item, watched), {});
-    const parsed = parseRecommendJson(raw);
-    if (!parsed || parsed.length === 0) {
-      M.aiRunning = false;
-      M.aiError = 'AI 分析失败：返回格式无法解析';
-      M.renderFn?.();
-      return;
-    }
-    M.aiRunning = false;
-    M.aiResult = parsed;
-    M.renderFn?.();
-  } catch (e: any) {
-    M.aiRunning = false;
-    M.aiError = 'AI 分析失败：' + (e.message || e);
-    M.renderFn?.();
-  }
+export function runSimilarRecommend(item: CinemaItem, app: App): Promise<void> {
+  return runAIPage(app, {
+    base: item, // 记录基准影片供「换一批」重跑
+    initWaitMsg: 'AI 正在分析同类影片…',
+    prepare: () => ({
+      prompt: buildSimilarPrompt(item, M.items.filter((i) => i.status === STATUS_WATCHED && i.name !== item.name)),
+      waitMsg: `已分析 ${M.items.length} 部影视，正在生成同类推荐…`,
+    }),
+  });
 }
 
 /** 找同类提示词：以基准影片 + 已看库为输入，要求推荐未看过的同类佳作（输出结构与其他 AI 保持一致） */

@@ -385,6 +385,12 @@ export default interface BzSettings {
   cinemaStatusFilter: string;
   cinemaGridColumns: string;
   cinemaStyle: string;
+  /** 影院抓取：ApiZero Key（豆瓣字段接口，apizero.cn；空 = 字段走豆瓣演职员兜底，ADR-0129） */
+  cinemaApizeroKey: string;
+  /** 影院抓取：豆瓣 Cookie（搜索页风控时提高成功率，可选） */
+  cinemaDoubanCookie: string;
+  /** 影院：面板主题皮肤键（午夜场布局下的主题，渲染待皮肤设计接入） */
+  cinemaSkinTheme: string;
   cinemaMobileDefaultFullscreen: boolean;
   /** 番茄钟：移动端默认全屏（默认关——原移动端 320px 居中卡） */
   pomodoroMobileDefaultFullscreen: boolean;
@@ -590,6 +596,9 @@ export const DEFAULT_SETTINGS: BzSettings = {
   cinemaStatusFilter: '',
   cinemaGridColumns: '5',
   cinemaStyle: 'midnight',
+  cinemaApizeroKey: '',
+  cinemaDoubanCookie: '',
+  cinemaSkinTheme: 'nightfall',
 
 
   // 做题家（设置并入复习计划 tab）

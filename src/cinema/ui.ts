@@ -10,49 +10,35 @@
  * 落域适配（ADR-0103 §5，原型不出）：移动头行补 ✕ 关闭钮；移动 ✦ 再点回列表。
  * 图标：lucide（纯层 data-lucide 占位 → mountIcons 统一 setIcon）；弹窗 ESC 走 escManager 层级。
  */
-import type { App } from 'obsidian';
+import type { App, IconName } from 'obsidian';
 import { TFile } from 'obsidian';
 import { notice, notifySaveError } from '../core/notice';
 import { emitDomainEvent } from '../core/domain-bus';
-import { escManager } from '../core/esc-manager';
-import { applyMobileWindowFullscreen, isMobileEnv } from '../core/mobile';
-import { topifyZ } from '../core/dom';
-import { tryGetSettings, saveSettings } from '../core/settings-provider';
+import { escManager, registerPanelEsc, unregisterPanelEsc } from '../core/esc-manager';
+import { isMobileEnv } from '../core/mobile';
+import { topifyZ, longPress } from '../core/dom';
+import { openItemMenu, openItemSheet, closeItemMenu, resetItemMenuClickGuard, type ItemAction } from '../core/item-actions';
+import { tryGetSettings } from '../core/settings-provider';
 import { mountIcons } from '../core/ui';
 import {
   STATUS_WANT, STATUS_WATCHING, STATUS_WATCHED, DEFAULT_RATING,
-  getGroupForTag, type CinemaStyle,
+  getGroupForTag,
 } from './constants';
 import { M, type CinemaItem, type CinemaSortMode } from './state';
 import { rebuildItems, getDisplayItems } from './data';
-import { formatRelativeTime } from '../core/utils';
 import { localNow } from '../core/ui/str';
 import { runAIRecommend, runSimilarRecommend, buildTasteProfile, quickAddWant } from './recommend';
-import { buildStatPageHtml } from './analysis';
+import { buildAnalysisHTML } from './analysis';
 import { enqueueDoubanFetch, dequeueDoubanFetch, isFetching } from './douban-queue';
 import {
   ICON, statusText, itemByKey, doubanSearchUrl,
-  detailModalHtml, confirmModalHtml, formModalHtml, setModalHtml,
-  aiPageHtml, actionRowsHtml, sheetHeadHtml, pcardHtml, type AiPageInput,
+  detailModalHtml, confirmModalHtml, formModalHtml,
+  aiPageHtml, sheetHeadHtml, pcardHtml, type AiPageInput,
   midnightDeskHtml, midnightMobHtml, renderMidnightDesk, renderMidnightMob,
   type MidnightRenderInput,
 } from './render';
 
 // ---------- 小工具 ----------
-
-/** 当前风格（设置 cinemaStyle；非法值回默认午夜场；重开面板生效。读设置属行为层，ADR-0104） */
-function cinemaStyleOf(): CinemaStyle {
-  const raw = (tryGetSettings() as Record<string, unknown>).cinemaStyle;
-  return raw === 'gazette' || raw === 'booth' ? raw : 'midnight';
-}
-
-/** 相对日期：统一走 core formatRelativeTime；本域仅保留「未标注日期」兜底语义 */
-export function relDate(d: string | null, now: Date = new Date()): string {
-  if (!d) return '未标注日期';
-  const t = new Date(d).getTime();
-  if (isNaN(t)) return '未标注日期';
-  return formatRelativeTime(d, now);
-}
 
 // ---------- 海报 ----------
 
@@ -84,7 +70,8 @@ function openDouban(item: CinemaItem): void {
   }
 }
 
-/** 快速标记状态（菜单/抽屉「标记在看」；「标记已看」已改走编辑窗——评分影评由用户在表单输入，saveEdit 落盘时补发同款域事件）：评分映射 + 状态流转即刷新观影日期 + 域事件补发 */
+/** 快速标记状态（菜单/抽屉「标记在看」）：状态流转 + 刷新观影日期 + 域事件补发。
+ *  「标记已看」已改走编辑窗（评分影评由用户在表单输入，saveEdit 落盘时补发同款域事件） */
 async function markStatus(item: CinemaItem, target: '在看' | '已看', sec: HTMLElement, app: App): Promise<void> {
   const fromSt = item.status === STATUS_WANT ? 'want' : item.status === STATUS_WATCHING ? 'watching' : 'watched';
   const prevRating = item.rating && item.rating > 0 ? item.rating : null;
@@ -114,7 +101,7 @@ async function markStatus(item: CinemaItem, target: '在看' | '已看', sec: HT
   }
 }
 
-/** 菜单/抽屉动作列表（顺序即显示顺序；业务语义与旧版一致） */
+/** 菜单/抽屉动作列表（顺序即显示顺序） */
 interface MenuAct { icon: string; label: string; danger?: boolean; run: () => void }
 function itemActions(it: CinemaItem, sec: HTMLElement, app: App): MenuAct[] {
   const out: MenuAct[] = [{ icon: ICON.eye, label: '打开详情', run: () => openDetail(sec, it, app) }];
@@ -122,8 +109,8 @@ function itemActions(it: CinemaItem, sec: HTMLElement, app: App): MenuAct[] {
     out.push({ icon: ICON.play, label: '标记在看', run: () => void markStatus(it, '在看', sec, app) });
   }
   if (it.status !== STATUS_WATCHED) {
-    // 标记已看不直改状态/评分：改走编辑窗预选「已看」，评分影评由用户确认后保存（上游 6cb2ac88，票 275①）
-  out.push({ icon: 'check', label: '标记已看', run: () => openForm(sec, it, app, '已看') });
+    // 标记已看不直改状态/评分：改走编辑窗预选「已看」，评分影评由用户确认后保存（memo item-1789105594322）
+    out.push({ icon: 'check', label: '标记已看', run: () => openForm(sec, it, app, '已看') });
   }
   out.push(
     { icon: ICON.ai, label: '找同类', run: () => void runSimilarRecommend(it, app) },
@@ -135,9 +122,6 @@ function itemActions(it: CinemaItem, sec: HTMLElement, app: App): MenuAct[] {
 }
 
 // ---------- 落盘（数据契约零改动） ----------
-
-// localNow 单源收敛（票 275 遗留③）：`core/ui/str` 的 localNow（上游同款，逐字节等价），
-// 影院 ui/recommend 两份私有实现退役。
 
 /** 文件名非法字符（Windows 保留集；名称源自文件名《X》，改名前拦截） */
 const ILLEGAL_NAME_RE = /[\\/:*?"<>|]/;
@@ -248,74 +232,53 @@ function panelToast(sec: HTMLElement | null, msg: string): void {
   setTimeout(() => t.remove(), 1800);
 }
 
-// ---------- 弹窗：右键菜单 / 长按抽屉 ----------
+// ---------- 弹窗：跟手菜单 / 长按抽屉（统一走 core/item-actions） ----------
+//
+// 手势与浮层实现全部交由共享层：桌面 contextmenu → core openItemMenu；移动端长按 →
+// core/dom.longPress → core openItemSheet。防穿透（长按松手补发的合成 click 会命中刚
+// 打开的遮罩把抽屉关掉，用户感知「长按没反应」）、下滑关闭、ESC、外部点击关闭、键盘导航
+// 均由 core 承载；本域只传动作集与皮肤类（观感见 styles.css 的皮肤段）。
 
-function closeMenus(): void {
-  M.currentOverlay?.querySelectorAll('.cn-menu').forEach((m) => m.remove());
-}
-function closeSheets(): void {
-  M.currentOverlay?.querySelectorAll('.cn-sheet,.cn-sheet-mask').forEach((x) => x.remove());
-}
+/** 浮层皮肤类（取色锚 cn-skin：core 浮层挂 body，不在面板树内，取不到午夜场调色板） */
+const MENU_SKIN = 'cn-skin cn-menu-skin';
+const SHEET_SKIN = 'cn-skin cn-sheet-skin';
 
-/** 桌面右键菜单（.cn-menu；坐标相对面板根；动作行 markup 单源 actionRowsHtml） */
-function openMenu(sec: HTMLElement, it: CinemaItem, app: App, x: number, y: number): void {
-  closeMenus();
-  const acts = itemActions(it, sec, app);
-  const el = document.createElement('div');
-  el.className = 'cn-menu';
-  el.innerHTML = actionRowsHtml(acts, 'cn-menu-item');
-  ovHost(sec).appendChild(el);
-  mountIcons(el);
-  const mw = el.offsetWidth, mh = el.offsetHeight, W = sec.clientWidth, H = sec.clientHeight;
-  el.style.left = Math.min(x, W - mw - 8) + 'px';
-  el.style.top = Math.min(y, H - mh - 8) + 'px';
-  el.addEventListener('click', (e) => {
-    const b = (e.target as HTMLElement).closest('[data-i]') as HTMLElement | null;
-    if (!b) return;
-    el.remove();
-    acts[Number(b.dataset.i)].run();
-  });
-  setTimeout(() => document.addEventListener('click', function h() { el.remove(); document.removeEventListener('click', h); }), 0);
+/** 域动作 → core ItemAction（icon 为 lucide 名，与 ItemAction.icon 同源） */
+function toItemActions(acts: MenuAct[]): ItemAction[] {
+  return acts.map((a) => ({
+    icon: a.icon as IconName,
+    label: a.label,
+    kind: a.danger ? 'danger' : undefined,
+    onClick: a.run,
+  }));
 }
 
-/** 移动端长按抽屉（.cn-sheet-mask + .cn-sheet，头=海报+名称+meta） */
-function openSheet(sec: HTMLElement, it: CinemaItem, app: App): void {
-  if (!sec.isConnected) return;
-  closeSheets();
-  const acts = itemActions(it, sec, app);
-  const url = posterUrl(it, app);
-  const mask = document.createElement('div');
-  mask.className = 'cn-sheet-mask';
-  const el = document.createElement('div');
-  el.className = 'cn-sheet';
-  el.innerHTML = sheetHeadHtml(it, url) + actionRowsHtml(acts, 'cn-sheet-item');
-  ovHost(sec).appendChild(mask);
-  ovHost(sec).appendChild(el);
-  mountIcons(el);
-  const closeAll = () => { mask.remove(); el.remove(); };
-  mask.addEventListener('click', closeAll);
-  el.addEventListener('click', (e) => {
-    const b = (e.target as HTMLElement).closest('[data-i]') as HTMLElement | null;
-    if (!b) return;
-    closeAll();
-    acts[Number(b.dataset.i)].run();
-  });
+/** 抽屉头部节点（海报 + 名称 + meta）：markup 单源 shared.sheetHeadHtml，core 侧要元素 */
+function sheetHeadEl(it: CinemaItem, url: string | null): HTMLElement {
+  const box = document.createElement('div');
+  box.innerHTML = sheetHeadHtml(it, url);
+  return (box.firstElementChild as HTMLElement) ?? box;
 }
 
-/** 长按绑定（m-grid 卡片每次重渲染重建后重挂；lpFired 吞长按后的终端 click 防双开） */
-let lpTimer: ReturnType<typeof setTimeout> | null = null;
-let lpFired = false;
+/** 移动端长按 → 底部抽屉（手势 core/dom.longPress；卡片每次重渲染重建后重挂）。 */
 function attachLongPress(sec: HTMLElement, app: App): void {
   sec.querySelectorAll<HTMLElement>('.m-grid .pcard').forEach((c) => {
-    c.addEventListener('pointerdown', () => {
+    // 原生长按菜单（保存图片/复制链接）让位给抽屉
+    c.addEventListener('contextmenu', (ev) => ev.preventDefault());
+    longPress(c, () => {
       const it = itemByKeyInState(c.dataset.cinemaKey);
       if (!it) return;
-      lpFired = false;
-      lpTimer = setTimeout(() => { lpFired = true; openSheet(sec, it, app); }, 450);
+      openSheet(sec, it, app);
     });
-    ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => c.addEventListener(ev, () => { if (lpTimer) clearTimeout(lpTimer); }));
-    c.addEventListener('click', (e) => { if (lpFired) { e.stopImmediatePropagation(); lpFired = false; } });
-    c.addEventListener('contextmenu', (ev) => ev.preventDefault());
+  });
+}
+
+/** 移动端抽屉：core openItemSheet（遮罩 + 底部滑入 + 头部信息 + 动作行，皮肤保午夜场观感） */
+function openSheet(sec: HTMLElement, it: CinemaItem, app: App): void {
+  if (!sec.isConnected) return;
+  openItemSheet(toItemActions(itemActions(it, sec, app)), {
+    sheetClass: SHEET_SKIN,
+    sheetHead: sheetHeadEl(it, posterUrl(it, app)),
   });
 }
 
@@ -325,16 +288,15 @@ function openDetail(sec: HTMLElement, it: CinemaItem, app: App): void {
   const url = posterUrl(it, app);
   const { el, close } = ovl(sec, detailModalHtml(it, url));
   mountIcons(el);
-  el.querySelector('.j-close')?.addEventListener('click', close);
   el.querySelector('.j-edit')?.addEventListener('click', () => { close(); openForm(sec, it, app); });
   el.querySelector('.j-del')?.addEventListener('click', () => { close(); openConfirm(sec, it, app); });
   el.querySelector('.j-similar')?.addEventListener('click', () => { close(); void runSimilarRecommend(it, app); });
 }
 
 /**
- * 随机抽一部（命令 bz-cinema-random-pick，票 275②）：从「想看」池随机挑一部并直接开详情
- * （选择困难时的出口）；想看池空则退到全量并说明，免得点了没反应。面板未打开则先冷开面板再叠详情弹窗
- * （与「影视分析报告」同一打开口径）。
+ * 随机抽一部（命令 bz-cinema-random-pick，2026-09-11 首页入口菜单）：
+ * 从「想看」池随机挑一部并**直接开详情**（选择困难时的出口）；想看池空则退到全量并说明，
+ * 免得点了没反应。面板未打开则先冷开面板再叠详情弹窗（与「影视分析报告」同一打开口径）。
  */
 export function openRandomMovie(app: App): void {
   rebuildItems(app);
@@ -346,8 +308,8 @@ export function openRandomMovie(app: App): void {
   }
   const it = pool[Math.floor(Math.random() * pool.length)];
   if (!M.currentOverlay) createOverlay(app);
-  // 面板已开时先整刷（pickRandomCinema 已把 M.view 回落 list，样板同 openCinemaAnalysis 的
-  // 「已开则 renderAll」分支）——否则详情弹窗叠在旧 ai/stat 页上，状态与画面错位
+  // C（补扫 cinema P3）：面板已开时先整刷（pickRandomCinema 已把 M.view 回落 list，样板同
+  // openCinemaAnalysis 的「已开则 renderAll」分支）——否则详情弹窗叠在旧 ai/stat 页上，状态与画面错位
   else renderAll(app);
   const root = M.currentOverlay?.querySelector<HTMLElement>('[data-cinema-root]');
   if (!root) return;
@@ -357,6 +319,8 @@ export function openRandomMovie(app: App): void {
 
 // ---------- 弹窗：添加 / 编辑表单 ----------
 
+/** 添加/编辑表单弹窗。presetSt：预选状态（中文口径，如「已看」）——「标记已看」入口传入，
+ *  状态 chip 预选、评分滑杆（预填当前评分，无则默认分）与影评框自动展开；弹窗本身不落盘，保存才生效 */
 function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?: string): void {
   const editing = !!item;
   const initTag = item ? item.typeTag : '电影';
@@ -379,7 +343,6 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
     (el.querySelector('.j-rating') as HTMLElement).style.display = show ? '' : 'none';
     (el.querySelector('.j-review') as HTMLElement).style.display = show ? '' : 'none';
   }));
-  el.querySelector('.j-close')?.addEventListener('click', close);
   el.querySelector('.j-save')?.addEventListener('click', () => {
     const name = (el.querySelector('.j-name') as HTMLInputElement).value.trim();
     if (!name) { panelToast(sec, '请输入名称'); return; }
@@ -399,7 +362,7 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
 
 interface FormPayload { name: string; tag: string; st: string; rating: number | null; date: string; review: string }
 
-/** 新增落盘（CM2：重名/落盘失败回退；created 域事件 + 海报守护接管） */
+/** 新增落盘（CM2：重名/落盘失败回退；created 域事件 + 抓取队列接管） */
 async function saveNew(sec: HTMLElement, p: FormPayload, app: App, close: () => void): Promise<void> {
   const group = getGroupForTag(p.tag) ?? '其他';
   const st = p.st === '想看' ? STATUS_WANT : p.st === '在看' ? STATUS_WATCHING : STATUS_WATCHED;
@@ -427,7 +390,7 @@ async function saveNew(sec: HTMLElement, p: FormPayload, app: App, close: () => 
   }
 }
 
-/** 编辑落盘：改名前置校验（非法字符/重名拦截）→ persistItem（rename + frontmatter tags） */
+/** 编辑落盘：改名前置校验（非法字符/重名拦截）→ persistItem（rename + frontmatter tags）→ 域事件补发 */
 async function saveEdit(sec: HTMLElement, item: CinemaItem, p: FormPayload, app: App, close: () => void): Promise<void> {
   const group = getGroupForTag(p.tag) ?? '其他';
   const st = p.st === '想看' ? STATUS_WANT : p.st === '在看' ? STATUS_WATCHING : STATUS_WATCHED;
@@ -447,7 +410,7 @@ async function saveEdit(sec: HTMLElement, item: CinemaItem, p: FormPayload, app:
   try {
     await persistItem(item, app, { prevName: prev.name, prevTag: prev.typeTag });
     // 域事件补发（与快速标记 markStatus 同口径）：状态流转 + 评分变化 → 小橘行为流；
-    // 「标记已看」改走编辑窗后由这里承接原 markStatus 的事件语义（票 275①）
+    // 「标记已看」改走本函数后由这里承接原 markStatus 的事件语义
     const fromSt = prev.status === STATUS_WANT ? 'want' : prev.status === STATUS_WATCHING ? 'watching' : 'watched';
     if (st !== prev.status) {
       const toSt = st === STATUS_WANT ? 'want' : st === STATUS_WATCHING ? 'watching' : 'watched';
@@ -495,32 +458,6 @@ function openConfirm(sec: HTMLElement, item: CinemaItem, app: App): void {
   });
 }
 
-// ---------- 弹窗：影院设置（面板内；写插件设置经 saveSettings 持久化） ----------
-
-function openSet(sec: HTMLElement, app: App): void {
-  const s = tryGetSettings() as Record<string, unknown>;
-  const sort = s.cinemaSortMode === 'created' || s.cinemaSortMode === 'rating' ? (s.cinemaSortMode as string) : 'date';
-  const stf = typeof s.cinemaStatusFilter === 'string' ? s.cinemaStatusFilter : '';
-  const cols = gridColumns();
-  const mobFull = s.cinemaMobileDefaultFullscreen === true;
-  const { el, close } = ovl(sec, setModalHtml({ sort, stf, cols, mobFull, folderPath: M.folderPath }));
-  mountIcons(el);
-  el.querySelector('.j-close')?.addEventListener('click', close);
-  el.querySelector('.j-sw')?.addEventListener('click', (e) => (e.currentTarget as HTMLElement).classList.toggle('on'));
-  el.querySelector('.j-save')?.addEventListener('click', () => {
-    s.cinemaSortMode = (el.querySelector('.j-sort') as HTMLSelectElement).value;
-    s.cinemaStatusFilter = (el.querySelector('.j-stf') as HTMLSelectElement).value;
-    s.cinemaGridColumns = String(Math.min(12, Math.max(2, parseInt((el.querySelector('.j-cols') as HTMLInputElement).value, 10) || 5)));
-    s.cinemaMobileDefaultFullscreen = el.querySelector('.j-sw')?.classList.contains('on') ?? false;
-    void saveSettings();
-    M.sortMode = s.cinemaSortMode as CinemaSortMode;
-    M.statusFilter = (s.cinemaStatusFilter as string) || null;
-    close();
-    panelToast(sec, '设置已保存');
-    renderAll(app);
-  });
-}
-
 // ---------- 共享页：AI 荐片（画像行 + 页面状态快照 → 纯层 aiPageHtml） ----------
 
 /** 偏好行（buildTasteProfile 真实画像；无数据回退「暂无」） */
@@ -559,7 +496,7 @@ function midnightInput(app: App): MidnightRenderInput {
     watchedCount: watchedCount(),
     aiHtml: aiPageHtml(aiInput()),
     aiCount: M.aiResult && M.aiResult.length ? M.aiResult.length : null,
-    statHtml: buildStatPageHtml(),
+    statHtml: buildAnalysisHTML(),
     poster: (it) => posterUrl(it, app),
     fetching: (it) => isFetching(it.file?.path),
   };
@@ -623,14 +560,15 @@ function bindMidnight(sec: HTMLElement, app: App): void {
     }
     const tool = t.closest('.j-tool') as HTMLElement | null;
     if (tool && tool.dataset.tool) {
+      // 进 ai/stat 不动筛选状态：rail 高亮由渲染层按视图熄灭（render.ts listOn 门控），
+      // 返回列表时先前选中的筛选高亮原样恢复
       M.view = M.view === tool.dataset.tool ? 'list' : (tool.dataset.tool as 'ai' | 'stat');
       renderAll(app);
       return;
     }
-    const mb = t.closest('.j-mai,.j-mstat,.j-mgear,.j-mclose') as HTMLElement | null;
+    const mb = t.closest('.j-mai,.j-mstat,.j-mclose') as HTMLElement | null;
     if (mb) {
-      if (mb.classList.contains('j-mgear')) openSet(sec, app);
-      else if (mb.classList.contains('j-mclose')) closeOverlay();
+      if (mb.classList.contains('j-mclose')) closeOverlay();
       else {
         const v = mb.classList.contains('j-mai') ? 'ai' : 'stat';
         M.view = M.view === v ? 'list' : v; // 落域适配：再点回列表
@@ -655,8 +593,7 @@ function bindMidnight(sec: HTMLElement, app: App): void {
     }
     const chip = t.closest('.chip') as HTMLElement | null;
     if (chip) {
-      // chips 属列表视图：在 AI/分析页点 chips 必须回落列表（否则筛选生效但页面停在原视图，看着像「点了没反应」）
-      M.view = 'list';
+      M.view = 'list'; // chips 属列表视图：在 AI/分析页点 chips 必须回落列表（否则筛选生效但页面停在原视图，看着像「点了没反应」）
       if (chip.dataset.c) {
         M.typeFilter = chip.dataset.c === 'all' ? null : chip.dataset.c;
         M.statusFilter = null;
@@ -673,9 +610,7 @@ function bindMidnight(sec: HTMLElement, app: App): void {
       renderAll(app);
       return;
     }
-    const analysisAdd = t.closest('[data-cinema-analysis-add]') as HTMLElement | null;
-    if (analysisAdd) { openForm(sec, null, app); return; }
-    const add = t.closest('[data-cinema-add]') as HTMLElement | null;
+    const add = t.closest('[data-cinema-analysis-add],[data-cinema-add]') as HTMLElement | null;
     if (add) { openForm(sec, null, app); return; }
     const cardEl = t.closest('.pcard') as HTMLElement | null;
     if (cardEl) {
@@ -684,13 +619,19 @@ function bindMidnight(sec: HTMLElement, app: App): void {
     }
   });
   sec.addEventListener('contextmenu', (e) => {
+    // 桌面壳专属：右键菜单是鼠标惯用件。移动壳分流——触屏长按会同时发 pointerdown 与
+    // contextmenu，不分流就会多弹一个鼠标菜单盖在抽屉上；移动端长按手势走 core/dom.longPress。
+    if (sec.classList.contains('mob')) return;
     const cardEl = (e.target as HTMLElement).closest('.pcard') as HTMLElement | null;
     if (!cardEl) return;
     e.preventDefault();
     const it = itemByKeyInState(cardEl.dataset.cinemaKey);
     if (!it) return;
-    const h = sec.getBoundingClientRect();
-    openMenu(sec, it, app, e.clientX - h.left + 4, e.clientY - h.top + 4);
+    // core 跟手菜单（防溢出定位/ESC/外部点击关闭/键盘导航由共享层承载）
+    openItemMenu(e.clientX, e.clientY, toItemActions(itemActions(it, sec, app)), true, MENU_SKIN);
+    // 右键时序会置位残余 click 抑制（Chromium：mousedown → contextmenu → mouseup 落在菜单外），
+    // 吞掉下一次左键（菜单项要点两次才生效）；右键无补发 click，直调后立即复位
+    resetItemMenuClickGuard();
   });
 }
 
@@ -699,7 +640,6 @@ function bindMidnight(sec: HTMLElement, app: App): void {
 export function createOverlay(app: App): void {
   const overlay = document.createElement('div');
   overlay.className = 'bz-panel-overlay';
-  cinemaStyleOf(); // 风格单源（gazette/booth 延后，issue 236：本批仅午夜场上岸）
   const mobile = isMobileEnv();
   overlay.innerHTML = mobile ? midnightMobHtml() : midnightDeskHtml();
 
@@ -709,9 +649,6 @@ export function createOverlay(app: App): void {
   M.renderFn = () => renderAll(app);
   const root = overlay.querySelector<HTMLElement>('[data-cinema-root]');
   if (!root) return;
-  if (mobile) {
-    applyMobileWindowFullscreen(root, (tryGetSettings() as Record<string, unknown>).cinemaMobileDefaultFullscreen === true);
-  }
   // 点遮罩 = 关闭主面板（桌面；移动全屏无遮罩）
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) closeOverlay();
@@ -749,6 +686,7 @@ export function renderAll(app: App): void {
 
 export function closeOverlay(): void {
   if (M.searchDebounceTimer) clearTimeout(M.searchDebounceTimer);
+  closeItemMenu(); // 浮层（跟手菜单/抽屉）挂 body，不随面板移除 → 关面板时一并收掉
   if (M.currentOverlay) {
     M.currentOverlay.remove();
     M.currentOverlay = null;
@@ -759,12 +697,6 @@ export function closeOverlay(): void {
 
 // ---------- ESC（主面板；弹窗层各自注册更高优先级） ----------
 
-let mainEscRegistered = false;
 export function registerEscapeHandler(): void {
-  if (mainEscRegistered) return;
-  mainEscRegistered = true;
-  escManager.register('bz-cinema', {
-    isVisible: () => !!M.currentOverlay,
-    close: () => closeOverlay(),
-  });
+  registerPanelEsc('bz-cinema', () => !!M.currentOverlay, () => closeOverlay());
 }

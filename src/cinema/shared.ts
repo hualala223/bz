@@ -17,12 +17,9 @@
 import { esc, iconSpan } from '../core/ui/str';
 import {
   STATUS_WANT, STATUS_WATCHING, STATUS_WATCHED,
-  GROUP_ORDER, TYPE_COLORS, getGroupForTag,
+  GROUP_ORDER, TYPE_COLORS, getGroupForTag, getStarString,
 } from './constants';
 import type { CinemaItem } from './state';
-
-// 再出口（壳经 window.BZR_cinema 取用；插件 ui.ts 亦统一从这里取）
-export { esc, iconSpan };
 
 // ---------- 图标名 ----------
 
@@ -41,8 +38,6 @@ export const ICON = {
   eye: 'eye',
   play: 'play',
   globe: 'globe',
-  film: 'clapperboard',
-  gear: 'sliders-horizontal',
 } as const;
 
 // ---------- 格式化/口径 ----------
@@ -66,17 +61,6 @@ export function statusColor(status: number | string): string {
 export function statusText(status: number | string): string {
   const v = statusNum(status);
   return v === STATUS_WANT ? '想看' : v === STATUS_WATCHING ? '在看' : '已看';
-}
-
-/** 星星串（沿用 floor 口径：半星=空心；5 星轨道文本） */
-export function stars(rating: number): string {
-  if (!rating || rating <= 0) return '';
-  const st = Math.min(Math.round((rating / 2) * 2) / 2, 5);
-  const full = Math.floor(st);
-  let s = '';
-  for (let i = 0; i < full; i++) s += '★';
-  for (let j = full; j < 5; j++) s += '☆';
-  return s;
 }
 
 /** 豆瓣搜索页 URL（无豆瓣链接条目的直达兜底） */
@@ -105,20 +89,22 @@ export function posterInner(item: CinemaItem, url: string | null): string {
 }
 
 /** 片卡 HTML（desk 网格与 mob 长按网格同一张卡；data-cinema-key = CM3 稳定键）；
- *  fetching=后台抓取中 → 海报区遮罩 spinner（issue 261，ADR-0113） */
+ *  fetching=后台抓取中 → 海报区遮罩 spinner（ADR-0113） */
 export function pcardHtml(it: CinemaItem, posterUrl: string | null, fetching = false): string {
   const r = it.rating;
   return `<div class="pcard" data-cinema-key="${esc(itemKey(it))}"><div class="pw">${posterInner(it, posterUrl)}${fetching ? '<div class="pw-fetch"><span class="pw-spin"></span></div>' : ''}
     ${(() => { const st = statusNum(it.status); return st !== STATUS_WATCHED ? `<span class="badge" style="background:${statusColor(st)}">${statusText(st)}</span>` : ''; })()}</div>
     <div class="pname">${esc(it.name)}</div>
     <div class="pmeta">${esc(it.year || '')}${it.year && it.director ? ' · ' : ''}${esc(it.director || '')}</div>
-    <div class="pstars">${r && r > 0 ? stars(r) + `<span class="num">${Number(r).toFixed(1)}</span>` : '<span style="opacity:.35">未评分</span>'}</div></div>`;
+    <div class="pstars">${r && r > 0 ? getStarString(r) + `<span class="num">${Number(r).toFixed(1)}</span>` : '<span style="opacity:.35">未评分</span>'}</div></div>`;
 }
 
 // ---------- 视图状态快照（纯层禁读 M：筛选/排序/视图显式入参） ----------
 
+export type CinemaViewKind = 'list' | 'ai' | 'stat';
+
 export interface CinemaView {
-  view: 'list' | 'ai' | 'stat';
+  view: CinemaViewKind;
   typeFilter: string | null;
   statusFilter: string | null;
   sortMode: string;
@@ -144,12 +130,11 @@ export function detailModalHtml(it: CinemaItem, posterUrl: string | null): strin
     ['豆瓣评分', it.doubanRating ?? ''],
   ] as [string, string][]).filter(([, v]) => v !== '');
   return `<div class="cn-modal" style="max-width:400px;width:100%">
-    <button class="cn-modal-x j-close" title="关闭">${iconSpan(ICON.close)}</button>
     <div class="dm-head"><div class="dm-poster">${posterUrl ? `<img src="${esc(posterUrl)}" onerror="this.remove()">` : ''}</div>
       <div style="flex:1;min-width:0"><div class="dm-title">${esc(it.name)}</div>
         <div class="dm-badges">${badge(typeColor(it.group), it.typeTag)}
           ${(() => { const st = statusNum(it.status); return st !== STATUS_WATCHED ? badge(statusColor(st), statusText(st)) : ''; })()}
-          ${it.rating && it.rating > 0 ? `<span class="dm-stars">${stars(it.rating)}</span><span class="dm-rating">${Number(it.rating).toFixed(1)}</span>` : ''}
+          ${it.rating && it.rating > 0 ? `<span class="dm-stars">${getStarString(it.rating)}</span><span class="dm-rating">${Number(it.rating).toFixed(1)}</span>` : ''}
           ${it.watchDate ? `<span class="dm-date">${esc((it.watchDate || '').slice(0, 10))}</span>` : ''}</div>
         ${it.review ? `<div class="dm-review">${esc(it.review)}</div>` : ''}</div></div>
     ${rows.length ? '<div class="dm-sec">豆 瓣 信 息</div>' + rows.map(([k, v]) => `<div class="dm-kv"><span class="dm-kv-k">${k}</span><span class="dm-kv-v">${esc(v)}</span></div>`).join('') : ''}
@@ -188,7 +173,7 @@ export function formModalHtml(opts: { editing: boolean; name: string; typeTag: s
   const initSt = opts.stText;
   const ratingVal = opts.rating;
   return `<div class="cn-modal" style="width:100%">
-    <div class="cn-modal-title">${editing ? '编辑影视' : '添加影视'}</div><button class="cn-modal-x j-close" title="关闭">${iconSpan(ICON.close)}</button>
+    <div class="cn-modal-title">${editing ? '编辑影视' : '添加影视'}</div>
     <div class="f-field"><span class="f-label">名 称</span><input class="f-input j-name" value="${esc(opts.name)}" placeholder="影视名称"></div>
     <div class="f-field"><span class="f-label">类 型</span><div class="f-choice j-tags">${formChoicesHtml(formAllTags(), opts.typeTag, 'f-tag')}</div></div>
     <div class="f-field"><span class="f-label">状 态</span><div class="f-choice j-sts">${formChoicesHtml(['想看', '在看', '已看'], initSt, 'f-st')}</div></div>
@@ -207,25 +192,6 @@ export function confirmModalHtml(item: CinemaItem): string {
     <p>确定删除「${esc(item.name)}」吗？</p>
     <div class="cn-confirm-sub">将移入系统回收站，可在回收站恢复</div>
     <div class="dm-actions"><button class="dm-btn j-cancel">取消</button><button class="dm-btn danger j-del">${iconSpan(ICON.del)}删除</button></div>
-  </div>`;
-}
-
-/** 影院设置弹窗内容（面板内；写设置经 saveSettings 持久化留行为层） */
-export function setModalHtml(opts: { sort: string; stf: string; cols: number; mobFull: boolean; folderPath: string }): string {
-  const { sort, stf, cols, mobFull } = opts;
-  return `<div class="cn-modal" style="width:100%">
-    <div class="cn-modal-title">影院设置</div><button class="cn-modal-x j-close" title="关闭">${iconSpan(ICON.close)}</button>
-    <div class="set-row"><div class="set-name">默认排序<div class="set-desc">打开面板时列表按所选规则排序</div></div>
-      <div class="set-ctl"><select class="j-sort">${[['date', '最近观看'], ['created', '按创建时间'], ['rating', '按评分']].map(([v, l]) => `<option value="${v}"${sort === v ? ' selected' : ''}>${l}</option>`).join('')}</select></div></div>
-    <div class="set-row"><div class="set-name">默认状态筛选<div class="set-desc">打开面板时选中的状态筛选</div></div>
-      <div class="set-ctl"><select class="j-stf">${['', '想看', '在看', '已看'].map((v) => `<option value="${v}"${stf === v ? ' selected' : ''}>${v || '全部'}</option>`).join('')}</select></div></div>
-    <div class="set-row"><div class="set-name">网格每行列数<div class="set-desc">海报网格每一行的列数（2-12）</div></div>
-      <div class="set-ctl"><input type="number" class="j-cols" min="2" max="12" step="1" value="${cols}"></div></div>
-    <div class="set-row"><div class="set-name">移动端默认全屏<div class="set-desc">打开面板时移动端进入全屏态</div></div>
-      <div class="set-ctl"><button class="set-sw j-sw${mobFull ? ' on' : ''}"></button></div></div>
-    <div class="set-row"><div class="set-name">影视文件夹<div class="set-desc">影院读取的影视文件夹</div></div>
-      <div class="set-ctl" style="font-size:11px;color:var(--ink-3);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(opts.folderPath)}</div></div>
-    <div class="dm-actions"><button class="dm-btn gold j-save">保存</button></div>
   </div>`;
 }
 
@@ -275,22 +241,16 @@ export function aiPageHtml(inp: AiPageInput): string {
       <div style="text-align:center;margin-top:14px"><button class="dm-btn j-ai-more" data-cinema-ai-start>${iconSpan(ICON.ai)}换一批</button></div>`;
   }
   return `<div class="ai-pref">偏好：<b>${esc(inp.pref)}</b></div>
-    <div class="ai-guide"><span class="ai-ic">${iconSpan(ICON.ai)}</span>
+    <div class="ai-guide">
       <div class="ai-title">让 AI 读懂你的片库</div>
       <div class="ai-sub">基于你的评分、影评与偏好标签生成荐片，<br>结果可直接加入想看清单</div>
       <button class="ai-start j-ai-start" data-cinema-ai-start>${iconSpan(ICON.ai)}开始推荐</button></div>`;
 }
 
-// ---------- 菜单/抽屉行（动作接线留行为层：这里只排 icon+label） ----------
+// ---------- 长按抽屉头部（动作行由 core/item-actions 统一渲染：见 ui.ts openSheet） ----------
 
-export interface MenuActView { icon: string; label: string; danger?: boolean }
-
-/** 右键菜单与长按抽屉共用的动作行（.cn-menu-item / .cn-sheet-item 外层类由各端拼） */
-export function actionRowsHtml(acts: MenuActView[], itemClass: string): string {
-  return acts.map((a, i) => `<button class="${itemClass}${a.danger ? ' danger' : ''}" data-i="${i}">${iconSpan(a.icon)}${a.label}</button>`).join('');
-}
-
-/** 长按抽屉头部（海报 + 名称 + meta 行；海报 URL 由调用方解析） */
+/** 抽屉头部（海报 + 名称 + meta 行；海报 URL 由调用方解析）。动作行不再自绘——
+ *  移动端抽屉与桌面菜单统一走 core/item-actions（ADR：手势与浮层单源）。 */
 export function sheetHeadHtml(it: CinemaItem, posterUrl: string | null): string {
   return `<div class="cn-sheet-head">${posterUrl ? `<img class="cn-sheet-poster" src="${esc(posterUrl)}" onerror="this.remove()">` : ''}
     <div><div class="cn-sheet-name">${esc(it.name)}</div><div class="cn-sheet-sub">${esc(it.year || '')} · ${esc(it.director || it.group)} · ${statusText(it.status)}</div></div></div>`;

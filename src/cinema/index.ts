@@ -5,7 +5,7 @@
 import type { App } from 'obsidian';
 import { tryGetSettings } from '../core/settings-provider';
 import { onDomainEvent } from '../core/domain-bus';
-import { M, resetCinemaState, DEFAULT_FOLDER } from './state';
+import { M, resetCinemaState, resolveCinemaFolderPath, DEFAULT_FOLDER } from './state';
 import { rebuildItems } from './data';
 import { createOverlay, closeOverlay, registerEscapeHandler, renderAll, openAddModalDirect, openRandomMovie } from './ui';
 import { shutdownDoubanQueue, sweepDoubanFetch } from './douban-queue';
@@ -26,11 +26,10 @@ export function applyDefaultView(): void {
 
 /** 幂等初始化（懒加载）：设置注入 + ESC + 自动刷新 */
 export function ensureCinema(app: App): void {
-  // G6：目录每次调用同步读设置——会话内改「影视文件夹」立即生效；否则 M.folderPath 首次
-  // 初始化即缓存旧值，面板/新建仍走旧目录、要重载才对上。DEFAULT_FOLDER 保留导出（域外引用）
-  const s = tryGetSettings() as Record<string, unknown>;
-  M.folderPath =
-    typeof s.cinemaFolderPath === 'string' && s.cinemaFolderPath.trim() ? s.cinemaFolderPath : DEFAULT_FOLDER;
+  // G6：目录每次调用同步读设置（resolveCinemaFolderPath 唯一单源）——会话内改「影视文件夹」
+  // 立即生效；否则 M.folderPath 首次初始化缓存旧值，面板/新建仍走旧目录，
+  // 与日记本（实时读设置）对不上直到重载。DEFAULT_FOLDER 保留导出（域外引用）
+  M.folderPath = resolveCinemaFolderPath();
   if (initialized) return;
   initialized = true;
   M.appRef = app;
@@ -53,11 +52,9 @@ function registerAutoRefresh(app: App): void {
       renderAll(app);
     }, 300);
   };
-  for (const kind of ['cinema']) {
-    onDomainEvent<{ path: string }>(`${kind}:file-created`, (evt) => schedule({ path: evt.path }));
-    onDomainEvent<{ path: string }>(`${kind}:file-deleted`, (evt) => schedule({ path: evt.path }));
-    onDomainEvent<{ path: string }>(`${kind}:file-modified`, (evt) => schedule({ path: evt.path }));
-  }
+  onDomainEvent<{ path: string }>('cinema:file-created', (evt) => schedule({ path: evt.path }));
+  onDomainEvent<{ path: string }>('cinema:file-deleted', (evt) => schedule({ path: evt.path }));
+  onDomainEvent<{ path: string }>('cinema:file-modified', (evt) => schedule({ path: evt.path }));
   onDomainEvent<{ path: string }>('vault:md-created', (evt) => schedule({ path: evt.path }));
   onDomainEvent<{ path: string }>('vault:md-deleted', (evt) => schedule({ path: evt.path }));
   onDomainEvent<{ path: string }>('vault:md-modified', (evt) => schedule({ path: evt.path }));
@@ -72,7 +69,7 @@ export function openCinema(app: App): void {
   }
   applyDefaultView();
   createOverlay(app);
-  // 豆瓣抓取队列（issue 261）：打开即扫未齐条目，入队串行补抓
+  // 豆瓣抓取队列（ADR-0113）：打开即扫未齐条目，入队串行补抓
   sweepDoubanFetch(app);
 }
 
@@ -88,7 +85,7 @@ export function openCinemaAnalysis(app: App): void {
   else {
     applyDefaultView();
     createOverlay(app);
-    sweepDoubanFetch(app); // 豆瓣抓取队列（issue 261）
+    sweepDoubanFetch(app);
   }
 }
 
@@ -99,9 +96,9 @@ export function addCinemaItem(app: App): void {
 }
 
 /**
- * 随机抽一部（命令 bz-cinema-random-pick，票 275②）：从「想看」池随机挑一部并直接开详情；
- * 面板未开则冷开（详情叠在列表页上，故先把视图回落 list —— 上次停在分析/AI 页时不清掉
- * 会叠在错误的页面上）。
+ * 随机抽一部（命令 bz-cinema-random-pick，2026-09-11 首页入口菜单）：
+ * 从「想看」池随机挑一部并直接开详情；面板未开则冷开（详情叠在列表页上，
+ * 故先把视图回落 list —— 上次停在分析/AI 页时不清掉会叠在错误的页面上）。
  */
 export function pickRandomCinema(app: App): void {
   ensureCinema(app);
@@ -113,7 +110,7 @@ export function pickRandomCinema(app: App): void {
 export function unloadCinema(): void {
   initialized = false;
   autoRefreshRegistered = false;
-  shutdownDoubanQueue(); // 杀活动抓取子进程、清队列状态（卸载后会话语义重置，issue 261）
+  shutdownDoubanQueue(); // 杀活动抓取子进程、清队列状态（卸载后会话语义重置）
   if (M.currentOverlay) {
     M.currentOverlay.remove();
     M.currentOverlay = null;

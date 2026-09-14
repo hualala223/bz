@@ -2,6 +2,39 @@
 
 > 进度同步总表（AGENTS.md）。每票一节，状态：计划中 → 进行中 → 门禁 → 已交付。
 
+## 上游吸收：剪藏本自抓 + 影院自抓（票 286 / 票 287）— 2026-09-14
+
+**状态：已交付**。用户裁决「1 和 2，完整替换本地内容；ApiZero key 稍后再说」——两项各自独立成票、独立提交，均走 `git worktree` 隔离（`wt-clipbook-cinema`，主仓零接触）。
+
+### 票 286 — 聚合讯抓取迁入插件（上游 issue 302 / ADR-0128）
+
+- [x] 整域对齐：`src/clipbook` 13 文件覆盖 + 新增 `news-fetcher.ts`（四源 = 知乎日报 / 果壳科学人 / B站 UP 动态 / RSS，移植为 `httpGet` 依赖注入纯逻辑）
+- [x] news.json 新增 `lastFetchAt` / `fetchIntervalMin` 段（档位 30/60/120/360，默认 30）；全源失败轮不推进锚点，下次打开即重试
+- [x] 触发链：`main.ts` onload 延迟一拍 + `openClipbook` 入口（均走间隔判定）+ 命令 `bz-clipbook-fetch-now`（忽略间隔）
+- [x] 剪藏本 32 条评审修复批随行吸收（C1–C32：UI/存储/设置/抓取侧，含窗口裁剪落盘、B站通知收窄、档位表单源化）
+- [x] 孤本清理：删 `src/clipbook/prototype-render.js`；`scripts/build-preview.mjs` 预览清单移出 clipbook（上游已把预览产物改出到 `prototypes/<域>/`，本地未引入该基建，故不再产出 src 侧孤本）
+- [x] 命名适配：`clipbook/flow.ts` 文献盒导入维持本地 `../literature`（上游为 `../knowledge`）
+- [x] ⚠️ 代价（ADR-0128 用户已拍板方向）：桌面端 Obsidian 关闭期间不再定时抓取；外部 PM2 守护 `obsidian-news watch` 退役——**本机进程未代为停止**，npm 包与 `tools/news-watcher/` 源码留存可回滚
+
+### 票 287 — 影院豆瓣抓取迁入插件（上游 issue 303 / ADR-0129）
+
+- [x] 整域对齐：`src/cinema` 12 文件覆盖 + 新增 `douban-fetcher.ts`
+- [x] 字段链：ApiZero 首选（评分/导演/主演/类型/地区/片长/年份/热门短评）→ 缺导演主演或需编剧时 rexxar 兜底；语言/又名/IMDb/简介四字段退役；一律「缺失才填」防覆盖手工修正
+- [x] 海报链：搜索页提 `posterUrl` → 高清升级 → `adapter.writeBinary` 写 `CONFIG/MOVIE POSTER/` → frontmatter + 正文 embed
+- [x] 队列改造：`douban-queue` 执行器 spawn → 插件内 `fetchNote`（完成信号 = 返回值，字段落盘轮询兜底退役），移动端启用
+- [x] 设置：`src/settings.ts` 增 `cinemaApizeroKey` / `cinemaDoubanCookie` / `cinemaSkinTheme`（末者为上游「面板主题」占位行所需，注释原话「主题行占位，域消费待皮肤设计时接入」）；影院设置组新增「数据抓取」
+- [x] 测试白名单：`tests/core/d3-write-gate.test.ts` 补 `cinema/douban-fetcher.ts`、`cinema/douban-queue.ts` 两条
+- [ ] 待办（用户侧）：**ApiZero key 未提供**，当前留空 → 字段自动落 rexxar 兜底（评分拿不到）；拿到后写入 vault `data.json`（不进仓库）
+
+### 门禁
+
+- [x] `tsc --noEmit` 0 错（隔离目录内与主仓各跑一遍）
+- [x] 全量 298 文件 / 4696 例全绿（隔离目录内跑，`BZ_TEST_MAX_WORKERS=4` 限流防 OOM；主仓收尾复核同绿）
+- [x] production 构建通过并部署 vault 插件目录；根 `main.js` / `styles.css` 构建产物未提交
+- [x] 提交纪律：两票各自独立提交，仅显式路径 `git add`
+- [x] 归档：上游 `issues/302–303`、`ADR-0128–0129` → `upstream-yeshimei/`
+- [x] 说明：本次为「整域替换」，故沿带上游该域在本地基线之后的其余改动（如 cinema「面板主题」占位行）
+
 ## 用户实跑两 bug 修复（票 284 / 票 285）— 2026-09-14
 
 **状态：已交付**。用户实跑报两个问题，各自独立成票、独立提交、各自落 ADR（不混一票）。

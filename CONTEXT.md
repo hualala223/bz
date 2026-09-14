@@ -61,18 +61,18 @@ _Avoid_: 自动移动待办到明天（是「今天补投影」，不是改 due/
 
 **保存至文献 (Save to Literature)**: 聚合讯阅读器对 B站视频条目（platform='B站' 且 url 非空）的保存动作（ticket 134，ADR-0068）——底栏按钮替换「保存至剪藏」，点击打开文献盒主面板 + 添加转文献任务弹窗（预填视频链接/标题/UP主）；不落剪藏、不标已读、不发 'news' 域事件（不进小橘行为流），阅读器留在本篇未读；普通文章仍是「保存至剪藏」原行为（B站条目 url 异常缺失回退剪藏按钮）。B站条目「下一篇/完成阅读」同样不进行为流（部分推翻 ticket 123「跳过也发」，普通文章保留）。_Avoid_: 保存至剪藏（指 B站条目按钮时）、剪藏视频（无此动作）
 
-**数据源守护 (News Source Watcher)**: 聚合讯数据源的抓取守护进程（PM2 托管 `obsidian-news watch`，ADR-0008）——每 30 分钟抓取最近 24 小时文章（果壳科学人 + 知乎日报 + **B站 UP 主视频投稿**，ticket 124），URL + 标题双去重后入库 `CONFIG/STORAGE/news.json`（四段整读写，保留插件侧维护段），入库即未读。**ticket 124 源开关**：按 news.json `sources` 段决定抓哪些源（插件剪藏本设置「数据源」组写）；**B 站抓取**：Cookie 优先用配置 `bilibiliCookie`（ticket 127），未配置自动引导（GET www.bilibili.com 收集 buvid3 规避 412）→ 用户动态 API（`x/polymer/web-dynamic/v1/feed/space?host_mid=<uid>`）→ 仅 `DYNAMIC_TYPE_AV`（视频投稿）→ **每 UP 最近 N 条**（`bilibiliMaxItems`，默认 10，不走 24h 窗口，ticket 127）→ 条目 platform='B站'、body=简介+封面+播放链接。命名区分：**包** `@jwbz/obsidian-news`（npm 分发单元）≠ **CLI 命令** `obsidian-news`（bin 入口，六子命令 watch/fetch/start/stop/status/logs）≠ **PM2 进程名** `news-watcher`（历史名，引用不破）≠ 仓库目录 `tools/news-watcher/`。配置走 **rc 配置** `~/.news-watcherrc`（vaultPath 指向 vault 根）或 `NEWS_PATH` 环境变量；旧 vault 内嵌部署（`CONFIG/SCRIPTS/NodeJs/news-watcher`）已废弃（legacy）。与 bz 插件完全分离：插件不含抓取逻辑，只读 news.json 渲染阅读流。
-_Avoid_: 新闻抓取、新闻爬虫、news watcher 进程
+**聚合讯抓取 (News Fetch in Plugin)**: 抓取执行方自 2026-09-14 起 = **插件内** `src/clipbook/news-fetcher.ts`（上游 issue 302 / ADR-0128）——外部 PM2 守护 `obsidian-news watch` **退役**（进程停，npm 包 `@jwbz/obsidian-news` 与 `tools/news-watcher/` 源码留存可回滚）。HTTP 通道 = Obsidian `requestUrl`（15s 超时，桌面/移动端一致、无 CORS），四源照搬（知乎日报 + 果壳科学人 + B站 UP 动态 + RSS）：24h 窗口、URL+标题双去重、逐篇正文抓取（入库即全文）。**触发链**：main.ts onload（延迟一拍）+ 打开剪藏本，均走 `maybeFetchNews()` 间隔判定；命令 `bz-clipbook-fetch-now` 忽略间隔。**news.json 新增两段**：`lastFetchAt`（epoch ms；全源失败轮不推进，下次打开即重试）、`fetchIntervalMin`（档位 30/60/120/360，默认 30，跨设备随库同步）。抓取期互斥锁防重入；通知静默，仅失败时报。写入方唯一化，消灭双写竞争。
+_Avoid_: 数据源守护（已退役）、news watcher 进程（已退役）、新闻爬虫
 
-**数据源开关 (Source Switch)**: news.json `sources` 段的三个布尔开关（zhihu/guokr/bilibili，默认全开），决定数据源守护抓哪些源；插件侧唯一写点 = 剪藏本设置弹窗「数据源」组。
+**数据源开关 (Source Switch)**: news.json `sources` 段的三个布尔开关（zhihu/guokr/bilibili，默认全开），决定插件抓哪些源；插件侧唯一写点 = 剪藏本设置弹窗「数据源」组。
 
 **UP 主名单 (UP List)**: news.json `bilibiliUps` 段的 uid 数组（仅存 uid），决定 B 站源抓取哪些 UP 主的视频投稿；插件侧「数据源」组收成一个「管理」按钮（ticket 126），点击打开**独立管理弹窗**做添加/删除（粘贴 space.bilibili.com/<uid> 主页链接或视频链接自动解析 uid）；后台抓到消息后经 `bilibiliUpInfo` 段回填 UP 主名字/头像，名单展示用名字/头像替换 uid（缺资料回退 uid）。**B 站源开关关闭时整个名单段隐藏**（ticket 126，原先只隐藏名单行）。**ticket 127**：弹窗底部含「B 站 Cookie（可选）」配置区（`bilibiliCookie` 段，412 风控引导）。_Avoid_: UP 主（指用户概念，名单持 uid）
 
-**UP 主资料 (UP Info)**: news.json `bilibiliUpInfo` 段的 uid → `{name?, avatar?}` 映射（ticket 126）——数据源守护 B 站抓取到条目时回填（取首个条目的 `module_author` name/face，头像统一转 https），插件侧只读展示，缺资料回退 uid。_Avoid_: UP 主信息（非术语）
+**UP 主资料 (UP Info)**: news.json `bilibiliUpInfo` 段的 uid → `{name?, avatar?}` 映射（ticket 126）——插件 B 站抓取到条目时回填（取首个条目的 `module_author` name/face，头像统一转 https），插件侧只读展示，缺资料回退 uid。_Avoid_: UP 主信息（非术语）
 
 **每 UP 最近 N 条 (Latest N per UP)**: news.json `bilibiliMaxItems` 段（ticket 127，默认 10，夹取 1..50）——B 站源不走 24 小时窗口，按最近优先收满 N 条未抓过的动态即停；插件「数据源」组 UP 名单段内「B站抓取条数」设置。_Avoid_: 抓取条数（非术语）
 
-**B 站 Cookie (Bilibili Cookie)**: news.json `bilibiliCookie` 段（ticket 127，可选明文）——API 返回 412（风控）时数据源守护优先使用；插件「UP 主名单管理」弹窗引导配置（浏览器 F12 → Cookie 复制 buvid3/SESSDATA），未配置回退自动引导。_Avoid_: cookie（非术语，指字段）
+**B 站 Cookie (Bilibili Cookie)**: news.json `bilibiliCookie` 段（ticket 127，可选明文）——API 返回 412（风控）时插件优先使用；插件「UP 主名单管理」弹窗引导配置（浏览器 F12 → Cookie 复制 buvid3/SESSDATA），未配置回退自动引导。_Avoid_: cookie（非术语，指字段）
 
 **保留策略 (Retention Policy)**: 插件侧清理规则（ticket 124，Q12/Q15 用户拍板）——打开阅读器时对 news.json articles 清理一次：未读永不处理；已保存骨架（read=true 且 state='saved'，正文已清空）超过 newsRetentionSavedDays（默认 3）天删除；已跳过骨架（state='skipped' 或旧数据无 state 兜底按此档）超过 newsRetentionSkippedDays（默认 7）天删除；起算 = fetchedAt ?? date。设置项在剪藏本设置「数据源」组。_Avoid_: 数据清理、过期清理（非术语）
 
@@ -109,10 +109,10 @@ _Avoid_: 把「想法编辑」当成 bz 直写的一般能力——只此两处�
 **影视分析报告域 (movie-report)**: 观影数据分析独立域（ADR-0048，自 `src/movie/analysis.ts` 迁出为 `src/movie-report/`）——index（ensure/open/unload）+ analysis（统计与渲染）+ state（本域目录态）；命令 `bz-movie-report`（名称「影视分析报告」，id 契约不变）；数据只读 `我的/影视/*.md` frontmatter（metadataCache）；跨域显式引用无环：本域 → movie/constants（纯数据）、movie/ui 📊 按钮 → 本域 openAnalysisModal；移动端默认全屏沿用 movie 键（用户拍板：跟随窗口不设独立开关）；ESC 键名 `movie-analysis` 不变。窗口标题「📊 观影数据分析」为既有文案。
 _Avoid_: 影视数据分析弹窗（旧词条口径——指本域窗口时用「影视分析报告」）；由影视.js 调用 / 共享 __MOVIE_FOLDER_PATH（已随独立域解除）
 
-**海报抓取 (Poster Fetch)**: 由独立守护进程（PM2 托管 `douban-poster watch`，ADR-0007）完成：监听影视文件夹新建/改动（10s 防抖）→ 全目录遍历缺「海报」字段的笔记 → 按创建时间倒序入队 → 每 15s 串行抓取「豆瓣搜索 → 高清海报下载 → 13 个 frontmatter 字段补全 → 正文海报 embed」。与 bz 插件完全分离：插件不含抓取逻辑，设置页仅提供安装与运行指引；脚本源码在 `tools/obsidian-douban-poster/`（npm 包 `@jwbz/obsidian-douban-poster`）。
-_Avoid_: 抓海报、豆瓣补全、poster fetch
+**影院豆瓣抓取 (Cinema Douban Fetch)**: 抓取执行方自 2026-09-14 起 = **插件内** `src/cinema/douban-fetcher.ts`（上游 issue 303 / ADR-0129）。**海报链**：豆瓣搜索页提 `posterUrl` → `upgradePosterUrl` 高清 → `requestUrl` arrayBuffer 下载 → `adapter.writeBinary` 写 `CONFIG/MOVIE POSTER/<安全名>_<时间戳>.<ext>` → frontmatter 海报 + 正文 `![[…]]` embed（`vault.process` 原子改写）。**字段链**：ApiZero 首选（评分/导演/主演/类型/制片地区/片长/上映年份/热门短评）→ 缺导演主演或需编剧时 **rexxar 演职员接口兜底**；语言/又名/IMDb/简介四字段退役（详情页 HTML 不再抓）；所有字段一律「缺失才填」，防重抓覆盖手工修正。搜索被判风控（响应 <2000B 或无结果结构）→ 该条失败。**队列** `douban-queue.ts`：执行器从 spawn 换为插件内 `fetchNote`（完成信号 = 返回值，字段落盘轮询兜底退役），移动端启用。设置组「数据抓取」= ApiZero Key（apizero.cn，Bearer 鉴权，默认空 → 字段落 rexxar 兜底）+ 豆瓣 Cookie（可选，风控时提高成功率）；key 存 data.json **随库同步、不进仓库**。spawn 链退役：全局包 `@jwbz/obsidian-douban-poster` 与 `tools/obsidian-douban-poster/` 留存（手动 CLI 仍可用，对齐 news 先例）。
+_Avoid_: 抓海报、豆瓣补全、poster fetch（旧守护口径）；douban-poster 守护、spawn 抓取（均已退役）
 
-**桌面端专属能力 (Desktop-only Capability)**: 依赖 Node.js 外部进程（child_process）、移动端（Capacitor）不可用的功能。门禁：`window.require('child_process')` 为 null 即非桌面端；移动端不注册事件监听，设置项置灰标注「仅桌面端可用」，不静默降级。（当前实例：文献盒批量处理等外部工具；海报抓取已移出插件，由独立守护进程承担）
+**桌面端专属能力 (Desktop-only Capability)**: 依赖 Node.js 外部进程（child_process）、移动端（Capacitor）不可用的功能。门禁：`window.require('child_process')` 为 null 即非桌面端；移动端不注册事件监听，设置项置灰标注「仅桌面端可用」，不静默降级。（当前实例：文献盒批量处理等外部工具；影院豆瓣抓取已迁入插件（issue 303），不再是桌面专属）
 
 
 **自动摘要 (Auto Summary)**: 常驻监听 `归档/网页剪藏` 新文件 → AI（deepseek-v4-flash）生成摘要/标签写回 frontmatter。详设（ticket 124）三键：autoSummaryLength（simple/standard/detailed 摘要长度档位）、autoSummaryTagsEnabled + autoSummaryTagCount（标签生成开关与数量区间）、autoSummaryTiming（见「摘要时机」）。AI 配置走主设置页 core AI（ADR-0052）。

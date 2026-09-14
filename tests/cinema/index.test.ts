@@ -1,7 +1,7 @@
 /**
  * 影院（cinema）入口/目录回落 + 事件补发测试（ADR-0087 接管旧 movie 域）
  * - ensureCinema：cinemaFolderPath 显式配置生效；缺省回落「我的/影视」
- * - quickAddWant：发 movie:created(want) 域事件（smartcat 行为流依赖）+ progress 通知 + 建笔记
+ * - quickAddWant：发 movie:created(want) 域事件（smartcat 行为流依赖）+ 建笔记 + 入抓取队列
  * - runAIRecommend / 快速状态窗 / 删除等事件补发由 ui.test / recommend.test 覆盖
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -10,9 +10,11 @@ import { resetObsidianMocks } from '../mock-obsidian-entry';
 import { setApp } from '../../src/core/app';
 import { setSettingsProvider } from '../../src/core/settings-provider';
 import { onDomainEvent, clearDomainEvents } from '../../src/core/domain-bus';
+import { getNoticeMessages, clearNotices } from '../mock-obsidian-entry';
 import { M, resetCinemaState } from '../../src/cinema/state';
-import { ensureCinema, unloadCinema, applyDefaultView } from '../../src/cinema';
+import { ensureCinema, unloadCinema, applyDefaultView, openCinema, openCinemaAnalysis } from '../../src/cinema';
 import { quickAddWant } from '../../src/cinema/recommend';
+import { configureFetchQueue, isFetching, shutdownDoubanQueue } from '../../src/cinema/douban-queue';
 
 function makeApp(vault: MockVault) {
   const app = mockAppWithVault(vault);
@@ -49,6 +51,22 @@ describe('cinema ensureCinema 目录回落（ADR-0087）', () => {
     setSettingsProvider(() => ({ cinemaFolderPath: '   ' } as any));
     const vault = new MockVault();
     ensureCinema(makeApp(vault));
+    expect(M.folderPath).toBe('我的/影视');
+  });
+
+  it('G6 回归：会话内改「影视文件夹」→ 下次 ensureCinema 即同步（不再缓存首次值）', () => {
+    setSettingsProvider(() => ({ cinemaFolderPath: '我的/影院' } as any));
+    const vault = new MockVault();
+    const app = makeApp(vault);
+    ensureCinema(app);
+    expect(M.folderPath).toBe('我的/影院');
+    // 已初始化状态下改设置（幂等闸门不再拦目录同步）
+    setSettingsProvider(() => ({ cinemaFolderPath: '我的/新影院' } as any));
+    ensureCinema(app);
+    expect(M.folderPath).toBe('我的/新影院');
+    // 清空配置 → 回落默认（resolveCinemaFolderPath 唯一单源）
+    setSettingsProvider(() => ({} as any));
+    ensureCinema(app);
     expect(M.folderPath).toBe('我的/影视');
   });
 });
@@ -95,7 +113,7 @@ describe('cinema quickAddWant 事件补发（movie:created want）', () => {
     M.folderPath = '我的/影视';
   });
 
-  it('加入想看 → 建笔记 + 发 movie:created(want) 事件（豆瓣队列接管，无 progress 通知）', async () => {
+  it('加入想看 → 建笔记 + 发 movie:created(want) 事件（抓取走队列，进度零通知）', async () => {
     const seen: any[] = [];
     const off = onDomainEvent('movie', (evt) => seen.push(evt));
     const vault = new MockVault();
@@ -105,40 +123,69 @@ describe('cinema quickAddWant 事件补发（movie:created want）', () => {
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ kind: 'created', name: '新片', status: 'want', rating: null });
     expect((vault.files as any).get('我的/影视/《新片》.md')).toContain('评分: -1');
-    // issue 261：海报抓取改由 douban-queue 接管——不再弹 progress 通知（jsdom 无 window.require，入队静默跳过）
+    // 进度零通知（ADR-0113）：反馈只在卡片 loading，未配置 CLI 时队列静默禁用
     expect(document.querySelector('.bz-notice--progress')).toBeNull();
     off();
   });
 });
 
-describe('G6：影视文件夹设置会话内即时生效（票 271）', () => {
+describe('cinema 打开面板触发豆瓣抓取队列（ADR-0113）', () => {
   beforeEach(() => {
     resetObsidianMocks();
     resetCinemaState();
+    clearNotices();
+    shutdownDoubanQueue();
     document.body.innerHTML = '';
+    M.folderPath = '我的/影视';
   });
   afterEach(() => {
     unloadCinema();
+    shutdownDoubanQueue();
     setSettingsProvider(() => ({} as any));
   });
 
-  it('已初始化后再改 cinemaFolderPath → 再次 ensureCinema 立即改用新目录（不必重载）', () => {
-    setSettingsProvider(() => ({ cinemaFolderPath: '我的/影院' } as any));
+  /** 假执行器（ADR-0129 执行器=插件内 fetch）：写回海报+豆瓣链接（模拟 fetcher 成功），记录调用 */
+  function successFetch(vault: MockVault) {
+    const fetched: string[] = [];
+    const fetch = async (file: any) => {
+      fetched.push(file.path);
+      vault.files.set(file.path, `${vault.files.get(file.path) ?? ''}海报: CONFIG/MOVIE POSTER/a.jpg\n豆瓣链接: https://movie.douban.com/subject/1/\n`);
+      return { ok: true } as const;
+    };
+    return { fetched, fetch };
+  }
+
+  it('openCinema → 有海报缺链接的笔记入队抓取并清 pending（静默无通知）', async () => {
+    setSettingsProvider(() => ({} as any));
     const vault = new MockVault();
-    ensureCinema(makeApp(vault));
-    expect(M.folderPath).toBe('我的/影院');
-    // 会话内改设置：目录每次 ensureCinema 同步读 → 面板/新建立刻走新目录
-    setSettingsProvider(() => ({ cinemaFolderPath: '我的/新影库' } as any));
-    ensureCinema(makeApp(vault));
-    expect(M.folderPath).toBe('我的/新影库');
+    vault.files.set(
+      '我的/影视/《缺信息》.md',
+      '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---',
+    );
+    const app = makeApp(vault);
+    const { fetched, fetch } = successFetch(vault);
+    configureFetchQueue({ fetch, gapMs: 0, refreshDelayMs: 0 });
+    openCinema(app);
+    await new Promise((r) => setTimeout(r, 25));
+    expect(fetched).toHaveLength(1);
+    expect(fetched[0]).toContain('《缺信息》');
+    expect(isFetching('我的/影视/《缺信息》.md')).toBe(false);
+    // 完全静默（ADR-0113 拍板）：抓取不发任何通知
+    expect(getNoticeMessages()).toEqual([]);
   });
 
-  it('已初始化 + 设置被清空 → 回落默认目录（幂等初始化不阻断目录同步）', () => {
-    setSettingsProvider(() => ({ cinemaFolderPath: '我的/影院' } as any));
-    const vault = new MockVault();
-    ensureCinema(makeApp(vault));
+  it('openCinemaAnalysis（面板未开分支）同样触发入队', async () => {
     setSettingsProvider(() => ({} as any));
-    ensureCinema(makeApp(vault));
-    expect(M.folderPath).toBe('我的/影视');
+    const vault = new MockVault();
+    vault.files.set(
+      '我的/影视/《缺信息》.md',
+      '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---',
+    );
+    const app = makeApp(vault);
+    const { fetched, fetch } = successFetch(vault);
+    configureFetchQueue({ fetch, gapMs: 0, refreshDelayMs: 0 });
+    openCinemaAnalysis(app);
+    await new Promise((r) => setTimeout(r, 25));
+    expect(fetched).toHaveLength(1);
   });
 });
