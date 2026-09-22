@@ -306,7 +306,7 @@ export async function collectRecap(app: App, now: number = Date.now()): Promise<
 
   // 影视：观影日期=今天 → 已看；无观影日期而创建在今天 → 加入片单
   try {
-    const folder = settingDir(['cinemaFolderPath'], '我的/影视');
+    const folder = settingDir(['cinemaFolderPath'], '我的/娱乐');
     for (const f of app.vault.getMarkdownFiles()) {
       if (!f.path.startsWith(folder + '/')) continue;
       const item = parseMovieFile(f as TFile, app);

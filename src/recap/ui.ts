@@ -40,7 +40,7 @@ function iconSpan(name: string, extra = ''): string {
 
 const DOMAIN_LABEL: Record<RecapDomain, string> = {
   diary: '日记',
-  cinema: '影视',
+  cinema: '娱乐',
   bookshelf: '读书',
   todo: '待办',
   pomodoro: '番茄',
@@ -234,7 +234,7 @@ function summaryEl(s: RecapSummary, failed: RecapDomain[]): HTMLDivElement {
   summary.className = 'bz-recap-summary';
   summary.append(
     statEl(val('diary', `${s.diary} 条`), '日记'),
-    statEl(val('cinema', `${s.movies}`), '影视'),
+    statEl(val('cinema', `${s.movies}`), '娱乐'),
     statEl(val('bookshelf', `${s.books}`), '读书'),
     statEl(val('todo', `${s.todoDone}`), '待办完成'),
     statEl(pom, '番茄'),

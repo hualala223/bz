@@ -112,7 +112,7 @@ async function collectReviewCounts(app: App, now: number, c: RiverCounts): Promi
 
 /** 影院：想看 / 在看（评分三分口径，同 snapshot） */
 function collectCinemaCounts(app: App, c: RiverCounts): void {
-  const folder = settingDir(['cinemaFolderPath'], '我的/影视');
+  const folder = settingDir(['cinemaFolderPath'], '我的/娱乐');
   for (const f of app.vault.getMarkdownFiles()) {
     if (!f.path.startsWith(folder + '/')) continue;
     const item = parseMovieFile(f as TFile, app);

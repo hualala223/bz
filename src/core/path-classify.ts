@@ -48,12 +48,12 @@ export function classifyFilePath(path: string | null | undefined): FileDomainKin
   if (isUnderDir('卡片盒', p)) return 'flash';
   // 剪藏：settings.articleDirectory（「📂 剪藏目录」）；缺键回退 '归档/网页剪藏'（出处：DEFAULT_SETTINGS）
   if (matchSettingDir(s.articleDirectory, p, '归档/网页剪藏')) return 'clipping';
-  // 影院（cinema 域，ADR-0087 起接管影视目录）：显式配置 cinemaFolderPath 命中即归类
-  // （缺省回落 '我的/影视'——旧 movieFolderPath 键已退役；与 cinema/state DEFAULT_FOLDER 同源副本）
-  if (matchSettingDir(s.cinemaFolderPath, p, '我的/影视')) return 'cinema';
+  // 娱乐（cinema 域，ADR-0087 起接管影视目录；ADR-0127 票 292 门面正名「娱乐」）：
+  // 显式配置 cinemaFolderPath 命中即归类（缺省回落 '我的/娱乐'——与 cinema/state DEFAULT_FOLDER 同源副本）
+  if (matchSettingDir(s.cinemaFolderPath, p, '我的/娱乐')) return 'cinema';
   // 影视（movie 语义保留，仅服务 diary 侧 movieDirectory 键——日记本「影视」归类）：
-  // movieDirectory 默认 '我的/影视'（src/settings.ts DEFAULT_SETTINGS 与 src/diary/config.ts MOVIE_DIRECTORY 一致）
-  if (matchSettingDir(s.movieDirectory, p, '我的/影视')) return 'movie';
+  // movieDirectory 默认 '我的/娱乐'（ADR-0127 随娱乐目录迁移；src/settings.ts DEFAULT_SETTINGS 同源）
+  if (matchSettingDir(s.movieDirectory, p, '我的/娱乐')) return 'movie';
   // 现代诗：settings 无对应键，沿用 src/smartcat/context-source.ts 硬编码 '我的/现代诗'
   if (isUnderDir('我的/现代诗', p)) return 'poem';
   // 信：settings.letterDirectory（「✉️ 信目录」）；缺键回退 '我的/信'

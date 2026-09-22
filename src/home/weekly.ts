@@ -191,7 +191,7 @@ export async function collectWeeklyStat(app: App, now: number = Date.now()): Pro
 
   // 影视：影院目录已看条目（观影日期落本周；无日期回退笔记创建时间）
   try {
-    const folder = settingDir(['cinemaFolderPath'], '我的/影视');
+    const folder = settingDir(['cinemaFolderPath'], '我的/娱乐');
     const items: Array<{ watchDate: string | null; ctime: number; watched: boolean }> = [];
     for (const f of app.vault.getMarkdownFiles()) {
       if (!f.path.startsWith(folder + '/')) continue;

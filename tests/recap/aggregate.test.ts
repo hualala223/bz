@@ -213,11 +213,11 @@ describe('collectRecap（只读采集集成）', () => {
     ].join('\n'));
     vault.files.set(`我的/日记/${y}.md`, '# 📖 08:00\n\n昨天的');
     // 影视：1 部今天标记已看（mtime 今天 23:14）+ 1 部今天创建的想看 + 1 部昨天已看
-    vault.files.set('我的/影视/《夜片》.md', '---\ntags:\n- 电影\n观影日期: ' + t + '\n评分: 9\n---\n');
-    vault.files.set('我的/影视/《新片单》.md', '---\ntags:\n- 电影\n评分: -1\n---\n');
-    vault.files.set('我的/影视/《旧片》.md', '---\ntags:\n- 电影\n观影日期: ' + y + '\n评分: 7\n---\n');
-    vault.stats.set('我的/影视/《夜片》.md', { ctime: AT_TODAY(10, 0), mtime: AT_TODAY(23, 14) });
-    vault.stats.set('我的/影视/《新片单》.md', { ctime: AT_TODAY(11, 0), mtime: AT_TODAY(11, 0) });
+    vault.files.set('我的/娱乐/《夜片》.md', '---\ntags:\n- 电影\n观影日期: ' + t + '\n评分: 9\n---\n');
+    vault.files.set('我的/娱乐/《新片单》.md', '---\ntags:\n- 电影\n评分: -1\n---\n');
+    vault.files.set('我的/娱乐/《旧片》.md', '---\ntags:\n- 电影\n观影日期: ' + y + '\n评分: 7\n---\n');
+    vault.stats.set('我的/娱乐/《夜片》.md', { ctime: AT_TODAY(10, 0), mtime: AT_TODAY(23, 14) });
+    vault.stats.set('我的/娱乐/《新片单》.md', { ctime: AT_TODAY(11, 0), mtime: AT_TODAY(11, 0) });
     // 书：1 本今天读完（mtime 21:00）+ 1 本在读今天有进度（mtime 19:30）+ 1 本昨天读完
     vault.files.set('书库/读完的书.md', '---\ntags:\n- book\nreadingDate: 2026-08-01\ncompletionDate: ' + t + '\n---\n');
     vault.files.set('书库/在读的书.md', '---\ntags:\n- book\nreadingDate: 2026-08-01\nreadingProgress: 45\n---\n');

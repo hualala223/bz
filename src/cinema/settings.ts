@@ -37,7 +37,7 @@ export function cinemaSettingsSchema(): SettingsSchema {
         icon: 'folder-open',
         name: '目录',
         rows: [
-          { type: 'path', mode: 'single', name: '影视文件夹', desc: '影院读取的影视文件夹，日记本也从这里读影视', binding: { key: 'cinemaFolderPath' } },
+          { type: 'path', mode: 'single', name: '娱乐文件夹', desc: '娱乐读取的条目文件夹，日记本也从这里读条目', binding: { key: 'cinemaFolderPath' } },
           // 旧「每批加载数量」（cinemaPageSize）已删除：全仓无消费点（列表一次全量渲染），属死配置
         ],
       },

@@ -35,7 +35,7 @@ export const RECAP_MARKER = '【今日回顾】';
 export function numbersSegments(summary: RecapSummary, failed: RecapDomain[], opts?: { excludeDiary?: boolean }): string[] {
   const segs: string[] = [];
   if (!failed.includes('diary') && !opts?.excludeDiary) segs.push(`日记 ${summary.diary} 条`);
-  if (!failed.includes('cinema')) segs.push(`影视 ${summary.movies} 部`);
+  if (!failed.includes('cinema')) segs.push(`娱乐 ${summary.movies} 部`);
   if (!failed.includes('bookshelf')) segs.push(`读完 ${summary.books} 本`);
   if (!failed.includes('todo')) segs.push(`完成 ${summary.todoDone} 个待办`);
   if (!failed.includes('pomodoro')) segs.push(`番茄 ${summary.pomodoros} 个 ${summary.pomodoroMinutes} 分钟`);

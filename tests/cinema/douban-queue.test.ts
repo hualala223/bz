@@ -49,7 +49,7 @@ describe('豆瓣抓取队列（douban-queue，ADR-0129 执行器=插件内 fetch
     resetCinemaState();
     shutdownDoubanQueue();
     clearNotices();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
   });
 
   afterEach(() => {
@@ -59,9 +59,9 @@ describe('豆瓣抓取队列（douban-queue，ADR-0129 执行器=插件内 fetch
 
   it('sweep：缺海报或缺链接的条目入队（继承守护全责），齐全条目不碰', async () => {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《全缺》.md', '---\ntags: [电影]\n评分: 8\n---');
-    vault.files.set('我的/影视/《有海报缺链接》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---');
-    vault.files.set('我的/影视/《齐全》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n豆瓣链接: https://movie.douban.com/subject/1/\n---');
+    vault.files.set('我的/娱乐/《全缺》.md', '---\ntags: [电影]\n评分: 8\n---');
+    vault.files.set('我的/娱乐/《有海报缺链接》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---');
+    vault.files.set('我的/娱乐/《齐全》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n豆瓣链接: https://movie.douban.com/subject/1/\n---');
     const app = mockAppWithVault(vault);
     M.appRef = app;
     rebuildItems(app);
@@ -76,12 +76,12 @@ describe('豆瓣抓取队列（douban-queue，ADR-0129 执行器=插件内 fetch
     expect(fetched.some((p) => p.includes('《有海报缺链接》'))).toBe(true);
     expect(fetched.some((p) => p.includes('《齐全》'))).toBe(false);
     // 完成后 loading 清除
-    expect(isFetching('我的/影视/《全缺》.md')).toBe(false);
+    expect(isFetching('我的/娱乐/《全缺》.md')).toBe(false);
   });
 
   it('会话内去重：第二次 sweep 零新抓取', async () => {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《缺信息》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---');
+    vault.files.set('我的/娱乐/《缺信息》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---');
     const app = mockAppWithVault(vault);
     rebuildItems(app);
     const { fetched, fetch } = makeSuccessFetch(vault);
@@ -98,7 +98,7 @@ describe('豆瓣抓取队列（douban-queue，ADR-0129 执行器=插件内 fetch
 
   it('抓取中 isFetching=true，完成后清除；重开面板（再 sweep）不重复', async () => {
     const vault = new MockVault();
-    const path = '我的/影视/《缺信息》.md';
+    const path = '我的/娱乐/《缺信息》.md';
     vault.files.set(path, '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---');
     const app = mockAppWithVault(vault);
     M.appRef = app;
@@ -127,7 +127,7 @@ describe('豆瓣抓取队列（douban-queue，ADR-0129 执行器=插件内 fetch
 
   it('渲染联动：sweep 新增即渲染（loading 首帧可见）；完成后重建+渲染两次（立即退场+延迟上卡）', async () => {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《缺信息》.md', '---\ntags: [电影]\n评分: 8\n---');
+    vault.files.set('我的/娱乐/《缺信息》.md', '---\ntags: [电影]\n评分: 8\n---');
     const app = mockAppWithVault(vault);
     M.appRef = app;
     rebuildItems(app);
@@ -158,8 +158,8 @@ describe('豆瓣抓取队列（douban-queue，ADR-0129 执行器=插件内 fetch
 
   it('执行器返回失败 → 失败聚合一条错误通知（含片名）', async () => {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《小众片A》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---');
-    vault.files.set('我的/影视/《小众片B》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---');
+    vault.files.set('我的/娱乐/《小众片A》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---');
+    vault.files.set('我的/娱乐/《小众片B》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---');
     const app = mockAppWithVault(vault);
     rebuildItems(app);
     configureFetchQueue({ ...TEST_HOOKS, fetch: async () => ({ ok: false, reason: 'notfound' }) });
@@ -176,8 +176,8 @@ describe('豆瓣抓取队列（douban-queue，ADR-0129 执行器=插件内 fetch
 
   it('风控失败单独聚合：文案含「豆瓣风控」且与一般失败分开', async () => {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《风控片》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---');
-    vault.files.set('我的/影视/《普通失败片》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---');
+    vault.files.set('我的/娱乐/《风控片》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---');
+    vault.files.set('我的/娱乐/《普通失败片》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---');
     const app = mockAppWithVault(vault);
     rebuildItems(app);
     configureFetchQueue({
@@ -198,7 +198,7 @@ describe('豆瓣抓取队列（douban-queue，ADR-0129 执行器=插件内 fetch
 
   it('移动端启用（ADR-0129）：无 child_process 环境照常入队执行', async () => {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《移动端新片》.md', '---\ntags: [电影]\n评分: 8\n---');
+    vault.files.set('我的/娱乐/《移动端新片》.md', '---\ntags: [电影]\n评分: 8\n---');
     const app = mockAppWithVault(vault);
     M.appRef = app;
     rebuildItems(app);
@@ -213,7 +213,7 @@ describe('豆瓣抓取队列（douban-queue，ADR-0129 执行器=插件内 fetch
 
   it('执行器抛异常按失败处理，不炸队列', async () => {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《抛异常》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---');
+    vault.files.set('我的/娱乐/《抛异常》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---');
     const app = mockAppWithVault(vault);
     rebuildItems(app);
     configureFetchQueue({ ...TEST_HOOKS, fetch: async () => { throw new Error('boom'); } });
@@ -221,13 +221,13 @@ describe('豆瓣抓取队列（douban-queue，ADR-0129 执行器=插件内 fetch
     sweepDoubanFetch(app);
     await settle();
     expect(hasNotice(/豆瓣信息获取失败/)).toBe(true);
-    expect(isFetching('我的/影视/《抛异常》.md')).toBe(false);
+    expect(isFetching('我的/娱乐/《抛异常》.md')).toBe(false);
   });
 
   it('isFetching 时限兜底：pending 超过单条超时 + 余量即视为过期（执行器挂死 loading 不永转）', async () => {
     vi.useFakeTimers();
     const vault = new MockVault();
-    const path = '我的/影视/《超时》.md';
+    const path = '我的/娱乐/《超时》.md';
     vault.files.set(path, '---\ntags: [电影]\n评分: 8\n---');
     const app = mockAppWithVault(vault);
     M.appRef = app;
@@ -244,7 +244,7 @@ describe('豆瓣抓取队列（douban-queue，ADR-0129 执行器=插件内 fetch
     const vault = new MockVault();
     const app = mockAppWithVault(vault);
     for (let i = 0; i < 20; i++) {
-      vault.files.set(`我的/影视/《片${i}》.md`, '---\ntags: [电影]\n评分: 8\n---');
+      vault.files.set(`我的/娱乐/《片${i}》.md`, '---\ntags: [电影]\n评分: 8\n---');
     }
     M.appRef = app;
     rebuildItems(app);
@@ -277,7 +277,7 @@ describe('豆瓣抓取队列（douban-queue，ADR-0129 执行器=插件内 fetch
   it('单条硬超时：执行器悬挂超过 FETCH_TIMEOUT_MS 按失败收（Promise.race 兜底）', async () => {
     vi.useFakeTimers();
     const vault = new MockVault();
-    vault.files.set('我的/影视/《悬挂》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---');
+    vault.files.set('我的/娱乐/《悬挂》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---');
     const app = mockAppWithVault(vault);
     rebuildItems(app);
     configureFetchQueue({ ...TEST_HOOKS, fetch: () => new Promise<DoubanFetchOutcome>(() => {}) });
@@ -294,10 +294,10 @@ describe('豆瓣抓取队列·frontmatter 契约', () => {
   it('完成验证容忍 YAML 引号（fetcher 写入形态）', () => {
     const vault = new MockVault();
     vault.files.set(
-      '我的/影视/《引号》.md',
+      '我的/娱乐/《引号》.md',
       '---\ntags: [电影]\n评分: 8\n海报: "CONFIG/MOVIE POSTER/a.jpg"\n豆瓣链接: "https://movie.douban.com/subject/1/"\n---',
     );
-    expect(vault.files.get('我的/影视/《引号》.md')).toContain('海报: "CONFIG/MOVIE POSTER/a.jpg"');
+    expect(vault.files.get('我的/娱乐/《引号》.md')).toContain('海报: "CONFIG/MOVIE POSTER/a.jpg"');
   });
 
   it('enqueueDoubanFetch：file 为 null 静默跳过', () => {
@@ -323,7 +323,7 @@ describe('G8：删除影片出队豆瓣抓取队列', () => {
     resetCinemaState();
     shutdownDoubanQueue();
     clearNotices();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
   });
 
   afterEach(() => {
@@ -332,8 +332,8 @@ describe('G8：删除影片出队豆瓣抓取队列', () => {
   });
 
   function seedTwo(vault: MockVault) {
-    vault.files.set('我的/影视/《甲》.md', '---\ntags: [电影]\n评分: -1\n---');
-    vault.files.set('我的/影视/《乙》.md', '---\ntags: [电影]\n评分: -1\n---');
+    vault.files.set('我的/娱乐/《甲》.md', '---\ntags: [电影]\n评分: -1\n---');
+    vault.files.set('我的/娱乐/《乙》.md', '---\ntags: [电影]\n评分: -1\n---');
     const app = mockAppWithVault(vault);
     rebuildItems(app);
     return M.items.slice();

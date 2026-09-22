@@ -75,8 +75,8 @@ function seedDay(vault: StatVault): void {
   const t = todayStr();
   const y = todayStr(-1);
   vault.files.set(`我的/日记/${t}.md`, '# 📖 09:00\n\n早读了一会儿\n\n# 📖 23:10\n\n睡前记一笔');
-  vault.files.set('我的/影视/《夜片》.md', '---\ntags:\n- 电影\n观影日期: ' + t + '\n评分: 9\n---\n');
-  vault.stats.set('我的/影视/《夜片》.md', { ctime: AT(10, 0), mtime: AT(23, 14) });
+  vault.files.set('我的/娱乐/《夜片》.md', '---\ntags:\n- 电影\n观影日期: ' + t + '\n评分: 9\n---\n');
+  vault.stats.set('我的/娱乐/《夜片》.md', { ctime: AT(10, 0), mtime: AT(23, 14) });
   vault.files.set('书库/读完的书.md', '---\ntags:\n- book\nreadingDate: 2026-08-01\ncompletionDate: ' + t + '\n---\n');
   vault.stats.set('书库/读完的书.md', { ctime: AT(9, 0), mtime: AT(21, 0) });
   vault.files.set('CONFIG/STORAGE/memo.json', JSON.stringify([
@@ -128,7 +128,7 @@ describe('今日回顾面板（recap 域）', () => {
     // 摘要行五格（uiStat 统计卡基线 .bz-stat）：日记 2 条 / 影视 1 / 读书 1 / 待办完成 1 / 番茄 1 个 25 分钟
     const stats = [...overlay().querySelectorAll('.bz-recap-stat.bz-stat')];
     expect(stats.map((s) => s.querySelector('.bz-stat-label')!.textContent)).toEqual(
-      ['日记', '影视', '读书', '待办完成', '番茄']
+      ['日记', '娱乐', '读书', '待办完成', '番茄']
     );
     expect(stats.map((s) => s.querySelector('.bz-stat-num')!.textContent)).toEqual(
       ['2 条', '1', '1', '1', '1 个 · 25 分钟']

@@ -55,10 +55,10 @@ describe('设置面板域清单（本地口径）', () => {
     }
   });
 
-  it('域名映射本地口径：待办/影院/书库/保险库', () => {
+  it('域名映射本地口径：待办/娱乐/书库/保险库', () => {
     const nameOf = (id: string) => DOMAINS.find((d) => d.id === id)?.name;
     expect(nameOf('todo')).toBe('待办');
-    expect(nameOf('cinema')).toBe('影院');
+    expect(nameOf('cinema')).toBe('娱乐'); // ADR-0127 票 292：门面正名「娱乐」
     expect(nameOf('bookshelf')).toBe('书库');
     expect(nameOf('encrypt')).toBe('保险库'); // 上游 ADR-0085：密码本并入统一保险库
     expect(nameOf('diary-wall')).toBe('回忆墙');

@@ -44,7 +44,7 @@ export async function checkOrphans(app: App, opts: CheckOpts = {}): Promise<Chec
   // 1) 影院：影视条目海报缺失（frontmatter「海报」路径指向的文件不存在）
   {
     const s = tryGetSettings() as any;
-    const folder = (s && s.cinemaFolderPath) || '我的/影视';
+    const folder = (s && s.cinemaFolderPath) || '我的/娱乐';
     const files = app.vault.getMarkdownFiles().filter((f: any) => f.path.startsWith(folder + '/'));
     for (const f of files) {
       if (opts.isCancelled?.()) return null;

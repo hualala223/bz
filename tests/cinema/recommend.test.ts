@@ -14,16 +14,16 @@ import { setAISettingsProvider, resetAIProviderCache } from '../../src/core/ai';
 import { setApp } from '../../src/core/app';
 
 function seedProfile(vault: MockVault) {
-  vault.files.set('我的/影视/《A》.md', '---\ntags: [电影]\n评分: 5\n观影日期: 2025-06-01T10:00:00\n类型: 剧情/悬疑\n导演: 诺兰\n主演: A/B\n---');
-  vault.files.set('我的/影视/《B》.md', '---\ntags: [电影]\n评分: 4\n观影日期: 2025-05-01T10:00:00\n类型: 科幻\n导演: 诺兰\n---');
-  vault.files.set('我的/影视/《C》.md', '---\ntags: [美剧]\n评分: -1\n---');
+  vault.files.set('我的/娱乐/《A》.md', '---\ntags: [电影]\n评分: 5\n观影日期: 2025-06-01T10:00:00\n类型: 剧情/悬疑\n导演: 诺兰\n主演: A/B\n---');
+  vault.files.set('我的/娱乐/《B》.md', '---\ntags: [电影]\n评分: 4\n观影日期: 2025-05-01T10:00:00\n类型: 科幻\n导演: 诺兰\n---');
+  vault.files.set('我的/娱乐/《C》.md', '---\ntags: [美剧]\n评分: -1\n---');
 }
 
 describe('cinema buildTasteProfile / prompt / parse', () => {
   beforeEach(() => {
     resetObsidianMocks();
     resetCinemaState();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     const vault = new MockVault();
     seedProfile(vault);
     rebuildItems(mockAppWithVault(vault));
@@ -73,7 +73,7 @@ describe('cinema quickAddWant', () => {
     resetObsidianMocks();
     resetCinemaState();
     document.body.innerHTML = '';
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     const vault = new MockVault();
     seedProfile(vault);
     M.appRef = mockAppWithVault(vault);
@@ -83,7 +83,7 @@ describe('cinema quickAddWant', () => {
   it('加入想看：建笔记（评分 -1）；重复名提示不建', async () => {
     const app = M.appRef as any;
     await quickAddWant(app, '新片', '电影');
-    const created = (app.vault as any).files.get('我的/影视/《新片》.md');
+    const created = (app.vault as any).files.get('我的/娱乐/《新片》.md');
     expect(created).toContain('评分: -1');
     expect(created).toContain('- 电影');
     // 重复
@@ -98,7 +98,7 @@ describe('cinema runAIRecommend（页内化：等待 → 结果列表 / 失败�
     resetObsidianMocks();
     resetCinemaState();
     document.body.innerHTML = '';
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     const vault = new MockVault();
     seedProfile(vault);
     M.appRef = mockAppWithVault(vault);
@@ -288,7 +288,7 @@ describe('cinema 找同类（ADR-0087 迁入 runSimilarRecommend/buildSimilarPro
     resetObsidianMocks();
     resetCinemaState();
     document.body.innerHTML = '';
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     const vault = new MockVault();
     seedProfile(vault);
     M.appRef = mockAppWithVault(vault);

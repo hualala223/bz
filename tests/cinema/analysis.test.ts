@@ -12,7 +12,7 @@ import { rebuildItems } from '../../src/cinema/data';
 import { buildAnalysisData, buildAnalysisHTML } from '../../src/cinema/analysis';
 
 function seed(vault: MockVault) {
-  vault.files.set('我的/影视/《星际穿越》.md', `---
+  vault.files.set('我的/娱乐/《星际穿越》.md', `---
 tags: [电影]
 评分: 9.6
 观影日期: 2026-08-01
@@ -24,7 +24,7 @@ tags: [电影]
 上映日期: 2014
 豆瓣评分: 9.4
 ---`);
-  vault.files.set('我的/影视/《三体 第一季》.md', `---
+  vault.files.set('我的/娱乐/《三体 第一季》.md', `---
 tags: [国产剧]
 评分: 9.2
 观影日期: 2026-07-01
@@ -36,7 +36,7 @@ tags: [国产剧]
 上映日期: 2023
 豆瓣评分: 8.7
 ---`);
-  vault.files.set('我的/影视/《绝命毒师 第一季》.md', `---
+  vault.files.set('我的/娱乐/《绝命毒师 第一季》.md', `---
 tags: [美剧]
 评分: 9.4
 观影日期: 2026-06-01
@@ -47,7 +47,7 @@ tags: [美剧]
 上映日期: 2008
 豆瓣评分: 9.4
 ---`);
-  vault.files.set('我的/影视/《想看片》.md', `---
+  vault.files.set('我的/娱乐/《想看片》.md', `---
 tags: [电影]
 评分: -1
 观影日期: 2026-05-01
@@ -59,7 +59,7 @@ describe('cinema buildAnalysisData', () => {
   beforeEach(() => {
     resetObsidianMocks();
     resetCinemaState();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     const vault = new MockVault();
     seed(vault);
     rebuildItems(mockAppWithVault(vault));
@@ -99,7 +99,7 @@ describe('cinema buildAnalysisData', () => {
     expect(d.disappoint.length).toBe(0);
   });
 
-  it('影评关键词 + 系列追踪', () => {
+  it('感想关键词 + 系列追踪', () => {
     const d = buildAnalysisData();
     expect(d.reviewCount).toBe(2);
     expect(d.reviewKeywords['震撼']).toBe(1);
@@ -127,7 +127,7 @@ describe('cinema buildAnalysisHTML · G9 想看清单豆瓣评分', () => {
   beforeEach(() => {
     resetObsidianMocks();
     resetCinemaState();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     const vault = new MockVault();
     seed(vault);
     rebuildItems(mockAppWithVault(vault));
@@ -144,7 +144,7 @@ describe('cinema buildAnalysisHTML', () => {
   beforeEach(() => {
     resetObsidianMocks();
     resetCinemaState();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     const vault = new MockVault();
     seed(vault);
     rebuildItems(mockAppWithVault(vault));
@@ -161,7 +161,7 @@ describe('cinema buildAnalysisHTML', () => {
     expect(html).toContain('打分习惯');
     expect(html).toContain('题材偏好');
     expect(html).toContain('最爱导演');
-    expect(html).toContain('影评关键词');
+    expect(html).toContain('感想关键词');
     expect(html).toContain('我的高分');
     expect(html).toContain('想看清单');
     expect(html).toContain('评分趋势');
@@ -169,9 +169,9 @@ describe('cinema buildAnalysisHTML', () => {
 
   it('空库 → 引导文案', () => {
     resetCinemaState();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     const html = buildAnalysisHTML();
-    expect(html).toContain('还没有可统计的影视记录');
+    expect(html).toContain('还没有可统计的条目');
   });
 });
 
@@ -181,7 +181,7 @@ describe('cinema buildAnalysisHTML', () => {
 const REPORT_19_SECTIONS = [
   '类型分布', '年度观影趋势', '片龄画像', '片长画像', '月度观影分布', '观影节奏',
   '个人评分分布', '评分趋势（个人10分制）', '打分习惯（个人−豆瓣）', '题材偏好 TOP10',
-  '制片国家/地区 TOP10', '最爱导演 TOP10', '最爱主演 TOP10', '真爱重复', '影评关键词',
+  '制片国家/地区 TOP10', '最爱导演 TOP10', '最爱主演 TOP10', '真爱重复', '感想关键词',
   '我的高分 TOP10', '系列追踪', '追剧深度', '想看清单',
 ];
 
@@ -189,23 +189,23 @@ describe('ADR-0090 片长/季集统计并入（原独立报告能力）', () => 
   beforeEach(() => {
     resetObsidianMocks();
     resetCinemaState();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     const vault = new MockVault();
-    vault.files.set('我的/影视/《A》.md', `---
+    vault.files.set('我的/娱乐/《A》.md', `---
 tags: [电影]
 评分: 5
 观影日期: 2025-06-01
 上映日期: 2024-01-01
 片长: 118分钟
 ---`);
-    vault.files.set('我的/影视/《A2》.md', `---
+    vault.files.set('我的/娱乐/《A2》.md', `---
 tags: [电影]
 评分: 4
 观影日期: 2025-06-02
 上映日期: 2025-01-01
 片长: 45分钟
 ---`);
-    vault.files.set('我的/影视/《剧》.md', `---
+    vault.files.set('我的/娱乐/《剧》.md', `---
 tags: [美剧]
 评分: 2
 观影日期: 2024-12-01
@@ -235,9 +235,9 @@ tags: [美剧]
 
   it('无片长/季集字段不误入统计（缺省回落「—」）', () => {
     resetCinemaState();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     const vault = new MockVault();
-    vault.files.set('我的/影视/《裸条》.md', '---\ntags: [电影]\n评分: 7\n观影日期: 2025-01-01\n---');
+    vault.files.set('我的/娱乐/《裸条》.md', '---\ntags: [电影]\n评分: 7\n观影日期: 2025-01-01\n---');
     rebuildItems(mockAppWithVault(vault));
     const d = buildAnalysisData();
     expect(d.durCount).toBe(0);
@@ -251,7 +251,7 @@ describe('ADR-0090 内嵌页板块对照（19 板块不丢能力）', () => {
   beforeEach(() => {
     resetObsidianMocks();
     resetCinemaState();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     const vault = new MockVault();
     seed(vault);
     rebuildItems(mockAppWithVault(vault));
@@ -290,14 +290,14 @@ describe('ADR-0090 头行小计 + 空态动作 + 整页组装', () => {
   beforeEach(() => {
     resetObsidianMocks();
     resetCinemaState();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
   });
 
   it('空库整页：引导文案 + 「添加影视」动作按钮（data-cinema-analysis-add）', () => {
     const html = buildAnalysisHTML();
-    expect(html).toContain('还没有可统计的影视记录');
+    expect(html).toContain('还没有可统计的条目');
     expect(html).toContain('data-cinema-analysis-add');
-    expect(html).toContain('添加影视');
+    expect(html).toContain('添加条目');
   });
 
   it('整页 = 内容流（页头 sp-head 由 ui.ts 承担，issue 236）', () => {

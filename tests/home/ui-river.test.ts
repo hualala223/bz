@@ -118,7 +118,7 @@ describe('home 活动河 UI（issue 232）', () => {
     vault.files.set('CONFIG/STORAGE/memo.json', JSON.stringify([
       { title: '重要待办', created: '2026-01-01 09:00:00', completed: null, priority: 'important' }, // 重要未完成 → todo hot
     ]));
-    vault.files.set('我的/影视/《正在看》.md', '---\ntags:\n- 电影\n评分: 0\n---\n'); // 在看 > 0 → cinema warn
+    vault.files.set('我的/娱乐/《正在看》.md', '---\ntags:\n- 电影\n评分: 0\n---\n'); // 在看 > 0 → cinema warn
     const app = recApp(vault);
     openHome(app);
     await new Promise((r) => setTimeout(r, 20));

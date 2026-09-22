@@ -26,24 +26,24 @@ function md(content: string): string {
 
 function seedVault(): { vault: MockVault; app: ReturnType<typeof mockAppWithVault> } {
   const vault = new MockVault();
-  vault.files.set('我的/影视/《星际穿越》.md', md(`---
+  vault.files.set('我的/娱乐/《星际穿越》.md', md(`---
 tags: [电影]
 评分: 9.6
 观影日期: 2026-08-01
 影评: 爱是穿越维度的唯一力量
 导演: 诺兰
 ---`));
-  vault.files.set('我的/影视/《绝命毒师 第一季》.md', md(`---
+  vault.files.set('我的/娱乐/《绝命毒师 第一季》.md', md(`---
 tags: [美剧]
 评分: 9.4
 观影日期: 2026-07-01
 ---`));
-  vault.files.set('我的/影视/《瑞克和莫蒂》.md', md(`---
+  vault.files.set('我的/娱乐/《瑞克和莫蒂》.md', md(`---
 tags: [美漫]
 评分: 0
 观影日期: 2026-06-01
 ---`));
-  vault.files.set('我的/影视/《想看片》.md', md(`---
+  vault.files.set('我的/娱乐/《想看片》.md', md(`---
 tags: [电影]
 评分: -1
 观影日期: 2026-05-01
@@ -77,7 +77,7 @@ describe('cinema 风格化面板（issue 236）', () => {
     resetObsidianMocks();
     resetCinemaState();
     clearDomainEvents();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     document.body.innerHTML = '';
   });
   afterEach(() => {
@@ -96,7 +96,7 @@ describe('cinema 风格化面板（issue 236）', () => {
     expect(root).toBeTruthy();
     expect(root.dataset.cinemaRoot).toBe('midnight');
     // 左栏：品牌 + 类型行（全部 + 6 组）+ 状态行（3）+ foot 工具 2
-    expect(root.querySelector('.rail-brand h1')?.textContent).toBe('影院');
+    expect(root.querySelector('.rail-brand h1')?.textContent).toBe('娱乐');
     expect(root.querySelectorAll('.j-groups [data-g]').length).toBe(7);
     expect(root.querySelectorAll('.j-status [data-s]').length).toBe(3);
     expect(root.querySelectorAll('.rail-foot .j-tool').length).toBe(2);
@@ -104,10 +104,10 @@ describe('cinema 风格化面板（issue 236）', () => {
     const allRow = root.querySelector('.j-groups [data-g="全部"]');
     expect(allRow?.classList.contains('is-on')).toBe(true);
     expect(allRow?.querySelector('.n')?.textContent).toBe('4');
-    // d-head：标题=全部 + · 4 部 + 添加影片
+    // d-head：标题=全部 + · 4 部 + 添加条目
     expect(root.querySelector('.d-head .j-title')?.textContent).toBe('全部');
     expect(root.querySelector('.d-head .j-cnt')?.textContent).toBe('· 4 部');
-    expect(root.querySelector('[data-cinema-add]')?.textContent).toContain('添加影片');
+    expect(root.querySelector('[data-cinema-add]')?.textContent).toContain('添加条目');
     // d-tools：搜索框 + 排序 seg 三档默认「最近观看」
     expect(root.querySelector('.d-search .j-q')).toBeTruthy();
     expect(root.querySelectorAll('.j-sort button').length).toBe(3);
@@ -147,7 +147,7 @@ describe('cinema 风格化面板（issue 236）', () => {
     expect(star.querySelector('.badge')).toBeNull(); // 已看不显示徽章
     expect(star.querySelector('.pstars')?.textContent).toContain('★');
     expect(star.querySelector('.pstars .num')?.textContent).toBe('9.6');
-    expect(star.dataset.cinemaKey).toBe('我的/影视/《星际穿越》.md');
+    expect(star.dataset.cinemaKey).toBe('我的/娱乐/《星际穿越》.md');
     const want = pcardByName(root, '想看片');
     expect(want.querySelector('.badge')?.textContent).toBe('想看');
     expect(want.querySelector('.pstars')?.textContent).toContain('未评分');
@@ -180,7 +180,7 @@ describe('cinema 风格化面板（issue 236）', () => {
     clickEl(pcardByName(root, '想看片'));
     clickEl((root.querySelector('.cn-modal') as HTMLElement).querySelector('.j-del'));
     const confirm = root.querySelector('.cn-confirm') as HTMLElement;
-    expect(confirm.querySelector('.cn-confirm-title')?.textContent).toBe('删除影视');
+    expect(confirm.querySelector('.cn-confirm-title')?.textContent).toBe('删除条目');
     expect(confirm.textContent).toContain('确定删除「想看片」吗？');
     expect(confirm.textContent).toContain('回收站');
     const trashSpy = vi.spyOn(app.vault, 'trash').mockResolvedValue(undefined);
@@ -217,17 +217,17 @@ describe('cinema 风格化面板（issue 236）', () => {
     // 想看卡点「标记已看」→ 弹编辑表单（.cn-modal）：状态预选已看 + 评分滑杆预填默认分 + 影评框展开，不直接落盘
     const evts: any[] = [];
     const offMovie = onDomainEvent('movie', (e: any) => evts.push(e));
-    const fmBefore = vault.files.get('我的/影视/《想看片》.md');
+    const fmBefore = vault.files.get('我的/娱乐/《想看片》.md');
     ctx('想看片');
     clickEl(Array.from((document.querySelector(menuSel) as HTMLElement).querySelectorAll('.bz-item-menu-item')).find((b) => b.textContent?.includes('标记已看')));
     const form = root.querySelector('.cn-ovl .cn-modal') as HTMLElement;
     expect(form, '标记已看应弹出编辑表单而非直接落盘').toBeTruthy();
-    expect(form.querySelector('.cn-modal-title')?.textContent).toBe('编辑影视');
+    expect(form.querySelector('.cn-modal-title')?.textContent).toBe('编辑条目');
     expect(form.querySelector('[data-f-st="已看"]')?.classList.contains('is-on')).toBe(true);
     expect((form.querySelector('.j-rating') as HTMLElement).style.display).not.toBe('none');
     expect((form.querySelector('.j-review') as HTMLElement).style.display).not.toBe('none');
     expect((form.querySelector('.j-range') as HTMLInputElement).value).toBe('5'); // 想看条目无评分 → 预填默认分
-    expect(vault.files.get('我的/影视/《想看片》.md')).toBe(fmBefore);
+    expect(vault.files.get('我的/娱乐/《想看片》.md')).toBe(fmBefore);
     expect(evts.length).toBe(0);
     // 用户调整评分、写影评后点保存 → frontmatter 正确 + 域事件（status/rated，小橘行为流承接）
     const range = form.querySelector('.j-range') as HTMLInputElement;
@@ -240,7 +240,7 @@ describe('cinema 风格化面板（issue 236）', () => {
     expect(item.status).toBe(2); // STATUS_WATCHED
     expect(item.rating).toBe(8.8);
     expect(item.review).toBe('值得重看');
-    const fm = vault.files.get('我的/影视/《想看片》.md')!;
+    const fm = vault.files.get('我的/娱乐/《想看片》.md')!;
     expect(fm).toContain('评分: 8.8');
     expect(fm).toContain('影评: 值得重看');
     expect(fm).not.toContain('观影日期: 2026-05-01'); // 状态流转刷新观影日期
@@ -277,8 +277,8 @@ describe('cinema 风格化面板（issue 236）', () => {
     const form = root.querySelector('.cn-modal') as HTMLElement;
     (form.querySelector('.j-name') as HTMLInputElement).value = '瑞克和莫蒂 第一季';
     clickEl(form.querySelector('.j-save'));
-    await vi.waitFor(() => expect(vault.files.has('我的/影视/《瑞克和莫蒂 第一季》.md')).toBe(true));
-    expect(vault.files.has('我的/影视/《瑞克和莫蒂》.md')).toBe(false);
+    await vi.waitFor(() => expect(vault.files.has('我的/娱乐/《瑞克和莫蒂 第一季》.md')).toBe(true));
+    expect(vault.files.has('我的/娱乐/《瑞克和莫蒂》.md')).toBe(false);
   });
 
   it('编辑改名 → 已存在同名拦截（弹窗留在原地，不落盘）', async () => {
@@ -290,8 +290,8 @@ describe('cinema 风格化面板（issue 236）', () => {
     const form = root.querySelector('.cn-modal') as HTMLElement;
     (form.querySelector('.j-name') as HTMLInputElement).value = '星际穿越';
     clickEl(form.querySelector('.j-save'));
-    await vi.waitFor(() => expect(root.querySelector('.cn-toast')?.textContent).toContain('已存在同名影视'));
-    expect(vault.files.has('我的/影视/《瑞克和莫蒂》.md')).toBe(true);
+    await vi.waitFor(() => expect(root.querySelector('.cn-toast')?.textContent).toContain('已存在同名条目'));
+    expect(vault.files.has('我的/娱乐/《瑞克和莫蒂》.md')).toBe(true);
     expect(form.querySelector('.j-name')).toBeTruthy();
   });
 
@@ -305,7 +305,7 @@ describe('cinema 风格化面板（issue 236）', () => {
     (form.querySelector('.j-name') as HTMLInputElement).value = 'a/b';
     clickEl(form.querySelector('.j-save'));
     await vi.waitFor(() => expect(hasNotice(/非法字符/)).toBe(true));
-    expect(vault.files.has('我的/影视/《瑞克和莫蒂》.md')).toBe(true);
+    expect(vault.files.has('我的/娱乐/《瑞克和莫蒂》.md')).toBe(true);
   });
 
   it('添加表单：默认想看（评分/影评隐藏）；切已看显隐联动；保存创建笔记 + progress 通知', async () => {
@@ -314,7 +314,7 @@ describe('cinema 风格化面板（issue 236）', () => {
     const root = document.querySelector('[data-cinema-root]') as HTMLElement;
     clickEl(root.querySelector('[data-cinema-add]'));
     const form = root.querySelector('.cn-modal') as HTMLElement;
-    expect(form.querySelector('.cn-modal-title')?.textContent).toBe('添加影视');
+    expect(form.querySelector('.cn-modal-title')?.textContent).toBe('添加条目');
     expect((form.querySelector('.j-name') as HTMLInputElement).value).toBe('');
     expect(form.querySelector('[data-f-st="想看"]')?.classList.contains('is-on')).toBe(true);
     expect((form.querySelector('.j-rating') as HTMLElement).style.display).toBe('none');
@@ -323,7 +323,7 @@ describe('cinema 风格化面板（issue 236）', () => {
     expect((form.querySelector('.j-rating') as HTMLElement).style.display).not.toBe('none');
     (form.querySelector('.j-name') as HTMLInputElement).value = '新片A';
     clickEl(form.querySelector('.j-save'));
-    await vi.waitFor(() => expect(vault.files.has('我的/影视/《新片A》.md')).toBe(true));
+    await vi.waitFor(() => expect(vault.files.has('我的/娱乐/《新片A》.md')).toBe(true));
     expect(M.items[0].name).toBe('新片A'); // 新增置首
     expect(M.items[0].status).toBe(2);
     await vi.waitFor(() => expect(root.querySelectorAll('.d-scroll .pcard').length).toBe(5)); // renderAll 落地
@@ -338,7 +338,7 @@ describe('cinema 风格化面板（issue 236）', () => {
     (form.querySelector('.j-name') as HTMLInputElement).value = '星际穿越';
     clickEl(form.querySelector('[data-f-st="已看"]'));
     clickEl(form.querySelector('.j-save'));
-    await vi.waitFor(() => expect(root.querySelector('.cn-toast')?.textContent).toContain('已存在同名影视'));
+    await vi.waitFor(() => expect(root.querySelector('.cn-toast')?.textContent).toContain('已存在同名条目'));
     expect(M.items.filter((i) => i.name === '星际穿越').length).toBe(1);
     void vault;
   });
@@ -469,8 +469,8 @@ describe('cinema 风格化面板（issue 236）', () => {
     M.aiResult = [{ title: '推荐新片', type: '电影', reason: '' }];
     M.renderFn?.();
     clickEl(root.querySelector('.rec-add'));
-    await vi.waitFor(() => expect(vault.files.has('我的/影视/《推荐新片》.md')).toBe(true));
-    emitDomainEvent('vault:md-created', { path: '我的/影视/《推荐新片》.md' });
+    await vi.waitFor(() => expect(vault.files.has('我的/娱乐/《推荐新片》.md')).toBe(true));
+    emitDomainEvent('vault:md-created', { path: '我的/娱乐/《推荐新片》.md' });
     await vi.waitFor(() => {
       const btn = Array.from(root.querySelectorAll('.rec-add')).find((b) => b.textContent === '已在库中') as HTMLButtonElement | undefined;
       expect(btn?.disabled).toBe(true); // 自动刷新后同名推荐置已在库中（闭环）
@@ -496,7 +496,7 @@ describe('cinema 风格化面板（issue 236）', () => {
     createOverlay(app2);
     openCinemaAnalysis(app2);
     const root2 = document.querySelector('[data-cinema-root]') as HTMLElement;
-    expect(root2.querySelector('.cn-empty-page')?.textContent).toContain('还没有可统计的影视记录');
+    expect(root2.querySelector('.cn-empty-page')?.textContent).toContain('还没有可统计的条目');
     clickEl(root2.querySelector('[data-cinema-analysis-add]'));
     expect(root2.querySelector('.cn-modal .j-name')).toBeTruthy();
     closeOverlay();
@@ -560,12 +560,12 @@ describe('cinema 风格化面板（issue 236）', () => {
     openCinemaAnalysis(app);
     const overlay = document.querySelector('.bz-panel-overlay') as HTMLElement;
     expect(overlay.querySelector('.sp-cnt')?.textContent).toBe('· 2 部已看');
-    vault.files.set('我的/影视/《新片》.md', md(`---
+    vault.files.set('我的/娱乐/《新片》.md', md(`---
 tags: [电影]
 评分: 8
 观影日期: 2026-08-02
 ---`));
-    emitDomainEvent('vault:md-created', { path: '我的/影视/《新片》.md' });
+    emitDomainEvent('vault:md-created', { path: '我的/娱乐/《新片》.md' });
     await vi.waitFor(() => expect(overlay.querySelector('.sp-cnt')?.textContent).toBe('· 3 部已看'));
   });
 
@@ -800,7 +800,7 @@ describe('补扫 C：随机抽一部（已开面板先整刷再叠详情）', ()
     resetObsidianMocks();
     resetCinemaState();
     clearDomainEvents();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     document.body.innerHTML = '';
   });
   afterEach(() => {

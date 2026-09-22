@@ -173,13 +173,13 @@ export function formModalHtml(opts: { editing: boolean; name: string; typeTag: s
   const initSt = opts.stText;
   const ratingVal = opts.rating;
   return `<div class="cn-modal" style="width:100%">
-    <div class="cn-modal-title">${editing ? '编辑影视' : '添加影视'}</div>
-    <div class="f-field"><span class="f-label">名 称</span><input class="f-input j-name" value="${esc(opts.name)}" placeholder="影视名称"></div>
+    <div class="cn-modal-title">${editing ? '编辑条目' : '添加条目'}</div>
+    <div class="f-field"><span class="f-label">名 称</span><input class="f-input j-name" value="${esc(opts.name)}" placeholder="条目名称"></div>
     <div class="f-field"><span class="f-label">类 型</span><div class="f-choice j-tags">${formChoicesHtml(formAllTags(), opts.typeTag, 'f-tag')}</div></div>
     <div class="f-field"><span class="f-label">状 态</span><div class="f-choice j-sts">${formChoicesHtml(['想看', '在看', '已看'], initSt, 'f-st')}</div></div>
     <div class="f-field j-rating" style="display:${initSt === '已看' ? '' : 'none'}"><span class="f-label">评 分</span>
       <div class="f-range-row"><input type="range" class="f-range j-range" min="1" max="10" step="0.1" value="${ratingVal}"><span class="f-range-val j-rval">${Number(ratingVal).toFixed(1)}</span></div></div>
-    <div class="f-field j-review" style="display:${initSt === '已看' ? '' : 'none'}"><span class="f-label">影 评</span><textarea class="f-input j-review-t" placeholder="写点什么…">${esc(opts.review)}</textarea></div>
+    <div class="f-field j-review" style="display:${initSt === '已看' ? '' : 'none'}"><span class="f-label">感 想</span><textarea class="f-input j-review-t" placeholder="写点什么…">${esc(opts.review)}</textarea></div>
     <div class="dm-actions"><button class="dm-btn gold j-save">${editing ? '保存' : '添加'}</button></div>
   </div>`;
 }
@@ -188,7 +188,7 @@ export function formModalHtml(opts: { editing: boolean; name: string; typeTag: s
 export function confirmModalHtml(item: CinemaItem): string {
   return `<div class="cn-modal cn-confirm" style="max-width:320px;width:100%">
     <span class="cn-confirm-ic">${iconSpan(ICON.confirm)}</span>
-    <div class="cn-confirm-title">删除影视</div>
+    <div class="cn-confirm-title">删除条目</div>
     <p>确定删除「${esc(item.name)}」吗？</p>
     <div class="cn-confirm-sub">将移入系统回收站，可在回收站恢复</div>
     <div class="dm-actions"><button class="dm-btn j-cancel">取消</button><button class="dm-btn danger j-del">${iconSpan(ICON.del)}删除</button></div>
@@ -243,7 +243,7 @@ export function aiPageHtml(inp: AiPageInput): string {
   return `<div class="ai-pref">偏好：<b>${esc(inp.pref)}</b></div>
     <div class="ai-guide">
       <div class="ai-title">让 AI 读懂你的片库</div>
-      <div class="ai-sub">基于你的评分、影评与偏好标签生成荐片，<br>结果可直接加入想看清单</div>
+      <div class="ai-sub">基于你的评分、感想与偏好标签生成荐片，<br>结果可直接加入想看清单</div>
       <button class="ai-start j-ai-start" data-cinema-ai-start>${iconSpan(ICON.ai)}开始推荐</button></div>`;
 }
 

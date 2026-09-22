@@ -22,7 +22,7 @@ describe('cinema 设置 schema', () => {
 
   it('DEFAULT_SETTINGS 不再声明 cinemaPageSize 默认值', () => {
     expect('cinemaPageSize' in DEFAULT_SETTINGS).toBe(false);
-    expect(DEFAULT_SETTINGS.cinemaFolderPath).toBe('我的/影视');
+    expect(DEFAULT_SETTINGS.cinemaFolderPath).toBe('我的/娱乐');
   });
 
   it('显示组：默认排序/默认状态筛选/网格每行列数（issue 194 + issue 208，键与契约）', () => {

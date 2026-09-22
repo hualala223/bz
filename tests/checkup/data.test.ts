@@ -207,14 +207,14 @@ describe('检查二：字段漂移', () => {
 
 describe('检查三：孤儿条目', () => {
   it('影院：海报文件缺失列出条目与路径；文件在则不报', async () => {
-    const fm = { '我的/影视/《T》.md': { tags: ['电影'], 海报: 'CONFIG/BOOK/p.png' } };
-    const { app } = makeApp({ '我的/影视/《T》.md': '# T' }, fm);
+    const fm = { '我的/娱乐/《T》.md': { tags: ['电影'], 海报: 'CONFIG/BOOK/p.png' } };
+    const { app } = makeApp({ '我的/娱乐/《T》.md': '# T' }, fm);
     const sec = await checkOrphans(app);
     const hit = sec!.issues.find((i) => i.title.includes('影视《T》'));
     expect(hit).toBeTruthy();
     expect(hit!.detail).toContain('CONFIG/BOOK/p.png');
 
-    const { app: app2 } = makeApp({ '我的/影视/《T》.md': '# T', 'CONFIG/BOOK/p.png': 'img' }, fm);
+    const { app: app2 } = makeApp({ '我的/娱乐/《T》.md': '# T', 'CONFIG/BOOK/p.png': 'img' }, fm);
     const sec2 = await checkOrphans(app2);
     expect(sec2!.issues.find((i) => i.title.includes('影视《T》'))).toBeUndefined();
   });
@@ -284,9 +284,9 @@ describe('检查三：孤儿条目', () => {
 
   it('只读纪律：孤儿检查全程不写盘', async () => {
     const { app, vault } = makeApp({
-      '我的/影视/《T》.md': '# T',
+      '我的/娱乐/《T》.md': '# T',
       [`${DIR}/favorites.json`]: JSON.stringify([fullFavItem({ linkedNote: 'x.md' })]),
-    }, { '我的/影视/《T》.md': { tags: ['电影'], 海报: 'nope.png' } });
+    }, { '我的/娱乐/《T》.md': { tags: ['电影'], 海报: 'nope.png' } });
     await checkOrphans(app);
     expect(vault.modifiedPaths).toEqual([]);
   });

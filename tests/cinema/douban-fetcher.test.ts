@@ -221,7 +221,7 @@ function makeDeps(over: {
   return { deps, vault };
 }
 
-const FILE_PATH = '我的/影视/《流浪地球2》.md';
+const FILE_PATH = '我的/娱乐/《流浪地球2》.md';
 
 async function runOn(vault: MockVault, deps: DoubanFetchDeps) {
   const app = mockAppWithVault(vault);

@@ -560,7 +560,7 @@ export const DEFAULT_SETTINGS: BzSettings = {
 
   // 日记本
   diaryDirectory: '我的/日记',
-  movieDirectory: '我的/影视',
+  movieDirectory: '我的/娱乐',
   letterDirectory: '我的/信',
   showTagCount: true,
   useFileDateTime: false,
@@ -610,8 +610,9 @@ export const DEFAULT_SETTINGS: BzSettings = {
   showThinks: true,
   showReview: true,
 
-  // 影院（cinema；上游 ADR-0087 起接管影视；缺省回落默认目录，旧 movieFolderPath 键已退役）
-  cinemaFolderPath: '我的/影视',
+  // 影院（cinema；上游 ADR-0087 起接管影视；缺省回落默认目录，旧 movieFolderPath 键已退役；
+  // ADR-0127 票 292：默认目录改 我的/娱乐，旧值 我的/影视 由启动迁移平移）
+  cinemaFolderPath: '我的/娱乐',
   cinemaSortMode: 'date',
   cinemaStatusFilter: '',
   cinemaGridColumns: '5',

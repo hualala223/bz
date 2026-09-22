@@ -34,6 +34,7 @@ import { openBookshelf, openBookshelfReport, unloadBookshelf } from './bookshelf
 import { unloadReadingReport } from './reading-report';
 // 影院（cinema 域，上游 ADR-0087 起接管影视；旧 movie 域已退役。ADR-0090：报告窗并入影院内嵌分析页）
 import { openCinema, addCinemaItem, openCinemaAnalysis, pickRandomCinema, unloadCinema } from './cinema';
+import { migrateCinemaFolder } from './cinema/migrate';
 // 复习（ticket 168 单一入口：仅「复习（按数量）」命令；ticket 169 加回「加入复习计划」；ensureReview/unloadReview 为常驻监控与卸载所需）
 import { reviewCountStart, reviewAddCurrent, reviewAddCurrentWithLinks, openReviewReport, openTodayReviewed, ensureReview, unloadReview } from './review';
 // 第二大脑（ticket 103 起原闪念正名接管，ADR-0051——flash 域已删除）
@@ -126,11 +127,10 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-bookshelf-open', name: '书库', icon: 'book-open', callback: () => openBookshelf(getApp()) },
   // 阅读分析报告（上游 ADR-0091 内嵌化：与书架墙面板内报告视图同一去向）
   { id: 'bz-reading-report-open', name: '阅读分析报告', icon: 'bar-chart-3', callback: () => openBookshelfReport(getApp()) },
-  // 影视分析报告（上游 ADR-0090 内嵌化：独立报告窗退役，命令直达影院面板分析页）
-  { id: 'bz-cinema-analysis', name: '影视分析报告', icon: 'pie-chart', callback: () => openCinemaAnalysis(getApp()) },
-  // 影院（cinema 域，上游 ADR-0087）
-  { id: 'bz-cinema-open', name: '影院', icon: 'clapperboard', callback: () => openCinema(getApp()) },
-  { id: 'bz-cinema-add', name: '加影视', icon: 'plus-circle', callback: () => addCinemaItem(getApp()) },
+  // 娱乐（cinema 域，上游 ADR-0087；ADR-0127 票 292 起门面正名「娱乐」，id 不变）
+  { id: 'bz-cinema-analysis', name: '娱乐分析报告', icon: 'pie-chart', callback: () => openCinemaAnalysis(getApp()) },
+  { id: 'bz-cinema-open', name: '娱乐', icon: 'clapperboard', callback: () => openCinema(getApp()) },
+  { id: 'bz-cinema-add', name: '加条目', icon: 'plus-circle', callback: () => addCinemaItem(getApp()) },
   // 随机抽一部（票 275②，上游 2026-09-11 首页入口菜单）：想看池随机 → 直开详情
   { id: 'bz-cinema-random-pick', name: '随机抽一部', icon: 'shuffle', callback: () => pickRandomCinema(getApp()) },
   // 复习（ticket 168 单一入口：仅保留「复习（按数量）」；ticket 169 加回「加入复习计划」、ticket 170 加「批量加入」，editorCallback 进文档右键待选）
@@ -258,6 +258,8 @@ export default class BzPlugin extends Plugin {
       delete old.literatureDirectory;
       migrated = true;
     }
+    // 票 292 迁移（ADR-0127）：娱乐域目录搬迁 我的/影视 → 我的/娱乐 + 旧默认值设置平移
+    if (await migrateCinemaFolder(this.app, this.settings as unknown as Record<string, unknown>)) migrated = true;
     // P2：迁移完成立即落盘——storagePath/手势结果写回 data.json，迁移 warning 不随每次启动重播
     if (migrated) void this.saveSettings();
     setApp(this.app);

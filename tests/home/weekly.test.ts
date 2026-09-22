@@ -197,9 +197,9 @@ describe('collectWeeklyStat（只读采集集成）', () => {
 
   it('混合数据：各指标独立聚合（影视/读完/番茄/备忘录/日记）', async () => {
     // 影视：1 部本周已看 + 1 部上周已看 + 1 部本周想看（不计）
-    vault.files.set('我的/影视/《周中一场》.md', cinemaMd(8, '2026-09-02'));
-    vault.files.set('我的/影视/《上周一场》.md', cinemaMd(7, '2026-08-29'));
-    vault.files.set('我的/影视/《想看一部》.md', cinemaMd(-1, null));
+    vault.files.set('我的/娱乐/《周中一场》.md', cinemaMd(8, '2026-09-02'));
+    vault.files.set('我的/娱乐/《上周一场》.md', cinemaMd(7, '2026-08-29'));
+    vault.files.set('我的/娱乐/《想看一部》.md', cinemaMd(-1, null));
     // 读完：本周 1 本 + 上周 1 本
     vault.files.set('书库/本周读完的书.md', bookMd('2026-09-01'));
     vault.files.set('书库/上周读完的书.md', bookMd('2026-08-29'));

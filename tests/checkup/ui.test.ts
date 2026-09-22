@@ -113,9 +113,9 @@ describe('数据体检面板（checkup UI）', () => {
       {
         [`${DIR}/memo.json`]: '{oops',
         [`${DIR}/favorites.json`]: JSON.stringify(fav),
-        '我的/影视/《T》.md': '# T',
+        '我的/娱乐/《T》.md': '# T',
       },
-      { '我的/影视/《T》.md': { tags: ['电影'], 海报: 'nope.png' } }
+      { '我的/娱乐/《T》.md': { tags: ['电影'], 海报: 'nope.png' } }
     );
     openDataCheckup(app);
     const popup = document.getElementById('bz-checkup-popup')!;

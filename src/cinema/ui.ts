@@ -303,7 +303,7 @@ export function openRandomMovie(app: App): void {
   const want = M.items.filter((it) => it.status === STATUS_WANT);
   const pool = want.length ? want : M.items;
   if (!pool.length) {
-    notice('影院里还没有片子可抽');
+    notice('娱乐里还没有条目可抽');
     return;
   }
   const it = pool[Math.floor(Math.random() * pool.length)];
@@ -314,7 +314,7 @@ export function openRandomMovie(app: App): void {
   const root = M.currentOverlay?.querySelector<HTMLElement>('[data-cinema-root]');
   if (!root) return;
   openDetail(root, it, app);
-  notice(want.length ? `抽到「${it.name}」` : `想看清单空着，从全部影视里抽到「${it.name}」`, 'success');
+  notice(want.length ? `抽到「${it.name}」` : `想看清单空着，从全部条目里抽到「${it.name}」`, 'success');
 }
 
 // ---------- 弹窗：添加 / 编辑表单 ----------
@@ -346,8 +346,8 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
   el.querySelector('.j-save')?.addEventListener('click', () => {
     const name = (el.querySelector('.j-name') as HTMLInputElement).value.trim();
     if (!name) { panelToast(sec, '请输入名称'); return; }
-    if (editing && item && name !== item.name && M.items.some((x) => x.name === name)) { panelToast(sec, '已存在同名影视，请换个名称'); return; }
-    if (!editing && M.items.some((x) => x.name === name)) { panelToast(sec, '已存在同名影视，请换个名称'); return; }
+    if (editing && item && name !== item.name && M.items.some((x) => x.name === name)) { panelToast(sec, '已存在同名条目，请换个名称'); return; }
+    if (!editing && M.items.some((x) => x.name === name)) { panelToast(sec, '已存在同名条目，请换个名称'); return; }
     const stChanged = !editing || !item || item.status !== (cur.st === '想看' ? STATUS_WANT : cur.st === '在看' ? STATUS_WATCHING : STATUS_WATCHED);
     const date = stChanged ? localNow() : (item!.watchDate || localNow());
     const rating = cur.st === '已看' ? parseFloat((el.querySelector('.j-range') as HTMLInputElement).value) : cur.st === '在看' ? 0 : null;
@@ -369,7 +369,7 @@ async function saveNew(sec: HTMLElement, p: FormPayload, app: App, close: () => 
   const it: CinemaItem = { file: null, name: p.name, typeTag: p.tag, group, status: st, rating: p.rating, watchDate: p.date, review: p.review, poster: null, genre: null, director: null, actors: null, region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null };
   try {
     if (app.vault.getAbstractFileByPath(`${M.folderPath}/《${p.name}》.md`)) {
-      panelToast(sec, '已存在同名影视，请换个名称');
+      panelToast(sec, '已存在同名条目，请换个名称');
       return;
     }
     M.items.unshift(it);
@@ -401,7 +401,7 @@ async function saveEdit(sec: HTMLElement, item: CinemaItem, p: FormPayload, app:
       return;
     }
     if (app.vault.getAbstractFileByPath(`${M.folderPath}/《${p.name}》.md`)) {
-      panelToast(sec, '已存在同名影视，请换个名称');
+      panelToast(sec, '已存在同名条目，请换个名称');
       return;
     }
   }
@@ -441,7 +441,7 @@ function openConfirm(sec: HTMLElement, item: CinemaItem, app: App): void {
       try {
         await app.vault.trash(item.file, true);
       } catch (e) {
-        console.error('删除影视笔记失败:', e);
+        console.error('删除条目笔记失败:', e);
         notice('删除失败：文件可能被占用，请重试', 'error');
         return;
       }

@@ -280,8 +280,8 @@ describe('collectRiver（只读采集集成）', () => {
   });
 
   it('计数接通：影院评分三分 / 书库状态三分 / news 未读 / 坏 JSON 容错', async () => {
-    vault.files.set('我的/影视/《想看》.md', '---\ntags:\n- 电影\n评分: -1\n---\n');
-    vault.files.set('我的/影视/《在看》.md', '---\ntags:\n- 电影\n评分: 0\n---\n');
+    vault.files.set('我的/娱乐/《想看》.md', '---\ntags:\n- 电影\n评分: -1\n---\n');
+    vault.files.set('我的/娱乐/《在看》.md', '---\ntags:\n- 电影\n评分: 0\n---\n');
     vault.files.set('书库/在读一本.md', '---\ntags:\n- book\nreadingDate: 2026-09-01\ncompletionDate: \n---\n');
     vault.files.set('书库/读完一本.md', '---\ntags:\n- book\nreadingDate: 2026-08-01\ncompletionDate: 2026-09-01\n---\n');
     vault.files.set('CONFIG/STORAGE/news.json', JSON.stringify({ articles: [{ read: false }, { read: false }, { read: true }] }));
@@ -336,7 +336,7 @@ describe('collectRiver（只读采集集成）', () => {
 
   it('影院批量回填免疫（issue 305 事故回归）：外部改笔记不进时间线，摘要口径照旧', async () => {
     // 观影日期=今天 + 已看 → recap 摘要 movies 仍计 1（文件统计职责保留），但时间线条目为零
-    vault.files.set('我的/影视/《批量回填》.md', `---\ntags:\n- 电影\n评分: 8\n观影日期: ${dateStrOf(NOW)}\n---\n`);
+    vault.files.set('我的/娱乐/《批量回填》.md', `---\ntags:\n- 电影\n评分: 8\n观影日期: ${dateStrOf(NOW)}\n---\n`);
     const data = await collectRiver(mockAppWithVault(vault) as any, NOW);
     expect(data.today.summary.movies).toBe(1);
     expect(data.today.events).toEqual([]);

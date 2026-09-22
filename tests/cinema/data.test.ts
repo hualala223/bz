@@ -19,12 +19,12 @@ describe('cinema 解析', () => {
   beforeEach(() => {
     resetObsidianMocks();
     resetCinemaState();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
   });
 
   it('解析条目：名称/标签/组/评分/日期/状态/海报/豆瓣字段', () => {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《星际穿越》.md', md(`---
+    vault.files.set('我的/娱乐/《星际穿越》.md', md(`---
 tags:
   - 电影
 评分: 9.6
@@ -63,9 +63,9 @@ tags:
 
   it('状态推断：-1=想看 / 0=在看 / 正数=已看', () => {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《A》.md', '---\ntags: [电影]\n评分: -1\n---');
-    vault.files.set('我的/影视/《B》.md', '---\ntags: [电影]\n评分: 0\n---');
-    vault.files.set('我的/影视/《C》.md', '---\ntags: [电影]\n评分: 8.2\n---');
+    vault.files.set('我的/娱乐/《A》.md', '---\ntags: [电影]\n评分: -1\n---');
+    vault.files.set('我的/娱乐/《B》.md', '---\ntags: [电影]\n评分: 0\n---');
+    vault.files.set('我的/娱乐/《C》.md', '---\ntags: [电影]\n评分: 8.2\n---');
     const app = makeApp(vault);
     const items = rebuildItems(app);
     const byName = Object.fromEntries(items.map((i) => [i.name, i]));
@@ -76,8 +76,8 @@ tags:
 
   it('无 frontmatter 跳过；无 tag 跳过', () => {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《无fm》.md', '正文没有 frontmatter');
-    vault.files.set('我的/影视/《无tag》.md', '---\n评分: 8\n---');
+    vault.files.set('我的/娱乐/《无fm》.md', '正文没有 frontmatter');
+    vault.files.set('我的/娱乐/《无tag》.md', '---\n评分: 8\n---');
     const app = makeApp(vault);
     const items = rebuildItems(app);
     expect(items.length).toBe(0);
@@ -85,8 +85,8 @@ tags:
 
   it('剧集二级 tag → 组归剧集', () => {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《三体》.md', '---\ntags: [国产剧]\n评分: 9.2\n---');
-    vault.files.set('我的/影视/《黑镜》.md', '---\ntags: [英剧]\n评分: 8.1\n---');
+    vault.files.set('我的/娱乐/《三体》.md', '---\ntags: [国产剧]\n评分: 9.2\n---');
+    vault.files.set('我的/娱乐/《黑镜》.md', '---\ntags: [英剧]\n评分: 8.1\n---');
     const app = makeApp(vault);
     const items = rebuildItems(app);
     items.forEach((i) => expect(i.group).toBe('剧集'));
@@ -95,7 +95,7 @@ tags:
   it('rebuildItems：metadataCache 未就绪（cache null）的文件保留内存既有条目，防新建闪失（issue 256）', () => {
     const vault = new MockVault();
     // 无 frontmatter 也无 embeds → mock cache 返回 null（≈ 真库中新建文件尚未被 metadataCache 索引）
-    vault.files.set('我的/影视/《缓存未就绪》.md', '正文');
+    vault.files.set('我的/娱乐/《缓存未就绪》.md', '正文');
     const app = makeApp(vault);
     const tfile = vault.getMarkdownFiles()[0];
     const handItem: CinemaItem = {
@@ -111,7 +111,7 @@ tags:
 
   it('rebuildItems：已索引但无效的文件（frontmatter 无 tags）不被保留分支救回', () => {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《无效》.md', '---\n评分: 8\n---');
+    vault.files.set('我的/娱乐/《无效》.md', '---\n评分: 8\n---');
     const app = makeApp(vault);
     const tfile = vault.getMarkdownFiles()[0];
     M.items.push({
@@ -128,15 +128,15 @@ describe('cinema 排序与筛选', () => {
   beforeEach(() => {
     resetObsidianMocks();
     resetCinemaState();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
   });
 
   function seed() {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《旧片》.md', '---\ntags: [电影]\n评分: 7.0\n观影日期: 2024-01-01\n---');
-    vault.files.set('我的/影视/《新片》.md', '---\ntags: [电影]\n评分: 9.0\n观影日期: 2026-08-01\n---');
-    vault.files.set('我的/影视/《无日期》.md', '---\ntags: [电影]\n评分: 8.0\n---');
-    vault.files.set('我的/影视/《剧》.md', '---\ntags: [美剧]\n评分: 8.5\n观影日期: 2026-07-01\n---');
+    vault.files.set('我的/娱乐/《旧片》.md', '---\ntags: [电影]\n评分: 7.0\n观影日期: 2024-01-01\n---');
+    vault.files.set('我的/娱乐/《新片》.md', '---\ntags: [电影]\n评分: 9.0\n观影日期: 2026-08-01\n---');
+    vault.files.set('我的/娱乐/《无日期》.md', '---\ntags: [电影]\n评分: 8.0\n---');
+    vault.files.set('我的/娱乐/《剧》.md', '---\ntags: [美剧]\n评分: 8.5\n观影日期: 2026-07-01\n---');
     const app = makeApp(vault);
     rebuildItems(app);
     return app;
@@ -158,9 +158,9 @@ describe('cinema 排序与筛选', () => {
 
   it('状态筛选', () => {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《想看》.md', '---\ntags: [电影]\n评分: -1\n---');
-    vault.files.set('我的/影视/《在看》.md', '---\ntags: [电影]\n评分: 0\n---');
-    vault.files.set('我的/影视/《已看》.md', '---\ntags: [电影]\n评分: 8\n---');
+    vault.files.set('我的/娱乐/《想看》.md', '---\ntags: [电影]\n评分: -1\n---');
+    vault.files.set('我的/娱乐/《在看》.md', '---\ntags: [电影]\n评分: 0\n---');
+    vault.files.set('我的/娱乐/《已看》.md', '---\ntags: [电影]\n评分: 8\n---');
     const app = makeApp(vault);
     rebuildItems(app);
     M.statusFilter = '想看';
@@ -172,7 +172,7 @@ describe('cinema 排序与筛选', () => {
   it('按创建排序用 ctime：后编辑（mtime 新）不改排名', () => {
     // 旧片先创建但最近被编辑过（mtime 最新）；新片后创建未编辑——按创建应新片在前
     const mk = (name: string, ctime: number, mtime: number): CinemaItem => ({
-      file: { path: `我的/影视/《${name}》.md`, stat: { ctime, mtime } } as any,
+      file: { path: `我的/娱乐/《${name}》.md`, stat: { ctime, mtime } } as any,
       name, typeTag: '电影', group: '电影',
       watchDate: null, rating: null, status: 2, poster: null, review: null,
       genre: null, director: null, actors: null, region: null, year: null,
@@ -187,8 +187,8 @@ describe('cinema 排序与筛选', () => {
 
   it('搜索：名称/影评/导演命中', () => {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《星际穿越》.md', '---\ntags: [电影]\n评分: 9.6\n影评: 爱是穿越维度的力量\n导演: 诺兰\n---');
-    vault.files.set('我的/影视/《三体》.md', '---\ntags: [国产剧]\n评分: 9.2\n---');
+    vault.files.set('我的/娱乐/《星际穿越》.md', '---\ntags: [电影]\n评分: 9.6\n影评: 爱是穿越维度的力量\n导演: 诺兰\n---');
+    vault.files.set('我的/娱乐/《三体》.md', '---\ntags: [国产剧]\n评分: 9.2\n---');
     const app = makeApp(vault);
     rebuildItems(app);
     M.searchKeyword = '穿越';

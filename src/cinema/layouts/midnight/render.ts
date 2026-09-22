@@ -21,7 +21,7 @@ export function midnightDeskHtml(): string {
   return `<section class="bz-cinema--midnight" data-cinema-root="midnight">
     <div class="d-body">
       <aside class="d-rail">
-        <div class="rail-brand"><h1>影院</h1><div class="en">CINEMA CLUB</div></div>
+        <div class="rail-brand"><h1>娱乐</h1><div class="en">ENTERTAINMENT</div></div>
         <div class="rail-sec">
           <div class="rail-label">类 型</div>
           <div class="j-groups"></div>
@@ -43,14 +43,14 @@ export function midnightMobHtml(): string {
   return `<section class="mob bz-cinema--midnight bz-panel-mtop" data-cinema-root="midnight">
     <div class="m-head"><h2 class="j-mtitle">全部</h2><span class="cnt j-mcnt"></span>
       <span class="m-acts">
-        <button class="add j-madd" data-cinema-add title="添加影片">${iconSpan(ICON.add)}</button>
+        <button class="add j-madd" data-cinema-add title="添加条目">${iconSpan(ICON.add)}</button>
         <button class="m-tool j-mai" title="AI 荐片">${iconSpan(ICON.ai)}</button>
         <button class="m-tool j-mstat" title="观影分析">${iconSpan(ICON.stat)}</button>
         <button class="m-tool j-mclose" title="关闭">${iconSpan(ICON.close)}</button>
       </span>
     </div>
     <div class="m-chips j-chips"></div>
-    <label class="m-search">${iconSpan(ICON.search)}<input class="j-mq" placeholder="搜索片名 / 导演…"></label>
+    <label class="m-search">${iconSpan(ICON.search)}<input class="j-mq" placeholder="搜索条目…"></label>
     <div class="m-scroll j-mview"></div>
   </section>`;
 }
@@ -133,10 +133,10 @@ export interface MidnightRenderInput {
 /** 列表视图头 + 工具行（d-head/d-tools；添加钮钩子 data-cinema-add） */
 export function listHeadHtml(inp: MidnightRenderInput): string {
   return `<div class="d-head"><h2 class="j-title">${esc(inp.title)}</h2><span class="cnt j-cnt">· ${inp.list.length} 部</span>
-    <button class="add j-add" data-cinema-add>${iconSpan(ICON.add)}添加影片</button></div>`;
+    <button class="add j-add" data-cinema-add>${iconSpan(ICON.add)}添加条目</button></div>`;
 }
 export function listToolsHtml(view: CinemaView): string {
-  return `<div class="d-tools"><label class="d-search">${iconSpan(ICON.search)}<input class="j-q" placeholder="搜索影视（名称、类型、影评）..." value="${esc(view.searchKeyword)}"></label>
+  return `<div class="d-tools"><label class="d-search">${iconSpan(ICON.search)}<input class="j-q" placeholder="搜索条目（名称、类型、感想）..." value="${esc(view.searchKeyword)}"></label>
     <div class="seg j-sort">${([['date', '最近观看'], ['created', '加入先后'], ['rating', '按评分']] as const).map(([k, l]) => `<button data-k="${k}" class="${view.sortMode === k ? 'is-on' : ''}">${l}</button>`).join('')}</div></div>`;
 }
 

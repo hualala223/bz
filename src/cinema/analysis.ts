@@ -255,9 +255,9 @@ const topN = (map: Record<string, number>, n: number) =>
 export function buildAnalysisHTML(): string {
   const data = buildAnalysisData();
   if (data.total === 0) {
-    return `<div class="cn-empty-page"><div class="big">还没有可统计的影视记录</div>
-      <div style="font-size:11.5px;color:var(--ink-3)">影视文件夹「${esc(M.folderPath)}」里还没有可分析的条目，添加影视后这里会生成你的观影统计</div>
-      <div style="margin-top:8px"><button class="dm-btn" data-cinema-analysis-add>添加影视</button></div></div>`;
+    return `<div class="cn-empty-page"><div class="big">还没有可统计的条目</div>
+      <div style="font-size:11.5px;color:var(--ink-3)">条目文件夹「${esc(M.folderPath)}」里还没有可分析的条目，添加条目后这里会生成你的观影统计</div>
+      <div style="margin-top:8px"><button class="dm-btn" data-cinema-analysis-add>添加条目</button></div></div>`;
   }
   const avgRating = data.ratingCount ? (data.ratingSum / data.ratingCount).toFixed(1) : '';
   const yearEntries = Object.keys(data.years).sort((a, b) => Number(a) - Number(b)).map((y) => ({ label: y, value: data.years[y] as number }));
@@ -269,7 +269,7 @@ export function buildAnalysisHTML(): string {
   const weekEntries = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'].map((w, i) => ({ label: w, value: data.weekdays[(i + 1) % 7] as number }));
   const cmpRow = (it: any) => topRow('', `《${esc(it.name)}》`, `我 ${Number(it.rating).toFixed(1)} / 豆 ${Number(it.douban).toFixed(1)}`);
 
-  return `${kvInline([`月均 <b>${data.monthFreq}</b> 部`, `周末 <b>${weekend}</b> 部`, `有影评 <b>${data.reviewCount}</b> 篇`])}
+  return `${kvInline([`月均 <b>${data.monthFreq}</b> 部`, `周末 <b>${weekend}</b> 部`, `有感想 <b>${data.reviewCount}</b> 篇`])}
   <div class="stat-cards">
     <div class="stat-card"><div class="v">${data.total}</div><div class="k">馆藏总数</div></div>
     <div class="stat-card"><div class="v">${data.watched}</div><div class="k">已放映</div></div>
@@ -290,7 +290,7 @@ export function buildAnalysisHTML(): string {
   ${secHTML('最爱导演 TOP10', 'bar-chart-3', softHTML(topN(data.directors, 10)))}
   ${secHTML('最爱主演 TOP10', 'bar-chart-3', softHTML(topN(data.actors, 10)))}
   ${secHTML('真爱重复', 'bar-chart-3', kvInline([`导演≥3部 <b>${data.dirRepeat}</b> 人`, `主演≥3部 <b>${data.actRepeat}</b> 人`]) + softHTML([{ label: '导演≥3部', value: data.dirRepeat as number }, { label: '主演≥3部', value: data.actRepeat as number }]))}
-  ${secHTML('影评关键词', 'bar-chart-3', kvInline([`有影评 <b>${data.reviewCount}</b> 篇（${data.reviewRate}%）`]) + (data.keywordEntries.length ? `<div class="tag-cloud">${data.keywordEntries.map(([k, v]) => `<span class="tag-pill">${esc(k)} <b>${v as number}</b></span>`).join('')}</div>` : emptyHTML()))}
+  ${secHTML('感想关键词', 'bar-chart-3', kvInline([`有感想 <b>${data.reviewCount}</b> 篇（${data.reviewRate}%）`]) + (data.keywordEntries.length ? `<div class="tag-cloud">${data.keywordEntries.map(([k, v]) => `<span class="tag-pill">${esc(k)} <b>${v as number}</b></span>`).join('')}</div>` : emptyHTML()))}
   ${secHTML('我的高分 TOP10', 'bar-chart-3', data.topRated.length ? data.topRated.map((it: any, i: number) => topRow(String(i + 1), esc(it.name), Number(it.rating).toFixed(1))).join('') : emptyHTML())}
   ${secHTML('系列追踪', 'bar-chart-3', data.seriesList.length ? data.seriesList.map(([k, v]: any, i: number) => topRow(String(i + 1), `《${esc(k)}》`, `${v as number} 部`)).join('') : emptyHTML())}
   ${secHTML('追剧深度', 'bar-chart-3', data.seasons.length ? kvInline([`平均 <b>${data.avgSeason}</b> 季`]) + data.seasons.map((s: any, i: number) => topRow(String(i + 1), `《${esc(s.name)}》`, `${s.seasons} 季`)).join('') : emptyHTML())}

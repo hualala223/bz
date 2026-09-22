@@ -6,8 +6,11 @@ import type { CinemaViewKind } from './shared';
 import type { App, TFile } from 'obsidian';
 import { tryGetSettings } from '../core/settings-provider';
 
-/** 影视目录默认值（cinemaFolderPath 未配置时回落；旧 movieFolderPath 键已退役） */
-export const DEFAULT_FOLDER = '我的/影视';
+/** 娱乐目录默认值（cinemaFolderPath 未配置时回落；旧 movieFolderPath 键已退役。
+ *  ADR-0127 票 292：默认目录 我的/影视 → 我的/娱乐，旧默认留存供启动迁移判定） */
+export const DEFAULT_FOLDER = '我的/娱乐';
+/** 旧默认目录（迁移判定用：启动时该目录存在且新目录不存在则整目录搬迁） */
+export const OLD_DEFAULT_FOLDER = '我的/影视';
 
 /** 影视目录解析（目录唯一真理跨域化，ADR-0115）：cinemaFolderPath 显式配置优先，缺省回落默认。
  *  日记本域经此函数读取影视目录（不再有独立的 movieDirectory 设置键），设置访问器未注入时回落默认。 */

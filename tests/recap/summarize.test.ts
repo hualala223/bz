@@ -81,27 +81,27 @@ describe('numbersSegments / numbersLine / templateSummary', () => {
   it('五域数字段齐全；失败域不计入（数字不可信宁可不写）', () => {
     expect(numbersSegments(DATA.summary, EMPTY_FAILED)).toEqual([
       '日记 2 条',
-      '影视 1 部',
+      '娱乐 1 部',
       '读完 1 本',
       '完成 1 个待办',
       '番茄 1 个 25 分钟',
     ]);
     expect(numbersSegments(DATA.summary, ['todo', 'pomodoro'])).toEqual([
       '日记 2 条',
-      '影视 1 部',
+      '娱乐 1 部',
       '读完 1 本',
     ]);
   });
 
   it('数字行「今日数字：…」· 分隔；模板「今天：…」、分隔（设计稿口径）', () => {
     expect(numbersLine(DATA.summary, EMPTY_FAILED)).toBe(
-      '今日数字：日记 2 条 · 影视 1 部 · 读完 1 本 · 完成 1 个待办 · 番茄 1 个 25 分钟'
+      '今日数字：日记 2 条 · 娱乐 1 部 · 读完 1 本 · 完成 1 个待办 · 番茄 1 个 25 分钟'
     );
     expect(templateSummary(DATA.summary, EMPTY_FAILED)).toBe(
-      '今天：日记 2 条、影视 1 部、读完 1 本、完成 1 个待办、番茄 1 个 25 分钟'
+      '今天：日记 2 条、娱乐 1 部、读完 1 本、完成 1 个待办、番茄 1 个 25 分钟'
     );
     expect(templateSummary({ diary: 0, movies: 0, books: 0, todoDone: 0, pomodoros: 0, pomodoroMinutes: 0 }, EMPTY_FAILED)).toBe(
-      '今天：日记 0 条、影视 0 部、读完 0 本、完成 0 个待办、番茄 0 个 0 分钟'
+      '今天：日记 0 条、娱乐 0 部、读完 0 本、完成 0 个待办、番茄 0 个 0 分钟'
     );
   });
 
@@ -115,7 +115,7 @@ describe('numbersSegments / numbersLine / templateSummary', () => {
 describe('buildRecapDigest / buildSummaryPrompt', () => {
   it('摘要含数字与逐条痕迹（时间+一句话）', () => {
     const digest = buildRecapDigest(DATA);
-    expect(digest).toContain('【今日数字】日记 2 条、影视 1 部');
+    expect(digest).toContain('【今日数字】日记 2 条、娱乐 1 部');
     expect(digest).toContain('- 09:02 完成『晨跑』');
     expect(digest).toContain('- 23:14 标记《夜片》已看 · ★★★★☆');
   });
@@ -132,7 +132,7 @@ describe('buildRecapDigest / buildSummaryPrompt', () => {
   it('excludeDiary（日记隐私门，ADR-0100）：AI 输入剔除日记数字段，其余域不受影响；缺省不剔除（本地模板口径不变）', () => {
     const digest = buildRecapDigest(DATA, { excludeDiary: true });
     expect(digest).not.toContain('日记');
-    expect(digest).toContain('【今日数字】影视 1 部');
+    expect(digest).toContain('【今日数字】娱乐 1 部');
     // 时间轴剔除 diary 域条目，其余域照常
     const diaryItem = { domain: 'diary' as const, ts: 0, timeLabel: '08:00', text: '新增 2 条' };
     const withDiary = { ...DATA, items: [diaryItem, ...DATA.items] };
@@ -157,7 +157,7 @@ describe('sanitizeSummaryText / buildEntryContent / isRecapEntry', () => {
       RECAP_MARKER,
       '今天你过得很踏实。',
       '',
-      '今日数字：日记 2 条 · 影视 1 部 · 读完 1 本 · 完成 1 个待办 · 番茄 1 个 25 分钟',
+      '今日数字：日记 2 条 · 娱乐 1 部 · 读完 1 本 · 完成 1 个待办 · 番茄 1 个 25 分钟',
     ]);
     const tpl = buildEntryContent('今天：日记 2 条', DATA.summary, EMPTY_FAILED, { withNumbers: false });
     expect(tpl.split('\n')).toEqual([RECAP_MARKER, '今天：日记 2 条']);
@@ -292,7 +292,7 @@ describe('writeRecapEntry（diary 写入 API 集成）', () => {
     const content = dayContent();
     expect(content).toContain(RECAP_MARKER);
     expect(content).toContain('今天你过得很踏实。');
-    expect(content.trimEnd().endsWith('今日数字：日记 2 条 · 影视 1 部 · 读完 1 本 · 完成 1 个待办 · 番茄 1 个 25 分钟')).toBe(true);
+    expect(content.trimEnd().endsWith('今日数字：日记 2 条 · 娱乐 1 部 · 读完 1 本 · 完成 1 个待办 · 番茄 1 个 25 分钟')).toBe(true);
     expect(recapCountIn(content)).toBe(1);
     expect(await hasRecapEntry({ vault } as never, NOW_MS)).toBe(true);
   });

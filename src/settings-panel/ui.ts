@@ -137,7 +137,7 @@ export const DOMAINS: DomainDef[] = [
   { id: 'favorites', name: '收藏本', icon: DOMAIN_ICONS.favorites, desc: '收藏条目', schemaLoader: schemaLoaders.favorites },
   { id: 'reading-report', name: '阅读报告', icon: DOMAIN_ICONS['reading-report'], desc: '阅读统计', noSettings: true },
 
-  { id: 'cinema', name: '影院', icon: DOMAIN_ICONS.cinema, desc: '影视目录与海报', schemaLoader: schemaLoaders.cinema },
+  { id: 'cinema', name: '娱乐', icon: DOMAIN_ICONS.cinema, desc: '电影/剧集/小说等条目与海报', schemaLoader: schemaLoaders.cinema },
   { id: 'bookshelf', name: '书库', icon: 'book-open', desc: '藏书与读书笔记', schemaLoader: schemaLoaders.bookshelf },
   { id: 'review', name: '复习计划', icon: DOMAIN_ICONS.review, desc: '间隔重复与做题', schemaLoader: schemaLoaders.review },
   { id: 'quiz', name: '做题家', icon: 'graduation-cap', desc: '复习出题与做题', noSettings: true },
