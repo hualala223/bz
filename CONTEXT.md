@@ -26,7 +26,7 @@ _Avoid_: 类型、分类
 
 **摘抄 (Quote)**: 从其他笔记选中文本生成的块引用双链（`[[文件#^blockid|文本]]`），以「摘抄」标签写入日记。
 
-**影视条目 / 信条目**: 从 `我的/影视`、`我的/信` 目录的 frontmatter 解析出的条目，聚合显示在日记流中。
+**影视条目 / 信条目**: 从 `我的/娱乐`（原 `我的/影视`，ADR-0127 迁移）、`我的/信` 目录的 frontmatter 解析出的条目，聚合显示在日记流中。
 
 **加密条目 (Encrypted Entry)**: 正文含 🔐 的条目，面板中隐藏但保留在数据映射中防止写入丢失。
 
@@ -202,8 +202,21 @@ _Avoid_: 保险箱、密码本面板（均已退役）
 **剪藏本 (Clipbook)**: 上游线 C5 裁决整体换血的融合域（ADR-0082/0086，issue 177）——原聚合讯（news）与剪藏（clipping）两域退役删除，clipbook 一体化承担：未读流（news.json 四段双写者，磁盘为基底各自保留非本域段）+ 剪藏笔记工作台 + `clipbook.json` 侧写（articleOverrides/savedArchive/order）。阅读右栏编辑部排版、保存为正式剪藏流水线、B 站源设置组（news-sources-group）、写队列（write-queue）。命令 `bz-clipbook-open`（替代旧 `bz-news-open`/`bz-clipping-open`）。设置键 `clipbookMobileDefaultFullscreen/clipbookReaderFontSize/clipbookPanelWidth/Height/clipbookMidWidth` + `newsRetentionUnsavedDays`（原 Saved/Skipped 两键合一）。auto-summary 域保留并随上游对接 clipbook。
 _Avoid_: 聚合讯面板（指旧 news 阅读器，已退役）
 
-**影院 (Cinema)**: 上游线 C4 裁决整体换血的新域（ADR-0087/0090/0103）——原影视（movie）域与影视分析报告（movie-report）域退役删除，cinema 接管 `我的/影视/*.md`（评分推断状态语义同源，零迁移）。书脊化风格框架（ADR-0103 三风格，默认午夜场）、分类头排序、AI 页（`bz-cinema-analysis` 影视分析报告内嵌面板分析页，ADR-0090）、AI 推荐一键想看（recommend）、海报监听（poster-watch）。设置键 `cinemaFolderPath/cinemaSortMode/cinemaStatusFilter/cinemaGridColumns/cinemaStyle/cinemaMobileDefaultFullscreen`；`movieDirectory`（日记侧归类）保留独立。命令 `bz-cinema-open`/`bz-cinema-add`/`bz-cinema-analysis`。仍向 smartcat 派发 'movie' 通道事件（行为感知兼容）。
-_Avoid_: 影视面板（指旧 movie 网格，已退役）
+**娱乐 (Entertainment，域 id 仍 cinema)**: 上游线 C4 裁决换血的域（ADR-0087/0090/0103），**ADR-0127 起门面正名「娱乐」**——域 id `cinema`、命令前缀 `bz-cinema-*`、设置键 `cinema*`、src 目录不动。数据 `我的/娱乐/*.md`（原 `我的/影视`，onload 一次性迁移）。书脊化风格框架（ADR-0103）、AI 页、AI 推荐一键想看、海报监听沿用；状态仍由评分推断（想看 -1 / 在看 0 / 已看 >0）。设置键 `cinemaFolderPath/cinemaSortMode/cinemaStatusFilter/cinemaGridColumns/cinemaStyle/cinemaMobileDefaultFullscreen`；`movieDirectory`（日记侧归类）保留独立。命令 `bz-cinema-open`/`bz-cinema-add`/`bz-cinema-analysis`/`bz-cinema-export`（感想导出）。仍向 smartcat 派发 'movie' 通道事件。
+_Avoid_: 影视面板（旧 movie 网格，已退役）；把「美剧/韩剧」当国家选项（ADR-0127 已规范为 美国/韩国）
+
+**顶级类型 (Type)**: 娱乐条目的固定七项分类：电影/电视剧/短剧/小说/动漫/纪录片/公开课（ADR-0127；「剧集」组退役、细分 tag 归一映射为「电视剧」）。**不开放自定义**（牵动集数与豆瓣抓取行为）。落盘仍是 frontmatter tags。
+
+**国家 (Country)**: 娱乐条目的地区单选，fm 键「国家」。默认待选项 内地/港台/美国/韩国；自定义项经编辑窗「+」添加后固定进待选项池（data.json `entertainmentCountries`，全局共享）。豆瓣的「制片国家/地区」为另一独立字段，不参与选项逻辑。
+_Avoid_: 与制片国家/地区混用（后者是豆瓣抓的多值原文）
+
+**题材 (Genre)**: 娱乐条目的多选分类，复用 fm 键「类型」（顿号分隔字符串）。默认待选项 悬疑/爱情/年代；自定义项固定进待选项池（data.json `entertainmentGenres`）。豆瓣抓取的题材串按分隔符兼容读取。
+_Avoid_: 与顶级类型混用（题材是内容属性，类型是形态分类）
+
+**集数 (Episodes)**: 电视剧/短剧专属的追剧进度，fm 键「总集数」「正在看集数」（数字）。表单仅 类型∈{电视剧,短剧} 且在看 时显示；追平总集数仅提示不自动标已看（半自动，ADR-0127）。在看卡片角标显示 `正在看/总集数`。
+
+**感想导出 (Review Export)**: 把娱乐条目的感想汇总为一篇 markdown 笔记落到 `我的/娱乐/感想导出/`（命令 `bz-cinema-export` 直达 + 列表多选模式）。条目卡含 名称/类型/国家/题材/评分/观影日期/感想。UI 文案「感想」对应 fm 键「影评」（键名不动，零迁移）。
+_Avoid_: 影评（UI 文案已改；fm 键除外）
 
 **待办 (Todo)**: 上游线 C2 裁决整体换血的新域（ADR-0092）——原备忘录（memo）域退役删除，todo 为 `memo.json` **唯一属主**（UI/交互/写盘/引用同步/被动捕获全归本域；数据与字段同源零迁移）。UI 为「场景工作台」：左场景栏（全部/今日/重要+自定义场景）+ 条目列表 + 搜索排序 + 面板拖拽缩放（尺寸记忆）+ 皮肤系统（`todoSkin`）。命令 `bz-todo-open`/`bz-todo-add`；ribbon「待办」。被动捕获：启动自动弹出/打开笔记提醒（`autoPopupOnStart`/`openNoteReminder` 与旧 memo 共键）。引用同步 `todo/file-sync.ts` 只管 memo.json（收藏本同步仍走 favorites 域本地保留）。设置键：`todoPanelWidth/Height`（尺寸记忆）、`todoSkin`、`todoMobileDefaultFullscreen`（默认关）+ 原 memo 场景/默认值键沿用。
 _Avoid_: 备忘录（域已退役；历史文档中「备忘录面板/加备忘」均指本域旧形态）
