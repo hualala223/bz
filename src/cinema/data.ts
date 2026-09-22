@@ -67,7 +67,18 @@ export function parseMovieFile(file: TFile, app: App): CinemaItem | null {
     // 片长/季集：原独立观影报告的两项统计源字段（ADR-0090 并入内嵌分析页）
     duration: fm['片长']?.toString() ?? null,
     seasonText: fm['季集']?.toString() ?? null,
+    // 国家（票 294）：fm 键「国家」单值；豆瓣「制片国家/地区」独立保留不走此键
+    country: fm['国家']?.toString() ?? null,
+    // 题材（票 294）：fm 键「类型」按顿号/逗号/斜杠分隔解析为多选数组（豆瓣题材串兼容）
+    genres: parseGenres(fm['类型']),
   };
+}
+
+/** 题材串解析：「悬疑、爱情」/「悬疑,爱情」/「悬疑 / 爱情」统一为数组（豆瓣题材串兼容） */
+export function parseGenres(raw: unknown): string[] {
+  if (raw === undefined || raw === null || raw === '') return [];
+  const str = String(raw);
+  return str.split(/[、,，/]/).map((v) => v.trim()).filter(Boolean);
 }
 
 /** 重建条目列表（扫描 M.folderPath 下全部 md） */
@@ -140,6 +151,9 @@ export function getDisplayItems(): CinemaItem[] {
   let list = [...M.items];
   if (M.typeFilter) list = list.filter((it) => it.group === M.typeFilter);
   if (M.statusFilter) list = list.filter((it) => it.status === (M.statusFilter === '想看' ? STATUS_WANT : M.statusFilter === '在看' ? STATUS_WATCHING : STATUS_WATCHED));
+  // 票 294：国家筛选（'未填' = 只看国家为空的条目）
+  if (M.countryFilter === '未填') list = list.filter((it) => !it.country);
+  else if (M.countryFilter) list = list.filter((it) => it.country === M.countryFilter);
   if (M.searchKeyword) {
     const kw = M.searchKeyword.toLowerCase();
     list = list.filter((it) => {

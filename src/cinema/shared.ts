@@ -107,13 +107,15 @@ export interface CinemaView {
   view: CinemaViewKind;
   typeFilter: string | null;
   statusFilter: string | null;
+  /** 国家筛选（null=全部；'未填'=国家为空；票 294） */
+  countryFilter: string | null;
   sortMode: string;
   searchKeyword: string;
 }
 
 /** 任一筛选激活（空态文案口径） */
 export function viewFiltered(view: CinemaView): boolean {
-  return !!(view.typeFilter || view.statusFilter || view.searchKeyword);
+  return !!(view.typeFilter || view.statusFilter || view.countryFilter || view.searchKeyword);
 }
 
 // ---------- 共享弹窗（ADR-0103 §3：三风格共用，scoped 午夜场锚样式零复制） ----------
@@ -122,7 +124,8 @@ export function viewFiltered(view: CinemaView): boolean {
 export function detailModalHtml(it: CinemaItem, posterUrl: string | null): string {
   const badge = (color: string, text: string) => `<span class="dm-chip" style="background:${color}">${esc(text)}</span>`;
   const rows: [string, string][] = ([
-    ['类型', it.genre ?? ''],
+    ['国家', it.country ?? ''],
+    ['题材', (it.genres ?? []).join('、')],
     ['导演', it.director ?? ''],
     ['主演', it.actors ?? ''],
     ['制片国家/地区', it.region ?? ''],
@@ -167,15 +170,27 @@ export function formChoicesHtml(values: string[], cur: string, attr: string): st
     `<button type="button" class="f-choice-btn${v === cur ? ' is-on' : ''}" data-${attr}="${v}"><span class="dot" style="background:${attr === 'f-tag' ? typeColor(getGroupForTag(v) ?? '其他') : ST_COLOR[v] ?? '#888'}"></span>${v}</button>`).join('');
 }
 
-/** 添加/编辑表单弹窗内容（保存/切状态等接线留各端行为层） */
-export function formModalHtml(opts: { editing: boolean; name: string; typeTag: string; stText: string; rating: number; review: string }): string {
+/** 选项池 chips 行（国家/题材共用；单选/多选由 data-fc-mode 决定；行尾「＋」= 自定义添加，票 294） */
+export function optionChipsHtml(options: string[], selected: string[], attr: string, multi: boolean): string {
+  const chips = options.map((v) => {
+    const on = selected.includes(v);
+    return `<button type="button" class="f-choice-btn${on ? ' is-on' : ''}" data-${attr}="${esc(v)}">${esc(v)}</button>`;
+  }).join('');
+  return chips + `<button type="button" class="f-choice-btn j-add-opt" data-fc-add="${attr}" title="添加新选项">＋</button>`;
+}
+
+/** 添加/编辑表单弹窗内容（保存/切状态等接线留各端行为层；国家/题材选项池行，票 294） */
+export function formModalHtml(opts: { editing: boolean; name: string; typeTag: string; stText: string; rating: number; review: string; country: string | null; genres: string[]; countryOptions: string[]; genreOptions: string[] }): string {
   const { editing } = opts;
   const initSt = opts.stText;
   const ratingVal = opts.rating;
+  const country = opts.country ?? '';
   return `<div class="cn-modal" style="width:100%">
     <div class="cn-modal-title">${editing ? '编辑条目' : '添加条目'}</div>
     <div class="f-field"><span class="f-label">名 称</span><input class="f-input j-name" value="${esc(opts.name)}" placeholder="条目名称"></div>
     <div class="f-field"><span class="f-label">类 型</span><div class="f-choice j-tags">${formChoicesHtml(formAllTags(), opts.typeTag, 'f-tag')}</div></div>
+    <div class="f-field"><span class="f-label">国 家</span><div class="f-choice j-countries">${optionChipsHtml(opts.countryOptions, country ? [country] : [], 'f-country', false)}</div></div>
+    <div class="f-field"><span class="f-label">题 材</span><div class="f-choice j-genres">${optionChipsHtml(opts.genreOptions, opts.genres, 'f-genre', true)}</div></div>
     <div class="f-field"><span class="f-label">状 态</span><div class="f-choice j-sts">${formChoicesHtml(['想看', '在看', '已看'], initSt, 'f-st')}</div></div>
     <div class="f-field j-rating" style="display:${initSt === '已看' ? '' : 'none'}"><span class="f-label">评 分</span>
       <div class="f-range-row"><input type="range" class="f-range j-range" min="1" max="10" step="0.1" value="${ratingVal}"><span class="f-range-val j-rval">${Number(ratingVal).toFixed(1)}</span></div></div>

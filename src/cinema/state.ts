@@ -45,6 +45,10 @@ export interface CinemaItem {
   duration: string | null;
   /** 季集原文（frontmatter「季集」，如「2季」；分析页追剧深度用，ADR-0090 并入） */
   seasonText: string | null;
+  /** 国家（frontmatter「国家」单值；票 294 / ADR-0127） */
+  country: string | null;
+  /** 题材数组（frontmatter「类型」顿号/斜杠分隔解析；票 294 / ADR-0127） */
+  genres: string[];
 }
 
 /** 排序模式：date=最近观看（默认）/ created=按创建 / rating=按评分 */
@@ -53,9 +57,11 @@ export type CinemaSortMode = 'date' | 'created' | 'rating';
 export interface CinemaState {
   currentOverlay: HTMLElement | null;
   items: CinemaItem[];
-  /** 当前筛选：type=组（null=全部）、status=状态（null=全部） */
+  /** 当前筛选：type=组（null=全部）、status=状态（null=全部）、country=国家（null=全部/'未填'） */
   typeFilter: string | null;
   statusFilter: string | null;
+  /** 国家筛选：null=全部；'未填'=只看国家为空的条目；其余=精确匹配（票 294） */
+  countryFilter: string | null;
   /** 排序模式 */
   sortMode: CinemaSortMode;
   /** 当前视图：list / ai / stat */
@@ -78,6 +84,7 @@ export const M: CinemaState = {
   currentOverlay: null,
   items: [],
   typeFilter: null,
+  countryFilter: null,
   statusFilter: null,
   sortMode: 'date',
   view: 'list',
@@ -98,6 +105,7 @@ export function resetCinemaState(): void {
   M.currentOverlay = null;
   M.items = [];
   M.typeFilter = null;
+  M.countryFilter = null;
   M.statusFilter = null;
   M.sortMode = 'date';
   M.view = 'list';

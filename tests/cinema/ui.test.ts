@@ -16,7 +16,7 @@ import { createOverlay, closeOverlay, openAddModalDirect, openRandomMovie, rende
 import { ensureCinema, unloadCinema, openCinemaAnalysis, pickRandomCinema } from '../../src/cinema';
 import { setAISettingsProvider, resetAIProviderCache } from '../../src/core/ai';
 import { setApp } from '../../src/core/app';
-import { setSettingsProvider } from '../../src/core/settings-provider';
+import { setSettingsProvider, setSettingsSaver } from '../../src/core/settings-provider';
 import { emitDomainEvent, clearDomainEvents, onDomainEvent } from '../../src/core/domain-bus';
 
 
@@ -28,6 +28,8 @@ function seedVault(): { vault: MockVault; app: ReturnType<typeof mockAppWithVaul
   const vault = new MockVault();
   vault.files.set('我的/娱乐/《星际穿越》.md', md(`---
 tags: [电影]
+国家: 内地
+类型: 科幻、悬疑
 评分: 9.6
 观影日期: 2026-08-01
 影评: 爱是穿越维度的唯一力量
@@ -95,9 +97,10 @@ describe('cinema 风格化面板（issue 236）', () => {
     const root = overlay.querySelector('section.bz-cinema--midnight') as HTMLElement;
     expect(root).toBeTruthy();
     expect(root.dataset.cinemaRoot).toBe('midnight');
-    // 左栏：品牌 + 类型行（全部 + 8 组，票 293 七项类型+其他）+ 状态行（3）+ foot 工具 2
+    // 左栏：品牌 + 类型行（全部 + 8 组，票 293 七项类型+其他）+ 国家行（票 294：内地 1 + 未填 3）+ 状态行（3）+ foot 工具 2
     expect(root.querySelector('.rail-brand h1')?.textContent).toBe('娱乐');
     expect(root.querySelectorAll('.j-groups [data-g]').length).toBe(9);
+    expect(root.querySelectorAll('.j-countries [data-cn]').length).toBe(2);
     expect(root.querySelectorAll('.j-status [data-s]').length).toBe(3);
     expect(root.querySelectorAll('.rail-foot .j-tool').length).toBe(2);
     // 「全部」行默认选中，计数 4
@@ -164,7 +167,8 @@ describe('cinema 风格化面板（issue 236）', () => {
     expect(modal.querySelector('.dm-title')?.textContent).toBe('星际穿越');
     expect(modal.querySelector('.dm-review')?.textContent).toContain('爱是穿越维度');
     expect(modal.textContent).toContain('豆 瓣 信 息');
-    expect(modal.querySelector('.dm-kv-k')?.textContent).toBe('导演');
+    expect(modal.querySelector('.dm-kv-k')?.textContent).toBe('国家'); // 票 294：国家/题材行置顶
+    expect(modal.textContent).toContain('科幻、悬疑');
     expect(modal.querySelector('.j-close')).toBeNull(); // issue 271：弹窗右上角关闭钮退役
     expect(modal.querySelector('.j-similar')?.textContent).toContain('找同类');
     expect(modal.querySelector('.j-edit')?.textContent).toContain('编辑');
@@ -579,7 +583,7 @@ tags: [电影]
     expect(root).toBeTruthy();
     expect(root.querySelectorAll('.m-acts .m-tool').length).toBe(3); // AI/分析/关闭（设置钮退役，添加钮为 .add）
     expect(root.querySelector('.j-mclose')).toBeTruthy(); // 落域适配：移动关闭钮
-    expect(root.querySelectorAll('.m-chips .chip').length).toBe(12);
+    expect(root.querySelectorAll('.m-chips .chip').length).toBe(14); // 票 294：12 + 国家(内地) + 未填桶
     expect(root.querySelectorAll('.m-grid .pcard').length).toBe(4);
     expect(root.querySelector('.j-mtitle')?.textContent).toBe('全部');
     expect(root.querySelector('.j-mcnt')?.textContent).toBe('· 4');
@@ -749,6 +753,135 @@ tags: [电影]
     const { app } = seedVault();
     createOverlay(app);
     expect(document.querySelector('section.bz-cinema--midnight')).toBeTruthy();
+  });
+
+  // ======================= 票 294：国家与题材标注 =======================
+
+  it('票294 表单：国家单选/题材多选预选回显，点选切换，保存落盘 fm「国家」「类型」', async () => {
+    const { app, vault } = seedVault();
+    createOverlay(app);
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    clickEl(pcardByName(root, '星际穿越'));
+    clickEl((root.querySelector('.cn-modal') as HTMLElement).querySelector('.j-edit'));
+    const form = root.querySelector('.cn-modal') as HTMLElement;
+    // 预选回显：国家=内地（单选）、题材=科幻+悬疑（多选）
+    expect(form.querySelector('[data-f-country="内地"]')?.classList.contains('is-on')).toBe(true);
+    expect(form.querySelector('[data-f-genre="科幻"]')?.classList.contains('is-on')).toBe(true);
+    expect(form.querySelector('[data-f-genre="悬疑"]')?.classList.contains('is-on')).toBe(true);
+    // 切国家（单选：内地 → 韩国）+ 去掉悬疑、加上爱情
+    clickEl(form.querySelector('[data-f-country="韩国"]'));
+    expect(form.querySelector('[data-f-country="内地"]')?.classList.contains('is-on')).toBe(false);
+    clickEl(form.querySelector('[data-f-genre="悬疑"]'));
+    clickEl(form.querySelector('[data-f-genre="爱情"]'));
+    clickEl(form.querySelector('.j-save'));
+    await vi.waitFor(() => expect(root.querySelector('.cn-toast')?.textContent).toContain('已保存'));
+    const fm = vault.files.get('我的/娱乐/《星际穿越》.md')!;
+    expect(fm).toContain('国家: 韩国');
+    expect(fm).toContain('类型: 科幻、爱情');
+    expect(fm).not.toContain('国家: 内地');
+  });
+
+  it('票294 表单「＋」自定义国家：输入后进选项池（data.json 键）并立即选中，保存落盘', async () => {
+    const { app, vault } = seedVault();
+    const customSettings: Record<string, unknown> = {};
+    let savedCount = 0;
+    setSettingsProvider(() => customSettings as any);
+    setSettingsSaver(async () => { savedCount++; });
+    createOverlay(app);
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    clickEl(root.querySelector('[data-cinema-add]'));
+    const form = root.querySelectorAll('.cn-modal')[0] as HTMLElement;
+    clickEl(form.querySelector('.j-countries .j-add-opt'));
+    const prompt = root.querySelectorAll('.cn-modal')[1] as HTMLElement;
+    expect(prompt.querySelector('.j-opt-name')).toBeTruthy();
+    (prompt.querySelector('.j-opt-name') as HTMLInputElement).value = '泰国';
+    clickEl(prompt.querySelector('.j-ok'));
+    await vi.waitFor(() => expect(savedCount).toBe(1));
+    expect(customSettings['entertainmentCountries']).toBe('泰国');
+    expect(root.querySelectorAll('.cn-modal').length).toBe(1); // 小弹窗已关，表单还在
+    // 新值立即出现在待选项并选中（重绘在 await 链上异步完成，等 DOM）
+    await vi.waitFor(() => {
+      const thai = (form.querySelector('.j-countries') as HTMLElement).querySelector('[data-f-country="泰国"]');
+      expect(thai?.classList.contains('is-on')).toBe(true);
+    });
+    // 保存 → 新条目 fm 带国家
+    (form.querySelector('.j-name') as HTMLInputElement).value = '泰国片';
+    clickEl(form.querySelector('.j-save'));
+    await vi.waitFor(() => expect(vault.files.has('我的/娱乐/《泰国片》.md')).toBe(true));
+    expect(vault.files.get('我的/娱乐/《泰国片》.md')).toContain('国家: 泰国');
+  });
+
+  it('票294 表单「＋」自定义题材：多选池同口径，取消按钮不落盘', async () => {
+    const { app, vault } = seedVault();
+    const customSettings: Record<string, unknown> = {};
+    setSettingsProvider(() => customSettings as any);
+    setSettingsSaver(async () => {});
+    createOverlay(app);
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    clickEl(root.querySelector('[data-cinema-add]'));
+    const form = root.querySelectorAll('.cn-modal')[0] as HTMLElement;
+    clickEl(form.querySelector('.j-genres .j-add-opt'));
+    const prompt = root.querySelectorAll('.cn-modal')[1] as HTMLElement;
+    // 取消：不落盘、无新 chip
+    clickEl(prompt.querySelector('.j-cancel'));
+    expect(customSettings['entertainmentGenres']).toBeUndefined();
+    // 再来一次，输入「武侠」确认
+    clickEl(form.querySelector('.j-genres .j-add-opt'));
+    const prompt2 = root.querySelectorAll('.cn-modal')[1] as HTMLElement;
+    (prompt2.querySelector('.j-opt-name') as HTMLInputElement).value = '武侠';
+    clickEl(prompt2.querySelector('.j-ok'));
+    // 重绘在 await 链上异步完成，等 DOM
+    await vi.waitFor(() => {
+      const wuxia = (form.querySelector('.j-genres') as HTMLElement).querySelector('[data-f-genre="武侠"]');
+      expect(wuxia?.classList.contains('is-on')).toBe(true);
+    });
+    expect(customSettings['entertainmentGenres']).toBe('武侠');
+    // 保存 → fm「类型」含自定义题材
+    (form.querySelector('.j-name') as HTMLInputElement).value = '武侠片';
+    clickEl(form.querySelector('.j-save'));
+    await vi.waitFor(() => expect(vault.files.has('我的/娱乐/《武侠片》.md')).toBe(true));
+    expect(vault.files.get('我的/娱乐/《武侠片》.md')).toContain('类型: 武侠');
+  });
+
+  it('票294 rail 国家筛选：点国家过滤、未填桶筛空国家、再点取消', () => {
+    const { app } = seedVault();
+    createOverlay(app);
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    // 内地：仅星际穿越
+    clickEl(root.querySelector('[data-cn="内地"]'));
+    expect(M.countryFilter).toBe('内地');
+    expect(root.querySelectorAll('.d-scroll .pcard').length).toBe(1);
+    expect(root.querySelector('.d-head .j-title')?.textContent).toBe('全部 · 内地');
+    // 未填桶：其余 3 条
+    clickEl(root.querySelector('[data-cn="未填"]'));
+    expect(M.countryFilter).toBe('未填');
+    expect(root.querySelectorAll('.d-scroll .pcard').length).toBe(3);
+    expect(root.querySelector('.d-head .j-title')?.textContent).toBe('全部 · 国家未填');
+    // 再点取消
+    clickEl(root.querySelector('[data-cn="未填"]'));
+    expect(M.countryFilter).toBeNull();
+    expect(root.querySelectorAll('.d-scroll .pcard').length).toBe(4);
+  });
+
+  it('票294 类型筛选与国家筛选叠加 + mob chips 国家筛选', () => {
+    const { app } = seedVault();
+    createOverlay(app);
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    // 叠加：电影 ∩ 内地 = 星际穿越（想看片也是电影但未填国家）
+    clickEl(root.querySelector('[data-g="电影"]'));
+    clickEl(root.querySelector('[data-cn="内地"]'));
+    expect(root.querySelectorAll('.d-scroll .pcard').length).toBe(1);
+    expect(root.querySelector('.d-head .j-title')?.textContent).toBe('电影 · 内地');
+    // mob：chips 点国家过滤（桌面部分的筛选残留先复位——closeOverlay 只复位视图不复位筛选）
+    M.countryFilter = null;
+    closeOverlay();
+    const { app: appM } = seedMobile();
+    createOverlay(appM);
+    const rootM = document.querySelector('section.mob.bz-cinema--midnight') as HTMLElement;
+    expect(rootM.querySelector('.chip[data-cn="内地"]')).toBeTruthy();
+    clickEl(rootM.querySelector('.chip[data-cn="内地"]'));
+    expect(M.countryFilter).toBe('内地');
+    expect(rootM.querySelectorAll('.m-grid .pcard').length).toBe(1);
   });
 });
 

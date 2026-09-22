@@ -113,7 +113,7 @@ tags:
     const handItem: CinemaItem = {
       file: tfile, name: '缓存未就绪', typeTag: '电影', group: '电影', watchDate: null, rating: null,
       status: 2, poster: null, review: null, genre: null, director: null, actors: null,
-      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null,
+      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: null, genres: [],
     };
     M.items.push(handItem);
     const items = rebuildItems(app);
@@ -129,7 +129,7 @@ tags:
     M.items.push({
       file: tfile, name: '无效', typeTag: '电影', group: '电影', watchDate: null, rating: null,
       status: 2, poster: null, review: null, genre: null, director: null, actors: null,
-      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null,
+      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: null, genres: [],
     });
     rebuildItems(app);
     expect(M.items).toHaveLength(0);
@@ -188,7 +188,7 @@ describe('cinema 排序与筛选', () => {
       name, typeTag: '电影', group: '电影',
       watchDate: null, rating: null, status: 2, poster: null, review: null,
       genre: null, director: null, actors: null, region: null, year: null,
-      doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null,
+      doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: null, genres: [],
     });
     const t0 = 1000;
     const old = mk('旧片', t0, 9000); // 先创建，后被编辑 → mtime 最大

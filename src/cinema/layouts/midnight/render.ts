@@ -25,6 +25,8 @@ export function midnightDeskHtml(): string {
         <div class="rail-sec">
           <div class="rail-label">类 型</div>
           <div class="j-groups"></div>
+          <div class="rail-label" style="padding-top:14px">国 家</div>
+          <div class="j-countries"></div>
           <div class="rail-label" style="padding-top:14px">状 态</div>
           <div class="j-status"></div>
         </div>
@@ -60,30 +62,55 @@ export function midnightMobHtml(): string {
 const railRow = (on: boolean, attr: string, color: string, name: string, n: number) =>
   `<button class="rail-item${on ? ' is-on' : ''}" ${attr}><span class="dot" style="background:${color}"></span>${esc(name)}<span class="n">${n}</span></button>`;
 
-/** 侧栏 rail（类型 + 状态两组；计数来自全量条目快照）。
+/** 侧栏 rail（类型 + 国家 + 状态三组；计数来自全量条目快照）。
+ *  国家组（票 294）：只列数据里出现过的国家 + 「未填」桶（有条目没填国家才出现）。
  *  ai/stat 页 rail 整体熄灭（含「全部」）——它是列表视图的筛选控件，非列表页不表达选中 */
-export function railHtml(items: CinemaItem[], view: CinemaView): { groups: string; status: string } {
+export function railHtml(items: CinemaItem[], view: CinemaView): { groups: string; countries: string; status: string } {
   const listOn = view.view === 'list';
   const g: Record<string, number> = {};
   const c: Record<string, number> = { 想看: 0, 在看: 0, 已看: 0 };
-  items.forEach((it) => { g[it.group] = (g[it.group] || 0) + 1; c[statusText(it.status)]++; });
-  let groups = railRow(listOn && !view.typeFilter && !view.statusFilter, 'data-g="全部"', 'var(--gold)', '全部', items.length);
+  const cn: Record<string, number> = {};
+  let cnEmpty = 0;
+  items.forEach((it) => {
+    g[it.group] = (g[it.group] || 0) + 1;
+    c[statusText(it.status)]++;
+    if (it.country) cn[it.country] = (cn[it.country] || 0) + 1;
+    else cnEmpty++;
+  });
+  let groups = railRow(listOn && !view.typeFilter && !view.statusFilter && !view.countryFilter, 'data-g="全部"', 'var(--gold)', '全部', items.length);
   for (const name of GROUP_ORDER) {
-    groups += railRow(listOn && view.typeFilter === name && !view.statusFilter, `data-g="${name}"`, typeColor(name), name, g[name] || 0);
+    groups += railRow(listOn && view.typeFilter === name && !view.statusFilter && !view.countryFilter, `data-g="${name}"`, typeColor(name), name, g[name] || 0);
+  }
+  let countries = '';
+  for (const name of Object.keys(cn)) {
+    countries += railRow(listOn && view.countryFilter === name, `data-cn="${esc(name)}"`, 'var(--gold)', name, cn[name]);
+  }
+  if (cnEmpty > 0) {
+    countries += railRow(listOn && view.countryFilter === '未填', 'data-cn="未填"', '#8a8578', '未填', cnEmpty);
   }
   let status = '';
   for (const s of ['想看', '在看', '已看'] as const) {
     status += railRow(listOn && view.statusFilter === s, `data-s="${s}"`, ST_COLOR[s], s, c[s]);
   }
-  return { groups, status };
+  return { groups, countries, status };
 }
 
-/** 移动端筛选 chips（全部/类型/状态横滑条；ai/stat 页同 rail 口径整体熄灭） */
-export function chipsHtml(view: CinemaView): string {
+/** 移动端筛选 chips（全部/类型/国家/状态横滑条；国家只列数据里出现过的 + 未填桶，票 294；
+ *  ai/stat 页同 rail 口径整体熄灭） */
+export function chipsHtml(view: CinemaView, items: CinemaItem[] = []): string {
   const listOn = view.view === 'list';
-  let html = `<button class="chip${listOn && !view.typeFilter && !view.statusFilter ? ' is-on' : ''}" data-c="all">${iconSpan(ICON.grid)}全部</button>`;
+  let html = `<button class="chip${listOn && !view.typeFilter && !view.statusFilter && !view.countryFilter ? ' is-on' : ''}" data-c="all">${iconSpan(ICON.grid)}全部</button>`;
   for (const name of GROUP_ORDER) {
-    html += `<button class="chip${listOn && view.typeFilter === name && !view.statusFilter ? ' is-on' : ''}" data-c="${name}">${name}</button>`;
+    html += `<button class="chip${listOn && view.typeFilter === name && !view.statusFilter && !view.countryFilter ? ' is-on' : ''}" data-c="${name}">${name}</button>`;
+  }
+  const cn = new Set<string>();
+  let cnEmpty = false;
+  items.forEach((it) => { if (it.country) cn.add(it.country); else cnEmpty = true; });
+  for (const name of cn) {
+    html += `<button class="chip${listOn && view.countryFilter === name ? ' is-on' : ''}" data-cn="${esc(name)}">${esc(name)}</button>`;
+  }
+  if (cnEmpty) {
+    html += `<button class="chip${listOn && view.countryFilter === '未填' ? ' is-on' : ''}" data-cn="未填">未填</button>`;
   }
   for (const s of ['想看', '在看', '已看'] as const) {
     html += `<button class="chip${listOn && view.statusFilter === s ? ' is-on' : ''}" data-s="${s}">${s}</button>`;
@@ -146,8 +173,10 @@ export function listToolsHtml(view: CinemaView): string {
 export function renderMidnightDesk(root: HTMLElement, inp: MidnightRenderInput): void {
   const rail = railHtml(inp.items, inp.view);
   const groupsEl = root.querySelector('.j-groups');
+  const countriesEl = root.querySelector('.j-countries');
   const statusEl = root.querySelector('.j-status');
   if (groupsEl) groupsEl.innerHTML = rail.groups;
+  if (countriesEl) countriesEl.innerHTML = rail.countries;
   if (statusEl) statusEl.innerHTML = rail.status;
   const view = root.querySelector('.j-view');
   if (!view) return;
@@ -186,5 +215,5 @@ export function renderMidnightMob(root: HTMLElement, inp: MidnightRenderInput): 
     }
   }
   const chips = root.querySelector('.j-chips');
-  if (chips) chips.innerHTML = chipsHtml(v);
+  if (chips) chips.innerHTML = chipsHtml(v, inp.items);
 }

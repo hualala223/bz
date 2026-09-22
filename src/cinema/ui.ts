@@ -26,13 +26,14 @@ import {
 } from './constants';
 import { M, type CinemaItem, type CinemaSortMode } from './state';
 import { rebuildItems, getDisplayItems } from './data';
-import { localNow } from '../core/ui/str';
+import { localNow, esc } from '../core/ui/str';
+import { getCountryOptions, getGenreOptions, addCountryOption, addGenreOption } from './options';
 import { runAIRecommend, runSimilarRecommend, buildTasteProfile, quickAddWant } from './recommend';
 import { buildAnalysisHTML } from './analysis';
 import { enqueueDoubanFetch, dequeueDoubanFetch, isFetching } from './douban-queue';
 import {
   ICON, statusText, itemByKey, doubanSearchUrl,
-  detailModalHtml, confirmModalHtml, formModalHtml,
+  detailModalHtml, confirmModalHtml, formModalHtml, optionChipsHtml,
   aiPageHtml, sheetHeadHtml, pcardHtml, type AiPageInput,
   midnightDeskHtml, midnightMobHtml, renderMidnightDesk, renderMidnightMob,
   type MidnightRenderInput,
@@ -137,7 +138,7 @@ async function persistItem(item: CinemaItem, app: App, edit?: { prevName: string
       await app.vault.createFolder(folder);
     }
     const filePath = `${folder}/《${item.name}》.md`;
-    const content = `---\ntags:\n- ${item.typeTag}\n观影日期: ${item.watchDate || localNow()}\n评分: ${item.rating ?? 0}\n${item.review ? `影评: ${item.review}\n` : ''}海报: \n---\n`;
+    const content = `---\ntags:\n- ${item.typeTag}\n${item.country ? `国家: ${item.country}\n` : ''}${item.genres.length ? `类型: ${item.genres.join('、')}\n` : ''}观影日期: ${item.watchDate || localNow()}\n评分: ${item.rating ?? 0}\n${item.review ? `影评: ${item.review}\n` : ''}海报: \n---\n`;
     const f = await app.vault.create(filePath, content);
     item.file = f;
     return;
@@ -164,6 +165,11 @@ async function persistItem(item: CinemaItem, app: App, edit?: { prevName: string
       if (at >= 0) tags[at] = item.typeTag;
       else if (!tags.includes(item.typeTag)) tags.unshift(item.typeTag);
       fm['tags'] = tags;
+      // 票 294：国家单选 / 题材多选（复用 fm 键「类型」，顿号分隔；空则删键）
+      if (item.country) fm['国家'] = item.country;
+      else delete fm['国家'];
+      if (item.genres.length) fm['类型'] = item.genres.join('、');
+      else delete fm['类型'];
     }
   });
 }
@@ -180,9 +186,12 @@ export function openAddModalDirect(app: App): void {
 function watchedCount(): number {
   return M.items.filter((it) => it.status === STATUS_WATCHED).length;
 }
-/** 列表标题 = 筛选名（组 + 状态叠加） */
+/** 列表标题 = 筛选名（组 + 国家 + 状态叠加） */
 function listTitle(): string {
-  return (M.typeFilter || '全部') + (M.statusFilter ? ` · ${M.statusFilter}` : '');
+  let t = M.typeFilter || '全部';
+  if (M.countryFilter) t += ` · ${M.countryFilter === '未填' ? '国家未填' : M.countryFilter}`;
+  if (M.statusFilter) t += ` · ${M.statusFilter}`;
+  return t;
 }
 /** 网格每行列数（设置 cinemaGridColumns；空值/非法回退 5，钳制 2~12） */
 export function gridColumns(): number {
@@ -319,6 +328,15 @@ export function openRandomMovie(app: App): void {
 
 // ---------- 弹窗：添加 / 编辑表单 ----------
 
+/** 待选项并集（基础池在前，已选但不在池中的值补在尾——豆瓣解析出的题材直接可选，票 294） */
+function mergePool(base: string[], extra: string[]): string[] {
+  const out = [...base];
+  for (const v of extra) {
+    if (v && !out.includes(v)) out.push(v);
+  }
+  return out;
+}
+
 /** 添加/编辑表单弹窗。presetSt：预选状态（中文口径，如「已看」）——「标记已看」入口传入，
  *  状态 chip 预选、评分滑杆（预填当前评分，无则默认分）与影评框自动展开；弹窗本身不落盘，保存才生效 */
 function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?: string): void {
@@ -326,16 +344,65 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
   const initTag = item ? item.typeTag : '电影';
   const initSt = presetSt ?? (item ? statusText(item.status) : '想看');
   const ratingVal = item && item.rating && item.rating > 0 ? item.rating : DEFAULT_RATING;
+  const countryPool = mergePool(getCountryOptions(), item?.country ? [item.country] : []);
+  const genrePool = mergePool(getGenreOptions(), item?.genres ?? []);
   const { el, close } = ovl(sec, formModalHtml({
     editing, name: item ? item.name : '', typeTag: initTag, stText: initSt,
     rating: ratingVal, review: item ? item.review ?? '' : '',
+    country: item?.country ?? null, genres: item?.genres ?? [],
+    countryOptions: countryPool, genreOptions: genrePool,
   }));
   mountIcons(el);
-  const cur = { tag: initTag, st: initSt };
+  const cur = { tag: initTag, st: initSt, country: item?.country ?? null, genres: [...(item?.genres ?? [])] };
   el.querySelectorAll<HTMLElement>('[data-f-tag]').forEach((b) => b.addEventListener('click', () => {
     cur.tag = b.dataset.fTag ?? cur.tag;
     el.querySelectorAll('[data-f-tag]').forEach((x) => x.classList.toggle('is-on', x === b));
   }));
+  // 票 294：国家（单选，再点取消）与题材（多选）chips——委托绑在容器上，自定义添加后重绘行不丢事件
+  const syncCountries = () => {
+    const row = el.querySelector('.j-countries');
+    if (row) row.innerHTML = optionChipsHtml(countryPool, cur.country ? [cur.country] : [], 'f-country', false);
+  };
+  const syncGenres = () => {
+    const row = el.querySelector('.j-genres');
+    if (row) row.innerHTML = optionChipsHtml(genrePool, cur.genres, 'f-genre', true);
+  };
+  el.querySelector('.j-countries')?.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    if (t.closest('.j-add-opt')) {
+      promptOptionValue(sec, '添加国家', async (v) => {
+        await addCountryOption(v);
+        if (!countryPool.includes(v)) countryPool.push(v);
+        cur.country = v;
+        syncCountries();
+      });
+      return;
+    }
+    const b = t.closest('[data-f-country]') as HTMLElement | null;
+    if (!b) return;
+    cur.country = cur.country === (b.dataset.fCountry ?? null) ? null : (b.dataset.fCountry ?? null);
+    syncCountries();
+  });
+  el.querySelector('.j-genres')?.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    if (t.closest('.j-add-opt')) {
+      promptOptionValue(sec, '添加题材', async (v) => {
+        await addGenreOption(v);
+        if (!genrePool.includes(v)) genrePool.push(v);
+        if (!cur.genres.includes(v)) cur.genres.push(v);
+        syncGenres();
+      });
+      return;
+    }
+    const b = t.closest('[data-f-genre]') as HTMLElement | null;
+    if (!b) return;
+    const v = b.dataset.fGenre ?? '';
+    if (!v) return;
+    const at = cur.genres.indexOf(v);
+    if (at >= 0) cur.genres.splice(at, 1);
+    else cur.genres.push(v);
+    syncGenres();
+  });
   el.querySelectorAll<HTMLElement>('[data-f-st]').forEach((b) => b.addEventListener('click', () => {
     cur.st = b.dataset.fSt ?? cur.st;
     el.querySelectorAll('[data-f-st]').forEach((x) => x.classList.toggle('is-on', x === b));
@@ -353,20 +420,36 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
     const rating = cur.st === '已看' ? parseFloat((el.querySelector('.j-range') as HTMLInputElement).value) : cur.st === '在看' ? 0 : null;
     const review = cur.st === '已看' ? (el.querySelector('.j-review-t') as HTMLTextAreaElement).value.trim() : '';
     if (editing && item) {
-      void saveEdit(sec, item, { name, tag: cur.tag, st: cur.st, rating, date, review }, app, close);
+      void saveEdit(sec, item, { name, tag: cur.tag, st: cur.st, rating, date, review, country: cur.country, genres: [...cur.genres] }, app, close);
     } else {
-      void saveNew(sec, { name, tag: cur.tag, st: cur.st, rating, date, review }, app, close);
+      void saveNew(sec, { name, tag: cur.tag, st: cur.st, rating, date, review, country: cur.country, genres: [...cur.genres] }, app, close);
     }
   });
 }
 
-interface FormPayload { name: string; tag: string; st: string; rating: number | null; date: string; review: string }
+/** 小输入弹窗：自定义添加选项（票 294「＋」按钮共用；确认后回调，弹窗自身不落盘） */
+function promptOptionValue(sec: HTMLElement, title: string, onSubmit: (v: string) => void): void {
+  const { el, close } = ovl(sec, `<div class="cn-modal" style="max-width:280px;width:100%">
+    <div class="cn-modal-title">${esc(title)}</div>
+    <div class="f-field"><input class="f-input j-opt-name" placeholder="输入新选项名称"></div>
+    <div class="dm-actions"><button class="dm-btn j-cancel">取消</button><button class="dm-btn gold j-ok">确定</button></div>
+  </div>`, { sticky: true });
+  el.querySelector('.j-cancel')?.addEventListener('click', close);
+  const ok = () => {
+    const v = (el.querySelector('.j-opt-name') as HTMLInputElement).value.trim();
+    close();
+    if (v) onSubmit(v);
+  };
+  el.querySelector('.j-ok')?.addEventListener('click', ok);
+}
+
+interface FormPayload { name: string; tag: string; st: string; rating: number | null; date: string; review: string; country: string | null; genres: string[] }
 
 /** 新增落盘（CM2：重名/落盘失败回退；created 域事件 + 抓取队列接管） */
 async function saveNew(sec: HTMLElement, p: FormPayload, app: App, close: () => void): Promise<void> {
   const group = getGroupForTag(p.tag) ?? '其他';
   const st = p.st === '想看' ? STATUS_WANT : p.st === '在看' ? STATUS_WATCHING : STATUS_WATCHED;
-  const it: CinemaItem = { file: null, name: p.name, typeTag: p.tag, group, status: st, rating: p.rating, watchDate: p.date, review: p.review, poster: null, genre: null, director: null, actors: null, region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null };
+  const it: CinemaItem = { file: null, name: p.name, typeTag: p.tag, group, status: st, rating: p.rating, watchDate: p.date, review: p.review, poster: null, genre: null, director: null, actors: null, region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: p.country, genres: p.genres };
   try {
     if (app.vault.getAbstractFileByPath(`${M.folderPath}/《${p.name}》.md`)) {
       panelToast(sec, '已存在同名条目，请换个名称');
@@ -394,7 +477,7 @@ async function saveNew(sec: HTMLElement, p: FormPayload, app: App, close: () => 
 async function saveEdit(sec: HTMLElement, item: CinemaItem, p: FormPayload, app: App, close: () => void): Promise<void> {
   const group = getGroupForTag(p.tag) ?? '其他';
   const st = p.st === '想看' ? STATUS_WANT : p.st === '在看' ? STATUS_WATCHING : STATUS_WATCHED;
-  const prev = { name: item.name, typeTag: item.typeTag, group: item.group, status: item.status, rating: item.rating, watchDate: item.watchDate, review: item.review };
+  const prev = { name: item.name, typeTag: item.typeTag, group: item.group, status: item.status, rating: item.rating, watchDate: item.watchDate, review: item.review, country: item.country, genres: [...item.genres] };
   if (p.name !== item.name) {
     if (ILLEGAL_NAME_RE.test(p.name)) {
       notice('名称含非法字符（\\ / : * ? " < > |），请修改', 'error');
@@ -407,6 +490,7 @@ async function saveEdit(sec: HTMLElement, item: CinemaItem, p: FormPayload, app:
   }
   item.name = p.name; item.typeTag = p.tag; item.group = group;
   item.status = st; item.rating = p.rating; item.watchDate = p.date; item.review = p.review;
+  item.country = p.country; item.genres = p.genres;
   try {
     await persistItem(item, app, { prevName: prev.name, prevTag: prev.typeTag });
     // 域事件补发（与快速标记 markStatus 同口径）：状态流转 + 评分变化 → 小橘行为流；
@@ -488,6 +572,7 @@ function midnightInput(app: App): MidnightRenderInput {
       view: M.view,
       typeFilter: M.typeFilter,
       statusFilter: M.statusFilter,
+      countryFilter: M.countryFilter,
       sortMode: M.sortMode,
       searchKeyword: M.searchKeyword,
     },
@@ -554,7 +639,7 @@ function bindMidnight(sec: HTMLElement, app: App): void {
     }
     const clear = t.closest('[data-cinema-clear]') as HTMLElement | null;
     if (clear) {
-      M.typeFilter = null; M.statusFilter = null; M.searchKeyword = '';
+      M.typeFilter = null; M.statusFilter = null; M.countryFilter = null; M.searchKeyword = '';
       renderAll(app);
       return;
     }
@@ -578,12 +663,15 @@ function bindMidnight(sec: HTMLElement, app: App): void {
     }
     const back = t.closest('.j-back') as HTMLElement | null;
     if (back) { M.view = 'list'; renderAll(app); return; }
-    const railBtn = t.closest('[data-g],[data-s]') as HTMLElement | null;
+    const railBtn = t.closest('[data-g],[data-s],[data-cn]') as HTMLElement | null;
     if (railBtn) {
       M.view = 'list';
       if (railBtn.dataset.g) {
         M.typeFilter = railBtn.dataset.g === '全部' ? null : railBtn.dataset.g;
         M.statusFilter = null;
+      } else if (railBtn.dataset.cn) {
+        // 票 294：国家筛选（'未填' = 国家为空桶；再点取消）
+        M.countryFilter = M.countryFilter === railBtn.dataset.cn ? null : railBtn.dataset.cn;
       } else {
         const s = railBtn.dataset.s ?? null;
         M.statusFilter = M.statusFilter === s ? null : s;
@@ -597,6 +685,8 @@ function bindMidnight(sec: HTMLElement, app: App): void {
       if (chip.dataset.c) {
         M.typeFilter = chip.dataset.c === 'all' ? null : chip.dataset.c;
         M.statusFilter = null;
+      } else if (chip.dataset.cn) {
+        M.countryFilter = M.countryFilter === chip.dataset.cn ? null : chip.dataset.cn;
       } else {
         const s = chip.dataset.s ?? null;
         M.statusFilter = M.statusFilter === s ? null : s;
