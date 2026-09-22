@@ -822,3 +822,39 @@
 - [x] 体检双链同步：MEMO_ITEM_FIELDS 16 字段 + checks-consistency.memoNormalize 快照加同款两行（ADR-0128 逐字对齐契约）；todo 设置页「默认排序方式」行移除，设置面板原型演示数据同步
 - [x] 门禁：tsc 本票改动零错（余 5 条为并行会话在制 cinema/票 294 类型错，与本票无关）；vitest 本票域 11 文件 184 用例全绿（新增数据归一/分类筛选/编辑器落盘/重开重置 6 组测试），全量 4780 用例中 10 失败全部位于并行在制域（cinema/clipbook/core-adapter）；esbuild production 构建通过，vault 产物探针验证（filterMode/不紧急/想要 字面量命中，根 main.js 与 vault 一致）
 - [x] 安全：构建前 main.js/styles.css/cinema·home prototype-render.js 四产物备份至 .scratch/ticket298-build-backup/（并行会话有在制 cinema 改动，用户拍板「现在就构建」，半成品 cinema 随本票构建一并入 vault，待其收尾重建覆盖）
+
+## 2026-09-22 · 票 292–297：影院域改版「娱乐」（类型体系 + 国家/题材 + 集数 + 感想导出）
+
+**状态：已交付**（grill-with-docs → to-spec → to-tickets → implement 全链，用户「全部推荐」；ADR-0127）。主仓直改（用户未要求 worktree），六票各自独立提交。
+
+### 票 292 — 门面正名与目录迁移（dd5a18b8）
+
+- [x] 面板/命令/文案全量「娱乐」，「影评」→「感想」（fm 键「影评」读写不变）
+- [x] 默认目录 我的/影视 → 我的/娱乐；migrateCinemaFolder 启动迁移（旧有新无 → 整目录搬迁；设置旧默认值平移；两者并存 → Notice 提示不动）；跨域回退值同步（path-classify/recap/home/checkup/settings-panel）
+
+### 票 293 — 七项顶级类型体系（edda0c1a）
+
+- [x] TYPE_GROUPS 固定七项（电影/电视剧/短剧/小说/动漫/纪录片/公开课），「剧集」组退役；旧剧集细分 tag（国产剧/美剧/英剧/德剧/日剧/韩剧/哥伦比亚剧）读侧归一「电视剧」，fm 原值不改写
+- [x] 豆瓣抓取收窄 DOUBAN_ELIGIBLE_TYPES = 电影/电视剧（新增/快速想看/扫队三入口 gate）
+
+### 票 294 — 国家与题材标注（5073646f）
+
+- [x] fm「国家」单值；题材复用 fm 键「类型」顿号分隔（parseGenres 兼容逗号/斜杠 = 豆瓣题材串直接可勾）
+- [x] 选项池 options.ts：data.json 键 entertainmentCountries/entertainmentGenres（默认 内地/港台/美国/韩国、悬疑/爱情/年代），「＋」自定义持久化并固定
+- [x] 表单/详情/落盘全链（编辑分支写键，快速状态路径不碰）；rail 国家筛选 + 未填桶 + mob chips
+
+### 票 295 — 集数与追剧进度（49a03963）
+
+- [x] fm「总集数」「正在看集数」仅电视剧/短剧写入（非剧类编辑删键不残留）；表单行仅剧类+在看显示
+- [x] 在看剧类卡片右上 `正在看/总集数` 进度角标（badge-eps）；追平随保存 toast 提示，不自动改状态
+
+### 票 296 — 感想导出（ce953144）
+
+- [x] 新命令 bz-cinema-export（注册表 72→73）；冷开直进多选；工具行「多选」入口 + cn-multibar（已选计数/导出/退出），mob 同条
+- [x] 导出单篇 markdown 落 `我的/娱乐/感想导出/`（时间戳文件名重名加序号），条目卡 = 名称/类型/国家/题材/评分/观影日期/感想，按当前排序；空选 toast 拦截
+
+### 票 297 — 收尾门禁
+
+- [x] AGENTS.md：领域清单行正名娱乐 + 目录、命令数 72→73 核算口径同步
+- [x] tsc --noEmit 0 错；esbuild production 通过（vault 产物 + 根三件套 + cinema prototype-render 再生，均不提交）
+- [x] vitest 全量 4803 用例 4797 绿；**余 6 失败全部位于 clipbook（news-fetcher/ui）与 core-adapter——并行会话在制域，隔离复跑失败稳定，与本轮 cinema 票无关（票 298 节已先行记录同批失败）**；cinema 域 11 文件 + smoke 全绿

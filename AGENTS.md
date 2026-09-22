@@ -18,7 +18,7 @@
 
 ## 架构
 
-- `src/main.ts`：命令裸注册表、设置页、懒加载、onunload（**72 条命令** = `COMMANDS` 表 **70** 条 + 表外裸注册 1 条 + diary 域 init 内 1 条。表内 70 = 53 条显式字面量 + 1 条 `ATTACH_COMMAND_ID`（`bz-attach-move`）+ 16 条 collect 汉字分类经 `...DEFAULT_COLLECT_CATEGORIES.map(categoryCommandId)` 展开；表外 = `bz-diary-open`；域内 init = `bz-diary-write`（`src/diary/ui/quote.ts:15`）。核算口径 = `tests/smoke.test.ts` 的 `EXPECTED_COMMAND_IDS`（55 字面量 + 16 条 collect 展开 = 71）另加 `bz-diary-write`。2026-09-14 票 288：新增 `bz-pomodoro-focus-toggle/skip/pause` 3 条（68→71）；同日票 289：新增视频生成文献笔记命令（71→72，上游 issue 278 命令入口，函数本就存在）；同日票 290：知识盒域正名，`bz-literature-*` 三条 id 更名 `bz-knowledge-*`（条数不变））
+- `src/main.ts`：命令裸注册表、设置页、懒加载、onunload（**73 条命令** = `COMMANDS` 表 **71** 条 + 表外裸注册 1 条 + diary 域 init 内 1 条。表内 71 = 54 条显式字面量 + 1 条 `ATTACH_COMMAND_ID`（`bz-attach-move`）+ 16 条 collect 汉字分类经 `...DEFAULT_COLLECT_CATEGORIES.map(categoryCommandId)` 展开；表外 = `bz-diary-open`；域内 init = `bz-diary-write`（`src/diary/ui/quote.ts:15`）。核算口径 = `tests/smoke.test.ts` 的 `EXPECTED_COMMAND_IDS`（56 字面量 + 16 条 collect 展开 = 72）另加 `bz-diary-write`。2026-09-14 票 288：新增 `bz-pomodoro-focus-toggle/skip/pause` 3 条（68→71）；同日票 289：新增视频生成文献笔记命令（71→72，上游 issue 278 命令入口，函数本就存在）；同日票 290：知识盒域正名，`bz-literature-*` 三条 id 更名 `bz-knowledge-*`（条数不变）；2026-09-22 票 296：新增 `bz-cinema-export` 导出感想（72→73））
 - `src/core/`：共享层（不挂 window）——app/settings-provider/ai/json-store/domain-bus/obsidian-adapter/path-classify/esc-manager/flow-dialog/utils/dom/changelog/notice（自绘 toast）/settings-modal/settings-schema/settings-common
 - `src/<域>/`：index.ts + data + ui + styles.css（该域样式源头，聚合进根 `styles.css`）；`src/settings.ts`；根 `styles.css`（构建聚合产物，勿手改）；`docs/adr/`；`CONTEXT.md`；`.scratch/<feature>/`
 - **依赖方向（ADR-0002）**：`core ← config/state ← parser ← store ← ui ← main`。store 无 DOM；UI 刷新靠回调订阅；禁止模块顶层互访，函数级引用环须函数体内延迟解析。
@@ -54,7 +54,7 @@
 | clipbook（剪藏本融合域，上游换血接替 news+clipping，ADR-0082） | news.json（未读流）+ `归档/网页剪藏/*.md` + clipbook.json（侧写） |
 | favorites | favorites.json |
 | reading-report | metadataCache 统计 |
-| cinema（影院，上游换血接替 movie，ADR-0087） | `我的/影视/*.md`（AI 分析页内嵌，ADR-0090） |
+| cinema（娱乐，ADR-0127 票 292 起门面正名「娱乐」，上游换血接替 movie，ADR-0087） | `我的/娱乐/*.md`（AI 分析页内嵌，ADR-0090；2026-09-22 票 292 起默认目录 我的/影视 → 我的/娱乐，启动时自动迁移） |
 | review | review.json |
 | quiz | quiz.json |
 | secondbrain（第二大脑） | secondbrain.json（meta/panel/link 三段）+ secondbrain.vec |
