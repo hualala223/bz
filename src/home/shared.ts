@@ -43,7 +43,7 @@ export const DOMAINS: HomeDomain[] = [
   { id: 'diary', commandId: 'bz-diary-open', name: '日记本', sub: '写今天的闪念', icon: iconOf('diary') },
   // 待办（todo 域，上游 memo 换血接替 ADR-0092/0117，本地命名走 ADR-0118）：上游 09-10 起补入首页入口（票 288）
   { id: 'todo', commandId: 'bz-todo-open', name: '待办', sub: '随手记与待办', icon: iconOf('todo') },
-  { id: 'cinema', commandId: 'bz-cinema-open', name: '娱乐', sub: '电影/剧集/小说 想看与在看', icon: iconOf('cinema') },
+  { id: 'cinema', commandId: 'bz-cinema-open', name: '娱乐', sub: '电影/剧集/书籍 想看与在看', icon: iconOf('cinema') },
   { id: 'review', commandId: 'bz-review-open', name: '复习计划', sub: '到期卡片队列', icon: iconOf('review') },
   { id: 'pomodoro', commandId: 'bz-pomodoro-open', name: '番茄钟', sub: '专注计时', icon: iconOf('pomodoro') },
   { id: 'favorites', commandId: 'bz-favorites-open', name: '收藏本', sub: '收藏条目', icon: iconOf('favorites') },

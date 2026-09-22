@@ -22,7 +22,7 @@ import { tryGetSettings } from '../core/settings-provider';
 import { mountIcons } from '../core/ui';
 import {
   STATUS_WANT, STATUS_WATCHING, STATUS_WATCHED, DEFAULT_RATING,
-  getGroupForTag, doubanEligibleTag, episodesEligibleTag,
+  getGroupForTag, getGroupSafe, doubanEligibleTag, episodesEligibleTag,
 } from './constants';
 import { M, type CinemaItem, type CinemaSortMode } from './state';
 import { rebuildItems, getDisplayItems, parseEpisodeCount } from './data';
@@ -33,7 +33,7 @@ import { buildAnalysisHTML } from './analysis';
 import { enqueueDoubanFetch, dequeueDoubanFetch, isFetching } from './douban-queue';
 import {
   ICON, statusText, itemByKey, itemKey, doubanSearchUrl,
-  detailModalHtml, confirmModalHtml, formModalHtml, optionChipsHtml,
+  detailModalHtml, confirmModalHtml, formModalHtml, optionChipsHtml, genreLabel,
   aiPageHtml, sheetHeadHtml, pcardHtml, type AiPageInput,
   midnightDeskHtml, midnightMobHtml, renderMidnightDesk, renderMidnightMob,
   type MidnightRenderInput,
@@ -357,7 +357,8 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
   const initSt = presetSt ?? (item ? statusText(item.status) : '想看');
   const ratingVal = item && item.rating && item.rating > 0 ? item.rating : DEFAULT_RATING;
   const countryPool = mergePool(getCountryOptions(), item?.country ? [item.country] : []);
-  const genrePool = mergePool(getGenreOptions(), item?.genres ?? []);
+  // 票 299：题材池按顶级类型隔离（书籍=体裁默认中图法 22 大类）；已选值恒可见（mergePool 兜底）
+  let genrePool = mergePool(getGenreOptions(getGroupSafe(initTag)), item?.genres ?? []);
   const { el, close } = ovl(sec, formModalHtml({
     editing, name: item ? item.name : '', typeTag: initTag, stText: initSt,
     rating: ratingVal, review: item ? item.review ?? '' : '',
@@ -367,6 +368,13 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
   }));
   mountIcons(el);
   const cur = { tag: initTag, st: initSt, country: item?.country ?? null, genres: [...(item?.genres ?? [])] };
+  // 票 299：切类型后题材池与「体裁/题材」行标签跟随目标组重取
+  const syncGenrePool = (tag: string) => {
+    genrePool = mergePool(getGenreOptions(getGroupSafe(tag)), cur.genres);
+    const label = el.querySelector('.j-genre-label');
+    if (label) label.textContent = genreLabel(getGroupSafe(tag), true);
+    syncGenres();
+  };
   // 票 295：集数行仅 剧类（电视剧/短剧）且「在看」时可见
   const epsVisible = () => episodesEligibleTag(cur.tag) && cur.st === '在看';
   const syncEps = () => {
@@ -376,6 +384,7 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
   el.querySelectorAll<HTMLElement>('[data-f-tag]').forEach((b) => b.addEventListener('click', () => {
     cur.tag = b.dataset.fTag ?? cur.tag;
     el.querySelectorAll('[data-f-tag]').forEach((x) => x.classList.toggle('is-on', x === b));
+    syncGenrePool(cur.tag);
     syncEps();
   }));
   // 票 294：国家（单选，再点取消）与题材（多选）chips——委托绑在容器上，自定义添加后重绘行不丢事件
@@ -406,8 +415,9 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
   el.querySelector('.j-genres')?.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;
     if (t.closest('.j-add-opt')) {
-      promptOptionValue(sec, '添加题材', async (v) => {
-        await addGenreOption(v);
+      const g = getGroupSafe(cur.tag);
+      promptOptionValue(sec, g === '书籍' ? '添加体裁' : '添加题材', async (v) => {
+        await addGenreOption(g, v);
         if (!genrePool.includes(v)) genrePool.push(v);
         if (!cur.genres.includes(v)) cur.genres.push(v);
         syncGenres();
@@ -625,12 +635,12 @@ function midnightInput(app: App): MidnightRenderInput {
 
 // ---------- 多选导出感想（票 296） ----------
 
-/** 单条目感想卡（markdown）：名称/类型/国家/题材/评分/观影日期/感想 */
+/** 单条目感想卡（markdown）：名称/类型/国家/题材（书籍=体裁，票 299）/评分/观影日期/感想 */
 function reviewCardMd(it: CinemaItem): string {
   const lines: string[] = [`## 《${it.name}》`, ''];
   lines.push(`- 类型：${it.typeTag}`);
   if (it.country) lines.push(`- 国家：${it.country}`);
-  if (it.genres.length) lines.push(`- 题材：${it.genres.join('、')}`);
+  if (it.genres.length) lines.push(`- ${genreLabel(it.group)}：${it.genres.join('、')}`);
   lines.push(`- 评分：${it.rating && it.rating > 0 ? Number(it.rating).toFixed(1) : '未评分'}`);
   if (it.watchDate) lines.push(`- 观影日期：${it.watchDate.slice(0, 10)}`);
   lines.push('', it.review || '（无感想）', '', '---', '');

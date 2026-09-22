@@ -17,13 +17,14 @@ import { M } from './state';
 import { refreshDataAndView } from './data';
 import { enqueueDoubanFetch } from './douban-queue';
 
-/** 类型 → 默认 tag（加入想看用；票 293：剧集退役，AI 类型归一映射电视剧） */
+/** 类型 → 默认 tag（加入想看用；票 293：剧集退役，AI 类型归一映射电视剧；票 299：小说→书籍，旧输出兼容归一） */
 const GROUP_DEFAULT_TAG: Record<string, string> = {
   电影: '电影',
   电视剧: '电视剧',
   剧集: '电视剧',
   短剧: '短剧',
-  小说: '小说',
+  书籍: '书籍',
+  小说: '书籍',
   动漫: '日漫',
   纪录片: '纪录片',
   公开课: '公开课',
@@ -83,9 +84,9 @@ export function buildRecommendPrompt(profile: any, recent: string[]): string {
 地区偏好：${profile.regions.join('、') || '无'}
 最近看的10部：${recent.join('；')}
 
-请基于画像推荐 ${RECOMMEND_ASK} 部用户可能喜欢的影视（电影/电视剧/短剧/小说/动漫/纪录片/公开课均可），按与口味的匹配度从高到低排序。推荐理由必须具体引用画像中的偏好信号（如"你偏爱X导演的Y风格"）。只推荐真实存在的影视，避免编造。
+请基于画像推荐 ${RECOMMEND_ASK} 部用户可能喜欢的影视（电影/电视剧/短剧/书籍/动漫/纪录片/公开课均可），按与口味的匹配度从高到低排序。推荐理由必须具体引用画像中的偏好信号（如"你偏爱X导演的Y风格"）。只推荐真实存在的影视，避免编造。
 
-严格输出 JSON（不要输出其他内容）：{"recommendations":[{"title":"片名","year":"年份","director":"导演","type":"电影|电视剧|短剧|小说|动漫|纪录片|公开课","reason":"推荐理由"}]}`;
+严格输出 JSON（不要输出其他内容）：{"recommendations":[{"title":"片名","year":"年份","director":"导演","type":"电影|电视剧|短剧|书籍|动漫|纪录片|公开课","reason":"推荐理由"}]}`;
 }
 
 /** 补问提示词（方案 A 第二轮）：只排除「已经推荐过的名字」（≤20 个，常量级），
@@ -101,9 +102,9 @@ export function buildFollowupPrompt(profile: any, recent: string[], excludeNames
 
 刚才已经向你推荐过以下影片（不要重复推荐）：${excludeNames.join('、')}
 
-请再推荐 ${FOLLOWUP_ASK} 部用户可能喜欢的影视（电影/电视剧/短剧/小说/动漫/纪录片/公开课均可），按与口味的匹配度从高到低排序，避开上面已出现过的。推荐理由必须具体引用画像中的偏好信号（如"你偏爱X导演的Y风格"）。只推荐真实存在的影视，避免编造。
+请再推荐 ${FOLLOWUP_ASK} 部用户可能喜欢的影视（电影/电视剧/短剧/书籍/动漫/纪录片/公开课均可），按与口味的匹配度从高到低排序，避开上面已出现过的。推荐理由必须具体引用画像中的偏好信号（如"你偏爱X导演的Y风格"）。只推荐真实存在的影视，避免编造。
 
-严格输出 JSON（不要输出其他内容）：{"recommendations":[{"title":"片名","year":"年份","director":"导演","type":"电影|电视剧|短剧|小说|动漫|纪录片|公开课","reason":"推荐理由"}]}`;
+严格输出 JSON（不要输出其他内容）：{"recommendations":[{"title":"片名","year":"年份","director":"导演","type":"电影|电视剧|短剧|书籍|动漫|纪录片|公开课","reason":"推荐理由"}]}`;
 }
 
 /** 候选条目名（title 兜底 name） */

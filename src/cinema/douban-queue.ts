@@ -144,7 +144,7 @@ export function dequeueDoubanFetch(path: string | null | undefined): void {
 }
 
 /** 面板打开扫描：未齐条目（缺海报或缺豆瓣链接）入队补抓；有新增即触发一次渲染（loading 首帧可见）。
- *  票 293：仅 电影/电视剧 参与自动抓取（短剧/小说不入队），类型判定走 doubanEligibleTag */
+ *  票 293/299：仅 电影/电视剧 参与自动抓取（短剧/书籍（含旧小说 tag 归一）不入队），类型判定走 doubanEligibleTag */
 export function sweepDoubanFetch(_app: App): void {
   let added = 0;
   for (const it of M.items) {

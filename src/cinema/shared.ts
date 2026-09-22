@@ -141,7 +141,7 @@ export function detailModalHtml(it: CinemaItem, posterUrl: string | null): strin
   const badge = (color: string, text: string) => `<span class="dm-chip" style="background:${color}">${esc(text)}</span>`;
   const rows: [string, string][] = ([
     ['国家', it.country ?? ''],
-    ['题材', (it.genres ?? []).join('、')],
+    [genreLabel(it.group), (it.genres ?? []).join('、')],
     ['导演', it.director ?? ''],
     ['主演', it.actors ?? ''],
     ['制片国家/地区', it.region ?? ''],
@@ -163,10 +163,16 @@ export function detailModalHtml(it: CinemaItem, posterUrl: string | null): strin
   </div>`;
 }
 
-/** 组 → 细分 tag 映射（表单 choices 用；ADR-0127 票 293：剧集退役，七项顶级类型） */
+/** 组 → 细分 tag 映射（表单 choices 用；ADR-0127 票 293：剧集退役，七项顶级类型；票 299 小说→书籍） */
 export const GROUP_SUBS_OF: Record<string, string[]> = {
-  电影: [], 电视剧: [], 短剧: [], 小说: [], 动漫: ['日漫', '国漫', '美漫'], 纪录片: [], 公开课: ['公开课', 'TED'],
+  电影: [], 电视剧: [], 短剧: [], 书籍: [], 动漫: ['日漫', '国漫', '美漫'], 纪录片: [], 公开课: ['公开课', 'TED'],
 };
+
+/** 分类行标签：书籍组叫「体裁」（图书馆口径，票 299），其余组「题材」；spaced=表单标签带空格风格。fm 键「类型」不变，纯显示层 */
+export function genreLabel(group: string, spaced = false): string {
+  const t = group === '书籍' ? '体裁' : '题材';
+  return spaced ? t.split('').join(' ') : t;
+}
 
 /** 表单可选类型（组顺序展开细分；「其他」不入表单） */
 export function formAllTags(): string[] {
@@ -196,18 +202,20 @@ export function optionChipsHtml(options: string[], selected: string[], attr: str
 }
 
 /** 添加/编辑表单弹窗内容（保存/切状态等接线留各端行为层；国家/题材选项池行，票 294；
+ *  分类行标签按组动态：书籍=体裁、其余=题材（票 299）；j-genre-label 供行为层切类型时改写；
  *  集数行仅剧类+在看时由行为层显隐，票 295） */
 export function formModalHtml(opts: { editing: boolean; name: string; typeTag: string; stText: string; rating: number; review: string; country: string | null; genres: string[]; countryOptions: string[]; genreOptions: string[]; epsTotal: number | null; epsWatching: number | null }): string {
   const { editing } = opts;
   const initSt = opts.stText;
   const ratingVal = opts.rating;
   const country = opts.country ?? '';
+  const genreLabelText = genreLabel(getGroupForTag(opts.typeTag) ?? '其他', true);
   return `<div class="cn-modal" style="width:100%">
     <div class="cn-modal-title">${editing ? '编辑条目' : '添加条目'}</div>
     <div class="f-field"><span class="f-label">名 称</span><input class="f-input j-name" value="${esc(opts.name)}" placeholder="条目名称"></div>
     <div class="f-field"><span class="f-label">类 型</span><div class="f-choice j-tags">${formChoicesHtml(formAllTags(), opts.typeTag, 'f-tag')}</div></div>
     <div class="f-field"><span class="f-label">国 家</span><div class="f-choice j-countries">${optionChipsHtml(opts.countryOptions, country ? [country] : [], 'f-country', false)}</div></div>
-    <div class="f-field"><span class="f-label">题 材</span><div class="f-choice j-genres">${optionChipsHtml(opts.genreOptions, opts.genres, 'f-genre', true)}</div></div>
+    <div class="f-field"><span class="f-label j-genre-label">${genreLabelText}</span><div class="f-choice j-genres">${optionChipsHtml(opts.genreOptions, opts.genres, 'f-genre', true)}</div></div>
     <div class="f-field"><span class="f-label">状 态</span><div class="f-choice j-sts">${formChoicesHtml(['想看', '在看', '已看'], initSt, 'f-st')}</div></div>
     <div class="f-field j-eps" style="display:none"><span class="f-label">集 数</span>
       <div class="f-eps-row"><label>正在看 <input type="number" min="0" class="f-input j-eps-watching" value="${opts.epsWatching ?? ''}"></label><label>总集数 <input type="number" min="0" class="f-input j-eps-total" value="${opts.epsTotal ?? ''}"></label></div></div>

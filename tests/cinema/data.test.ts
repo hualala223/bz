@@ -97,13 +97,15 @@ tags:
     expect(vault.files.get('我的/娱乐/《三体》.md')).toContain('国产剧'); // fm 原值不改写
   });
 
-  it('新顶级类型：短剧/小说 直建直归（票 293）', () => {
+  it('顶级类型：短剧直建直归；旧 tag「小说」经归一映射入「书籍」组，fm 原值不改写（票 293/299）', () => {
     const vault = new MockVault();
     vault.files.set('我的/娱乐/《长风渡》.md', '---\ntags: [短剧]\n评分: 7\n---');
     vault.files.set('我的/娱乐/《百年孤独》.md', '---\ntags: [小说]\n评分: 9.5\n---');
     const app = makeApp(vault);
     const items = rebuildItems(app);
-    expect(items.map((i) => i.group)).toEqual(['短剧', '小说']);
+    expect(items.map((i) => i.group)).toEqual(['短剧', '书籍']);
+    expect(items[1].typeTag).toBe('书籍'); // 读侧归一（同旧剧 tag 先例）
+    expect(vault.files.get('我的/娱乐/《百年孤独》.md')).toContain('小说'); // fm 原值不改写
   });
 
   it('rebuildItems：metadataCache 未就绪（cache null）的文件保留内存既有条目，防新建闪失（issue 256）', () => {
@@ -226,21 +228,23 @@ describe('cinema 工具函数', () => {
     expect(getStarString(-1)).toBe('');
   });
 
-  it('组映射（票 293：旧剧集细分 tag 归一电视剧）', () => {
+  it('组映射（票 293 旧剧归一 / 票 299 小说→书籍）', () => {
     expect(getGroupForTag('美剧')).toBe('电视剧');
     expect(getGroupForTag('哥伦比亚剧')).toBe('电视剧');
     expect(getGroupForTag('电视剧')).toBe('电视剧');
     expect(getGroupForTag('短剧')).toBe('短剧');
-    expect(getGroupForTag('小说')).toBe('小说');
+    expect(getGroupForTag('书籍')).toBe('书籍');
+    expect(getGroupForTag('小说')).toBe('书籍');
     expect(getGroupForTag('日漫')).toBe('动漫');
     expect(getGroupSafe('未知tag')).toBe('其他');
   });
 
-  it('豆瓣抓取 gate（票 293）：电影/电视剧（含旧剧 tag 归一）可抓，短剧/小说不可', () => {
+  it('豆瓣抓取 gate（票 293）：电影/电视剧（含旧剧 tag 归一）可抓，短剧/书籍（含旧小说 tag）不可', () => {
     expect(doubanEligibleTag('电影')).toBe(true);
     expect(doubanEligibleTag('电视剧')).toBe(true);
     expect(doubanEligibleTag('美剧')).toBe(true);
     expect(doubanEligibleTag('短剧')).toBe(false);
+    expect(doubanEligibleTag('书籍')).toBe(false);
     expect(doubanEligibleTag('小说')).toBe(false);
     expect(doubanEligibleTag('日漫')).toBe(false);
     expect(doubanEligibleTag(null)).toBe(false);
@@ -251,6 +255,7 @@ describe('cinema 工具函数', () => {
     expect(episodesEligibleTag('短剧')).toBe(true);
     expect(episodesEligibleTag('美剧')).toBe(true);
     expect(episodesEligibleTag('电影')).toBe(false);
+    expect(episodesEligibleTag('书籍')).toBe(false);
     expect(episodesEligibleTag('小说')).toBe(false);
     expect(episodesEligibleTag(null)).toBe(false);
   });

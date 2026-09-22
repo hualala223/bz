@@ -414,8 +414,10 @@ export default interface BzSettings {
   cinemaMobileDefaultFullscreen: boolean;
   /** 娱乐域国家待选项池（顿号分隔自定义段；票 294 / ADR-0127） */
   entertainmentCountries: string;
-  /** 娱乐域题材待选项池（顿号分隔自定义段；票 294 / ADR-0127） */
+  /** 娱乐域题材待选项池（顿号分隔自定义段；票 294 旧全局键，票 299 起仅作组键缺省回落） */
   entertainmentGenres: string;
+  /** 娱乐域题材池按组自定义段（组 → 顿号串；票 299 / ADR-0128 按组隔离） */
+  entertainmentGenresByGroup: Record<string, string>;
   /** 番茄钟：移动端默认全屏（默认关——原移动端 320px 居中卡） */
   pomodoroMobileDefaultFullscreen: boolean;
   /** 保险箱：移动端默认全屏（默认开——原 JS 内联强制全屏） */
@@ -626,6 +628,7 @@ export const DEFAULT_SETTINGS: BzSettings = {
   cinemaSkinTheme: 'nightfall',
   entertainmentCountries: '内地、港台、美国、韩国',
   entertainmentGenres: '悬疑、爱情、年代',
+  entertainmentGenresByGroup: {},
 
 
   // 做题家（设置并入复习计划 tab）

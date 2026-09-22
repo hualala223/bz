@@ -79,7 +79,7 @@ describe('豆瓣抓取队列（douban-queue，ADR-0129 执行器=插件内 fetch
     expect(isFetching('我的/娱乐/《全缺》.md')).toBe(false);
   });
 
-  it('sweep gate（票 293）：短剧/小说条目不入队，电影/电视剧照常', async () => {
+  it('sweep gate（票 293/299）：短剧/书籍（含旧小说 tag）条目不入队，电影/电视剧照常', async () => {
     const vault = new MockVault();
     vault.files.set('我的/娱乐/《电影缺图》.md', '---\ntags: [电影]\n评分: 8\n---');
     vault.files.set('我的/娱乐/《短剧缺图》.md', '---\ntags: [短剧]\n评分: 8\n---');

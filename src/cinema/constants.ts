@@ -11,13 +11,14 @@ export const DEFAULT_RATING = 5;
 
 /**
  * 类型分组：组 → 细分 tag 清单（ADR-0127 票 293：固定七项顶级类型，「剧集」退役、
- * 细分剧 tag 归一映射「电视剧」；动漫细分保留；不开放顶级类型自定义）
+ * 细分剧 tag 归一映射「电视剧」；动漫细分保留；不开放顶级类型自定义。
+ * 票 299 / ADR-0128：「小说」正名「书籍」，旧 tag 经 LEGACY_TAG_MAP 读侧归一）
  */
 export const TYPE_GROUPS: Record<string, string[]> = {
   电影: ['电影'],
   电视剧: ['电视剧'],
   短剧: ['短剧'],
-  小说: ['小说'],
+  书籍: ['书籍'],
   动漫: ['日漫', '国漫', '美漫'],
   纪录片: ['纪录片'],
   公开课: ['公开课', 'TED'],
@@ -25,8 +26,12 @@ export const TYPE_GROUPS: Record<string, string[]> = {
 
 export const ALL_TAGS: string[] = Object.values(TYPE_GROUPS).flat();
 
-/** 旧「剧集」组细分 tag → 「电视剧」归一映射（读侧归一显示，fm 原值不改写） */
+/**
+ * 旧 tag → 新 tag 归一映射（读侧归一显示，fm 原值不改写）：
+ * 旧「剧集」组细分 tag → 「电视剧」（票 293）；「小说」→「书籍」组正名（票 299 / ADR-0128）
+ */
 export const LEGACY_TAG_MAP: Record<string, string> = {
+  小说: '书籍',
   国产剧: '电视剧',
   美剧: '电视剧',
   英剧: '电视剧',
@@ -37,14 +42,14 @@ export const LEGACY_TAG_MAP: Record<string, string> = {
 };
 
 /** 组展示顺序（左栏/移动端分类条） */
-export const GROUP_ORDER: string[] = ['电影', '电视剧', '短剧', '小说', '动漫', '纪录片', '公开课', '其他'];
+export const GROUP_ORDER: string[] = ['电影', '电视剧', '短剧', '书籍', '动漫', '纪录片', '公开课', '其他'];
 
-/** 类型色（功能色，双主题一致；剧集色值由电视剧继承，短剧/小说新增） */
+/** 类型色（功能色，双主题一致；剧集色值由电视剧继承，短剧/书籍新增） */
 export const TYPE_COLORS: Record<string, string> = {
   电影: '#e6951d',
   电视剧: '#3d7bd6',
   短剧: '#d9534f',
-  小说: '#3aa08f',
+  书籍: '#3aa08f',
   动漫: '#d64d8f',
   纪录片: '#45a35c',
   公开课: '#9b6dd4',
@@ -82,7 +87,7 @@ export function getStarString(rating: number): string {
 
 // ======================= 豆瓣抓取适用类型（票 293） =======================
 
-/** 豆瓣自动抓取仅对 电影/电视剧 生效（短剧搜不到、小说是图书条目不适用；手动「在豆瓣打开」不受限） */
+/** 豆瓣自动抓取仅对 电影/电视剧 生效（短剧搜不到、书籍是图书条目不适用；手动「在豆瓣打开」不受限） */
 export const DOUBAN_ELIGIBLE_TYPES: string[] = ['电影', '电视剧'];
 
 /** 类型 tag 是否可自动抓豆瓣（旧剧集细分 tag 归一后判定） */

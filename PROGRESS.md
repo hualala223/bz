@@ -858,3 +858,14 @@
 - [x] AGENTS.md：领域清单行正名娱乐 + 目录、命令数 72→73 核算口径同步
 - [x] tsc --noEmit 0 错；esbuild production 通过（vault 产物 + 根三件套 + cinema prototype-render 再生，均不提交）
 - [x] vitest 全量 4803 用例 4797 绿；**余 6 失败全部位于 clipbook（news-fetcher/ui）与 core-adapter——并行会话在制域，隔离复跑失败稳定，与本轮 cinema 票无关（票 298 节已先行记录同批失败）**；cinema 域 11 文件 + smoke 全绿
+
+### 票 299 — 「小说」正名「书籍」+ 分类池按组隔离（体裁）
+
+- [x] TYPE_GROUPS/GROUP_ORDER/TYPE_COLORS 组名 小说→书籍（色值沿用）；LEGACY_TAG_MAP 加 小说→书籍（读侧归一，fm 原值不改写，同票 293 先例）
+- [x] 题材池按组隔离：data.json 新键 entertainmentGenresByGroup（settings 接口+默认 {}）；书籍默认体裁=中图法 22 大类（去顿号规范名），其余六组保持 悬疑/爱情/年代；旧全局键缺省回落（剔除旧默认三项防污染），组键写入即固化
+- [x] 体裁文案跟随（纯显示层，fm 键「类型」不动）：表单行标签（切类型即时重绘 j-genre-label）、详情弹窗、导出感想卡；添加提示语跟随
+- [x] recommend.ts 提示词与 GROUP_DEFAULT_TAG 跟随（书籍:'书籍'，小说:'书籍' 兼容归一）；home/settings-panel 副标题同步
+- [x] options.test 重写（按组隔离/回落/固化/幂等 8 例）；ui.test 补体裁切换用例；data.test/douban-queue.test 归一口径更新
+- [x] 门禁：tsc --noEmit 0 错；esbuild production 通过（vault 产物 + 根三件套再生，均不提交）；vitest 全量 **Test Files 3 failed | 302 passed (305)，Tests 6 failed | 4800 passed (4806)**——6 失败全部为 clipbook（news-fetcher/ui）+ core/obsidian-adapter 并行会话在制域遗留基线（同票 297 记录），cinema 域 11 文件 185 用例全绿
+- [x] ADR-0128；CONTEXT.md 术语（顶级类型/题材/体裁）同步；issues/299-entertainment-book-genre.md
+- [x] 同日补充：默认题材池按组改定（用户改定，覆盖 Q7「其余组保持悬疑/爱情/年代」）——影视四组（电影/电视剧/短剧/动漫）=剧情/喜剧/动作/爱情/科幻·奇幻/悬疑·惊悚/历史·传记/纪实/动画/其他；纪录片=历史/人物传记/自然地理等 16 项；公开课=学科门类 12 项；书籍维持中图法 22 大类；options.test/ui.test 同步；门禁复跑：tsc 0 错 / cinema 185 全绿 / 全量 4800/4806（6 失败同并行会话遗留基线）/ esbuild 过（vault 产物 18:52 再生）

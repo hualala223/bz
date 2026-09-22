@@ -812,7 +812,7 @@ tags: [电影]
     expect(vault.files.get('我的/娱乐/《泰国片》.md')).toContain('国家: 泰国');
   });
 
-  it('票294 表单「＋」自定义题材：多选池同口径，取消按钮不落盘', async () => {
+  it('票294 表单「＋」自定义题材：多选池同口径（票299 起写入组键），取消按钮不落盘', async () => {
     const { app, vault } = seedVault();
     const customSettings: Record<string, unknown> = {};
     setSettingsProvider(() => customSettings as any);
@@ -826,6 +826,7 @@ tags: [电影]
     // 取消：不落盘、无新 chip
     clickEl(prompt.querySelector('.j-cancel'));
     expect(customSettings['entertainmentGenres']).toBeUndefined();
+    expect(customSettings['entertainmentGenresByGroup']).toBeUndefined();
     // 再来一次，输入「武侠」确认
     clickEl(form.querySelector('.j-genres .j-add-opt'));
     const prompt2 = root.querySelectorAll('.cn-modal')[1] as HTMLElement;
@@ -836,12 +837,43 @@ tags: [电影]
       const wuxia = (form.querySelector('.j-genres') as HTMLElement).querySelector('[data-f-genre="武侠"]');
       expect(wuxia?.classList.contains('is-on')).toBe(true);
     });
-    expect(customSettings['entertainmentGenres']).toBe('武侠');
+    expect((customSettings['entertainmentGenresByGroup'] as Record<string, string>)['电影']).toBe('武侠');
     // 保存 → fm「类型」含自定义题材
     (form.querySelector('.j-name') as HTMLInputElement).value = '武侠片';
     clickEl(form.querySelector('.j-save'));
     await vi.waitFor(() => expect(vault.files.has('我的/娱乐/《武侠片》.md')).toBe(true));
     expect(vault.files.get('我的/娱乐/《武侠片》.md')).toContain('类型: 武侠');
+  });
+
+  it('票299 切类型到书籍：行标签变「体 裁」，体裁池为中图法 22 大类（书籍组隔离）', async () => {
+    const { app } = seedVault();
+    const customSettings: Record<string, unknown> = {};
+    setSettingsProvider(() => customSettings as any);
+    setSettingsSaver(async () => {});
+    createOverlay(app);
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    clickEl(root.querySelector('[data-cinema-add]'));
+    const form = root.querySelectorAll('.cn-modal')[0] as HTMLElement;
+    // 默认电影：题材行 + 影视默认池（票 299 补充名单）
+    expect(form.querySelector('.j-genre-label')?.textContent).toBe('题 材');
+    expect(form.querySelector('[data-f-genre="剧情"]')).toBeTruthy();
+    expect(form.querySelector('[data-f-genre="文学"]')).toBeFalsy();
+    // 切到书籍：标签 + 池整行重绘
+    clickEl(form.querySelector('[data-f-tag="书籍"]'));
+    expect(form.querySelector('.j-genre-label')?.textContent).toBe('体 裁');
+    expect(form.querySelector('[data-f-genre="文学"]')).toBeTruthy();
+    expect(form.querySelector('[data-f-genre="哲学宗教"]')).toBeTruthy();
+    expect(form.querySelector('[data-f-genre="悬疑"]')).toBeFalsy();
+    // 组隔离：书籍下自定义体裁写入书籍组键，不串电影组
+    clickEl(form.querySelector('.j-genres .j-add-opt'));
+    const prompt = root.querySelectorAll('.cn-modal')[1] as HTMLElement;
+    (prompt.querySelector('.j-opt-name') as HTMLInputElement).value = '社会学';
+    clickEl(prompt.querySelector('.j-ok'));
+    await vi.waitFor(() => {
+      expect(form.querySelector('[data-f-genre="社会学"]')?.classList.contains('is-on')).toBe(true);
+    });
+    expect((customSettings['entertainmentGenresByGroup'] as Record<string, string>)['书籍']).toBe('社会学');
+    expect((customSettings['entertainmentGenresByGroup'] as Record<string, string>)['电影']).toBeUndefined();
   });
 
   it('票294 rail 国家筛选：点国家过滤、未填桶筛空国家、再点取消', () => {
