@@ -332,7 +332,7 @@ describe('豆瓣抓取队列·frontmatter 契约', () => {
       file: null, name: 'X', typeTag: '电影', group: '电影', watchDate: null, rating: null,
       status: 2, poster: null, review: null, genre: null, director: null, actors: null,
       region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null,
-      duration: null, seasonText: null, country: null, genres: [],
+      duration: null, seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null,
     };
     expect(pcardHtml(it, null, true)).toContain('pw-fetch');
     expect(pcardHtml(it, null, false)).not.toContain('pw-fetch');

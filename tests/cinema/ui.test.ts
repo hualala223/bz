@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { MockVault, mockAppWithVault } from '../mock-vault';
 import { resetObsidianMocks, hasNotice, Platform } from '../mock-obsidian-entry';
 import { M, resetCinemaState } from '../../src/cinema/state';
+import { STATUS_WATCHING } from '../../src/cinema/constants';
 import { rebuildItems } from '../../src/cinema/data';
 import { runAIRecommend, runSimilarRecommend } from '../../src/cinema/recommend';
 import { createOverlay, closeOverlay, openAddModalDirect, openRandomMovie, renderAll } from '../../src/cinema/ui';
@@ -882,6 +883,93 @@ tags: [电影]
     clickEl(rootM.querySelector('.chip[data-cn="内地"]'));
     expect(M.countryFilter).toBe('内地');
     expect(rootM.querySelectorAll('.m-grid .pcard').length).toBe(1);
+  });
+
+  // ======================= 票 295：集数与追剧进度 =======================
+
+  it('票295 表单集数行：仅剧类+在看可见，切类型/状态联动显隐', () => {
+    const { app } = seedVault();
+    createOverlay(app);
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    clickEl(root.querySelector('[data-cinema-add]'));
+    const form = root.querySelector('.cn-modal') as HTMLElement;
+    const epsRow = form.querySelector('.j-eps') as HTMLElement;
+    const vis = () => epsRow.style.display !== 'none';
+    // 默认（电影+想看）：隐藏
+    expect(vis()).toBe(false);
+    // 电视剧+想看：仍隐藏
+    clickEl(form.querySelector('[data-f-tag="电视剧"]'));
+    expect(vis()).toBe(false);
+    // 电视剧+在看：显示
+    clickEl(form.querySelector('[data-f-st="在看"]'));
+    expect(vis()).toBe(true);
+    // 切电影+在看：隐藏
+    clickEl(form.querySelector('[data-f-tag="电影"]'));
+    expect(vis()).toBe(false);
+    // 短剧+在看：显示
+    clickEl(form.querySelector('[data-f-tag="短剧"]'));
+    expect(vis()).toBe(true);
+    // 切已看：隐藏
+    clickEl(form.querySelector('[data-f-st="已看"]'));
+    expect(vis()).toBe(false);
+  });
+
+  it('票295 落盘：电视剧+在看填集数 → fm 两键；追平随保存 toast 提示（不自动改状态）', async () => {
+    const { app, vault } = seedVault();
+    createOverlay(app);
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    clickEl(root.querySelector('[data-cinema-add]'));
+    const form = root.querySelector('.cn-modal') as HTMLElement;
+    clickEl(form.querySelector('[data-f-tag="电视剧"]'));
+    clickEl(form.querySelector('[data-f-st="在看"]'));
+    (form.querySelector('.j-name') as HTMLInputElement).value = '追剧X';
+    (form.querySelector('.j-eps-watching') as HTMLInputElement).value = '40';
+    (form.querySelector('.j-eps-total') as HTMLInputElement).value = '40';
+    clickEl(form.querySelector('.j-save'));
+    await vi.waitFor(() => expect(root.querySelector('.cn-toast')?.textContent).toContain('已添加'));
+    expect(root.querySelector('.cn-toast')?.textContent).toContain('已追平 40 集，可标记已看');
+    expect(M.items.find((i) => i.name === '追剧X')!.status).toBe(STATUS_WATCHING); // 不自动改状态
+    const fm = vault.files.get('我的/娱乐/《追剧X》.md')!;
+    expect(fm).toContain('总集数: 40');
+    expect(fm).toContain('正在看集数: 40');
+  });
+
+  it('票295 落盘：非剧类不写集数键；编辑时残留键被删除', async () => {
+    const { app, vault } = seedVault();
+    vault.files.set('我的/娱乐/《旧剧残留》.md', '---\ntags: [电影]\n评分: 8\n总集数: 30\n正在看集数: 3\n---');
+    rebuildItems(app);
+    createOverlay(app);
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    // 编辑（已看）电影：残留键删除
+    clickEl(pcardByName(root, '旧剧残留'));
+    clickEl((root.querySelector('.cn-modal') as HTMLElement).querySelector('.j-edit'));
+    const form = root.querySelector('.cn-modal') as HTMLElement;
+    clickEl(form.querySelector('.j-save'));
+    await vi.waitFor(() => expect(root.querySelector('.cn-toast')?.textContent).toContain('已保存'));
+    const fm = vault.files.get('我的/娱乐/《旧剧残留》.md')!;
+    expect(fm).not.toContain('总集数');
+    expect(fm).not.toContain('正在看集数');
+    // 新增电影：不写集数键
+    clickEl(root.querySelector('[data-cinema-add]'));
+    const form2 = root.querySelectorAll('.cn-modal')[0] as HTMLElement;
+    (form2.querySelector('.j-name') as HTMLInputElement).value = '纯电影';
+    clickEl(form2.querySelector('.j-save'));
+    await vi.waitFor(() => expect(vault.files.has('我的/娱乐/《纯电影》.md')).toBe(true));
+    const fm2 = vault.files.get('我的/娱乐/《纯电影》.md')!;
+    expect(fm2).not.toContain('总集数');
+    expect(fm2).not.toContain('正在看集数');
+  });
+
+  it('票295 卡片角标：在看剧类显示 `正在看/总集数`（12/40），无数据不显示', async () => {
+    const { app, vault } = seedVault();
+    vault.files.set('我的/娱乐/《连载剧》.md', '---\ntags: [电视剧]\n评分: 0\n总集数: 40\n正在看集数: 12\n---');
+    vault.files.set('我的/娱乐/《无集数剧》.md', '---\ntags: [电视剧]\n评分: 0\n---');
+    rebuildItems(app);
+    createOverlay(app);
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    expect(pcardByName(root, '连载剧').querySelector('.badge-eps')?.textContent).toBe('12/40');
+    expect(pcardByName(root, '无集数剧').querySelector('.badge-eps')).toBeNull();
+    expect(pcardByName(root, '星际穿越').querySelector('.badge-eps')).toBeNull(); // 已看不显示
   });
 });
 

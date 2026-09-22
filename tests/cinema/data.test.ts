@@ -3,12 +3,14 @@ import { makeApp } from '../helpers/app';
 /**
  * 影院（cinema）数据层测试：解析/排序/筛选
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { MockVault, mockAppWithVault } from '../mock-vault';
 import { resetObsidianMocks } from '../mock-obsidian-entry';
 import { M, resetCinemaState, type CinemaItem } from '../../src/cinema/state';
-import { rebuildItems, getDisplayItems, sortByDateDesc, sortByCreatedDesc, dateVal } from '../../src/cinema/data';
-import { getStarString, getGroupForTag, getGroupSafe, doubanEligibleTag } from '../../src/cinema/constants';
+import { rebuildItems, getDisplayItems, sortByDateDesc, sortByCreatedDesc, dateVal, parseEpisodeCount } from '../../src/cinema/data';
+import { getStarString, getGroupForTag, getGroupSafe, doubanEligibleTag, episodesEligibleTag, STATUS_WATCHING, STATUS_WATCHED } from '../../src/cinema/constants';
+import { pcardHtml } from '../../src/cinema/shared';
+import { unloadCinema } from '../../src/cinema';
 
 
 function md(content: string): string {
@@ -113,7 +115,7 @@ tags:
     const handItem: CinemaItem = {
       file: tfile, name: '缓存未就绪', typeTag: '电影', group: '电影', watchDate: null, rating: null,
       status: 2, poster: null, review: null, genre: null, director: null, actors: null,
-      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: null, genres: [],
+      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null,
     };
     M.items.push(handItem);
     const items = rebuildItems(app);
@@ -129,7 +131,7 @@ tags:
     M.items.push({
       file: tfile, name: '无效', typeTag: '电影', group: '电影', watchDate: null, rating: null,
       status: 2, poster: null, review: null, genre: null, director: null, actors: null,
-      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: null, genres: [],
+      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null,
     });
     rebuildItems(app);
     expect(M.items).toHaveLength(0);
@@ -188,7 +190,7 @@ describe('cinema 排序与筛选', () => {
       name, typeTag: '电影', group: '电影',
       watchDate: null, rating: null, status: 2, poster: null, review: null,
       genre: null, director: null, actors: null, region: null, year: null,
-      doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: null, genres: [],
+      doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null,
     });
     const t0 = 1000;
     const old = mk('旧片', t0, 9000); // 先创建，后被编辑 → mtime 最大
@@ -244,4 +246,64 @@ describe('cinema 工具函数', () => {
     expect(doubanEligibleTag(null)).toBe(false);
   });
 
+  it('集数 gate（票 295）：电视剧/短剧（含旧剧 tag 归一）适用，其余类型不适用', () => {
+    expect(episodesEligibleTag('电视剧')).toBe(true);
+    expect(episodesEligibleTag('短剧')).toBe(true);
+    expect(episodesEligibleTag('美剧')).toBe(true);
+    expect(episodesEligibleTag('电影')).toBe(false);
+    expect(episodesEligibleTag('小说')).toBe(false);
+    expect(episodesEligibleTag(null)).toBe(false);
+  });
+
+  it('集数解析（票 295）：正整数有效（小数取整），空/0/负/非数一律 null', () => {
+    expect(parseEpisodeCount(40)).toBe(40);
+    expect(parseEpisodeCount('12')).toBe(12);
+    expect(parseEpisodeCount(12.4)).toBe(12);
+    expect(parseEpisodeCount('')).toBeNull();
+    expect(parseEpisodeCount(null)).toBeNull();
+    expect(parseEpisodeCount(0)).toBeNull();
+    expect(parseEpisodeCount(-3)).toBeNull();
+    expect(parseEpisodeCount('abc')).toBeNull();
+  });
+
+});
+
+describe('集数落盘与角标（票 295）', () => {
+  beforeEach(() => {
+    resetObsidianMocks();
+    resetCinemaState();
+    M.folderPath = '我的/娱乐';
+  });
+  afterEach(() => {
+    unloadCinema();
+  });
+
+  it('fm 解析：「总集数」「正在看集数」读入条目；缺失为 null', () => {
+    const vault = new MockVault();
+    vault.files.set('我的/娱乐/《某剧》.md', '---\ntags: [电视剧]\n评分: 0\n总集数: 40\n正在看集数: 12\n---');
+    vault.files.set('我的/娱乐/《某片》.md', '---\ntags: [电影]\n评分: 8\n---');
+    const app = makeApp(vault);
+    const items = rebuildItems(app);
+    const drama = items.find((i) => i.name === '某剧')!;
+    expect(drama.status).toBe(STATUS_WATCHING);
+    expect(drama.episodesTotal).toBe(40);
+    expect(drama.episodesWatching).toBe(12);
+    const film = items.find((i) => i.name === '某片')!;
+    expect(film.episodesTotal).toBeNull();
+    expect(film.episodesWatching).toBeNull();
+  });
+
+  it('在看剧类卡片角标：`12/40` 右上角标；非在看/非剧类/缺数据不显示', () => {
+    const mk = (over: Partial<CinemaItem>): CinemaItem => ({
+      file: null, name: 'X', typeTag: '电视剧', group: '电视剧', watchDate: null, rating: 0,
+      status: STATUS_WATCHING, poster: null, review: null, genre: null, director: null, actors: null,
+      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null,
+      seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, ...over,
+    });
+    expect(pcardHtml(mk({ name: 'A', episodesTotal: 40, episodesWatching: 12 }), null)).toContain('badge-eps">12/40</span>');
+    expect(pcardHtml(mk({ name: 'B', status: STATUS_WATCHED, episodesTotal: 40, episodesWatching: 40 }), null)).not.toContain('badge-eps');
+    expect(pcardHtml(mk({ name: 'C', typeTag: '电影', episodesTotal: 40, episodesWatching: 12 }), null)).not.toContain('badge-eps');
+    expect(pcardHtml(mk({ name: 'D', episodesTotal: 40, episodesWatching: null }), null)).not.toContain('badge-eps');
+    expect(pcardHtml(mk({ name: 'E', episodesTotal: null, episodesWatching: 12 }), null)).not.toContain('badge-eps');
+  });
 });

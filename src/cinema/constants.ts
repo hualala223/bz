@@ -92,6 +92,18 @@ export function doubanEligibleTag(tag: string | null | undefined): boolean {
   return DOUBAN_ELIGIBLE_TYPES.includes(normalized);
 }
 
+// ======================= 集数进度适用类型（票 295） =======================
+
+/** 集数（总集数/正在看集数）仅对 电视剧/短剧 生效（票 295；fm 两键也仅剧类写入） */
+export const EPISODE_TYPES: string[] = ['电视剧', '短剧'];
+
+/** 类型 tag 是否支持集数进度（旧剧集细分 tag 归一后判定） */
+export function episodesEligibleTag(tag: string | null | undefined): boolean {
+  if (!tag) return false;
+  const normalized = LEGACY_TAG_MAP[tag] ?? tag;
+  return EPISODE_TYPES.includes(normalized);
+}
+
 // ======================= 风格框架（issue 236 / ADR-0103） =======================
 
 // 当前仅午夜场上岸（gazette/booth 为 styles.css 预留段，设置项见 settings.ts）；

@@ -71,6 +71,9 @@ export function parseMovieFile(file: TFile, app: App): CinemaItem | null {
     country: fm['国家']?.toString() ?? null,
     // 题材（票 294）：fm 键「类型」按顿号/逗号/斜杠分隔解析为多选数组（豆瓣题材串兼容）
     genres: parseGenres(fm['类型']),
+    // 集数（票 295）：fm 键「总集数」「正在看集数」仅剧类写入，读侧对任意值宽容解析
+    episodesTotal: parseEpisodeCount(fm['总集数']),
+    episodesWatching: parseEpisodeCount(fm['正在看集数']),
   };
 }
 
@@ -79,6 +82,14 @@ export function parseGenres(raw: unknown): string[] {
   if (raw === undefined || raw === null || raw === '') return [];
   const str = String(raw);
   return str.split(/[、,，/]/).map((v) => v.trim()).filter(Boolean);
+}
+
+/** 集数解析（票 295）：正整数有效，其余（空/0/负/非数）一律 null */
+export function parseEpisodeCount(raw: unknown): number | null {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n);
 }
 
 /** 重建条目列表（扫描 M.folderPath 下全部 md） */

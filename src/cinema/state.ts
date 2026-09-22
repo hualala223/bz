@@ -49,6 +49,10 @@ export interface CinemaItem {
   country: string | null;
   /** 题材数组（frontmatter「类型」顿号/斜杠分隔解析；票 294 / ADR-0127） */
   genres: string[];
+  /** 总集数（frontmatter「总集数」；仅电视剧/短剧写入，票 295） */
+  episodesTotal: number | null;
+  /** 正在看集数（frontmatter「正在看集数」；仅电视剧/短剧写入，票 295） */
+  episodesWatching: number | null;
 }
 
 /** 排序模式：date=最近观看（默认）/ created=按创建 / rating=按评分 */

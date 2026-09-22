@@ -17,7 +17,7 @@
 import { esc, iconSpan } from '../core/ui/str';
 import {
   STATUS_WANT, STATUS_WATCHING, STATUS_WATCHED,
-  GROUP_ORDER, TYPE_COLORS, getGroupForTag, getStarString,
+  GROUP_ORDER, TYPE_COLORS, getGroupForTag, getStarString, episodesEligibleTag,
 } from './constants';
 import type { CinemaItem } from './state';
 
@@ -89,11 +89,15 @@ export function posterInner(item: CinemaItem, url: string | null): string {
 }
 
 /** 片卡 HTML（desk 网格与 mob 长按网格同一张卡；data-cinema-key = CM3 稳定键）；
- *  fetching=后台抓取中 → 海报区遮罩 spinner（ADR-0113） */
+ *  fetching=后台抓取中 → 海报区遮罩 spinner（ADR-0113）；
+ *  在看剧类 + 集数齐全 → 右上 `正在看/总集数` 进度角标（票 295，无数据不显示） */
 export function pcardHtml(it: CinemaItem, posterUrl: string | null, fetching = false): string {
   const r = it.rating;
+  const epsBadge = it.status === STATUS_WATCHING && episodesEligibleTag(it.typeTag)
+    && it.episodesWatching !== null && it.episodesTotal !== null
+    ? `<span class="badge badge-eps">${it.episodesWatching}/${it.episodesTotal}</span>` : '';
   return `<div class="pcard" data-cinema-key="${esc(itemKey(it))}"><div class="pw">${posterInner(it, posterUrl)}${fetching ? '<div class="pw-fetch"><span class="pw-spin"></span></div>' : ''}
-    ${(() => { const st = statusNum(it.status); return st !== STATUS_WATCHED ? `<span class="badge" style="background:${statusColor(st)}">${statusText(st)}</span>` : ''; })()}</div>
+    ${(() => { const st = statusNum(it.status); return st !== STATUS_WATCHED ? `<span class="badge" style="background:${statusColor(st)}">${statusText(st)}</span>` : ''; })()}${epsBadge}</div>
     <div class="pname">${esc(it.name)}</div>
     <div class="pmeta">${esc(it.year || '')}${it.year && it.director ? ' · ' : ''}${esc(it.director || '')}</div>
     <div class="pstars">${r && r > 0 ? getStarString(r) + `<span class="num">${Number(r).toFixed(1)}</span>` : '<span style="opacity:.35">未评分</span>'}</div></div>`;
@@ -179,8 +183,9 @@ export function optionChipsHtml(options: string[], selected: string[], attr: str
   return chips + `<button type="button" class="f-choice-btn j-add-opt" data-fc-add="${attr}" title="添加新选项">＋</button>`;
 }
 
-/** 添加/编辑表单弹窗内容（保存/切状态等接线留各端行为层；国家/题材选项池行，票 294） */
-export function formModalHtml(opts: { editing: boolean; name: string; typeTag: string; stText: string; rating: number; review: string; country: string | null; genres: string[]; countryOptions: string[]; genreOptions: string[] }): string {
+/** 添加/编辑表单弹窗内容（保存/切状态等接线留各端行为层；国家/题材选项池行，票 294；
+ *  集数行仅剧类+在看时由行为层显隐，票 295） */
+export function formModalHtml(opts: { editing: boolean; name: string; typeTag: string; stText: string; rating: number; review: string; country: string | null; genres: string[]; countryOptions: string[]; genreOptions: string[]; epsTotal: number | null; epsWatching: number | null }): string {
   const { editing } = opts;
   const initSt = opts.stText;
   const ratingVal = opts.rating;
@@ -192,6 +197,8 @@ export function formModalHtml(opts: { editing: boolean; name: string; typeTag: s
     <div class="f-field"><span class="f-label">国 家</span><div class="f-choice j-countries">${optionChipsHtml(opts.countryOptions, country ? [country] : [], 'f-country', false)}</div></div>
     <div class="f-field"><span class="f-label">题 材</span><div class="f-choice j-genres">${optionChipsHtml(opts.genreOptions, opts.genres, 'f-genre', true)}</div></div>
     <div class="f-field"><span class="f-label">状 态</span><div class="f-choice j-sts">${formChoicesHtml(['想看', '在看', '已看'], initSt, 'f-st')}</div></div>
+    <div class="f-field j-eps" style="display:none"><span class="f-label">集 数</span>
+      <div class="f-eps-row"><label>正在看 <input type="number" min="0" class="f-input j-eps-watching" value="${opts.epsWatching ?? ''}"></label><label>总集数 <input type="number" min="0" class="f-input j-eps-total" value="${opts.epsTotal ?? ''}"></label></div></div>
     <div class="f-field j-rating" style="display:${initSt === '已看' ? '' : 'none'}"><span class="f-label">评 分</span>
       <div class="f-range-row"><input type="range" class="f-range j-range" min="1" max="10" step="0.1" value="${ratingVal}"><span class="f-range-val j-rval">${Number(ratingVal).toFixed(1)}</span></div></div>
     <div class="f-field j-review" style="display:${initSt === '已看' ? '' : 'none'}"><span class="f-label">感 想</span><textarea class="f-input j-review-t" placeholder="写点什么…">${esc(opts.review)}</textarea></div>
