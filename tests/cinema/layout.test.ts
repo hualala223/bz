@@ -7,7 +7,7 @@ import { railHtml, chipsHtml } from '../../src/cinema/layouts/midnight/render';
 
 const items = [
   { name: '甲', group: '电影', status: 0, typeTag: '电影' },
-  { name: '乙', group: '剧集', status: 2, typeTag: '美剧' },
+  { name: '乙', group: '电视剧', status: 2, typeTag: '美剧' },
 ] as any;
 
 function viewOf(over: Record<string, unknown> = {}) {
@@ -23,8 +23,8 @@ describe('影院 rail/chips 视图切换高亮口径（票 271）', () => {
   });
 
   it('列表页：选中类型/状态时各高亮自身（「全部」熄灭）', () => {
-    const r = railHtml(items, viewOf({ typeFilter: '剧集' }));
-    expect(r.groups).toContain('is-on" data-g="剧集"');
+    const r = railHtml(items, viewOf({ typeFilter: '电视剧' }));
+    expect(r.groups).toContain('is-on" data-g="电视剧"');
     expect(r.groups).not.toContain('is-on" data-g="全部"');
     expect(railHtml(items, viewOf({ statusFilter: '已看' })).status).toContain('is-on" data-s="已看"');
     expect(chipsHtml(viewOf({ typeFilter: '电影' }))).toContain('chip is-on" data-c="电影"');
@@ -32,16 +32,16 @@ describe('影院 rail/chips 视图切换高亮口径（票 271）', () => {
 
   it('ai/stat 页：rail 与 chips 整组熄灭（含「全部」），筛选状态本身保留', () => {
     for (const v of ['ai', 'stat'] as const) {
-      const view = viewOf({ view: v, typeFilter: '剧集' });
+      const view = viewOf({ view: v, typeFilter: '电视剧' });
       expect(railHtml(items, view).groups).not.toContain('is-on');
       expect(railHtml(items, view).status).not.toContain('is-on');
       expect(chipsHtml(view)).not.toContain('is-on');
-      expect(view.typeFilter).toBe('剧集'); // 筛选状态未被渲染层清掉
+      expect(view.typeFilter).toBe('电视剧'); // 筛选状态未被渲染层清掉
     }
   });
 
   it('返回列表：先前选中的高亮原样恢复', () => {
-    expect(railHtml(items, viewOf({ view: 'ai', typeFilter: '剧集' })).groups).not.toContain('is-on');
-    expect(railHtml(items, viewOf({ view: 'list', typeFilter: '剧集' })).groups).toContain('is-on" data-g="剧集"');
+    expect(railHtml(items, viewOf({ view: 'ai', typeFilter: '电视剧' })).groups).not.toContain('is-on');
+    expect(railHtml(items, viewOf({ view: 'list', typeFilter: '电视剧' })).groups).toContain('is-on" data-g="电视剧"');
   });
 });

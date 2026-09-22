@@ -79,6 +79,28 @@ describe('豆瓣抓取队列（douban-queue，ADR-0129 执行器=插件内 fetch
     expect(isFetching('我的/娱乐/《全缺》.md')).toBe(false);
   });
 
+  it('sweep gate（票 293）：短剧/小说条目不入队，电影/电视剧照常', async () => {
+    const vault = new MockVault();
+    vault.files.set('我的/娱乐/《电影缺图》.md', '---\ntags: [电影]\n评分: 8\n---');
+    vault.files.set('我的/娱乐/《短剧缺图》.md', '---\ntags: [短剧]\n评分: 8\n---');
+    vault.files.set('我的/娱乐/《小说缺图》.md', '---\ntags: [小说]\n评分: 8\n---');
+    vault.files.set('我的/娱乐/《旧剧缺图》.md', '---\ntags: [美剧]\n评分: 8\n---'); // 归一电视剧 → 可抓
+    const app = mockAppWithVault(vault);
+    M.appRef = app;
+    rebuildItems(app);
+    const { fetched, fetch } = makeSuccessFetch(vault);
+    configureFetchQueue({ ...TEST_HOOKS, fetch });
+
+    sweepDoubanFetch(app);
+    await settle();
+
+    expect(fetched).toHaveLength(2);
+    expect(fetched.some((p) => p.includes('《电影缺图》'))).toBe(true);
+    expect(fetched.some((p) => p.includes('《旧剧缺图》'))).toBe(true);
+    expect(fetched.some((p) => p.includes('《短剧缺图》'))).toBe(false);
+    expect(fetched.some((p) => p.includes('《小说缺图》'))).toBe(false);
+  });
+
   it('会话内去重：第二次 sweep 零新抓取', async () => {
     const vault = new MockVault();
     vault.files.set('我的/娱乐/《缺信息》.md', '---\ntags: [电影]\n评分: 8\n海报: CONFIG/MOVIE POSTER/a.jpg\n---');

@@ -11,16 +11,19 @@ import { notice, notifySaveError } from '../core/notice';
 import { localNow } from '../core/ui/str';
 import { createAI } from '../core/ai';
 import { emitDomainEvent } from '../core/domain-bus';
-import { STATUS_WATCHED } from './constants';
+import { STATUS_WATCHED, doubanEligibleTag } from './constants';
 import type { CinemaItem } from './state';
 import { M } from './state';
 import { refreshDataAndView } from './data';
 import { enqueueDoubanFetch } from './douban-queue';
 
-/** 类型 → 默认 tag（加入想看用） */
+/** 类型 → 默认 tag（加入想看用；票 293：剧集退役，AI 类型归一映射电视剧） */
 const GROUP_DEFAULT_TAG: Record<string, string> = {
   电影: '电影',
-  剧集: '国产剧',
+  电视剧: '电视剧',
+  剧集: '电视剧',
+  短剧: '短剧',
+  小说: '小说',
   动漫: '日漫',
   纪录片: '纪录片',
   公开课: '公开课',
@@ -80,9 +83,9 @@ export function buildRecommendPrompt(profile: any, recent: string[]): string {
 地区偏好：${profile.regions.join('、') || '无'}
 最近看的10部：${recent.join('；')}
 
-请基于画像推荐 ${RECOMMEND_ASK} 部用户可能喜欢的影视（电影/剧集/动漫/纪录片/公开课均可），按与口味的匹配度从高到低排序。推荐理由必须具体引用画像中的偏好信号（如"你偏爱X导演的Y风格"）。只推荐真实存在的影视，避免编造。
+请基于画像推荐 ${RECOMMEND_ASK} 部用户可能喜欢的影视（电影/电视剧/短剧/小说/动漫/纪录片/公开课均可），按与口味的匹配度从高到低排序。推荐理由必须具体引用画像中的偏好信号（如"你偏爱X导演的Y风格"）。只推荐真实存在的影视，避免编造。
 
-严格输出 JSON（不要输出其他内容）：{"recommendations":[{"title":"片名","year":"年份","director":"导演","type":"电影|剧集|动漫|纪录片|公开课","reason":"推荐理由"}]}`;
+严格输出 JSON（不要输出其他内容）：{"recommendations":[{"title":"片名","year":"年份","director":"导演","type":"电影|电视剧|短剧|小说|动漫|纪录片|公开课","reason":"推荐理由"}]}`;
 }
 
 /** 补问提示词（方案 A 第二轮）：只排除「已经推荐过的名字」（≤20 个，常量级），
@@ -98,9 +101,9 @@ export function buildFollowupPrompt(profile: any, recent: string[], excludeNames
 
 刚才已经向你推荐过以下影片（不要重复推荐）：${excludeNames.join('、')}
 
-请再推荐 ${FOLLOWUP_ASK} 部用户可能喜欢的影视（电影/剧集/动漫/纪录片/公开课均可），按与口味的匹配度从高到低排序，避开上面已出现过的。推荐理由必须具体引用画像中的偏好信号（如"你偏爱X导演的Y风格"）。只推荐真实存在的影视，避免编造。
+请再推荐 ${FOLLOWUP_ASK} 部用户可能喜欢的影视（电影/电视剧/短剧/小说/动漫/纪录片/公开课均可），按与口味的匹配度从高到低排序，避开上面已出现过的。推荐理由必须具体引用画像中的偏好信号（如"你偏爱X导演的Y风格"）。只推荐真实存在的影视，避免编造。
 
-严格输出 JSON（不要输出其他内容）：{"recommendations":[{"title":"片名","year":"年份","director":"导演","type":"电影|剧集|动漫|纪录片|公开课","reason":"推荐理由"}]}`;
+严格输出 JSON（不要输出其他内容）：{"recommendations":[{"title":"片名","year":"年份","director":"导演","type":"电影|电视剧|短剧|小说|动漫|纪录片|公开课","reason":"推荐理由"}]}`;
 }
 
 /** 候选条目名（title 兜底 name） */
@@ -195,8 +198,8 @@ tags:
     notice(`已加入想看：${trimmedName}`, 'success');
     // 事件补发（smartcat 行为流观察；ADR-0087 cinema 接管）：created want
     emitDomainEvent('movie', { kind: 'created', name: trimmedName, status: 'want', rating: null, review: null });
-    // 入抓取队列（ADR-0113）：卡片 loading 反馈，无通知
-    enqueueDoubanFetch(f, trimmedName);
+    // 入抓取队列（ADR-0113）：卡片 loading 反馈，无通知；票 293 起仅 电影/电视剧 入队
+    if (doubanEligibleTag(tag)) enqueueDoubanFetch(f, trimmedName);
     refreshDataAndView(app);
   } catch (e) {
     notifySaveError(e, '加入想看');

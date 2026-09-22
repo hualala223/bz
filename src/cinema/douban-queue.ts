@@ -12,6 +12,7 @@ import { notice } from '../core/notice';
 import { sleep } from '../core/utils';
 import { tryGetSettings } from '../core/settings-provider';
 import { M } from './state';
+import { doubanEligibleTag } from './constants';
 import { rebuildItems } from './data';
 import { fetchNoteDouban, type DoubanFetchDeps, type DoubanFetchOutcome } from './douban-fetcher';
 
@@ -142,12 +143,13 @@ export function dequeueDoubanFetch(path: string | null | undefined): void {
   attempted.delete(path);
 }
 
-/** 面板打开扫描：未齐条目（缺海报或缺豆瓣链接）入队补抓；有新增即触发一次渲染（loading 首帧可见） */
+/** 面板打开扫描：未齐条目（缺海报或缺豆瓣链接）入队补抓；有新增即触发一次渲染（loading 首帧可见）。
+ *  票 293：仅 电影/电视剧 参与自动抓取（短剧/小说不入队），类型判定走 doubanEligibleTag */
 export function sweepDoubanFetch(_app: App): void {
   let added = 0;
   for (const it of M.items) {
     if (!it.file) continue;
-    if (!it.poster || !it.doubanUrl) {
+    if ((!it.poster || !it.doubanUrl) && doubanEligibleTag(it.typeTag)) {
       if (enqueueDoubanFetch(it.file, it.name)) added++;
     }
   }

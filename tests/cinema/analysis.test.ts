@@ -78,8 +78,8 @@ describe('cinema buildAnalysisData', () => {
   it('类型/标签/国家分布 + 评分桶', () => {
     const d = buildAnalysisData();
     expect(d.groups['电影']).toBe(2);
-    expect(d.groups['剧集']).toBe(2);
-    expect(d.tags['国产剧']).toBe(1);
+    expect(d.groups['电视剧']).toBe(2);
+    expect(d.tags['电视剧']).toBe(2); // 票 293：typeTag 归一后 国产剧+美剧 都计电视剧
     expect(d.countries['美国']).toBe(2);
     expect(d.buckets['≥9']).toBe(3);
   });
@@ -223,7 +223,7 @@ tags: [美剧]
     expect(d.durBuckets['>120']).toBe(1);
     // (118+45+200)/3 = 121
     expect(d.avgDur).toBe('121');
-    expect(d.groupDurEntries).toEqual([{ label: '剧集', value: 200 }, { label: '电影', value: 82 }]);
+    expect(d.groupDurEntries).toEqual([{ label: '电视剧', value: 200 }, { label: '电影', value: 82 }]);
   });
 
   it('季集统计：首个数字入平均 + 追剧深度榜', () => {
@@ -280,9 +280,9 @@ describe('ADR-0090 内嵌页板块对照（19 板块不丢能力）', () => {
     expect(html).not.toContain('<svg');
     expect(html).not.toContain('donut');
     expect(html).not.toContain('stroke-dasharray'); // 环形图虚线描边不应再有
-    // 类型组名以条形行标签出现（seed 有 电影/剧集 两组）
+    // 类型组名以条形行标签出现（seed 有 电影/电视剧 两组；票 293 剧集归一电视剧）
     expect(html).toContain('类型分布');
-    expect(html).toContain('剧集');
+    expect(html).toContain('电视剧');
   });
 });
 

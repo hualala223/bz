@@ -2,7 +2,7 @@
  * 影院（cinema）域数据层：扫描笔记 → 条目；排序（观影日期倒序）；筛选
  */
 import type { App, TFile } from 'obsidian';
-import { ALL_TAGS, getGroupSafe, STATUS_WANT, STATUS_WATCHING, STATUS_WATCHED } from './constants';
+import { ALL_TAGS, getGroupSafe, LEGACY_TAG_MAP, STATUS_WANT, STATUS_WATCHING, STATUS_WATCHED } from './constants';
 import type { CinemaItem } from './state';
 import { M } from './state';
 
@@ -30,6 +30,8 @@ export function parseMovieFile(file: TFile, app: App): CinemaItem | null {
     if (tags.length === 0) return null;
     typeTag = tags[0];
   }
+  // 票 293：旧「剧集」细分 tag 归一为「电视剧」（仅内存显示口径，fm 原值不改写）
+  typeTag = LEGACY_TAG_MAP[typeTag] ?? typeTag;
 
   const watchDate = fm['观影日期']?.toString() ?? null;
   const rawRating = fm['评分'];

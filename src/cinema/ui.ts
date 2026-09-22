@@ -22,7 +22,7 @@ import { tryGetSettings } from '../core/settings-provider';
 import { mountIcons } from '../core/ui';
 import {
   STATUS_WANT, STATUS_WATCHING, STATUS_WATCHED, DEFAULT_RATING,
-  getGroupForTag,
+  getGroupForTag, doubanEligibleTag,
 } from './constants';
 import { M, type CinemaItem, type CinemaSortMode } from './state';
 import { rebuildItems, getDisplayItems } from './data';
@@ -375,7 +375,7 @@ async function saveNew(sec: HTMLElement, p: FormPayload, app: App, close: () => 
     M.items.unshift(it);
     await persistItem(it, app);
     emitDomainEvent('movie', { kind: 'created', name: p.name, status: st === STATUS_WANT ? 'want' : st === STATUS_WATCHING ? 'watching' : 'watched', rating: p.rating, review: p.review || null });
-    if (it.file) enqueueDoubanFetch(it.file, it.name);
+    if (it.file && doubanEligibleTag(it.typeTag)) enqueueDoubanFetch(it.file, it.name);
     close();
     panelToast(sec, `已添加「${p.name}」`);
     renderAll(app);

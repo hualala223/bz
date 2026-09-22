@@ -144,9 +144,9 @@ export function detailModalHtml(it: CinemaItem, posterUrl: string | null): strin
   </div>`;
 }
 
-/** 组 → 细分 tag 映射（表单 choices 用；与原型 GROUP_SUBS 同序） */
+/** 组 → 细分 tag 映射（表单 choices 用；ADR-0127 票 293：剧集退役，七项顶级类型） */
 export const GROUP_SUBS_OF: Record<string, string[]> = {
-  电影: [], 剧集: ['国产剧', '美剧', '英剧', '德剧', '日剧', '韩剧', '哥伦比亚剧'], 动漫: ['日漫', '国漫', '美漫'], 纪录片: [], 公开课: ['公开课', 'TED'],
+  电影: [], 电视剧: [], 短剧: [], 小说: [], 动漫: ['日漫', '国漫', '美漫'], 纪录片: [], 公开课: ['公开课', 'TED'],
 };
 
 /** 表单可选类型（组顺序展开细分；「其他」不入表单） */

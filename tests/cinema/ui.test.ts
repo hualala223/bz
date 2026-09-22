@@ -95,9 +95,9 @@ describe('cinema 风格化面板（issue 236）', () => {
     const root = overlay.querySelector('section.bz-cinema--midnight') as HTMLElement;
     expect(root).toBeTruthy();
     expect(root.dataset.cinemaRoot).toBe('midnight');
-    // 左栏：品牌 + 类型行（全部 + 6 组）+ 状态行（3）+ foot 工具 2
+    // 左栏：品牌 + 类型行（全部 + 8 组，票 293 七项类型+其他）+ 状态行（3）+ foot 工具 2
     expect(root.querySelector('.rail-brand h1')?.textContent).toBe('娱乐');
-    expect(root.querySelectorAll('.j-groups [data-g]').length).toBe(7);
+    expect(root.querySelectorAll('.j-groups [data-g]').length).toBe(9);
     expect(root.querySelectorAll('.j-status [data-s]').length).toBe(3);
     expect(root.querySelectorAll('.rail-foot .j-tool').length).toBe(2);
     // 「全部」行默认选中，计数 4
@@ -386,14 +386,14 @@ describe('cinema 风格化面板（issue 236）', () => {
     const { app } = seedVault();
     createOverlay(app);
     const root = document.querySelector('[data-cinema-root]') as HTMLElement;
-    // 先选中类型 + 状态（剧集 + 已看 → 状态行高亮）
-    clickEl(root.querySelector('[data-g="剧集"]'));
+    // 先选中类型 + 状态（电视剧 + 已看 → 状态行高亮）
+    clickEl(root.querySelector('[data-g="电视剧"]'));
     clickEl(root.querySelector('[data-s="已看"]'));
     expect(root.querySelector('.rail-item.is-on')?.textContent).toContain('已看');
     // 进 AI 页：筛选状态保留，rail 整组熄灭、一个 is-on 都不留
     clickEl(root.querySelector('[data-tool="ai"]'));
     expect(M.view).toBe('ai');
-    expect(M.typeFilter).toBe('剧集');
+    expect(M.typeFilter).toBe('电视剧');
     expect(M.statusFilter).toBe('已看');
     expect(root.querySelector('.rail-item.is-on')).toBeNull();
     // 返回：先前选中的高亮原样恢复
@@ -571,7 +571,7 @@ tags: [电影]
 
   // ======================= 移动端（mob 壳） =======================
 
-  it('移动端：mob 壳渲染（m-head 添加/AI/分析/关闭 + chips 10 + m-grid）', () => {
+  it('移动端：mob 壳渲染（m-head 添加/AI/分析/关闭 + chips 12 + m-grid）', () => {
     setSettingsProvider(() => ({  } as any));
     const { app } = seedMobile();
     createOverlay(app);
@@ -579,7 +579,7 @@ tags: [电影]
     expect(root).toBeTruthy();
     expect(root.querySelectorAll('.m-acts .m-tool').length).toBe(3); // AI/分析/关闭（设置钮退役，添加钮为 .add）
     expect(root.querySelector('.j-mclose')).toBeTruthy(); // 落域适配：移动关闭钮
-    expect(root.querySelectorAll('.m-chips .chip').length).toBe(10);
+    expect(root.querySelectorAll('.m-chips .chip').length).toBe(12);
     expect(root.querySelectorAll('.m-grid .pcard').length).toBe(4);
     expect(root.querySelector('.j-mtitle')?.textContent).toBe('全部');
     expect(root.querySelector('.j-mcnt')?.textContent).toBe('· 4');
@@ -590,9 +590,9 @@ tags: [电影]
     const { app } = seedMobile();
     createOverlay(app);
     const root = document.querySelector('section.mob.bz-cinema--midnight') as HTMLElement;
-    clickEl(root.querySelector('.chip[data-c="剧集"]'));
+    clickEl(root.querySelector('.chip[data-c="电视剧"]'));
     expect(root.querySelectorAll('.m-grid .pcard').length).toBe(1);
-    expect(root.querySelector('.j-mtitle')?.textContent).toBe('剧集');
+    expect(root.querySelector('.j-mtitle')?.textContent).toBe('电视剧');
     clickEl(root.querySelector('.j-mai'));
     expect(root.querySelector('.j-mview')?.classList.contains('sp-body')).toBe(true);
     clickEl(root.querySelector('.j-mai'));
@@ -605,19 +605,19 @@ tags: [电影]
     const { app } = seedMobile();
     createOverlay(app);
     const root = document.querySelector('section.mob.bz-cinema--midnight') as HTMLElement;
-    clickEl(root.querySelector('.chip[data-c="剧集"]'));
-    expect(root.querySelector('.chip.is-on')?.textContent).toContain('剧集');
+    clickEl(root.querySelector('.chip[data-c="电视剧"]'));
+    expect(root.querySelector('.chip.is-on')?.textContent).toContain('电视剧');
     // 分析页：筛选状态保留，chips 整条熄灭
     clickEl(root.querySelector('.j-mstat'));
     expect(M.view).toBe('stat');
-    expect(M.typeFilter).toBe('剧集');
+    expect(M.typeFilter).toBe('电视剧');
     expect(root.querySelector('.chip.is-on')).toBeNull();
     clickEl(root.querySelector('.j-mai'));
     expect(root.querySelector('.chip.is-on')).toBeNull();
     // 再点回列表：先前选中的高亮原样恢复
     clickEl(root.querySelector('.j-mai'));
     expect(M.view).toBe('list');
-    expect(root.querySelector('.chip.is-on')?.textContent).toContain('剧集');
+    expect(root.querySelector('.chip.is-on')?.textContent).toContain('电视剧');
   });
 
   // 回归（2026-09-10 真机反馈）：AI 荐片/观影分析页点 chips 无反应——chips 行在移动壳里常驻，
@@ -629,7 +629,7 @@ tags: [电影]
     // AI 页 → 点类型 chip
     clickEl(root.querySelector('.j-mai'));
     expect(M.view).toBe('ai');
-    clickEl(root.querySelector('.chip[data-c="剧集"]'));
+    clickEl(root.querySelector('.chip[data-c="电视剧"]'));
     expect(M.view).toBe('list');
     expect(root.querySelector('.j-mview')?.classList.contains('m-scroll')).toBe(true);
     expect(root.querySelectorAll('.m-grid .pcard').length).toBe(1);
@@ -638,7 +638,7 @@ tags: [电影]
     expect(M.view).toBe('stat');
     clickEl(root.querySelector('.chip[data-s="已看"]'));
     expect(M.view).toBe('list');
-    expect(root.querySelectorAll('.m-grid .pcard').length).toBe(1); // 剧集 ∩ 已看 = 绝命毒师（类型筛选被保留）
+    expect(root.querySelectorAll('.m-grid .pcard').length).toBe(1); // 电视剧 ∩ 已看 = 绝命毒师（类型筛选被保留）
   });
 
   it('移动端搜索：防抖全刷 + 标题/计数联动', async () => {
