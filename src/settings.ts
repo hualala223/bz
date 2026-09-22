@@ -63,7 +63,7 @@ export default interface BzSettings {
   openNoteReminder: boolean;
   /** 🏷️ 场景列表（逗号分隔，空则内置默认：剪藏,工作,学习,生活,代码,公开课） */
   memoScenarios: string;
-  /** 🔀 默认排序方式：priority（紧急优先）/ due（仅到期）/ created（创建时间） */
+  /** 🔀 默认排序方式：票 298 起面板改用三维分类器（ADR-0128），本键退役仅保留兼容旧 data.json，面板不再读写 */
   memoSortMode: string;
   /** 📁 默认显示归档：打开面板时显示已归档条目 */
   memoShowArchivedByDefault: boolean;
@@ -412,6 +412,10 @@ export default interface BzSettings {
   /** 影院：面板主题皮肤键（午夜场布局下的主题，渲染待皮肤设计接入） */
   cinemaSkinTheme: string;
   cinemaMobileDefaultFullscreen: boolean;
+  /** 娱乐域国家待选项池（顿号分隔自定义段；票 294 / ADR-0127） */
+  entertainmentCountries: string;
+  /** 娱乐域题材待选项池（顿号分隔自定义段；票 294 / ADR-0127） */
+  entertainmentGenres: string;
   /** 番茄钟：移动端默认全屏（默认关——原移动端 320px 居中卡） */
   pomodoroMobileDefaultFullscreen: boolean;
   /** 保险箱：移动端默认全屏（默认开——原 JS 内联强制全屏） */
@@ -620,6 +624,8 @@ export const DEFAULT_SETTINGS: BzSettings = {
   cinemaApizeroKey: '',
   cinemaDoubanCookie: '',
   cinemaSkinTheme: 'nightfall',
+  entertainmentCountries: '内地、港台、美国、韩国',
+  entertainmentGenres: '悬疑、爱情、年代',
 
 
   // 做题家（设置并入复习计划 tab）

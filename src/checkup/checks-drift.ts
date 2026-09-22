@@ -10,9 +10,9 @@ import type { App } from 'obsidian';
 import type { CheckIssue, CheckOpts, CheckResult, CheckSection } from './types';
 import { readRawJson, jsonScanTargets } from './files';
 
-/** 备忘录/待办条目约定字段（todo/data.ts normalizeItem 同款 14 字段） */
+/** 备忘录/待办条目约定字段（todo/data.ts normalizeItem 同款 16 字段；票 298 增 category/urgency） */
 export const MEMO_ITEM_FIELDS = [
-  'id', 'title', 'scene', 'priority', 'created', 'completed', 'due',
+  'id', 'title', 'scene', 'priority', 'category', 'urgency', 'created', 'completed', 'due',
   'notePath', 'notePosition', 'scriptName', 'courseName', 'coursePath', 'linkedNote', 'url',
 ];
 

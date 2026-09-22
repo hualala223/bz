@@ -1,6 +1,7 @@
 /**
  * 待办（todo）域类型
- * 数据格式与 memo.json 零迁移（spec「数据格式总表」14 字段），与旧 memo 域共用同一数据文件。
+ * 数据格式与 memo.json 零迁移（spec「数据格式总表」14 字段 + 票 298 新增 category/urgency 共 16 字段），
+ * 与旧 memo 域共用同一数据文件。
  */
 export interface TodoPosition {
   line: number;
@@ -12,6 +13,8 @@ export interface TodoItem {
   title: string;
   scene: string;
   priority: string; // important | minor
+  category: string; // must | want（票 298：必须/想要，缺省 must）
+  urgency: string; // urgent | not（票 298：紧急/不紧急，缺省 not；与 due 正交的手动标记）
   created: string;
   completed: string | null;
   due: string | null;

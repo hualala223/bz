@@ -1,7 +1,8 @@
 /**
  * 待办（todo）域设置 schema（接入设置面板；窗口内无设置按钮，收敛进 Obsidian 设置面板）
- * 设置键全部绑定旧 memo 既有键（memoScenarios/memoSortMode/…）——并存期与旧 memo 共享
+ * 设置键全部绑定旧 memo 既有键（memoScenarios/memoShowArchivedByDefault/…）——并存期与旧 memo 共享
  * 设置、删旧域后零迁移；唯一新键 todoMobileDefaultFullscreen 是本域面板的移动全屏开关。
+ * memoSortMode（默认排序方式）自票 298/ADR-0128 起退役：面板改用三维分类器，键保留兼容不再消费。
  * 提醒组：启动自动弹出 / 打开笔记提醒已由本域提醒后台承担（todo/reminder.ts，
  * 落点=待办面板；memo→todo 接管迁移第 3 项提前实施），旧 memo 侧对应入口已改道移除。
  */
@@ -45,17 +46,6 @@ export function todoSettingsSchema(): SettingsSchema {
               { value: '今日', label: '今日' },
               { value: '重要', label: '重要' },
               ...TodoData.getScenarios().map((sc) => ({ value: sc, label: sc })),
-            ],
-          },
-          {
-            type: 'select',
-            name: '默认排序方式',
-            desc: '面板条目按所选规则排序',
-            binding: { key: 'memoSortMode' },
-            options: [
-              { value: 'priority', label: '紧急优先' },
-              { value: 'due', label: '仅按到期时间' },
-              { value: 'created', label: '按创建时间' },
             ],
           },
           {

@@ -33,10 +33,11 @@ import { fixOrphanIssues, runCheckup, getLastCheckupReport, __resetCheckupCacheF
 const DIR = 'CONFIG/STORAGE';
 const CORRUPT = 'CONFIG/.CORRUPT';
 
-/** memo 条目全字段样本（14 字段齐全 = 无缺失漂移） */
+/** memo 条目全字段样本（16 字段齐全 = 无缺失漂移；票 298 增 category/urgency） */
 function fullMemoItem(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    id: 'item-1', title: '买牛奶', scene: '生活', priority: 'minor', created: '2026-01-01 00:00:00',
+    id: 'item-1', title: '买牛奶', scene: '生活', priority: 'minor',
+    category: 'must', urgency: 'not', created: '2026-01-01 00:00:00',
     completed: null, due: null, notePath: null, notePosition: null, scriptName: null,
     courseName: null, coursePath: null, linkedNote: null, url: null, ...over,
   };
@@ -186,8 +187,8 @@ describe('检查二：字段漂移', () => {
     expect(sec!.summary).not.toContain('漂移');
   });
 
-  it('漂移字段常量与域 normalize 契约一致（14/15/3）', () => {
-    expect(MEMO_ITEM_FIELDS).toHaveLength(14);
+  it('漂移字段常量与域 normalize 契约一致（16/15/3；票 298 memo 增 category/urgency）', () => {
+    expect(MEMO_ITEM_FIELDS).toHaveLength(16);
     expect(FAVORITES_ITEM_FIELDS).toHaveLength(15);
     expect(POMODORO_HISTORY_FIELDS).toEqual(['ts', 'duration', 'task']);
   });

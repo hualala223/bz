@@ -48,6 +48,9 @@ export function normalizeItem(item: any): TodoItem {
     title: item.title,
     scene: item.scene,
     priority: item.priority || 'minor',
+    // 票 298：类别（必须/想要）与紧急度（紧急/不紧急），缺省 必须+不紧急（ADR-0128）
+    category: item.category === 'want' ? 'want' : 'must',
+    urgency: item.urgency === 'urgent' ? 'urgent' : 'not',
     created: item.created,
     completed: item.completed || null,
     due: item.due || null,

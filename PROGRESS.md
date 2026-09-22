@@ -811,3 +811,14 @@
 - [x] 票 290 补漏：sync 脚本按文件名排除 styles.css（本意只排根构建产物），致 src/knowledge/styles.css 未同步、src/literature/styles.css 残留——tsc/vitest 不测 css，构建时「样式源缺失」才暴露。已从残留文件复原 knowledge/styles.css（仅头部注释正名，类名与 knowledge/ui.ts 零差集已验证）、删除 literature 残留；全仓 styles.css 残留 grep 清零
 - [x] 票 291：用户报告桌面端内容首页「看不到完整页面」——面板高锁 min(580px,92vh) + body overflow:hidden + grid 行高 minmax(0,1fr) 三重压死，超出内容被无声裁剪。改法：面板加高 min(860px,92vh)；body 桌面端纵向滚动（6px 细滚动条配纸感主题，暗色 hover 同步）；grid 去行高约束改 min-height:100%；时间线去内部滚动自然展开（消除双滚动嵌套）。移动端断点补 min-height:0 抵消，行为一字不变
 - [x] 构建 production 通过；两 vault（-0.笔记汇总库 / 1.阅读库）styles.css md5 与主仓根一致（dbf09851）
+
+## 2026-09-22 · 票 298：待办三维分类器（类别/优先级/时间）替换排序下拉
+
+**状态：已交付**（grill-with-docs 两轮收口，Q1-Q8 全推荐；ADR-0128）。
+
+- [x] 数据：TodoItem 增 category（must|want，缺省必须）/ urgency（urgent|not，缺省不紧急，与 due 正交的手动标记），normalizeItem 归一补缺省，memo.json 旧数据零迁移（约定字段 14→16）
+- [x] UI：面板排序下拉替换为分类下拉（11 项 = 全部 + 8 组合 + 按到期/按创建；组合 = 三维等值筛选，末两项 = 全部 + 该排序）；原「紧急优先」排序退役，其逻辑保留为内部默认排序；打开恒重置「全部」不持久化（memoSortMode 键退役保留兼容）
+- [x] 编辑器：类别行（优先级上方）+ 时间行（下方）两枚 uiChoice；composer 不挂新维度落缺省值；卡片视觉不动（Q8a）
+- [x] 体检双链同步：MEMO_ITEM_FIELDS 16 字段 + checks-consistency.memoNormalize 快照加同款两行（ADR-0128 逐字对齐契约）；todo 设置页「默认排序方式」行移除，设置面板原型演示数据同步
+- [x] 门禁：tsc 本票改动零错（余 5 条为并行会话在制 cinema/票 294 类型错，与本票无关）；vitest 本票域 11 文件 184 用例全绿（新增数据归一/分类筛选/编辑器落盘/重开重置 6 组测试），全量 4780 用例中 10 失败全部位于并行在制域（cinema/clipbook/core-adapter）；esbuild production 构建通过，vault 产物探针验证（filterMode/不紧急/想要 字面量命中，根 main.js 与 vault 一致）
+- [x] 安全：构建前 main.js/styles.css/cinema·home prototype-render.js 四产物备份至 .scratch/ticket298-build-backup/（并行会话有在制 cinema 改动，用户拍板「现在就构建」，半成品 cinema 随本票构建一并入 vault，待其收尾重建覆盖）

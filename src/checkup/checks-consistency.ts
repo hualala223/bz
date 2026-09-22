@@ -25,6 +25,9 @@ function memoNormalize(item: Record<string, unknown>): Record<string, unknown> {
     title,
     scene,
     priority: item.priority || 'minor',
+    // 票 298：与 normalizeItem 逐字对齐（ADR-0128 快照契约）
+    category: item.category === 'want' ? 'want' : 'must',
+    urgency: item.urgency === 'urgent' ? 'urgent' : 'not',
     created,
     completed: item.completed || null,
     due: item.due || null,

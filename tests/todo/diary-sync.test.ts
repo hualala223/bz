@@ -37,7 +37,9 @@ function diaryKey(): string {
 
 function item(extra: Partial<TodoItem>): TodoItem {
   return {
-    id: 'x', title: '条目', scene: '剪藏', priority: 'minor', created: `${today()} 10:00:00`,
+    id: 'x', title: '条目', scene: '剪藏', priority: 'minor',
+    category: 'must', urgency: 'not', // 票 298 新字段缺省
+    created: `${today()} 10:00:00`,
     completed: null, due: null, notePath: null, notePosition: null,
     scriptName: null, courseName: null, coursePath: null, linkedNote: null, url: null,
     ...extra,

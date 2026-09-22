@@ -124,7 +124,7 @@
         ] },
       ] },
       { icon: 'eye', name: '显示', rows: [
-        { t: 'select', n: '默认排序方式', d: '面板条目按所选规则排序', k: 'memoSortMode', opts: [{ v: 'priority', l: '紧急优先' }, { v: 'due', l: '仅按到期时间' }, { v: 'created', l: '按创建时间' }] },
+        { t: 'select', n: '打开默认场景', d: '打开待办面板时默认选中的场景', k: 'memoOpenScene', opts: [{ v: '@last', l: '上次停留' }, { v: '全部', l: '全部' }, { v: '今日', l: '今日' }, { v: '重要', l: '重要' }] },
         { t: 'toggle', n: '默认显示已完成', d: '打开面板时同时展开已完成折叠区', k: 'memoShowArchivedByDefault' },
         { t: 'select', n: '到期时间格式', d: '到期时间按相对或绝对格式显示', k: 'memoDueFormat', opts: [{ v: 'relative', l: '相对' }, { v: 'absolute', l: '绝对' }] },
       ] },
@@ -429,7 +429,7 @@
     showTagCount: true, useFileDateTime: false, diaryTagShowEmoji: true, diaryContentRenderMode: 'markdown',
     diaryTagSortMode: 'fixed', diaryDefaultDateFilter: 'all', diaryDefaultSelectedTag: '', diaryJumpToEditAfterSave: false,
     diaryMobileDefaultFullscreen: true, diaryWallMobileDefaultFullscreen: true,
-    todoSkin: 'paper', todoSkinTheme: 'warmwhite', memoSortMode: 'priority', memoShowArchivedByDefault: false, memoDueFormat: 'relative',
+    todoSkin: 'paper', todoSkinTheme: 'warmwhite', memoShowArchivedByDefault: false, memoDueFormat: 'relative',
     memoDefaultPriority: 'minor', memoDefaultScene: '', memoScenarios: '剪藏,工作,学习,生活,代码,公开课',
     autoPopupOnStart: true, openNoteReminder: true, todoMobileDefaultFullscreen: false,
     belongingsDefaultStatus: '', belongingsMobileDefaultFullscreen: false,

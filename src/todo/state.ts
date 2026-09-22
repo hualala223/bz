@@ -14,8 +14,8 @@ export interface TodoState {
   items: TodoItem[];
   /** 场景筛选：'全部' | '今日'（到期优先视图） | 场景名 */
   activeScene: string;
-  /** 排序：priority（紧急优先）/ due（仅按到期）/ created（按创建） */
-  sortMode: string;
+  /** 分类器（票 298/ADR-0128）：'all' | '<category>-<priority>-<urgency>' 组合筛选 | 'due' | 'created'（末两项 = 全部 + 该排序） */
+  filterMode: string;
   /** 搜索关键字（桌面工具行） */
   search: string;
   /** 已完成折叠区是否展开 */
@@ -37,7 +37,7 @@ export const M: TodoState = {
   overlay: null,
   items: [],
   activeScene: '全部',
-  sortMode: 'priority',
+  filterMode: 'all',
   search: '',
   showDone: false,
   showEarlierDone: false,
@@ -53,7 +53,7 @@ export function resetTodoState(): void {
   M.overlay = null;
   M.items = [];
   M.activeScene = '全部';
-  M.sortMode = 'priority';
+  M.filterMode = 'all';
   M.search = '';
   M.showDone = false;
   M.showEarlierDone = false;

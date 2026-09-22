@@ -205,6 +205,33 @@ function unsubscribeTodoSync(): void {
   }
 }
 
+// ---------- 三维分类（票 298/ADR-0128：类别×优先级×紧急度） ----------
+
+/** 类别/紧急度标签表：编辑器 uiChoice 与分类下拉共用同表，防两处文案漂移 */
+export const CATEGORY_LABELS: Record<string, string> = { must: '必须', want: '想要' };
+export const URGENCY_LABELS: Record<string, string> = { urgent: '紧急', not: '不紧急' };
+
+/** 分类下拉的组合键（8 组合，类别→优先级→紧急度字典序；末尾再拼按到期/按创建两个纯排序项） */
+export const CLASSIFY_COMBO_KEYS: string[] = ['must', 'want'].flatMap((c) =>
+  ['important', 'minor'].flatMap((p) => ['urgent', 'not'].map((u) => `${c}-${p}-${u}`))
+);
+
+/** 组合键 → 三元组；非组合键（all/due/created）或含未知取值返回 null */
+function comboOf(mode: string): { category: string; priority: string; urgency: string } | null {
+  const parts = mode.split('-');
+  if (parts.length !== 3) return null;
+  const [category, priority, urgency] = parts;
+  if (!CATEGORY_LABELS[category] || !URGENCY_LABELS[urgency]) return null;
+  if (priority !== 'important' && priority !== 'minor') return null;
+  return { category, priority, urgency };
+}
+
+/** 组合键 → 下拉标签（「必须/重要/紧急」式） */
+function comboLabel(key: string): string {
+  const c = comboOf(key)!;
+  return `${CATEGORY_LABELS[c.category]}/${c.priority === 'important' ? '重要' : '次要'}/${URGENCY_LABELS[c.urgency]}`;
+}
+
 // ---------- 视图判定（过滤 + 排序） ----------
 
 /** 到期排序优先级：overdue 0 / today 1 / future 2 / 无 3 */
@@ -216,7 +243,12 @@ function dueRank(it: TodoItem): number {
 
 function getVisibleItems(): TodoItem[] {
   const kw = M.search.trim().toLowerCase();
+  const combo = comboOf(M.filterMode); // 组合筛选（null = 全部/纯排序项，不过滤）
   let list = M.items.filter((it) => {
+    // 三维组合筛选（票 298）：类别/优先级/紧急度三维等值
+    if (combo && (it.category !== combo.category || it.priority !== combo.priority || it.urgency !== combo.urgency)) {
+      return false;
+    }
     // 场景筛选
     if (M.activeScene === '今日') {
       // 只看今天：已完成项仅今天完成的进 done 折叠区（含今日补完的逾期项）；
@@ -238,24 +270,26 @@ function getVisibleItems(): TodoItem[] {
     }
     return true;
   });
-  // 录入当场可见：伪场景（今日/重要）过滤可能排除刚保存的新条目（无到期/未标星），
-  // 置顶放行避免「保存了却看不见」；切场景/关面板/下一条新建时清除
-  if (M.pinnedNewId && M.activeScene !== '全部') {
+  // 录入当场可见：伪场景/组合筛选可能排除刚保存的新条目（无到期/未标星），
+  // 置顶放行避免「保存了却看不见」；切场景/切分类/关面板/下一条新建时清除
+  if (M.pinnedNewId && (M.activeScene !== '全部' || combo)) {
     const pinned = M.items.find((i) => i.id === M.pinnedNewId);
     if (pinned && !pinned.completed && !list.some((i) => i.id === pinned.id)) list = [pinned, ...list];
   }
-  // 排序：priority 模式 = 到期优先 + 重要优先（对齐 memo sortFn）
+  // 排序：内部默认 = 到期优先 + 重要优先（原「紧急优先」逻辑，ADR-0128 退役为默认）；
+  // 分类下拉末两项 due/created 沿旧排序语义
+  const sortMode = M.filterMode === 'due' ? 'due' : M.filterMode === 'created' ? 'created' : 'priority';
   list.sort((a, b) => {
     const ac = !!a.completed, bc = !!b.completed;
     if (ac !== bc) return ac ? 1 : -1;
     const dr = dueRank(a) - dueRank(b);
     if (dr !== 0) return dr;
-    if (M.sortMode === 'priority') {
+    if (sortMode === 'priority') {
       const pa = a.priority === 'important' ? 0 : 1;
       const pb = b.priority === 'important' ? 0 : 1;
       if (pa !== pb) return pa - pb;
     }
-    if (M.sortMode === 'created') {
+    if (sortMode === 'created') {
       return (b.created || '').localeCompare(a.created || '');
     }
     if (a.due && b.due) return a.due.localeCompare(b.due);
@@ -317,10 +351,8 @@ export function openTodoPanel(app: App, opts?: { notePath?: string }): void {
     return;
   }
   TodoData.init(tryGetSettings());
-  // 设置播种（P2）：「默认排序方式」（与 memo 共用 memoSortMode 键）与「默认显示归档」
-  // 在面板打开时初始化——此前恒「紧急优先」+ 折叠，两项设置对 memo 面板不生效
-  const sortSetting = tryGetSettings().memoSortMode;
-  M.sortMode = sortSetting === 'priority' || sortSetting === 'due' || sortSetting === 'created' ? sortSetting : 'priority';
+  // 分类器（票 298/ADR-0128）：每次打开重置「全部」——筛选是临时视角，不跨开合记忆
+  M.filterMode = 'all';
   M.showDone = tryGetSettings().memoShowArchivedByDefault === true;
   // 打开默认场景（memoOpenScene）：提醒 notePath 定位恒「全部」——定位靠搜索过滤，场景过滤会把目标条目挡掉
   M.activeScene = opts?.notePath ? '全部' : resolveOpenScene();
@@ -345,28 +377,27 @@ export function openTodoPanel(app: App, opts?: { notePath?: string }): void {
   applyTodoSkin(tryGetSettings().todoSkin);
   mountIcons(overlay);
 
-  // 排序 = 组件库下拉（issue 268 用户拍板：三档平铺占宽把搜索框挤窄，改单枚下拉——
-  // 收起态只占一行文案宽，搜索框（.bz-search flex:1）随之变长；展开菜单走 .bz-select-menu，
-  // 皮肤段按 paper/editorial 各自风格化。值域/写回口径不变）
-  const sortEl = overlay.querySelector('[data-todo-sort]') as HTMLElement;
-  const sortSelect = uiSelect<string>({
+  // 分类器 = 组件库下拉（票 298/ADR-0128）：替换原排序下拉（issue 268 形态保留——
+  // 单枚下拉收起只占一行文案宽）。11 项 = 全部 + 类别×优先级×紧急度 8 组合 + 按到期/按创建；
+  // 选组合 = 三维等值筛选，末两项 = 全部 + 该排序。选择不持久化（打开重置「全部」）
+  const classifyEl = overlay.querySelector('[data-todo-sort]') as HTMLElement;
+  const classifySelect = uiSelect<string>({
     options: [
-      { value: 'priority', label: '紧急优先' },
-      { value: 'due', label: '仅按到期' },
+      { value: 'all', label: '全部' },
+      ...CLASSIFY_COMBO_KEYS.map((k) => ({ value: k, label: comboLabel(k) })),
+      { value: 'due', label: '按到期' },
       { value: 'created', label: '按创建' },
     ],
-    value: M.sortMode,
+    value: M.filterMode,
     className: 'bz-todo-sortsel',
     onChange: (v) => {
-      M.sortMode = v;
-      // 同步写入默认排序（与 memo 共用 memoSortMode 键）
-      getSettings().memoSortMode = v;
-      void saveSettings();
+      M.filterMode = v;
+      M.pinnedNewId = null; // 录入置顶只服务当前视图，切分类即清（切场景同口径）
       renderAll();
     },
   });
-  sortEl.appendChild(sortSelect.el);
-  sortSelectDetach = sortSelect.detach;
+  classifyEl.appendChild(classifySelect.el);
+  sortSelectDetach = classifySelect.detach;
 
   // 桌面拖动缩放（ADR-0084；移动端真全屏/常规卡都由 CSS 撑满视口，不挂）。
   // 尺寸记忆（ADR-0094）：persist.load 挂载时恢复（resize 工厂钳到与拖拽同口径），
@@ -518,7 +549,7 @@ export function closeTodoPanel(): void {
     panelResizeDetach.detach();
     panelResizeDetach = null;
   }
-  // 摘排序下拉的 document 级监听（开合/ESC）
+  // 摘分类下拉的 document 级监听（开合/ESC）
   if (sortSelectDetach) {
     sortSelectDetach();
     sortSelectDetach = null;
@@ -544,7 +575,7 @@ export function registerEscapeHandler(): void {
 
 /** 面板当前 resize detach（打开期间非空，关闭清空） */
 let panelResizeDetach: { detach: () => void } | null = null;
-/** 排序下拉（uiSelect）的 document 级监听 detach（面板关闭时摘除，防孤儿监听） */
+/** 分类下拉（uiSelect）的 document 级监听 detach（面板关闭时摘除，防孤儿监听；变量名沿旧排序下拉） */
 let sortSelectDetach: (() => void) | null = null;
 
 // ---------- 渲染 ----------
@@ -1008,6 +1039,9 @@ function addFromComposer(): void {
       title: hint ? hint.title : txt,
       scene,
       priority: 'minor',
+      // 票 298：composer 不挂新维度（快速录入保持轻量），落缺省 必须+不紧急
+      category: 'must',
+      urgency: 'not',
       created: moment().format('YYYY-MM-DD HH:mm:ss'),
       completed: null,
       due: null,
@@ -1155,6 +1189,23 @@ export function openEditor(
   sceneField.appendChild(choice.el);
   form.appendChild(sceneField);
 
+  // 类别平铺单选（票 298：必须/想要，置于优先级行上方；缺省必须）
+  const catField = document.createElement('div');
+  catField.className = 'bz-field';
+  const catLabel = document.createElement('span');
+  catLabel.className = 'bz-field-label';
+  catLabel.textContent = '类别';
+  catField.appendChild(catLabel);
+  const catChoice = uiChoice<string>({
+    options: Object.entries(CATEGORY_LABELS).map(([value, label]) => ({ value, label })),
+    value: editing ? CATEGORY_LABELS[editing.category] ? editing.category : 'must' : 'must',
+    float: true, // 浮岛 segmented（issue 199 拍板）
+    label: '类别',
+    onChange: () => { /* 值由保存时读取 */ },
+  });
+  catField.appendChild(catChoice.el);
+  form.appendChild(catField);
+
   // 优先级平铺单选（无彩色圆点）
   const prioField = document.createElement('div');
   prioField.className = 'bz-field';
@@ -1174,6 +1225,26 @@ export function openEditor(
   });
   prioField.appendChild(prioChoice.el);
   form.appendChild(prioField);
+
+  // 时间平铺单选（票 298：紧急/不紧急，置于优先级行下方；缺省不紧急，与 due 正交）
+  const urgField = document.createElement('div');
+  urgField.className = 'bz-field';
+  const urgLabel = document.createElement('span');
+  urgLabel.className = 'bz-field-label';
+  urgLabel.textContent = '时间';
+  urgField.appendChild(urgLabel);
+  const urgChoice = uiChoice<string>({
+    options: [
+      { value: 'not', label: '不紧急' },
+      { value: 'urgent', label: '紧急' },
+    ],
+    value: editing ? (URGENCY_LABELS[editing.urgency] ? editing.urgency : 'not') : 'not',
+    float: true, // 浮岛 segmented（issue 199 拍板）
+    label: '时间',
+    onChange: () => { /* 值由保存时读取 */ },
+  });
+  urgField.appendChild(urgChoice.el);
+  form.appendChild(urgField);
 
   // 建议（从已有条目收集脚本名/课程名 + 公开课笔记）
   const knownScripts = [...new Set(M.items.map((i) => i.scriptName).filter((n): n is string => !!n))].sort();
@@ -1291,6 +1362,11 @@ export function openEditor(
     if (sceneBtnOn) scene = (sceneBtnOn as HTMLElement).dataset.value || scene;
     const prioBtnOn = prioChoice.el.querySelector('.is-on');
     const priority: string = prioBtnOn ? (prioBtnOn as HTMLElement).dataset.value || 'minor' : 'minor';
+    // 票 298：类别/时间随优先级同款读取（缺省 必须+不紧急，与归一口径一致）
+    const catBtnOn = catChoice.el.querySelector('.is-on');
+    const category: string = catBtnOn ? (catBtnOn as HTMLElement).dataset.value || 'must' : 'must';
+    const urgBtnOn = urgChoice.el.querySelector('.is-on');
+    const urgency: string = urgBtnOn ? (urgBtnOn as HTMLElement).dataset.value || 'not' : 'not';
     const dueVal = dueInput.value;
     const due = dueVal ? dueVal.replace('T', ' ') : null;
     let titleVal = titleInput.value.trim();
@@ -1325,6 +1401,8 @@ export function openEditor(
             title: finalTitle,
             scene,
             priority,
+            category,
+            urgency,
             due,
             notePath: posState.notePath,
             notePosition: posState.notePosition,
@@ -1334,13 +1412,15 @@ export function openEditor(
             url: url ?? editing.url,
           });
           await syncItemTitle(editing, finalTitle); // ADR-0122：日记投影行标题同步
-          emitDomainEvent('memo', { kind: 'edited', old: { title: editing.title }, next: { title: finalTitle, scene, priority, due } });
+          emitDomainEvent('memo', { kind: 'edited', old: { title: editing.title }, next: { title: finalTitle, scene, priority, category, urgency, due } });
         } else {
           const it: TodoItem = {
             id: generateId(), // T5：与旧 memo 同前缀 'item'（同源 memo.json）
             title: finalTitle,
             scene,
             priority,
+            category,
+            urgency,
             created: moment().format('YYYY-MM-DD HH:mm:ss'),
             completed: null,
             due,
@@ -1354,7 +1434,7 @@ export function openEditor(
           };
           await TodoData.addItem(it);
           await syncItemAdded(it); // ADR-0122：日记投影行追加（序号接当天最大号）
-          emitDomainEvent('memo', { kind: 'added', title: finalTitle, scene, priority, due });
+          emitDomainEvent('memo', { kind: 'added', title: finalTitle, scene, priority, category, urgency, due });
           M.pinnedNewId = it.id; // 录入当场可见：伪场景过滤放行这条新目
         }
         closeModal();

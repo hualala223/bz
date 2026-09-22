@@ -257,30 +257,23 @@ describe('todo 面板', () => {
     }
   });
 
-  it('设置播种：memoSortMode/memoShowArchivedByDefault 打开面板时初始化排序与已完成折叠区', async () => {
-    const { app, settings, vault } = seedVault();
-    settings.memoSortMode = 'created';
+  it('设置播种：memoShowArchivedByDefault 展开已完成折叠区；分类器打开恒「全部」（memoSortMode 已退役不读写）', async () => {
+    const { app, settings } = seedVault();
+    settings.memoSortMode = 'created'; // 旧键残留：票 298 起不再播种，应被忽略
     settings.memoShowArchivedByDefault = true;
-    // 清空种子条目的截止：逾期/今日条目会因 dueRank 分组压过 created 排序，
-    // 且「今天 HH:mm」过点即变逾期——断言需全天稳定（原 09:00 后单跑必挂的雷）
-    {
-      const raw = JSON.parse(vault.files.get('CONFIG/STORAGE/memo.json')!);
-      raw.forEach((r: any) => { r.due = null; });
-      vault.files.set('CONFIG/STORAGE/memo.json', JSON.stringify(raw, null, 2));
-    }
     openTodoPanel(app);
     await vi.waitFor(() => {
       expect(document.querySelector('.bz-todo-card')).toBeTruthy();
     });
-    expect(M.sortMode).toBe('created');
+    expect(M.filterMode).toBe('all'); // 分类器打开重置「全部」，不读旧排序键
     expect(M.showDone).toBe(true);
-    // 按创建排序生效（created 降序：最新的「给影评加封面」在前）+ 已完成折叠区展开（4 卡全显）
+    // 已完成折叠区展开（4 卡全显）；内部默认排序 = 到期优先 + 重要优先（重要且今日到期的 a 在前）
     const cards = document.querySelectorAll('.bz-todo-card');
     expect(cards.length).toBe(4);
-    expect(cards[0].textContent).toContain('给影评加封面');
+    expect(cards[0].textContent).toContain('完成阅读报告');
   });
 
-  it('设置播种：非法 memoSortMode 回退紧急优先；memoShowArchivedByDefault 缺省折叠', async () => {
+  it('设置播种：memoShowArchivedByDefault 缺省折叠（旧排序键非法值不影响分类器重置）', async () => {
     const { app, settings } = seedVault();
     settings.memoSortMode = 'bogus';
     delete (settings as any).memoShowArchivedByDefault;
@@ -288,7 +281,7 @@ describe('todo 面板', () => {
     await vi.waitFor(() => {
       expect(document.querySelector('.bz-todo-card')).toBeTruthy();
     });
-    expect(M.sortMode).toBe('priority');
+    expect(M.filterMode).toBe('all');
     expect(M.showDone).toBe(false);
     // 已完成折叠区默认收起：3 张未完成卡
     expect(document.querySelectorAll('.bz-todo-card').length).toBe(3);
@@ -310,33 +303,72 @@ describe('todo 面板', () => {
     expect(document.querySelectorAll('.bz-todo-card')[0].textContent).toContain('ffmpeg 转写参数整理');
   });
 
-  it('排序 = 组件库下拉（issue 268）：收起态单枚 + 展开菜单三档，切换写回设置', async () => {
+  it('分类器 = 组件库下拉（票 298）：11 项 = 全部 + 8 组合 + 按到期/按创建，选组合即筛选且不写设置', async () => {
     const { app, settings, saveSpy } = seedVault();
     openTodoPanel(app);
     await vi.waitFor(() => {
       expect(document.querySelector('[data-todo-sort] .bz-select')).toBeTruthy();
     });
     const sel = document.querySelector('[data-todo-sort] .bz-select') as HTMLElement;
-    // 收起态：只亮当前档文案 + 箭头（三档平铺退役 → 搜索框腾出宽度）
-    expect(sel.querySelector('.bz-select-val')?.textContent).toBe('紧急优先');
+    // 收起态：打开恒「全部」+ 箭头（单枚下拉形态沿 issue 268）
+    expect(sel.querySelector('.bz-select-val')?.textContent).toBe('全部');
     expect(sel.querySelector('.bz-select-car')).toBeTruthy();
     expect(document.querySelector('[data-todo-sort] .bz-choice')).toBeNull();
-    // 点触发器展开菜单：三档 + 当前档选中
+    // 展开菜单：11 项 = 全部 + 8 组合（类别→优先级→紧急度字典序）+ 按到期/按创建
     sel.click();
     const menu = sel.querySelector('.bz-select-menu') as HTMLElement;
     expect(menu).toBeTruthy();
     const items = [...menu.querySelectorAll('.bz-select-item')] as HTMLElement[];
-    expect(items.map((b) => b.textContent)).toEqual(['紧急优先', '仅按到期', '按创建']);
-    expect(menu.querySelector('.bz-select-item.is-on')?.textContent).toBe('紧急优先');
-    // 点「按创建」→ 写回 memoSortMode（与 memo 共用键）+ 落盘 + 菜单收起 + 收起态文案跟随
-    items.find((b) => b.textContent === '按创建')!.click();
-    expect(settings.memoSortMode).toBe('created');
+    expect(items.map((b) => b.textContent)).toEqual([
+      '全部',
+      '必须/重要/紧急', '必须/重要/不紧急', '必须/次要/紧急', '必须/次要/不紧急',
+      '想要/重要/紧急', '想要/重要/不紧急', '想要/次要/紧急', '想要/次要/不紧急',
+      '按到期', '按创建',
+    ]);
+    expect(menu.querySelector('.bz-select-item.is-on')?.textContent).toBe('全部');
+    // 旧数据缺省归「必须 + 不紧急」：种子条目 a（important）命中 必须/重要/不紧急，b/c（minor）命中 必须/次要/不紧急
+    items.find((b) => b.textContent === '必须/重要/紧急')!.click();
+    expect(M.filterMode).toBe('must-important-urgent');
     await vi.waitFor(() => {
-      expect(saveSpy).toHaveBeenCalled();
+      expect(document.querySelector('.bz-empty')).toBeTruthy();
+    }); // 无条目同时满足 重要+紧急 → 空态
+    expect(document.querySelectorAll('.bz-todo-card').length).toBe(0);
+    // 切「必须/重要/不紧急」→ 只剩重要条目 a
+    sel.click();
+    const menu2 = sel.querySelector('.bz-select-menu') as HTMLElement;
+    ([...menu2.querySelectorAll('.bz-select-item')] as HTMLElement[]).find((b) => b.textContent === '必须/重要/不紧急')!.click();
+    await vi.waitFor(() => {
+      expect(document.querySelectorAll('.bz-todo-card').length).toBe(1);
     });
+    expect(document.querySelectorAll('.bz-todo-card')[0].textContent).toContain('完成阅读报告');
+    // 末两项「按创建」= 纯排序视图（全部条目 + created 排序），不写旧排序键、不落盘
+    sel.click();
+    const menu3 = sel.querySelector('.bz-select-menu') as HTMLElement;
+    ([...menu3.querySelectorAll('.bz-select-item')] as HTMLElement[]).find((b) => b.textContent === '按创建')!.click();
+    expect(M.filterMode).toBe('created');
+    expect(settings.memoSortMode).toBe('priority'); // 退役键不被写回
+    expect(saveSpy).not.toHaveBeenCalled();
     expect(sel.querySelector('.bz-select-menu')).toBeNull();
     expect(sel.querySelector('.bz-select-val')?.textContent).toBe('按创建');
-    expect(M.sortMode).toBe('created');
+  });
+
+  it('分类器跨开合不记忆：关面板重开重置「全部」', async () => {
+    const { app } = seedVault();
+    openTodoPanel(app);
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-todo-sort] .bz-select')).toBeTruthy();
+    });
+    const sel = document.querySelector('[data-todo-sort] .bz-select') as HTMLElement;
+    sel.click();
+    const menu = sel.querySelector('.bz-select-menu') as HTMLElement;
+    ([...menu.querySelectorAll('.bz-select-item')] as HTMLElement[]).find((b) => b.textContent === '必须/次要/紧急')!.click();
+    expect(M.filterMode).toBe('must-minor-urgent');
+    closeTodoPanel();
+    openTodoPanel(app);
+    await vi.waitFor(() => {
+      expect(document.querySelector('.bz-todo-card')).toBeTruthy();
+    });
+    expect(M.filterMode).toBe('all'); // 筛选是临时视角，重开重置
   });
 });
 
@@ -360,7 +392,7 @@ describe('todo 编辑器', () => {
     });
     const editor = document.querySelector('.bz-todo-editor') as HTMLElement;
     // 场景平铺 = uiChoice（.bz-choice），选中 = 品牌（非黑）
-    expect(editor.querySelectorAll('.bz-choice-btn').length).toBeGreaterThanOrEqual(8); // 6 场景 + 2 优先级
+    expect(editor.querySelectorAll('.bz-choice-btn').length).toBeGreaterThanOrEqual(12); // 6 场景 + 2 优先级 + 2 类别 + 2 时间（票 298）
     // 平铺前无彩色圆点（.bz-choice-dot 不存在）
     expect(editor.querySelector('.bz-choice-dot')).toBeNull();
     // 第二输入框在场景平铺上方（第一个 extra 的 DOM 位置先于第一个 .bz-choice）
@@ -380,9 +412,9 @@ describe('todo 编辑器', () => {
       expect(document.querySelector('.bz-todo-editor')).toBeTruthy();
     });
     const editor = document.querySelector('.bz-todo-editor') as HTMLElement;
-    // 场景 + 优先级两组浮岛 segmented（各含 1 枚白卡指示器节点）
-    expect(editor.querySelectorAll('.bz-choice--float').length).toBe(2);
-    expect(editor.querySelectorAll('.bz-choice--float > .bz-choice-seg').length).toBe(2);
+    // 场景 + 优先级 + 类别 + 时间四组浮岛 segmented（各含 1 枚白卡指示器节点）
+    expect(editor.querySelectorAll('.bz-choice--float').length).toBe(4);
+    expect(editor.querySelectorAll('.bz-choice--float > .bz-choice-seg').length).toBe(4);
     // 定位钮 = 组件库 chip 档：.bz-btn--chip > .bz-btn-chip 内 pin 图标 + 独立文字 span
     const posBtn = editor.querySelector('.bz-btn--chip') as HTMLElement;
     expect(posBtn).toBeTruthy();
@@ -478,6 +510,53 @@ describe('todo 编辑器', () => {
     expect(raw[0].title).toBe('测试脚本任务');
     expect(raw[0].scene).toBe('代码');
     expect(raw[0].scriptName).toBe('test.py');
+  });
+
+  it('类别/时间行（票 298）：夹住优先级行（类别上/时间下），缺省 必须+不紧急', async () => {
+    const { app } = seedVault();
+    addTodo(app);
+    await vi.waitFor(() => {
+      expect(document.querySelector('.bz-todo-editor')).toBeTruthy();
+    });
+    const editor = document.querySelector('.bz-todo-editor') as HTMLElement;
+    const labels = [...editor.querySelectorAll('.bz-field-label')].map((l) => l.textContent);
+    // 行序：… 场景 → 类别 → 优先级 → 时间 → …（类别在优先级上方、时间在下方）
+    const iCat = labels.indexOf('类别');
+    const iPrio = labels.indexOf('优先级');
+    const iUrg = labels.indexOf('时间');
+    expect(iCat).toBeGreaterThan(-1);
+    expect(iCat).toBeLessThan(iPrio);
+    expect(iPrio).toBeLessThan(iUrg);
+    // 缺省选中：必须 / 不紧急
+    const onOf = (label: string) =>
+      ([...editor.querySelectorAll('.bz-field')].find((f) => f.querySelector('.bz-field-label')?.textContent === label)!);
+    expect(onOf('类别').querySelector('.bz-choice-btn.is-on')?.textContent).toBe('必须');
+    expect(onOf('时间').querySelector('.bz-choice-btn.is-on')?.textContent).toBe('不紧急');
+  });
+
+  it('编辑保存：类别/时间落盘（想要 + 紧急写入 memo.json）', async () => {
+    const { app, vault } = seedVault();
+    addTodo(app);
+    await vi.waitFor(() => {
+      expect(document.querySelector('.bz-todo-editor')).toBeTruthy();
+    });
+    const editor = document.querySelector('.bz-todo-editor') as HTMLElement;
+    const contentInput = editor.querySelector('textarea') as HTMLTextAreaElement;
+    contentInput.value = '三维标记条目';
+    const fieldOf = (label: string) =>
+      ([...editor.querySelectorAll('.bz-field')].find((f) => f.querySelector('.bz-field-label')?.textContent === label)!);
+    ([...fieldOf('类别').querySelectorAll('.bz-choice-btn')] as HTMLElement[]).find((b) => b.textContent === '想要')!.click();
+    ([...fieldOf('时间').querySelectorAll('.bz-choice-btn')] as HTMLElement[]).find((b) => b.textContent === '紧急')!.click();
+    const saveBtn = [...editor.querySelectorAll('.bz-btn')].find((b) => b.textContent?.includes('添加')) as HTMLElement;
+    saveBtn.click();
+    await vi.waitFor(() => {
+      expect(document.querySelector('.bz-todo-editor')).toBeNull();
+    });
+    const raw = JSON.parse(vault.files.get('CONFIG/STORAGE/memo.json')!);
+    expect(raw[0].title).toBe('三维标记条目');
+    expect(raw[0].category).toBe('want');
+    expect(raw[0].urgency).toBe('urgent');
+    expect(raw[0].priority).toBe('minor');
   });
 
   it('公开课新建：点课程建议 → 保存写入 courseName + coursePath（memo 面板课程标签可跳转）', async () => {

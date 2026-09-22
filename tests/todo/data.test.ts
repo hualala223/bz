@@ -1,10 +1,10 @@
 // @vitest-environment node
 /**
- * 待办（todo）数据层测试：memo.json 同源读写（与旧 memo 共用）、14 字段零迁移、
- * 场景解析、条目 CRUD、公开课笔记检索。
+ * 待办（todo）数据层测试：memo.json 同源读写（与旧 memo 共用）、16 字段零迁移
+ * （14 基础字段 + 票 298 category/urgency）、场景解析、条目 CRUD、公开课笔记检索。
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { TodoData, parseScenarios, DEFAULT_SCENARIOS } from '../../src/todo/data';
+import { TodoData, parseScenarios, normalizeItem, DEFAULT_SCENARIOS } from '../../src/todo/data';
 import { setApp } from '../../src/core/app';
 import { MockVault } from '../mock-vault';
 
@@ -57,6 +57,8 @@ describe('TodoData 构建', () => {
     const it = items[0];
     expect(it.id).toBeTruthy();
     expect(it.priority).toBe('minor');
+    expect(it.category).toBe('must'); // 票 298：缺省必须
+    expect(it.urgency).toBe('not'); // 票 298：缺省不紧急
     expect(it.completed).toBeNull();
     expect(it.due).toBeNull();
     expect(it.notePath).toBeNull();
@@ -71,7 +73,7 @@ describe('TodoData 构建', () => {
     expect(raw[0].id).toBeTruthy();
   });
 
-  it('读取旧 memo 域写入的数据（14 字段完整条目零迁移）', async () => {
+  it('读取旧 memo 域写入的数据（14 字段完整条目零迁移，新字段补缺省）', async () => {
     TodoData.init(BASE_SETTINGS);
     const legacy = {
       id: 'legacy-1', title: '剪藏标题', scene: '剪藏', priority: 'important',
@@ -82,7 +84,15 @@ describe('TodoData 构建', () => {
     };
     vault.files.set('CONFIG/STORAGE/memo.json', JSON.stringify([legacy], null, 2));
     const items = await TodoData.loadItems();
-    expect(items[0]).toEqual(legacy);
+    // 票 298：旧条目（无 category/urgency）归一补缺省 必须+不紧急，其余字段逐字不动
+    expect(items[0]).toEqual({ ...legacy, category: 'must', urgency: 'not' });
+  });
+
+  it('category/urgency 归一（票 298）：合法值保留、未知值回缺省', () => {
+    expect(normalizeItem({ category: 'want', urgency: 'urgent' })).toMatchObject({ category: 'want', urgency: 'urgent' });
+    expect(normalizeItem({ category: 'must', urgency: 'not' })).toMatchObject({ category: 'must', urgency: 'not' });
+    expect(normalizeItem({ category: 'bogus', urgency: 'sometimes' })).toMatchObject({ category: 'must', urgency: 'not' });
+    expect(normalizeItem({})).toMatchObject({ category: 'must', urgency: 'not' });
   });
 });
 
