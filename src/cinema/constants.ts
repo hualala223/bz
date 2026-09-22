@@ -11,7 +11,8 @@ export const DEFAULT_RATING = 5;
 
 /**
  * 类型分组：组 → 细分 tag 清单（ADR-0127 票 293：固定七项顶级类型，「剧集」退役、
- * 细分剧 tag 归一映射「电视剧」；动漫细分保留；不开放顶级类型自定义。
+ * 细分剧 tag 归一映射「电视剧」；票 300：动漫细分退役——日漫/国漫/美漫归一映射「动漫」，
+ * 七项顶级类型全部组名即 tag；不开放顶级类型自定义。
  * 票 299 / ADR-0128：「小说」正名「书籍」，旧 tag 经 LEGACY_TAG_MAP 读侧归一）
  */
 export const TYPE_GROUPS: Record<string, string[]> = {
@@ -19,7 +20,7 @@ export const TYPE_GROUPS: Record<string, string[]> = {
   电视剧: ['电视剧'],
   短剧: ['短剧'],
   书籍: ['书籍'],
-  动漫: ['日漫', '国漫', '美漫'],
+  动漫: ['动漫'],
   纪录片: ['纪录片'],
   公开课: ['公开课', 'TED'],
 };
@@ -28,10 +29,14 @@ export const ALL_TAGS: string[] = Object.values(TYPE_GROUPS).flat();
 
 /**
  * 旧 tag → 新 tag 归一映射（读侧归一显示，fm 原值不改写）：
- * 旧「剧集」组细分 tag → 「电视剧」（票 293）；「小说」→「书籍」组正名（票 299 / ADR-0128）
+ * 旧「剧集」组细分 tag → 「电视剧」（票 293）；「小说」→「书籍」组正名（票 299 / ADR-0128）；
+ * 旧动漫细分 tag → 「动漫」（票 300 细分退役）
  */
 export const LEGACY_TAG_MAP: Record<string, string> = {
   小说: '书籍',
+  日漫: '动漫',
+  国漫: '动漫',
+  美漫: '动漫',
   国产剧: '电视剧',
   美剧: '电视剧',
   英剧: '电视剧',

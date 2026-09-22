@@ -25,7 +25,7 @@ const GROUP_DEFAULT_TAG: Record<string, string> = {
   短剧: '短剧',
   书籍: '书籍',
   小说: '书籍',
-  动漫: '日漫',
+  动漫: '动漫',
   纪录片: '纪录片',
   公开课: '公开课',
 };

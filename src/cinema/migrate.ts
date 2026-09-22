@@ -3,7 +3,8 @@
  * ① 设置值平移：cinemaFolderPath / movieDirectory 存的仍是旧默认「我的/影视」时平移到新默认
  *   「我的/娱乐」（用户自定义值不动）；
  * ② 目录搬迁：旧目录存在且新目录不存在 → 整目录 renameFile（Obsidian 自动更新双链）；
- *   新目录已存在则不动并提示（避免同名合并歧义）。
+ *   新目录已存在则不动并提示（避免同名合并歧义）；rename 失败降级为提示手动重命名，
+ *   不中断插件加载（票 300——此前失败会炸 onLoad，表现为插件开关打不开）。
  * 只搬家不改内容：文件 frontmatter 零改写（数据格式变更已由 ADR-0127 授权）。
  */
 import { TFolder, type App, Notice } from 'obsidian';
@@ -37,8 +38,15 @@ export async function migrateCinemaFolder(app: App, settings: Record<string, unk
       new Notice('检测到旧影视目录「我的/影视」与新娱乐目录并存，未自动迁移，请手动合并');
       return changed;
     }
-    await app.fileManager.renameFile(oldDir as never, DEFAULT_FOLDER);
-    changed = true;
+    try {
+      await app.fileManager.renameFile(oldDir as never, DEFAULT_FOLDER);
+      changed = true;
+    } catch (e) {
+      // 票 300：目录 rename 失败（网络盘占用/外部同步进程锁等）不得中断插件加载——
+      // 设置平移照常生效，目录归位降级为提示用户手动重命名
+      console.error('[bz] 娱乐目录自动搬迁失败：', e);
+      new Notice('影视目录自动搬迁失败（我的/影视 → 我的/娱乐），请手动重命名文件夹');
+    }
   }
   return changed;
 }

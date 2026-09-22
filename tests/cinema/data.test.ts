@@ -236,6 +236,9 @@ describe('cinema 工具函数', () => {
     expect(getGroupForTag('书籍')).toBe('书籍');
     expect(getGroupForTag('小说')).toBe('书籍');
     expect(getGroupForTag('日漫')).toBe('动漫');
+    expect(getGroupForTag('国漫')).toBe('动漫');
+    expect(getGroupForTag('美漫')).toBe('动漫');
+    expect(getGroupForTag('动漫')).toBe('动漫');
     expect(getGroupSafe('未知tag')).toBe('其他');
   });
 

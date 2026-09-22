@@ -79,4 +79,16 @@ describe('migrateCinemaFolder（票 292 / ADR-0127）', () => {
     const settings: Record<string, unknown> = {};
     expect(await migrateCinemaFolder(app, settings)).toBe(false);
   });
+
+  it('rename 失败（票 300）：不抛异常、弹手动重命名提示、设置平移照常返回 true', async () => {
+    const vault = new MockVault();
+    vault.files.set('我的/影视/《旧片》.md', '---\ntags: [电影]\n---');
+    const base = mockAppWithVault(vault);
+    (base.fileManager as any).renameFile = async () => { throw new Error('EBUSY: 网络盘占用'); };
+    const settings: Record<string, unknown> = { cinemaFolderPath: OLD_DEFAULT_FOLDER };
+    expect(await migrateCinemaFolder(base, settings)).toBe(true);
+    expect(settings.cinemaFolderPath).toBe(DEFAULT_FOLDER); // 设置平移不受影响
+    expect(vault.files.has('我的/影视/《旧片》.md')).toBe(true); // 目录没搬成
+    expect(MockNotice.instances.some((n) => n.message.includes('手动重命名'))).toBe(true);
+  });
 });

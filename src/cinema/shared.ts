@@ -163,9 +163,9 @@ export function detailModalHtml(it: CinemaItem, posterUrl: string | null): strin
   </div>`;
 }
 
-/** 组 → 细分 tag 映射（表单 choices 用；ADR-0127 票 293：剧集退役，七项顶级类型；票 299 小说→书籍） */
+/** 组 → 细分 tag 映射（表单 choices 用；ADR-0127 票 293：剧集退役，七项顶级类型；票 299 小说→书籍；票 300 动漫细分退役） */
 export const GROUP_SUBS_OF: Record<string, string[]> = {
-  电影: [], 电视剧: [], 短剧: [], 书籍: [], 动漫: ['日漫', '国漫', '美漫'], 纪录片: [], 公开课: ['公开课', 'TED'],
+  电影: [], 电视剧: [], 短剧: [], 书籍: [], 动漫: [], 纪录片: [], 公开课: ['公开课', 'TED'],
 };
 
 /** 分类行标签：书籍组叫「体裁」（图书馆口径，票 299），其余组「题材」；spaced=表单标签带空格风格。fm 键「类型」不变，纯显示层 */
