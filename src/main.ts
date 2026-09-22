@@ -33,7 +33,7 @@ import { openBookshelf, openBookshelfReport, unloadBookshelf } from './bookshelf
 // 阅读数据分析报告（读书报告内嵌化 ADR-0091：独立弹窗退役，报告为书架墙面板内视图）
 import { unloadReadingReport } from './reading-report';
 // 影院（cinema 域，上游 ADR-0087 起接管影视；旧 movie 域已退役。ADR-0090：报告窗并入影院内嵌分析页）
-import { openCinema, addCinemaItem, openCinemaAnalysis, pickRandomCinema, unloadCinema } from './cinema';
+import { openCinema, addCinemaItem, openCinemaAnalysis, openCinemaExport, pickRandomCinema, unloadCinema } from './cinema';
 import { migrateCinemaFolder } from './cinema/migrate';
 // 复习（ticket 168 单一入口：仅「复习（按数量）」命令；ticket 169 加回「加入复习计划」；ensureReview/unloadReview 为常驻监控与卸载所需）
 import { reviewCountStart, reviewAddCurrent, reviewAddCurrentWithLinks, openReviewReport, openTodayReviewed, ensureReview, unloadReview } from './review';
@@ -131,6 +131,8 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-cinema-analysis', name: '娱乐分析报告', icon: 'pie-chart', callback: () => openCinemaAnalysis(getApp()) },
   { id: 'bz-cinema-open', name: '娱乐', icon: 'clapperboard', callback: () => openCinema(getApp()) },
   { id: 'bz-cinema-add', name: '加条目', icon: 'plus-circle', callback: () => addCinemaItem(getApp()) },
+  // 感想导出（ADR-0127 票 296）：面板未开先冷开，直进多选勾选态
+  { id: 'bz-cinema-export', name: '导出感想', icon: 'file-output', callback: () => openCinemaExport(getApp()) },
   // 随机抽一部（票 275②，上游 2026-09-11 首页入口菜单）：想看池随机 → 直开详情
   { id: 'bz-cinema-random-pick', name: '随机抽一部', icon: 'shuffle', callback: () => pickRandomCinema(getApp()) },
   // 复习（ticket 168 单一入口：仅保留「复习（按数量）」；ticket 169 加回「加入复习计划」、ticket 170 加「批量加入」，editorCallback 进文档右键待选）

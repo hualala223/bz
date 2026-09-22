@@ -9,7 +9,7 @@ import { esc, iconSpan } from '../../../core/ui/str';
 import { GROUP_ORDER } from '../../constants';
 import {
   ICON, ST_COLOR, statusText, typeColor,
-  pcardHtml, viewFiltered,
+  pcardHtml, viewFiltered, multiBarHtml,
   type CinemaView,
 } from '../../shared';
 import type { CinemaItem } from '../../state';
@@ -155,6 +155,8 @@ export interface MidnightRenderInput {
   poster: (it: CinemaItem) => string | null;
   /** 后台抓取中（插件 douban-queue pending 集合，壳给演示 false） */
   fetching?: (it: CinemaItem) => boolean;
+  /** 多选模式下该卡是否已勾选（票 296，壳给演示 false） */
+  picked?: (it: CinemaItem) => boolean;
 }
 
 /** 列表视图头 + 工具行（d-head/d-tools；添加钮钩子 data-cinema-add） */
@@ -163,8 +165,11 @@ export function listHeadHtml(inp: MidnightRenderInput): string {
     <button class="add j-add" data-cinema-add>${iconSpan(ICON.add)}添加条目</button></div>`;
 }
 export function listToolsHtml(view: CinemaView): string {
+  // 票 296：多选模式下工具行替换为勾选工具条（导出/退出）
+  if (view.multiSelect) return multiBarHtml(view);
   return `<div class="d-tools"><label class="d-search">${iconSpan(ICON.search)}<input class="j-q" placeholder="搜索条目（名称、类型、感想）..." value="${esc(view.searchKeyword)}"></label>
-    <div class="seg j-sort">${([['date', '最近观看'], ['created', '加入先后'], ['rating', '按评分']] as const).map(([k, l]) => `<button data-k="${k}" class="${view.sortMode === k ? 'is-on' : ''}">${l}</button>`).join('')}</div></div>`;
+    <div class="seg j-sort">${([['date', '最近观看'], ['created', '加入先后'], ['rating', '按评分']] as const).map(([k, l]) => `<button data-k="${k}" class="${view.sortMode === k ? 'is-on' : ''}">${l}</button>`).join('')}</div>
+    <button class="dm-btn j-multi" data-cinema-multiselect>多选</button></div>`;
 }
 
 // ---------- 渲染胶水（desk/mob 各自回填挂点；两侧同构执行） ----------
@@ -186,8 +191,10 @@ export function renderMidnightDesk(root: HTMLElement, inp: MidnightRenderInput):
   } else if (v.view === 'stat') {
     view.innerHTML = spHeadHtml('观影分析', `· ${inp.watchedCount} 部已看`) + `<div class="sp-body">${inp.statHtml}</div>`;
   } else {
+    const pick = (it: CinemaItem) => inp.picked?.(it) ?? false;
+    const cards = inp.list.map((it) => pcardHtml(it, inp.poster(it), inp.fetching?.(it) ?? false, pick(it))).join('');
     const body = inp.list.length
-      ? `<div class="d-scroll"><div class="grid" style="grid-template-columns:repeat(${inp.cols},1fr)">${inp.list.map((it) => pcardHtml(it, inp.poster(it), inp.fetching?.(it) ?? false)).join('')}</div></div>`
+      ? `<div class="d-scroll"><div class="grid" style="grid-template-columns:repeat(${inp.cols},1fr)">${cards}</div></div>`
       : emptyPageHtml(viewFiltered(v));
     view.innerHTML = listHeadHtml(inp) + listToolsHtml(v) + body;
   }
@@ -205,7 +212,9 @@ export function renderMidnightMob(root: HTMLElement, inp: MidnightRenderInput): 
   if (mv) {
     if (v.view === 'list') {
       mv.className = 'm-scroll j-mview';
-      mv.innerHTML = `<div class="m-grid">${inp.list.map((it) => pcardHtml(it, inp.poster(it), inp.fetching?.(it) ?? false)).join('')}</div>`;
+      // 票 296：多选模式在网格上方叠勾选工具条
+      const bar = v.multiSelect ? multiBarHtml(v) : '';
+      mv.innerHTML = `${bar}<div class="m-grid">${inp.list.map((it) => pcardHtml(it, inp.poster(it), inp.fetching?.(it) ?? false, inp.picked?.(it) ?? false)).join('')}</div>`;
     } else if (v.view === 'ai') {
       mv.className = 'sp-body j-mview';
       mv.innerHTML = inp.aiHtml;

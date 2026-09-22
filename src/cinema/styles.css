@@ -84,6 +84,12 @@
 .bz-cinema--midnight .badge-eps{left:auto;right:7px;background:rgba(22,20,16,.82);letter-spacing:0;font-variant-numeric:tabular-nums}
 .bz-cinema--midnight .f-eps-row{display:flex;gap:10px;align-items:center;font-size:12px;color:var(--ink-2)}
 .bz-cinema--midnight .f-eps-row input{width:70px}
+/* 多选导出（票 296）：工具条 + 勾选卡高亮 */
+.bz-cinema--midnight .cn-multibar{display:flex;align-items:center;gap:8px;padding:8px 0;font-size:12.5px;color:var(--ink)}
+.bz-cinema--midnight .cn-multibar .mb-cnt{font-weight:600;color:var(--gold);margin-right:auto}
+.bz-cinema--midnight .d-tools .j-multi{flex:none}
+.bz-cinema--midnight .pcard.is-picked .pw{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold)}
+.bz-cinema--midnight .pcard.is-picked .pname::after{content:' ✓';color:var(--gold)}
 .bz-cinema--midnight .pname{font-size:12.5px;font-weight:600;color:var(--ink);margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bz-cinema--midnight .pmeta{font-size:var(--bz-font-caption);color:var(--ink-3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bz-cinema--midnight .pstars{font-size:10.5px;color:var(--star);margin-top:3px;letter-spacing:1px}

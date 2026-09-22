@@ -32,7 +32,7 @@ import { runAIRecommend, runSimilarRecommend, buildTasteProfile, quickAddWant } 
 import { buildAnalysisHTML } from './analysis';
 import { enqueueDoubanFetch, dequeueDoubanFetch, isFetching } from './douban-queue';
 import {
-  ICON, statusText, itemByKey, doubanSearchUrl,
+  ICON, statusText, itemByKey, itemKey, doubanSearchUrl,
   detailModalHtml, confirmModalHtml, formModalHtml, optionChipsHtml,
   aiPageHtml, sheetHeadHtml, pcardHtml, type AiPageInput,
   midnightDeskHtml, midnightMobHtml, renderMidnightDesk, renderMidnightMob,
@@ -608,6 +608,8 @@ function midnightInput(app: App): MidnightRenderInput {
       countryFilter: M.countryFilter,
       sortMode: M.sortMode,
       searchKeyword: M.searchKeyword,
+      multiSelect: M.multiSelect,
+      selectedCount: M.selected.size,
     },
     cols: gridColumns(),
     title: listTitle(),
@@ -617,7 +619,47 @@ function midnightInput(app: App): MidnightRenderInput {
     statHtml: buildAnalysisHTML(),
     poster: (it) => posterUrl(it, app),
     fetching: (it) => isFetching(it.file?.path),
+    picked: (it) => M.selected.has(itemKey(it)),
   };
+}
+
+// ---------- 多选导出感想（票 296） ----------
+
+/** 单条目感想卡（markdown）：名称/类型/国家/题材/评分/观影日期/感想 */
+function reviewCardMd(it: CinemaItem): string {
+  const lines: string[] = [`## 《${it.name}》`, ''];
+  lines.push(`- 类型：${it.typeTag}`);
+  if (it.country) lines.push(`- 国家：${it.country}`);
+  if (it.genres.length) lines.push(`- 题材：${it.genres.join('、')}`);
+  lines.push(`- 评分：${it.rating && it.rating > 0 ? Number(it.rating).toFixed(1) : '未评分'}`);
+  if (it.watchDate) lines.push(`- 观影日期：${it.watchDate.slice(0, 10)}`);
+  lines.push('', it.review || '（无感想）', '', '---', '');
+  return lines.join('\n');
+}
+
+/** 导出勾选条目为单篇 markdown 笔记 → `我的/娱乐/感想导出/`（时间戳文件名，重名追加序号） */
+async function exportReviews(sec: HTMLElement, app: App): Promise<void> {
+  const picked = getDisplayItems().filter((it) => M.selected.has(itemKey(it))); // 复用当前排序
+  if (!picked.length) {
+    panelToast(sec, '请先勾选要导出的条目');
+    return;
+  }
+  const folder = `${M.folderPath}/感想导出`;
+  if (!app.vault.getAbstractFileByPath(folder)) {
+    await app.vault.createFolder(folder);
+  }
+  const stamp = localNow().slice(0, 16).replace(/[-: ]/g, ''); // YYYYMMDDHHmmss（截到分）
+  let path = `${folder}/感想导出 ${stamp}.md`;
+  let n = 2;
+  while (app.vault.getAbstractFileByPath(path)) {
+    path = `${folder}/感想导出 ${stamp}-${n++}.md`;
+  }
+  const head = `# 感想导出\n\n> ${picked.length} 条 · ${localNow().slice(0, 10)}\n\n`;
+  await app.vault.create(path, head + picked.map(reviewCardMd).join('\n'));
+  notice(`已导出 ${picked.length} 条感想到 感想导出/`, 'success');
+  M.multiSelect = false;
+  M.selected.clear();
+  renderAll(app);
 }
 
 // ---------- 搜索（防抖；desk 部分刷新保焦点 / mob 全刷+回焦） ----------
@@ -676,6 +718,24 @@ function bindMidnight(sec: HTMLElement, app: App): void {
       renderAll(app);
       return;
     }
+    // 票 296：多选导出工具条
+    const msel = t.closest('[data-cinema-multiselect]') as HTMLElement | null;
+    if (msel) {
+      M.multiSelect = true;
+      M.selected.clear();
+      M.view = 'list';
+      renderAll(app);
+      return;
+    }
+    const mexit = t.closest('[data-cinema-multiselect-exit]') as HTMLElement | null;
+    if (mexit) {
+      M.multiSelect = false;
+      M.selected.clear();
+      renderAll(app);
+      return;
+    }
+    const mexp = t.closest('[data-cinema-export]') as HTMLElement | null;
+    if (mexp) { void exportReviews(sec, app); return; }
     const tool = t.closest('.j-tool') as HTMLElement | null;
     if (tool && tool.dataset.tool) {
       // 进 ai/stat 不动筛选状态：rail 高亮由渲染层按视图熄灭（render.ts listOn 门控），
@@ -738,7 +798,16 @@ function bindMidnight(sec: HTMLElement, app: App): void {
     const cardEl = t.closest('.pcard') as HTMLElement | null;
     if (cardEl) {
       const it = itemByKeyInState(cardEl.dataset.cinemaKey);
-      if (it) openDetail(sec, it, app);
+      if (!it) return;
+      // 票 296：多选模式下点卡片=勾选/取消勾选
+      if (M.multiSelect) {
+        const k = itemKey(it);
+        if (M.selected.has(k)) M.selected.delete(k);
+        else M.selected.add(k);
+        renderAll(app);
+        return;
+      }
+      openDetail(sec, it, app);
     }
   });
   sec.addEventListener('contextmenu', (e) => {
@@ -816,6 +885,8 @@ export function closeOverlay(): void {
   }
   M.renderFn = null;
   M.view = 'list'; // 复位视图：重开回落列表页
+  M.multiSelect = false; // 票 296：多选模式不跨开合残留
+  M.selected.clear();
 }
 
 // ---------- ESC（主面板；弹窗层各自注册更高优先级） ----------

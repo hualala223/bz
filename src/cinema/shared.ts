@@ -90,17 +90,25 @@ export function posterInner(item: CinemaItem, url: string | null): string {
 
 /** 片卡 HTML（desk 网格与 mob 长按网格同一张卡；data-cinema-key = CM3 稳定键）；
  *  fetching=后台抓取中 → 海报区遮罩 spinner（ADR-0113）；
- *  在看剧类 + 集数齐全 → 右上 `正在看/总集数` 进度角标（票 295，无数据不显示） */
-export function pcardHtml(it: CinemaItem, posterUrl: string | null, fetching = false): string {
+ *  在看剧类 + 集数齐全 → 右上 `正在看/总集数` 进度角标（票 295，无数据不显示）；
+ *  多选导出模式 picked=true → is-picked 高亮（票 296） */
+export function pcardHtml(it: CinemaItem, posterUrl: string | null, fetching = false, picked = false): string {
   const r = it.rating;
   const epsBadge = it.status === STATUS_WATCHING && episodesEligibleTag(it.typeTag)
     && it.episodesWatching !== null && it.episodesTotal !== null
     ? `<span class="badge badge-eps">${it.episodesWatching}/${it.episodesTotal}</span>` : '';
-  return `<div class="pcard" data-cinema-key="${esc(itemKey(it))}"><div class="pw">${posterInner(it, posterUrl)}${fetching ? '<div class="pw-fetch"><span class="pw-spin"></span></div>' : ''}
+  return `<div class="pcard${picked ? ' is-picked' : ''}" data-cinema-key="${esc(itemKey(it))}"><div class="pw">${posterInner(it, posterUrl)}${fetching ? '<div class="pw-fetch"><span class="pw-spin"></span></div>' : ''}
     ${(() => { const st = statusNum(it.status); return st !== STATUS_WATCHED ? `<span class="badge" style="background:${statusColor(st)}">${statusText(st)}</span>` : ''; })()}${epsBadge}</div>
     <div class="pname">${esc(it.name)}</div>
     <div class="pmeta">${esc(it.year || '')}${it.year && it.director ? ' · ' : ''}${esc(it.director || '')}</div>
     <div class="pstars">${r && r > 0 ? getStarString(r) + `<span class="num">${Number(r).toFixed(1)}</span>` : '<span style="opacity:.35">未评分</span>'}</div></div>`;
+}
+
+/** 多选导出工具条（票 296；desk 工具行与 mob 列表顶部共用；动作接线留行为层） */
+export function multiBarHtml(view: Pick<CinemaView, 'selectedCount'>): string {
+  return `<div class="cn-multibar"><span class="mb-cnt">已选 ${view.selectedCount} 条</span>
+    <button class="dm-btn gold mb-export" data-cinema-export>导出感想</button>
+    <button class="dm-btn mb-exit" data-cinema-multiselect-exit>退出多选</button></div>`;
 }
 
 // ---------- 视图状态快照（纯层禁读 M：筛选/排序/视图显式入参） ----------
@@ -115,6 +123,10 @@ export interface CinemaView {
   countryFilter: string | null;
   sortMode: string;
   searchKeyword: string;
+  /** 多选导出模式（票 296）：勾选态下点卡片=勾选 */
+  multiSelect: boolean;
+  /** 多选已勾选数（工具条计数） */
+  selectedCount: number;
 }
 
 /** 任一筛选激活（空态文案口径） */

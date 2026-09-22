@@ -82,6 +82,10 @@ export interface CinemaState {
   aiError: string | null;
   /** 找同类基准影片（「换一批」按基准重跑；荐片为 null） */
   aiBase: CinemaItem | null;
+  /** 多选导出模式（票 296）：进入后点卡片=勾选/取消勾选 */
+  multiSelect: boolean;
+  /** 多选模式下已勾选条目（稳定键集合，票 296） */
+  selected: Set<string>;
 }
 
 export const M: CinemaState = {
@@ -102,6 +106,8 @@ export const M: CinemaState = {
   aiResult: null,
   aiError: null,
   aiBase: null,
+  multiSelect: false,
+  selected: new Set<string>(),
 };
 
 /** 测试/重建用：整体重置模块状态 */
@@ -123,4 +129,6 @@ export function resetCinemaState(): void {
   M.aiResult = null;
   M.aiError = null;
   M.aiBase = null;
+  M.multiSelect = false;
+  M.selected = new Set<string>();
 }

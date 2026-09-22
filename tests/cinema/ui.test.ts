@@ -14,7 +14,7 @@ import { STATUS_WATCHING } from '../../src/cinema/constants';
 import { rebuildItems } from '../../src/cinema/data';
 import { runAIRecommend, runSimilarRecommend } from '../../src/cinema/recommend';
 import { createOverlay, closeOverlay, openAddModalDirect, openRandomMovie, renderAll } from '../../src/cinema/ui';
-import { ensureCinema, unloadCinema, openCinemaAnalysis, pickRandomCinema } from '../../src/cinema';
+import { ensureCinema, unloadCinema, openCinemaAnalysis, pickRandomCinema, openCinemaExport } from '../../src/cinema';
 import { setAISettingsProvider, resetAIProviderCache } from '../../src/core/ai';
 import { setApp } from '../../src/core/app';
 import { setSettingsProvider, setSettingsSaver } from '../../src/core/settings-provider';
@@ -970,6 +970,89 @@ tags: [电影]
     expect(pcardByName(root, '连载剧').querySelector('.badge-eps')?.textContent).toBe('12/40');
     expect(pcardByName(root, '无集数剧').querySelector('.badge-eps')).toBeNull();
     expect(pcardByName(root, '星际穿越').querySelector('.badge-eps')).toBeNull(); // 已看不显示
+  });
+
+  // ======================= 票 296：感想导出（命令 + 多选模式） =======================
+
+  it('票296 多选模式：工具行「多选」进入 → 点卡片勾选高亮、计数联动 → 退出恢复详情点击', () => {
+    const { app } = seedVault();
+    createOverlay(app);
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    // 工具行有多选入口
+    expect(root.querySelector('[data-cinema-multiselect]')?.textContent).toContain('多选');
+    clickEl(root.querySelector('[data-cinema-multiselect]'));
+    expect(M.multiSelect).toBe(true);
+    // 工具行被勾选工具条替换
+    expect(root.querySelector('.cn-multibar .mb-cnt')?.textContent).toBe('已选 0 条');
+    expect(root.querySelector('[data-cinema-export]')?.textContent).toContain('导出感想');
+    // 点卡片=勾选：不开详情
+    clickEl(pcardByName(root, '星际穿越'));
+    expect(root.querySelector('.cn-modal')).toBeNull();
+    expect(pcardByName(root, '星际穿越').classList.contains('is-picked')).toBe(true);
+    expect(root.querySelector('.cn-multibar .mb-cnt')?.textContent).toBe('已选 1 条');
+    // 再点取消勾选
+    clickEl(pcardByName(root, '星际穿越'));
+    expect(pcardByName(root, '星际穿越').classList.contains('is-picked')).toBe(false);
+    expect(root.querySelector('.cn-multibar .mb-cnt')?.textContent).toBe('已选 0 条');
+    // 退出多选：恢复详情点击 + 工具行复原
+    clickEl(root.querySelector('[data-cinema-multiselect-exit]'));
+    expect(M.multiSelect).toBe(false);
+    expect(root.querySelector('.cn-multibar')).toBeNull();
+    expect(root.querySelector('[data-cinema-multiselect]')).toBeTruthy();
+    clickEl(pcardByName(root, '星际穿越'));
+    expect(root.querySelector('.cn-modal')).toBeTruthy(); // 恢复开详情
+  });
+
+  it('票296 导出：勾选两条生成单篇笔记到 感想导出/，字段完整、含当前排序', async () => {
+    const { app, vault } = seedVault();
+    createOverlay(app);
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    clickEl(root.querySelector('[data-cinema-multiselect]'));
+    clickEl(pcardByName(root, '星际穿越')); // 已看 9.6 有影评有国家/题材
+    clickEl(pcardByName(root, '想看片'));   // 想看无影评
+    clickEl(root.querySelector('[data-cinema-export]'));
+    await vi.waitFor(() => expect(hasNotice(/已导出 2 条感想/)).toBe(true));
+    const dir = Array.from(vault.files.keys()).find((p) => p.startsWith('我的/娱乐/感想导出/'));
+    expect(dir, '感想导出目录下应有笔记').toBeTruthy();
+    const md = vault.files.get(dir!)!;
+    expect(md).toContain('# 感想导出');
+    expect(md).toContain('## 《星际穿越》');
+    expect(md).toContain('## 《想看片》');
+    expect(md).toContain('- 类型：电影');
+    expect(md).toContain('- 国家：内地');
+    expect(md).toContain('- 题材：科幻、悬疑');
+    expect(md).toContain('- 评分：9.6');
+    expect(md).toContain('- 观影日期：2026-08-01');
+    expect(md).toContain('爱是穿越维度的唯一力量');
+    expect(md).toContain('（无感想）');
+    // 导出后自动退出多选并清空勾选
+    expect(M.multiSelect).toBe(false);
+    expect(M.selected.size).toBe(0);
+  });
+
+  it('票296 空选导出：toast 拦截不落盘', async () => {
+    const { app, vault } = seedVault();
+    createOverlay(app);
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    clickEl(root.querySelector('[data-cinema-multiselect]'));
+    clickEl(root.querySelector('[data-cinema-export]'));
+    await vi.waitFor(() => expect(root.querySelector('.cn-toast')?.textContent).toContain('请先勾选要导出的条目'));
+    expect(Array.from(vault.files.keys()).some((p) => p.includes('感想导出'))).toBe(false);
+  });
+
+  it('票296 命令直达 openCinemaExport：面板未开冷开并直进多选；重进清空上次勾选', async () => {
+    const { app } = seedVault();
+    openCinemaExport(app);
+    expect(document.querySelector('.bz-panel-overlay')).toBeTruthy();
+    expect(M.multiSelect).toBe(true);
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    clickEl(pcardByName(root, '星际穿越'));
+    expect(M.selected.size).toBe(1);
+    // 再走一次命令：就地重进多选，勾选清空
+    openCinemaExport(app);
+    expect(M.multiSelect).toBe(true);
+    expect(M.selected.size).toBe(0);
+    expect(root.querySelector('.cn-multibar')).toBeTruthy();
   });
 });
 
