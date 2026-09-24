@@ -8,10 +8,31 @@
 import type { App, TFile } from 'obsidian';
 import { notice } from '../core/notice';
 import { openTextPromptDialog } from '../core/prompt-dialog';
-import { fetchNoteDouban, extractMovieName, clearMovieDoubanFields } from './douban-fetcher';
+import { fetchNoteDouban, extractMovieName } from './douban-fetcher';
 import { fetchDepsFromSettings } from './douban-queue';
 import { LEGACY_TAG_MAP } from './constants';
 import { refetchBookDoubanWithPrompt } from '../bookshelf/douban-refetch';
+
+/** 本地票 301（就地实现）：重抓前清豆瓣字段（fm 键剥除，正文字段不动） */
+const REFETCH_FM_KEYS = ['海报','豆瓣链接','评分','观影日期','导演','主演','类型','制片国家/地区','简介','片长','季集','热门短评'];
+async function clearMovieDoubanFields(app: App, file: TFile): Promise<void> {
+  const f = app.vault.getAbstractFileByPath(file.path);
+  if (!f) return;
+  let content = '';
+  try { content = await app.vault.read(f as any); } catch { return; }
+  const lines = content.split('
+');
+  let inFm = lines[0] === '---';
+  let cleared = inFm;
+  const kept = lines.filter((l) => {
+    if (inFm && l === '---') { inFm = false; return true; }
+    if (inFm && REFETCH_FM_KEYS.some((k) => l.startsWith(k + ':'))) return false;
+    return true;
+  });
+  if (cleared) await app.vault.modify(f as any, kept.join('
+'));
+}
+
 
 /** fm tags 判书籍（旧「小说」tag 归一；与队列 getGroupSafe 同口径的轻量版） */
 function isBookNote(app: App, file: TFile): boolean {
@@ -56,7 +77,7 @@ export async function refetchCinemaDouban(app: App, target?: TFile): Promise<voi
     notice('旧豆瓣数据清理失败，已取消重抓', 'error');
     return;
   }
-  const outcome = await fetchNoteDouban(app, file, deps, { query });
+  const outcome = await fetchNoteDouban(app, file, deps);
   if (outcome.ok) {
     notice(outcome.skipped ? '该条目豆瓣信息本已齐全，未重抓' : `豆瓣信息已重抓：${name}`);
   } else if (outcome.reason === 'blocked') notice('豆瓣风控拦截，稍后重试（重载插件后开面板也会自动补抓）', 'error');

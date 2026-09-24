@@ -2,7 +2,7 @@
  * 影院（cinema）域数据层：扫描笔记 → 条目；排序（观影日期倒序）；筛选
  */
 import type { App, TFile } from 'obsidian';
-import { ALL_TAGS, getGroupSafe, STATUS_WANT, STATUS_WATCHING, STATUS_WATCHED } from './constants';
+import { ALL_TAGS, getGroupSafe, LEGACY_TAG_MAP, STATUS_WANT, STATUS_WATCHING, STATUS_WATCHED } from './constants';
 import { extractMovieName } from './douban-fetcher';
 import type { CinemaItem } from './state';
 import { M } from './state';
@@ -57,7 +57,7 @@ export function parseMovieFile(file: TFile, app: App): CinemaItem | null {
 
   return {
     file,
-    name,
+    name: name ?? '',
     typeTag,
     group: getGroupSafe(typeTag),
     watchDate,

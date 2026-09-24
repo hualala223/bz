@@ -192,7 +192,7 @@ export function renderMidnightDesk(root: HTMLElement, inp: MidnightRenderInput):
     view.innerHTML = spHeadHtml('观影分析', `· ${inp.watchedCount} 部已看`) + `<div class="sp-body">${inp.statHtml}</div>`;
   } else {
     const pick = (it: CinemaItem) => inp.picked?.(it) ?? false;
-    const cards = inp.list.map((it) => pcardHtml(it, inp.poster(it), inp.fetching?.(it) ?? false, pick(it))).join('');
+    const cards = inp.list.map((it) => pcardHtml(it, inp.poster(it), inp.fetching?.(it) ?? false)).join('');
     const body = inp.list.length
       ? `<div class="d-scroll"><div class="grid" style="grid-template-columns:repeat(${inp.cols},1fr)">${cards}</div></div>`
       : emptyPageHtml(viewFiltered(v));
@@ -214,7 +214,7 @@ export function renderMidnightMob(root: HTMLElement, inp: MidnightRenderInput): 
       mv.className = 'm-scroll j-mview';
       // 票 296：多选模式在网格上方叠勾选工具条
       const bar = v.multiSelect ? multiBarHtml(v) : '';
-      mv.innerHTML = `${bar}<div class="m-grid">${inp.list.map((it) => pcardHtml(it, inp.poster(it), inp.fetching?.(it) ?? false, inp.picked?.(it) ?? false)).join('')}</div>`;
+      mv.innerHTML = `${bar}<div class="m-grid">${inp.list.map((it) => pcardHtml(it, inp.poster(it), inp.fetching?.(it) ?? false)).join('')}</div>`;
     } else if (v.view === 'ai') {
       mv.className = 'sp-body j-mview';
       mv.innerHTML = inp.aiHtml;

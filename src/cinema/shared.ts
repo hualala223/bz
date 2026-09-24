@@ -91,26 +91,6 @@ export function posterInner(item: CinemaItem, url: string | null): string {
   return `<img loading="lazy" src="${esc(url)}" onerror="this.outerHTML='<div class=\\'ph\\'>${esc(item.name[0] ?? '')}</div>'">`;
 }
 
-<<<<<<< local
-/** 片卡 HTML（desk 网格与 mob 长按网格同一张卡；data-cinema-key = CM3 稳定键）；
- *  fetching=后台抓取中 → 海报区遮罩 spinner（ADR-0113）；
- *  在看剧类 + 集数齐全 → 右上 `正在看/总集数` 进度角标（票 295，无数据不显示）；
- *  多选导出模式 picked=true → is-picked 高亮（票 296） */
-export function pcardHtml(it: CinemaItem, posterUrl: string | null, fetching = false, picked = false): string {
-  const r = it.rating;
-  const epsBadge = it.status === STATUS_WATCHING && episodesEligibleTag(it.typeTag)
-    && it.episodesWatching !== null && it.episodesTotal !== null
-    ? `<span class="badge badge-eps">${it.episodesWatching}/${it.episodesTotal}</span>` : '';
-  // 票 301：书籍在看时章节进度角标同口径（右下错开沿用 badge-eps 样式）
-  const chBadge = it.status === STATUS_WATCHING && chaptersEligibleTag(it.typeTag)
-    && it.chaptersWatching !== null && it.chaptersTotal !== null
-    ? `<span class="badge badge-eps">${it.chaptersWatching}/${it.chaptersTotal}章</span>` : '';
-  return `<div class="pcard${picked ? ' is-picked' : ''}" data-cinema-key="${esc(itemKey(it))}"><div class="pw">${posterInner(it, posterUrl)}${fetching ? '<div class="pw-fetch"><span class="pw-spin"></span></div>' : ''}
-    ${(() => { const st = statusNum(it.status); return st !== STATUS_WATCHED ? `<span class="badge" style="background:${statusColor(st)}">${statusText(st)}</span>` : ''; })()}${epsBadge}${chBadge}</div>
-    <div class="pname">${esc(it.name)}</div>
-    <div class="pmeta">${esc(it.year || '')}${it.year && it.director ? ' · ' : ''}${esc(it.director || '')}</div>
-    <div class="pstars">${r && r > 0 ? getStarString(r) + `<span class="num">${Number(r).toFixed(1)}</span>` : '<span style="opacity:.35">未评分</span>'}</div></div>`;
-=======
 // ---------- 剧集按季合并（cinemaMergeSeasons；分组口径在 ./seasons 单源） ----------
 
 /** 季段状态三态：已看=金实 / 在看=橙斜纹 / 未看·想看=空段（用户 2026-09-18 拍板口径） */
@@ -214,7 +194,6 @@ export function cardHtml(e: CardEntry, posterUrl: string | null, fetching = fals
 /** 单条目片卡（pcardHtml 调用点先于合并卡存在：douban-queue 测试与语义单条入口仍用此名） */
 export function pcardHtml(it: CinemaItem, posterUrl: string | null, fetching = false): string {
   return cardHtml({ kind: 'single', item: it }, posterUrl, fetching);
->>>>>>> upstream
 }
 
 /** 多选导出工具条（票 296；desk 工具行与 mob 列表顶部共用；动作接线留行为层） */
@@ -226,7 +205,7 @@ export function multiBarHtml(view: Pick<CinemaView, 'selectedCount'>): string {
 
 // ---------- 视图状态快照（纯层禁读 M：筛选/排序/视图显式入参） ----------
 
-export type CinemaViewKind = 'list' | 'ai';
+export type CinemaViewKind = 'list' | 'ai' | 'stat'; // stat=本地观影分析视图（票 295 批保留）
 
 export interface CinemaView {
   view: CinemaViewKind;
@@ -261,21 +240,6 @@ export function detailModalHtml(it: CinemaItem, posterUrl: string | null): strin
     ['导演', it.director ?? ''],
     ['主演', it.actors ?? ''],
     ['制片国家/地区', it.region ?? ''],
-<<<<<<< local
-    ['上映日期', it.year ?? ''],
-    ...it.bookInfo,
-    ['豆瓣评分', it.doubanRating ?? ''],
-  ] as [string, string][]).filter(([, v]) => v !== '');
-  // 章节进度行（票 301）：书籍条目有章节数据时显示（对齐集数在编辑表单的口径，卡片直读）
-  const chapterRow = it.chaptersTotal !== null
-    ? `<div class="dm-kv"><span class="dm-kv-k">章节</span><span class="dm-kv-v">${it.chaptersWatching !== null ? `${it.chaptersWatching} / ${it.chaptersTotal}` : `共 ${it.chaptersTotal} 章`}</span></div>`
-    : '';
-  // 集数进度行（票 301 追加）：剧集条目有总集数时显示，形态同章节行
-  const epsRow = it.episodesTotal !== null
-    ? `<div class="dm-kv"><span class="dm-kv-k">集数</span><span class="dm-kv-v">${it.episodesWatching !== null ? `${it.episodesWatching} / ${it.episodesTotal}` : `共 ${it.episodesTotal} 集`}</span></div>`
-    : '';
-  return `<div class="cn-modal" style="max-width:400px;width:100%">
-=======
     ['上映日期', it.releaseDate ?? it.year ?? ''], // 完整年月日（year 只留年，卡片/统计用）
     ['片长', it.duration ?? ''],
     ['季集', it.seasonText ? `${it.seasonText} 集` : ''],
@@ -284,7 +248,6 @@ export function detailModalHtml(it: CinemaItem, posterUrl: string | null): strin
   const hot = (it.hotComment ?? '').trim();
   const hotFold = hot.length > HOT_FOLD_MIN; // 长评收起，行为层 data-dm-fold 接线展开/收起
   return `<div class="cn-modal cn-modal--detail">
->>>>>>> upstream
     <div class="dm-head"><div class="dm-poster">${posterUrl ? `<img src="${esc(posterUrl)}" onerror="this.remove()">` : ''}</div>
       <div style="flex:1;min-width:0"><div class="dm-title">${esc(it.name)}</div>
         <div class="dm-badges">${badge(typeColor(it.group), it.typeTag)}
@@ -293,19 +256,9 @@ export function detailModalHtml(it: CinemaItem, posterUrl: string | null): strin
           ${it.watchDate ? `<span class="dm-date">${esc((it.watchDate || '').slice(0, 10))}</span>` : ''}</div>
         ${it.review ? `<div class="dm-review">${esc(it.review)}</div>` : ''}</div></div>
     ${rows.length ? '<div class="dm-sec">豆 瓣 信 息</div>' + rows.map(([k, v]) => `<div class="dm-kv"><span class="dm-kv-k">${k}</span><span class="dm-kv-v">${esc(v)}</span></div>`).join('') : ''}
-    ${epsRow}
-    ${chapterRow}
+    ${it.episodesWatching != null || it.episodesTotal != null ? `<div class="dm-kv"><span class="dm-kv-k">集 数</span><span class="dm-kv-v">${it.episodesWatching ?? '—'} / ${it.episodesTotal ?? '—'}</span></div>` : ''}
+    ${it.chaptersWatching != null || it.chaptersTotal != null ? `<div class="dm-kv"><span class="dm-kv-k">章 节</span><span class="dm-kv-v">${it.chaptersWatching ?? '—'} / ${it.chaptersTotal ?? '—'}</span></div>` : ''}
     ${it.doubanUrl ? `<div class="dm-kv"><span class="dm-kv-k">豆瓣链接</span><span class="dm-kv-v"><a href="${esc(it.doubanUrl)}" target="_blank" rel="noopener">${esc(it.doubanUrl)}</a></span></div>` : ''}
-<<<<<<< local
-    ${it.synopsis ? `<div class="dm-sec">简 介</div><div style="font-size:12px;line-height:1.8;color:var(--ink-2);text-align:justify">${esc(it.synopsis)}</div>` : ''}
-    <div class="dm-actions">${it.file ? `<button class="dm-btn j-refetch">${iconSpan(ICON.refresh)}重抓豆瓣</button>` : ''}<button class="dm-btn j-similar">${iconSpan(ICON.ai)}找同类</button><button class="dm-btn j-edit">${iconSpan(ICON.edit)}编辑</button><button class="dm-btn danger j-del">${iconSpan(ICON.del)}删除</button></div>
-  </div>`;
-}
-
-/** 组 → 细分 tag 映射（表单 choices 用；ADR-0127 票 293：剧集退役，七项顶级类型；票 299 小说→书籍；票 300 动漫细分退役） */
-export const GROUP_SUBS_OF: Record<string, string[]> = {
-  电影: [], 电视剧: [], 短剧: [], 书籍: [], 动漫: [], 纪录片: [], 公开课: ['公开课', 'TED'],
-=======
     ${hot ? `<div class="dm-sec">热 门 短 评</div><div class="dm-quote${hotFold ? ' is-fold' : ''}" data-dm-quote>${esc(hot)}</div>${hotFold ? `<button type="button" class="dm-fold j-quote-fold" data-dm-fold>展开全文（${hot.length} 字）</button>` : ''}` : ''}
     ${it.synopsis ? `<div class="dm-sec">简 介</div><div class="dm-synopsis">${esc(it.synopsis)}</div>` : ''}
     <div class="dm-actions"><button class="dm-btn j-similar">${iconSpan(ICON.ai)}找同类</button><button class="dm-btn j-edit">${iconSpan(ICON.edit)}编辑</button><button class="dm-btn danger j-del">${iconSpan(ICON.del)}删除</button></div>
@@ -384,7 +337,6 @@ export function seriesDetailModalHtml(card: SeriesCard, posterOf: (it: CinemaIte
 /** 组 → 细分 tag 映射（表单 choices 用；与原型 GROUP_SUBS 同序） */
 export const GROUP_SUBS_OF: Record<string, string[]> = {
   电影: [], 剧集: ['国产剧', '美剧', '英剧', '德剧', '日剧', '韩剧', '哥伦比亚剧'], 动漫: ['日漫', '国漫', '美漫'], 纪录片: [], 公开课: ['公开课'],
->>>>>>> upstream
 };
 
 /** 分类行标签：书籍组叫「体裁」（图书馆口径，票 299），其余组「题材」；spaced=表单标签带空格风格。fm 键「类型」不变，纯显示层 */
@@ -411,53 +363,6 @@ export function formChoicesHtml(values: string[], cur: string, attr: string): st
     `<button type="button" class="f-choice-btn${v === cur ? ' is-on' : ''}" data-${attr}="${v}"><span class="dot" style="background:${attr === 'f-tag' ? typeColor(getGroupForTag(v) ?? '其他') : ST_COLOR[v] ?? '#888'}"></span>${v}</button>`).join('');
 }
 
-<<<<<<< local
-/** 选项池 chips 行（国家/题材共用；单选/多选由 data-fc-mode 决定；行尾「＋」= 自定义添加，票 294） */
-export function optionChipsHtml(options: string[], selected: string[], attr: string, multi: boolean): string {
-  const chips = options.map((v) => {
-    const on = selected.includes(v);
-    return `<button type="button" class="f-choice-btn${on ? ' is-on' : ''}" data-${attr}="${esc(v)}">${esc(v)}</button>`;
-  }).join('');
-  return chips + `<button type="button" class="f-choice-btn j-add-opt" data-fc-add="${attr}" title="添加新选项">＋</button>`;
-}
-
-/** 添加/编辑表单弹窗内容（保存/切状态等接线留各端行为层；国家/题材选项池行，票 294；
- *  分类行标签按组动态：书籍=体裁、其余=题材（票 299）；j-genre-label 供行为层切类型时改写；
- *  集数行仅剧类+在看时由行为层显隐，票 295） */
-export function formModalHtml(opts: { editing: boolean; name: string; typeTag: string; stText: string; rating: number; review: string; country: string | null; genres: string[]; countryOptions: string[]; genreOptions: string[]; epsTotal: number | null; epsWatching: number | null; chTotal: number | null; chWatching: number | null }): string {
-  const { editing } = opts;
-  const initSt = opts.stText;
-  const ratingVal = opts.rating;
-  const country = opts.country ?? '';
-  const genreLabelText = genreLabel(getGroupForTag(opts.typeTag) ?? '其他', true);
-  return `<div class="cn-modal" style="width:100%">
-    <div class="cn-modal-title">${editing ? '编辑条目' : '添加条目'}</div>
-    <div class="f-field"><span class="f-label">名 称</span><input class="f-input j-name" value="${esc(opts.name)}" placeholder="条目名称"></div>
-    <div class="f-field"><span class="f-label">类 型</span><div class="f-choice j-tags">${formChoicesHtml(formAllTags(), opts.typeTag, 'f-tag')}</div></div>
-    <div class="f-field"><span class="f-label">国 家</span><div class="f-choice j-countries">${optionChipsHtml(opts.countryOptions, country ? [country] : [], 'f-country', false)}</div></div>
-    <div class="f-field"><span class="f-label j-genre-label">${genreLabelText}</span><div class="f-choice j-genres">${optionChipsHtml(opts.genreOptions, opts.genres, 'f-genre', true)}</div></div>
-    <div class="f-field"><span class="f-label">状 态</span><div class="f-choice j-sts">${formChoicesHtml(['想看', '在看', '已看'], initSt, 'f-st')}</div></div>
-    <div class="f-field j-eps" style="display:none"><span class="f-label">集 数</span>
-      <div class="f-eps-row"><label>正在看 <input type="number" min="0" class="f-input j-eps-watching" value="${opts.epsWatching ?? ''}"></label><label>总集数 <input type="number" min="0" class="f-input j-eps-total" value="${opts.epsTotal ?? ''}"></label></div></div>
-    <div class="f-field j-chapters" style="display:none"><span class="f-label">章 节</span>
-      <div class="f-eps-row"><label>正在看 <input type="number" min="0" class="f-input j-ch-watching" value="${opts.chWatching ?? ''}"></label><label>总章节数 <input type="number" min="0" class="f-input j-ch-total" value="${opts.chTotal ?? ''}"></label></div></div>
-    <div class="f-field j-rating" style="display:${initSt === '已看' ? '' : 'none'}"><span class="f-label">评 分</span>
-      <div class="f-range-row"><input type="range" class="f-range j-range" min="1" max="10" step="0.1" value="${ratingVal}"><span class="f-range-val j-rval">${Number(ratingVal).toFixed(1)}</span></div></div>
-    <div class="f-field j-review" style="display:${initSt === '已看' ? '' : 'none'}"><span class="f-label">感 想</span><textarea class="f-input j-review-t" placeholder="写点什么…">${esc(opts.review)}</textarea></div>
-    <div class="dm-actions"><button class="dm-btn gold j-save">${editing ? '保存' : '添加'}</button></div>
-  </div>`;
-}
-
-/** 删除确认弹窗内容（sticky；删除动作留行为层） */
-export function confirmModalHtml(item: CinemaItem): string {
-  return `<div class="cn-modal cn-confirm" style="max-width:320px;width:100%">
-    <span class="cn-confirm-ic">${iconSpan(ICON.confirm)}</span>
-    <div class="cn-confirm-title">删除条目</div>
-    <p>确定删除「${esc(item.name)}」吗？</p>
-    <div class="cn-confirm-sub">将移入系统回收站，可在回收站恢复</div>
-    <div class="dm-actions"><button class="dm-btn j-cancel">取消</button><button class="dm-btn danger j-del">${iconSpan(ICON.del)}删除</button></div>
-  </div>`;
-=======
 /** 添加/编辑表单弹窗内容（保存 / 解析 / 翻转等接线留行为层）。
  *  新增态 = **双面卡片**（issue 395）：正面 = 名称 + 状态 +（已看点开）评分/影评 + 解析按钮；
  *  点「解析」拉豆瓣 → 翻到背面看全部信息。评分/影评收在正面状态下方（2026-09-21 用户拍板：
@@ -534,7 +439,6 @@ export interface FormBackOpts {
 export function formTagChipHtml(typeTag: string, pending = false): string {
   if (pending) return '<span class="dm-chip dm-chip--pick is-pending"><span class="dm-skel"></span></span>';
   return `<button type="button" class="dm-chip dm-chip--pick" data-pick="tag" style="background:${typeColor(getGroupForTag(typeTag) ?? '其他')}">${esc(typeTag)}</button>`;
->>>>>>> upstream
 }
 
 /** 状态徽标：与分类同形制、同一套 dm-pick 机制 */
@@ -658,4 +562,26 @@ export function sheetHeadHtml(it: CinemaItem, posterUrl: string | null): string 
 export function seriesSheetHeadHtml(card: SeriesCard, posterUrl: string | null): string {
   return `<div class="cn-sheet-head">${posterUrl ? `<img class="cn-sheet-poster" src="${esc(posterUrl)}" onerror="this.remove()">` : ''}
     <div><div class="cn-sheet-name">${esc(card.name)}</div><div class="cn-sheet-sub">${esc(seriesCountsText(card))}</div></div></div>`;
+}
+
+// ===== 本地票 294/融合保留 =====
+/** 选项池 chips 行（国家/题材共用；单选/多选由 data-fc-mode 决定；行尾「＋」= 自定义添加，票 294） */
+export function optionChipsHtml(options: string[], selected: string[], attr: string, multi: boolean): string {
+  const chips = options.map((v) => {
+    const on = selected.includes(v);
+    return `<button type="button" class="f-choice-btn${on ? ' is-on' : ''}" data-${attr}="${esc(v)}">${esc(v)}</button>`;
+  }).join('');
+  return chips + `<button type="button" class="f-choice-btn j-add-opt" data-fc-add="${attr}" title="添加新选项">＋</button>`;
+}
+
+// ===== 本地票 294/融合保留 =====
+/** 删除确认弹窗内容（sticky；删除动作留行为层） */
+export function confirmModalHtml(item: CinemaItem): string {
+  return `<div class="cn-modal cn-confirm" style="max-width:320px;width:100%">
+    <span class="cn-confirm-ic">${iconSpan(ICON.confirm)}</span>
+    <div class="cn-confirm-title">删除条目</div>
+    <p>确定删除「${esc(item.name)}」吗？</p>
+    <div class="cn-confirm-sub">将移入系统回收站，可在回收站恢复</div>
+    <div class="dm-actions"><button class="dm-btn j-cancel">取消</button><button class="dm-btn danger j-del">${iconSpan(ICON.del)}删除</button></div>
+  </div>`;
 }

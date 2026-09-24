@@ -15,9 +15,8 @@ import { tryGetSettings } from '../core/settings-provider';
 import { M } from './state';
 import { doubanEligibleTag, getGroupSafe } from './constants';
 import { rebuildItems } from './data';
-import { fetchNoteDouban, type DoubanFetchDeps, type DoubanFetchOutcome } from './douban-fetcher';
-import { fetchMdBookDouban } from '../bookshelf/douban-fetcher';
 import { fetchNoteDouban, queryDoubanByName, downloadPosterToVault, type DoubanFetchDeps, type DoubanFetchOutcome, type DoubanQueryOutcome } from './douban-fetcher';
+import { fetchMdBookDouban } from '../bookshelf/douban-fetcher';
 
 /** 查询结果类型再导出：测试注入 `configureFetchQueue({ preview })` 时要用 */
 export type { DoubanQueryOutcome };
@@ -68,47 +67,6 @@ let refreshDelayMs = 1500;
 // ---------- requestUrl 适配（生产默认 HTTP 通道） ----------
 
 /** 带 15s 超时的 requestUrl GET；非 2xx / 超时 → null（由调用方判形态）；
- *  网络异常向上抛（审查 C6：吞成 null 会被 searchLooksBlocked 误判为风控拦截） */
-async function httpGet(url: string, headers?: Record<string, string>): Promise<string | null> {
-  const timer = new Promise<null>((resolve) => setTimeout(() => resolve(null), HTTP_TIMEOUT_MS));
-  const req = requestUrl({ url, method: 'GET', headers, throw: false }).then((resp) => {
-    return resp.status >= 200 && resp.status < 300 ? resp.text : null;
-  });
-  req.catch(() => {}); // race 选中 timer 时消化 rejection，防 unhandled
-  return await Promise.race([req, timer]);
-}
-
-async function downloadBinary(url: string, headers?: Record<string, string>): Promise<ArrayBuffer | null> {
-  const timer = new Promise<null>((resolve) => setTimeout(() => resolve(null), HTTP_TIMEOUT_MS * 2));
-  const req = requestUrl({ url, method: 'GET', headers, throw: false }).then((resp) => {
-    return resp.status >= 200 && resp.status < 300 ? resp.arrayBuffer : null;
-  });
-  req.catch(() => {}); // 同上
-  return await Promise.race([req, timer]);
-}
-
-/** 从插件设置读抓取配置（ApiZero Key / 豆瓣 Cookie，随库同步移动端；重抓命令复用） */
-export function fetchDepsFromSettings(app: App): DoubanFetchDeps {
-  const s = (tryGetSettings() ?? {}) as Record<string, unknown>;
-  const adapter = (app.vault as unknown as { adapter?: { writeBinary?: (p: string, d: ArrayBuffer) => Promise<void>; mkdir?: (p: string) => Promise<void> } }).adapter;
-  const uaHeaders = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' };
-  return {
-    httpGet: (url, headers) => httpGet(url, { ...uaHeaders, ...(headers || {}) }),
-    downloadBinary: (url, headers) => downloadBinary(url, { ...uaHeaders, ...(headers || {}) }),
-    writeBinary: async (path, data) => {
-      if (!adapter?.writeBinary) throw new Error('adapter.writeBinary 不可用');
-      await adapter.writeBinary(path, data);
-    },
-    mkdir: async (path) => {
-      await adapter?.mkdir?.(path);
-    },
-    apizeroKey: typeof s.cinemaApizeroKey === 'string' ? s.cinemaApizeroKey.trim() : '',
-    doubanCookie: typeof s.cinemaDoubanCookie === 'string' ? s.cinemaDoubanCookie.trim() : '',
-  };
-
-// ---------- requestUrl 适配（生产默认 HTTP 通道） ----------
-
-/** 带 15s 超时的 requestUrl GET；非 2xx / 超时 → null（由调用方判形态）；
  *  网络异常向上抛（审查 C6：吞成 null 会被 suggestLooksBlocked 误判为风控拦截） */
 async function httpGet(url: string, headers?: Record<string, string>): Promise<string | null> {
   const timer = new Promise<null>((resolve) => setTimeout(() => resolve(null), HTTP_TIMEOUT_MS));
@@ -128,7 +86,7 @@ async function downloadBinary(url: string, headers?: Record<string, string>): Pr
   return await Promise.race([req, timer]);
 }
 
-/** 从插件设置读抓取配置（ApiZero Key / 豆瓣 Cookie，随库同步移动端；票 301 重抓命令复用） */
+/** 从插件设置读抓取配置（ApiZero Key / 豆瓣 Cookie，随库同步移动端；票 301 重抓复用） */
 export function fetchDepsFromSettings(app: App): DoubanFetchDeps {
   const s = (tryGetSettings() ?? {}) as Record<string, unknown>;
   const adapter = (app.vault as unknown as { adapter?: { writeBinary?: (p: string, d: ArrayBuffer) => Promise<void>; mkdir?: (p: string) => Promise<void> } }).adapter;

@@ -572,3 +572,4 @@ export async function fetchNoteDouban(app: App, file: TFile, deps: DoubanFetchDe
   }
   return { ok: true };
 }
+
