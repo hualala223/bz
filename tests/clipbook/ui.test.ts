@@ -556,13 +556,18 @@ describe('移动章目录（issue 248：site 章 + 已收折叠）', () => {
 describe('会话冻结序（ADR-0108：桌面打开即已读 + 原位保留 + 重开面板才重排 + 双折叠段）', () => {
   /** 站点种子：果壳 = 未读 2 + 已读骨架 1（30 天内回看）+ 承接剪藏 1；知乎独立未读 1 */
   function seedFrozen(): MockVault {
+    const daysAgo = (n: number): string => {
+      const d = new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+      const pad = (x: number): string => String(x).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} 08:00:00`;
+    };
     const vault = new MockVault();
     vault.files.set('CONFIG/STORAGE/news.json', JSON.stringify({
       articles: [
-        { platform: '果壳科学人', title: '果壳未读甲', url: 'https://guokr.com/fa', author: '果壳', date: '2026-09-02 08:00:00', body: '正文甲' },
-        { platform: '果壳科学人', title: '果壳未读乙', url: 'https://guokr.com/fb', author: '果壳', date: '2026-09-01 08:00:00', body: '正文乙' },
-        { platform: '果壳科学人', title: '果壳已读旧', url: 'https://guokr.com/old', author: '果壳', date: '2026-08-20 08:00:00', read: true, state: 'skipped' },
-        { platform: '知乎日报', title: '知乎未读', url: 'https://zhihu.com/z1', date: '2026-09-03 08:00:00', body: '正文知' },
+        { platform: '果壳科学人', title: '果壳未读甲', url: 'https://guokr.com/fa', author: '果壳', date: daysAgo(2), body: '正文甲' },
+        { platform: '果壳科学人', title: '果壳未读乙', url: 'https://guokr.com/fb', author: '果壳', date: daysAgo(3), body: '正文乙' },
+        { platform: '果壳科学人', title: '果壳已读旧', url: 'https://guokr.com/old', author: '果壳', date: daysAgo(20), read: true, state: 'skipped' },
+        { platform: '知乎日报', title: '知乎未读', url: 'https://zhihu.com/z1', date: daysAgo(1), body: '正文知' },
       ],
       stats: { totalRead: 1, totalSaved: 0, totalSkipped: 1, byPlatform: {}, byDate: {} },
       bilibiliUps: [], bilibiliUpInfo: {}, bilibiliMaxItems: 10, bilibiliCookie: '',

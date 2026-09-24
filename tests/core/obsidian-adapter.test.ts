@@ -84,10 +84,10 @@ describe('obsidian-adapter', () => {
     expect(rec.payloadsOf('flash:file-modified')).toEqual([{ path: '卡片盒/TDD.md' }]);
     expect('date' in rec.payloadsOf('flash:file-modified')[0]).toBe(false); // 仅 diary 附带 date
 
-    vault.fire('delete', { path: '我的/影视/《a》观后感.md' }); // delete 失效对象：无 extension，只用 path
-    expect(rec.payloadsOf('vault:md-deleted')).toEqual([{ path: '我的/影视/《a》观后感.md' }]);
-    // ADR-0087：影视目录归 cinema（旧 movie:file-* 通道退役）
-    expect(rec.payloadsOf('cinema:file-deleted')).toEqual([{ path: '我的/影视/《a》观后感.md' }]);
+    vault.fire('delete', { path: '我的/娱乐/《a》观后感.md' }); // delete 失效对象：无 extension，只用 path
+    expect(rec.payloadsOf('vault:md-deleted')).toEqual([{ path: '我的/娱乐/《a》观后感.md' }]);
+    // ADR-0087：影视目录归 cinema（旧 movie:file-* 通道退役）；票 292 默认目录 我的/影视 → 我的/娱乐
+    expect(rec.payloadsOf('cinema:file-deleted')).toEqual([{ path: '我的/娱乐/《a》观后感.md' }]);
 
     vault.fire('create', { path: '我的/日记/随笔.md', extension: 'md' }); // 日记但非日期命名 → date 字段整个省略
     expect(rec.payloadsOf('diary:file-created')).toEqual([{ path: '我的/日记/随笔.md' }]);
