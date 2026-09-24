@@ -9,6 +9,7 @@
  */
 import { requestUrl } from 'obsidian';
 import { getApp } from './app';
+import { toBase64 } from './crypto';
 
 export interface AISettingsLike {
   aiProvider?: string;
@@ -268,7 +269,7 @@ export class AIService {
   /** 通用 AI 请求（fetch 流式，失败自动 fallback requestUrl 非流式）；
    *  options.signal（取消）/ options.onDelta（流式增量回调）为调用方选项（ticket 141），不进请求体，
    *  既有调用（不传这两项）行为零变化 */
-  async prompt(promptText: string, model: string = this.defaultModel, options: AIOptions = {}): Promise<string> {
+  async prompt(promptText: string | { text: string; images?: string[] }, model: string = this.defaultModel, options: AIOptions = {}): Promise<string> {
     const mergedOptions = this._mergeOptions(options);
     const provider = await getAIProvider(mergedOptions.provider);
     // 调用方未显式指定模型时，用 provider 配置的默认模型（如 OpenCode Go 设置里的模型）
@@ -276,7 +277,7 @@ export class AIService {
     const mo = mergedOptions.modelOptions || {};
     const body: Record<string, any> = {
       model: effModel,
-      messages: [{ role: 'user', content: promptText }],
+      messages: [{ role: 'user', content: buildUserContent(promptText) }],
       max_tokens: mo.max_tokens || 4096,
       stream: true,
     };
@@ -338,11 +339,11 @@ export class AIService {
   }
 
   /** 要求 AI 返回 JSON 格式（设置 response_format） */
-  async json(promptText: string, extraOptions: AIOptions = {}): Promise<string> {
+  async json(input: AIInput, extraOptions: AIOptions = {}): Promise<string> {
     const options = this._prepareOptions(extraOptions, {
       response_format: { type: 'json_object' },
     });
-    return this.prompt(promptText, 'deepseek-v4-flash', options);
+    return this.prompt(input, 'deepseek-v4-flash', options);
   }
 
   /** 思考 + 联网搜索（实验性） */
@@ -406,4 +407,61 @@ export function createAI(params?: any, defaultModel = 'deepseek-v4-flash', defau
     };
   }
   return new AIService(params, defaultModel, mergedOptions);
+}
+
+// ===== 上游移植批 3f 前置：多模态输入基元（知识盒影像录入消费；provider 解析/键集零改动，F3 未动） =====
+
+/** OpenAI 兼容 content 数组的部件（仅带图时才用到） */
+export type AIContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
+/** 多模态输入：纯文本，或 文本+图片 URL/数据 URL 数组 */
+export type AIInput = string | { text: string; images?: string[] };
+
+/** DeepSeek Vision 接受的格式（其余如 svg/avif 需先转码）→ MIME */
+const AI_IMAGE_MIME: Record<string, string> = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp',
+};
+
+/** 单图字节上限 32 MiB（DeepSeek Vision 文档口径）；超限应在调用方压缩后再发 */
+export const AI_IMAGE_MAX_BYTES = 32 * 1024 * 1024;
+
+/** 路径/文件名 → 受支持图片 MIME；非支持格式返回 null */
+export function imageMimeOfPath(path: string): string | null {
+  const ext = String(path || '').split('.').pop()?.toLowerCase() || '';
+  return AI_IMAGE_MIME[ext] || null;
+}
+
+/** MIME → 规范扩展名（jpeg 归一 jpg）；未知返回 null */
+export function imageExtOfMime(mime: string): string | null {
+  const m = String(mime || '').toLowerCase();
+  for (const [ext, known] of Object.entries(AI_IMAGE_MIME)) {
+    if (known === m && ext !== 'jpeg') return ext;
+  }
+  return null;
+}
+
+/** 字节 → data URL（空内容抛错；超 32MiB 抛错） */
+export function imageDataUrl(bytes: ArrayBuffer | Uint8Array, mime: string): string {
+  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  if (u8.byteLength === 0) throw new Error('图片内容为空');
+  if (u8.byteLength > AI_IMAGE_MAX_BYTES) {
+    throw new Error(`图片过大（${Math.round(u8.byteLength / 1024 / 1024)} MiB），上限 ${AI_IMAGE_MAX_BYTES / 1024 / 1024} MiB`);
+  }
+  return `data:${mime};base64,${toBase64(u8)}`;
+}
+
+/** 用户消息内容体：纯文本 → 字符串（旧报文不变）；带图 → 多模态数组（文本在前）；空图项丢弃 */
+function buildUserContent(input: string | { text: string; images?: string[] }): string | AIContentPart[] {
+  if (typeof input === 'string') return input;
+  const text = String(input?.text ?? '');
+  const images = (Array.isArray(input?.images) ? input.images : [])
+    .map((u) => String(u ?? '').trim())
+    .filter((u) => u.length > 0);
+  if (!images.length) return text;
+  return [
+    { type: 'text', text },
+    ...images.map<AIContentPart>((url) => ({ type: 'image_url', image_url: { url } })),
+  ];
 }

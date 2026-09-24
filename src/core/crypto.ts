@@ -68,7 +68,8 @@ export class CryptoService {
  * 字节数组 → Base64（分块，逐字节结果与 String.fromCharCode(...bytes) 完全一致）。
  * 分块（≤32k 字节/次）避免对大字节数组一次性展开触发栈溢出。
  */
-function toBase64(bytes: Uint8Array): string {
+/** 分块 Base64（上游架#7 收编为共享导出：core/ai 图像 dataURL 复用） */
+export function toBase64(bytes: Uint8Array): string {
   const CHUNK = 0x8000; // 32768，远低于引擎参数上限
   let bin = '';
   for (let i = 0; i < bytes.length; i += CHUNK) {
