@@ -3,13 +3,12 @@
  *
  * 设计决策（grilling 会话敲定 + 修订）：
  * - 位置：桌面端右上角、从右侧滑入；移动端（max-width 768px）顶部居中、从上往下
- * - 偏好四项（issue 258，吸收上游 issue 297）：级别降噪 / 停留档位 / 桌面四角位置 / 同屏上限——
- *   经 settings-provider 读取（noticeLevel/noticeDuration/noticePosition/noticeMaxVisible），
- *   四项缺省值均等于下面所列的既有行为，未改设置时行为与旧版逐条一致
+ * - 用户偏好（issue 297）：级别静默 / 停留档位 / 桌面四角位置 / 同屏上限——经 settings-provider
+ *   读取（noticeLevel/noticeDuration/noticePosition/noticeMaxVisible），缺省值 = 本表所列原行为
  * - 堆叠 + 上限 5 条（超出挤掉最旧；常驻帧 duration<=0 / progress 默认不参与驱逐——P1-33：
  *   连续任务的常驻句柄不会被后续 toast 挤掉，setMessage/setType 始终有效）
- * - 类型图标用 emoji（info ℹ️ / success ✅ / warning ⚠️ / error ❌ / pause ⏸️ / accept ✨ /
- *   delete 🗑️ / confirm ✓ / restore ↩️ / skip 🚫 / archive 📁 / progress 转圈）；
+ * - 类型图标用 emoji（info ℹ️ / success ✅ / warning ⚠️ / error ❌ / pause ⏸️ /
+ *   delete 🗑️ / restore ↩️ / archive 📁 / progress 转圈）；
  *   类型由调用方显式指定（notice(msg, type)），不做消息内容自动归类
  * - 通知文案规范（2026-08-1x 用户决策）：消息正文一律不带 emoji 前缀（类型图标即视觉前缀，重复）
  * - 新增通知类型规范：新语义先查下方 ICONS 表——已有类型直接用；确无匹配再新增
@@ -22,7 +21,7 @@
  * - 时长：默认 info/success/warning 3s、error 5s；显式 duration 优先；
  *   未指定时按文字长度动态计算（≤20 字用默认值，>20 字每多 1 字加 60ms，上限 15s）；
  *   progress 类型默认不自动消失（调用方控制）
- * - 点击通知本体即关闭
+ * - 点击通知本体即关闭（含常驻帧；2026-09-19 拍板：常驻帧 ✕ 关闭钮退役，点本体即关）
  * - z-index 动态发号（ADR-0067）：每次弹出抬顶容器——toast 永远盖过最新打开的 overlay
  */
 import { allocZ } from './z-order';
@@ -34,11 +33,8 @@ export type NoticeType =
   | 'warning'
   | 'error'
   | 'pause'
-  | 'accept'
   | 'delete'
-  | 'confirm'
   | 'restore'
-  | 'skip'
   | 'archive';
 /** 通知类型：常规类型 + progress（进度条形态，默认不自动消失） */
 export type NoticeKind = NoticeType | 'progress';
@@ -83,21 +79,20 @@ export interface NoticeHandle {
   setProgress(pct: number): void;
   /** 切换类型（如 progress 完成 → success）：更新图标/配色，并接管自动消失计时 */
   setType(t: NoticeKind): void;
+  /** 事后挂操作按钮（效率整改 9）：单个或数组，按 label 去重不重复挂——
+   *  progress 跑完原地变结果再补挂「查看」等出口用，域内不必再手拼 .bz-notice-action DOM */
+  setAction(actions: NoticeAction | NoticeAction[]): void;
   /** 主动关闭（带退出动画） */
   hide(): void;
 }
 
 const MAX_VISIBLE_DEFAULT = 5;
 
-/**
- * 同屏上限（noticeMaxVisible 设置，issue 258）：'3' / '8' 生效，其余（未设置、空值、非法值）
- * 一律回落 5——即加入偏好之前的既有上限。
- */
+/** 同屏上限（noticeMaxVisible 设置，issue 297）：'3'/'8'，其余回落 5 */
 function maxVisible(): number {
   const v = Number(noticePref('noticeMaxVisible'));
   return v === 3 || v === 8 ? v : MAX_VISIBLE_DEFAULT;
 }
-
 const LEAVE_MS = 200;
 /** 去重窗口：同 dedupeKey 的通知已消失后，在此窗口内重复触发不新弹 */
 const DEDUPE_WINDOW_MS = 30000;
@@ -107,6 +102,8 @@ const MOBILE_QUERY = '(max-width: 768px)';
 /**
  * 类型 → 图标 emoji（progress 用转圈 SVG，见 SPINNER_SVG）。
  * 新增类型规范：此处加图标 + CSS 颜色 class + 默认时长（defaultDuration 非 error 均 3s）。
+ * 一致性清理（2026-09-18）：accept/confirm/skip 零消费已删除（styles.css 遗留色类无害保留）；
+ * archive 有消费方（favorites 归档撤销）不动。
  */
 const ICONS: Record<NoticeType, string> = {
   info: 'ℹ️',
@@ -114,11 +111,8 @@ const ICONS: Record<NoticeType, string> = {
   warning: '⚠️',
   error: '❌',
   pause: '⏸️',
-  accept: '✨',
   delete: '🗑️',
-  confirm: '✓',
   restore: '↩️',
-  skip: '🚫',
   archive: '📁',
 };
 
@@ -139,6 +133,10 @@ const UNDO_DURATION_MS = 6000;
  * 撤销型通知（ticket 141 通病 1）：删除/移出/跳过类操作落地后，给 toast 挂「撤销」按钮，
  * 点击执行回滚回调。把「此操作不可撤销」的事前威慑改成「已删除 + 可反悔」的事后兜底。
  * 默认 delete 类型（🗑️）、6s 停留；跳过/归档等语义由调用方显式传 type。
+ * 删除确认口径（效率整改 5，2026-09-18）：接了 notifyUndo 的删除**不再走 openFlowDialog
+ * 二次确认**——撤销兜底已覆盖误删风险，确认+撤销双保险只是多一次打断；仅不可逆操作
+ * （密文销毁等）保留确认。落地序：belongings/clipbook/review 先行，favorites 于
+ * 2026-09-19 深审批 B 落地（此前本行误记 favorites 为「先例」，与代码不符，以代码为准纠偏）。
  */
 export function notifyUndo(
   msg: string,
@@ -164,10 +162,19 @@ export function notifySaveError(err: unknown, what?: string): void {
 /**
  * 动作失败统一提示（enh-sweep B 包）：非写盘类动作（清理/还原/加密等）失败的人话错误 toast。
  * 与 notifySaveError 同风格——说明什么失败（动作名）+ 原因 + 重试途径（「请重试」尾巴）。
+ * onRetry（效率整改 8）：传入时直接挂「重试」action——文案把动作交回给用户，就该给出路
+ * （复用现成 action 机制；带 action 的通知不受级别静默抑制，重试出口恒可达）。
  */
-export function notifyActionError(err: unknown, action: string): void {
+export function notifyActionError(
+  err: unknown,
+  action: string,
+  opts?: { onRetry?: () => void }
+): void {
   const msg = err instanceof Error ? err.message : String(err);
-  notify(`${action}失败：${msg}，请重试`, { type: 'error' });
+  notify(`${action}失败：${msg}，请重试`, {
+    type: 'error',
+    action: opts?.onRetry ? { label: '重试', onClick: opts.onRetry } : undefined,
+  });
 }
 
 /** 当前视口是否为移动端（决定默认位置/动画：移动端顶部居中，桌面右侧弹出） */
@@ -179,24 +186,8 @@ function isMobileView(): boolean {
   );
 }
 
-/**
- * 通知偏好读取（issue 258）：通知是最后兜底的报告通道，设置读取失败不得让通知本身炸掉——
- * provider 未注入（tryGetSettings 返回空对象）或抛错一律按缺省行为走（设置抛错的场景正是通知
- * 要报告的对象）。故四项偏好一律经此函数读，且只认字符串值。
- */
-function noticePref(
-  key: 'noticeLevel' | 'noticeDuration' | 'noticePosition' | 'noticeMaxVisible'
-): string | undefined {
-  try {
-    const v = tryGetSettings()[key];
-    return typeof v === 'string' ? v : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** 默认动效变体：桌面右侧滑入（位置在左列时换 slide-left 从左滑入，issue 258）；
- *  移动端顶部下滑（保证全站位置/动效一致） */
+/** 默认动效变体：桌面右侧滑入（位置在左列时换 slide-left 从左滑入，issue 297）；移动端顶部下滑
+ *  （保证全站位置/动效一致） */
 function defaultVariant(): NoticeVariant {
   if (isMobileView()) return 'drop';
   const pos = noticePref('noticePosition');
@@ -213,10 +204,19 @@ const OUT_CLASS: Record<NoticeVariant, string> = {
   shake: 'bz-notice--out-fade',
 };
 
-/**
- * 停留档位（noticeDuration 设置，issue 258）：quick=2s / standard=3s（缺省）/ relaxed=5s /
- * persistent=常驻点击才关。只作用于「未显式指定时长」的默认停留——撤销 6s 等显式时长不缩放。
- */
+/** 通知偏好读取（issue 297）：通知是最后兜底的报告通道，设置读取失败不得让通知本身炸掉——
+ *  provider 未注入/抛错一律按缺省行为走（settings 抛错的场景正是通知要报告的对象） */
+function noticePref(key: 'noticeLevel' | 'noticeDuration' | 'noticePosition' | 'noticeMaxVisible'): string | undefined {
+  try {
+    const v = (tryGetSettings() as Record<string, unknown> | undefined)?.[key];
+    return typeof v === 'string' ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 停留档位（noticeDuration 设置，issue 297）：quick=2s / standard=3s（缺省）/ relaxed=5s /
+ *  persistent=常驻点击才关。只作用于未显式指定 duration 的默认时长——撤销 6s 等显式时长不缩放 */
 function durationGear(): { base: number; persistent: boolean } {
   const v = noticePref('noticeDuration');
   if (v === 'quick') return { base: 2000, persistent: false };
@@ -230,11 +230,9 @@ function defaultDuration(type: NoticeType): number {
   return type === 'error' ? base + 2000 : base;
 }
 
-/**
- * 通知级别（noticeLevel 设置，issue 258）：important=仅警告与错误 / error=仅错误。
- * 低档位静默常规通知——但带操作按钮（撤销/查看等交互出口）与 progress（长任务状态框）永不放行，
- * 否则用户失去反悔窗口与进度反馈。静默先于去重登记：被静默的调用视同未发生，不占用去重窗口。
- */
+/** 通知级别（noticeLevel 设置，issue 297）：important=仅警告与错误 / error=仅错误。
+ *  低档位静默常规通知——但带操作按钮（撤销/查看等交互出口）与 progress 永不放行。
+ *  静默先于去重登记：被静默的调用视同未发生 */
 function suppressedByLevel(kind: NoticeKind, opts?: NoticeOptions): boolean {
   const level = noticePref('noticeLevel');
   if (level !== 'important' && level !== 'error') return false;
@@ -244,16 +242,9 @@ function suppressedByLevel(kind: NoticeKind, opts?: NoticeOptions): boolean {
   return kind !== 'warning' && kind !== 'error';
 }
 
-/**
- * 弹出位置类（noticePosition 设置，issue 258）：容器挂角位类，CSS 只在 769px+ 生效——
- * 移动端媒体查询（纯 id 选择器，特异性低于 id+类）恒顶部居中不被覆盖。
- * 缺省 top-right 不挂类（走基底样式）。
- */
-const POSITION_CLASSES = [
-  'bz-notice-pos--bottom-right',
-  'bz-notice-pos--bottom-left',
-  'bz-notice-pos--top-left',
-] as const;
+/** 弹出位置类（noticePosition 设置，issue 297）：容器挂角位类，CSS 只在 769px+ 生效——
+ *  移动端媒体查询（id 特异性低于 id+类）恒顶部居中不被覆盖。缺省 top-right 不挂类 */
+const POSITION_CLASSES = ['bz-notice-pos--bottom-right', 'bz-notice-pos--bottom-left', 'bz-notice-pos--top-left'] as const;
 
 function applyPositionClass(container: HTMLElement): void {
   const pos = noticePref('noticePosition');
@@ -346,11 +337,8 @@ function applyTypeToEl(n: InternalNotice, kind: NoticeKind): void {
     'bz-notice--warning',
     'bz-notice--error',
     'bz-notice--pause',
-    'bz-notice--accept',
     'bz-notice--delete',
-    'bz-notice--confirm',
     'bz-notice--restore',
-    'bz-notice--skip',
     'bz-notice--archive',
     'bz-notice--progress'
   );
@@ -398,18 +386,18 @@ function armTimer(n: InternalNotice, kind: NoticeKind, explicitDuration?: number
     } else {
       n.persistent = true;
     }
-    return;
+  } else {
+    const base = defaultDuration(kind);
+    const dur = explicitDuration !== undefined ? explicitDuration : (text ? calcDuration(text, base) : base);
+    if (dur <= 0) {
+      n.persistent = true; // <= 0 = 常驻
+    } else if (explicitDuration === undefined && durationGear().persistent) {
+      // 常驻档（issue 297）：未显式指定时长不自动消失。persistent 保持 false——与 progress 常驻帧
+      // 不同，仍参与堆叠驱逐，否则普通帧无限滞留堆出屏幕
+    } else {
+      n.timer = window.setTimeout(() => hideNow(n), dur);
+    }
   }
-  const base = defaultDuration(kind);
-  const dur = explicitDuration !== undefined ? explicitDuration : (text ? calcDuration(text, base) : base);
-  if (dur <= 0) {
-    n.persistent = true; // <= 0 = 常驻
-    return;
-  }
-  // 「常驻」档（issue 258）：未显式指定时长则不自动消失。persistent 保持 false——与 progress 常驻帧
-  // 不同，仍参与堆叠驱逐，否则普通帧无限滞留会堆出屏幕。
-  if (explicitDuration === undefined && durationGear().persistent) return;
-  n.timer = window.setTimeout(() => hideNow(n), dur);
 }
 
 /**
@@ -439,35 +427,90 @@ export function cleanupNotices(): void {
   if (container && container.parentNode) container.parentNode.removeChild(container);
 }
 
-/** 空操作 handle：去重合并时返回（调用方安全调用 setMessage/setType/hide） */
+/** 空操作 handle：级别静默 / 去重窗口抑制时返回（调用方安全调用 setMessage/setType/hide） */
 function noopHandle(): NoticeHandle {
   return {
     el: document.createElement('div'),
     setMessage(): void {},
     setProgress(): void {},
     setType(): void {},
+    setAction(): void {},
     hide(): void {},
   };
 }
 
 /** 操作按钮 span（span 而非 button——Obsidian 核心 button 默认 height: var(--input-height) 会把通知框撑高）；
- *  创建与去重合并（progress→结果原地更新时补挂）共用 */
+ *  创建与去重合并（progress→结果原地更新时补挂）共用。
+ *  键盘可达（R6）：tabIndex=0 + Enter/Space 触发同回调（对齐 chip.ts 键盘口径）；
+ *  action 点击自带 stopPropagation，不会误触发「点本体关闭」 */
 function appendActionBtn(n: InternalNotice, action: NoticeAction): void {
   const btn = document.createElement('span');
   btn.className = 'bz-notice-action';
   btn.setAttribute('role', 'button');
+  btn.tabIndex = 0;
   btn.textContent = action.label;
-  btn.addEventListener('click', (e) => {
+  const fire = (e: Event) => {
     e.stopPropagation();
     if (action.onClick) action.onClick();
     hideNow(n);
+  };
+  btn.addEventListener('click', fire);
+  btn.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      fire(e);
+    }
   });
   n.el.appendChild(btn);
 }
 
+/** 真句柄工厂（效率整改 9）：指向存活帧；dedupe 合并路径与常规创建路径共用 */
+function makeHandle(n: InternalNotice): NoticeHandle {
+  return {
+    el: n.el,
+    setMessage(text: string): void {
+      n.msgEl.textContent = text;
+    },
+    setType(t: NoticeKind): void {
+      applyTypeToEl(n, t);
+      // 重排计时（UX 整改 16）：传入当前正文，progress→success 等长文案按 60ms/字
+      // 动态显示，不再固定 3s；显式 duration 优先规则不变
+      armTimer(n, t, undefined, n.msgEl.textContent || undefined);
+    },
+    setProgress(pct: number): void {
+      if (!n.progressEl) return;
+      if (pct === -1) {
+        n.progressEl.classList.add('bz-notice-progress--indeterminate');
+        return;
+      }
+      n.progressEl.classList.remove('bz-notice-progress--indeterminate');
+      const clamped = Math.max(0, Math.min(100, pct));
+      n.progressEl.style.width = clamped + '%';
+      // 完成态：进度条变绿
+      if (clamped >= 100) n.progressEl.classList.add('bz-notice-progress--done');
+      else n.progressEl.classList.remove('bz-notice-progress--done');
+    },
+    setAction(actions: NoticeAction | NoticeAction[]): void {
+      const list = Array.isArray(actions) ? actions : [actions];
+      // 按 label 去重：与已挂按钮、批内重复都不重挂（同创建路径合并口径）
+      const existing = new Set(
+        Array.from(n.el.querySelectorAll('.bz-notice-action')).map((el) => el.textContent || '')
+      );
+      for (const a of list) {
+        if (existing.has(a.label)) continue;
+        appendActionBtn(n, a);
+        existing.add(a.label);
+      }
+    },
+    hide(): void {
+      hideNow(n);
+    },
+  };
+}
+
 export function notify(msg: string, opts?: NoticeOptions): NoticeHandle {
   const kind: NoticeKind = (opts && opts.type) || 'info';
-  // 级别静默（issue 258）：先于去重登记，被静默的调用视同未发生
+  // 级别静默（issue 297）：先于去重登记，被静默的调用视同未发生
   if (suppressedByLevel(kind, opts)) return noopHandle();
   const isProgress = kind === 'progress';
   const type: NoticeType = isProgress ? 'info' : kind;
@@ -492,14 +535,12 @@ export function notify(msg: string, opts?: NoticeOptions): NoticeHandle {
       const mergeActions: NoticeAction[] = [];
       if (opts.action) mergeActions.push(opts.action);
       if (opts.actions) mergeActions.push(...opts.actions);
-      const existingLabels = new Set(
-        Array.from(r.n.el.querySelectorAll('.bz-notice-action')).map((el) => el.textContent || '')
-      );
-      for (const a of mergeActions) {
-        if (!existingLabels.has(a.label)) appendActionBtn(r.n, a);
-      }
       armTimer(r.n, kind, opts.duration, msg);
-      return noopHandle();
+      // 返回指向存活帧的真句柄（效率整改 9）：调用方手里的 setMessage/setAction/hide
+      // 继续生效，不再返回静默失效的 noop——依赖句柄收尾的域不会留僵尸帧
+      const merged = makeHandle(r.n);
+      if (mergeActions.length) merged.setAction(mergeActions);
+      return merged;
     }
     if (r && now - r.at < DEDUPE_WINDOW_MS) {
       return noopHandle();
@@ -558,7 +599,8 @@ export function notify(msg: string, opts?: NoticeOptions): NoticeHandle {
   }
   for (const a of actions) appendActionBtn(n, a);
 
-  // 点击本体关闭
+  // 点击本体关闭（全帧型统一，含常驻帧）：2026-09-19 拍板——常驻帧 ✕ 关闭钮退役，
+  // 「一碰就没」的误关风险让位于单一点按出口的直觉
   el.addEventListener('click', () => hideNow(n));
 
   // 抬顶（ADR-0067）：toast 与 overlay 共享动态层级空间，弹出时重发号保证永远可见
@@ -576,32 +618,5 @@ export function notify(msg: string, opts?: NoticeOptions): NoticeHandle {
   const fullText = (opts && opts.title ? opts.title + ' ' : '') + msg;
   armTimer(n, kind, opts && opts.duration, fullText);
 
-  return {
-    el,
-    setMessage(text: string): void {
-      n.msgEl.textContent = text;
-    },
-    setType(t: NoticeKind): void {
-      applyTypeToEl(n, t);
-      // 重排计时（UX 整改 16）：传入当前正文，progress→success 等长文案按 60ms/字
-      // 动态显示，不再固定 3s；显式 duration 优先规则不变
-      armTimer(n, t, undefined, n.msgEl.textContent || undefined);
-    },
-    setProgress(pct: number): void {
-      if (!n.progressEl) return;
-      if (pct === -1) {
-        n.progressEl.classList.add('bz-notice-progress--indeterminate');
-        return;
-      }
-      n.progressEl.classList.remove('bz-notice-progress--indeterminate');
-      const clamped = Math.max(0, Math.min(100, pct));
-      n.progressEl.style.width = clamped + '%';
-      // 完成态：进度条变绿
-      if (clamped >= 100) n.progressEl.classList.add('bz-notice-progress--done');
-      else n.progressEl.classList.remove('bz-notice-progress--done');
-    },
-    hide(): void {
-      hideNow(n);
-    },
-  };
+  return makeHandle(n);
 }

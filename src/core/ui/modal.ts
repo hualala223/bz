@@ -15,6 +15,9 @@ export interface BzModalOpts {
   head?: boolean;                  // 带头行（关闭钮）——默认 false（无关闭钮，靠遮罩/ESC）
   title?: string;
   onClose?: () => void;            // 关闭回调（遮罩/ESC/✕）
+  /** 关闭意图拦截（上游 issue 365，脏表单弹窗用）：提供时遮罩点击/ESC 改调 requestClose——
+   *  由消费方确认后再调 close；✕ 钮直走 close 不拦（显式意图） */
+  requestClose?: () => void;
   className?: string;              // 附加到 popup 的类
 }
 
@@ -73,18 +76,45 @@ export function uiModal(opts: BzModalOpts): { mask: HTMLElement; popup: HTMLElem
     opts.onClose?.();
   }
 
+  // 关闭意图统一走 attemptClose（上游 issue 365 同款）：有 requestClose 时交消费方拦截，否则直接关
+  const attemptClose = (): void => {
+    if (opts.requestClose) opts.requestClose();
+    else close();
+  };
+
   // 点遮罩关闭（弹窗内元素不触发）
   mask.addEventListener('click', (e) => {
-    if (e.target === mask) close();
+    if (e.target === mask) attemptClose();
   });
 
   // ESC：栈顶后开先关（escManager 会做可见性判断）
   escHandle = escManager.register('bz-modal', {
     isVisible: () => mask.isConnected,
-    close,
+    close: attemptClose,
   });
 
   document.body.appendChild(mask);
   liveModals.add(close);
   return { mask, popup, close };
+}
+
+/** bindFormSubmit（效率基元，上游效率#2）：弹窗表单回车提交——Ctrl/⌘+Enter 任意处、
+ *  纯 Enter 仅单行 input（textarea 回车换行不拦；data-bz-no-form-submit 豁免过滤/搜索框）。 */
+export function bindFormSubmit(popup: HTMLElement, onSubmit: () => void): void {
+  popup.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.defaultPrevented || e.isComposing) return;
+    if (e.key !== 'Enter') return;
+    if (!(e.ctrlKey || e.metaKey)) return; // 纯 Enter 交 keypress 段（输入框消费在彼处可见）
+    e.preventDefault();
+    onSubmit();
+  });
+  popup.addEventListener('keypress', (e: KeyboardEvent) => {
+    if (e.defaultPrevented) return;
+    if (e.key !== 'Enter' || e.ctrlKey || e.metaKey) return;
+    const t = e.target;
+    if (!(t instanceof HTMLInputElement)) return;
+    if (t.dataset.bzNoFormSubmit !== undefined) return;
+    e.preventDefault();
+    onSubmit();
+  });
 }

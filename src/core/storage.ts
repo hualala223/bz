@@ -50,9 +50,20 @@ export interface JsonFileStore<T> {
 }
 
 /** 共享数据目录（storagePath，trim 去尾斜杠，空回退 CONFIG/STORAGE） */
+/** 共享数据目录归一（纯函数，storagePath 解析唯一入口；上游移植批 3 随件单源化）：
+ *  trim 去尾斜杠；误配 .json 尾段剥到所在目录（旧设置可能存了完整文件路径）；剥空/未设回退 CONFIG/STORAGE。 */
+export function normalizeStorageDir(value?: string): string {
+  let dir = (value || 'CONFIG/STORAGE').trim().replace(/\/+$/, '');
+  if (/\.json$/i.test(dir)) {
+    const idx = dir.lastIndexOf('/');
+    dir = idx >= 0 ? dir.slice(0, idx) : '';
+  }
+  return dir || 'CONFIG/STORAGE';
+}
+
 export function storageDir(): string {
   const s = tryGetSettings() as any;
-  return ((s && s.storagePath) || 'CONFIG/STORAGE').trim().replace(/\/+$/, '');
+  return normalizeStorageDir(s && s.storagePath);
 }
 
 /** 共享数据文件路径（base 可覆盖 storagePath——旧字段兜底域用 storagePath||xxxPath） */
