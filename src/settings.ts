@@ -345,6 +345,14 @@ export default interface BzSettings {
   knowledgeMountAutoSuggest: boolean;
   /** B 站 Cookie（上游 ADR-0133：知识盒视频档位查询；数据源凭据组） */
   bilibiliCookie: string;
+  /** 🧩 智谱 Plan 密钥（上游 issue 411 融合：Coding 套餐专用端点） */
+  zhipuPlanApiKey: string;
+  /** 🧩 智谱 Plan 模型（默认 glm-5.3-flash） */
+  zhipuPlanModel: string;
+  /** 🧩 per-provider 最大输出 token 覆盖（上游 ADR-0148/0151；键=provider id） */
+  aiMaxTokensOverrides: Record<string, number>;
+  /** 🧩 per-provider 思考档位（上游 issue 330/411；键=provider id，值='off'|'default'） */
+  aiThinkingOverrides: Record<string, string>;
   /** 🎨 知识盒面板皮肤（上游外观组范式） */
   knowledgeSkin: string;
   knowledgeSkinTheme: string;
@@ -820,6 +828,10 @@ export const DEFAULT_SETTINGS: BzSettings = {
   linkAgentMinScore: 0.3,
   knowledgeMountAutoSuggest: false,
   bilibiliCookie: '',
+  zhipuPlanApiKey: '',
+  zhipuPlanModel: '',
+  aiMaxTokensOverrides: {},
+  aiThinkingOverrides: {},
   knowledgeSkin: 'default',
   knowledgeSkinTheme: 'manila',
   knowledgeImageFolder: '',

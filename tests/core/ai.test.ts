@@ -64,7 +64,7 @@ describe('AIService', () => {
     const body = JSON.parse(opts.body);
     expect(body.model).toBe('deepseek-v4-flash');
     expect(body.messages).toEqual([{ role: 'user', content: '请回答' }]);
-    expect(body.max_tokens).toBe(4096); // prompt 默认 4096
+    expect(body.max_tokens).toBe(393216); // 融合批：默认走 model-limits 官方最大档（deepseek-v4-flash），不再恒 4096
     expect(body.stream).toBe(true);
   });
 

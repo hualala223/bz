@@ -82,7 +82,9 @@ describe('全量 schema 文案 lint（注册表：LINT_TARGETS）', () => {
       'AI 服务商',
       'DeepSeek 密钥', 'DeepSeek 模型',
       'OpenCode 密钥', 'OpenCode 模型',
-      '智谱密钥', '智谱模型',
+      '智谱密钥',
+      '智谱 Plan 密钥',
+      '智谱 Plan 模型', '智谱模型',
       '硅基流动密钥', '硅基流动模型',
       '火山方舟密钥', '火山方舟模型', '获取模型名',
     ]);

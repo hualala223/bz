@@ -10,6 +10,7 @@
 import { requestUrl } from 'obsidian';
 import { getApp } from './app';
 import { toBase64 } from './crypto';
+import { resolveModelLimits } from './model-limits';
 
 export interface AISettingsLike {
   aiProvider?: string;
@@ -20,6 +21,9 @@ export interface AISettingsLike {
   opencodeGoModel?: string;
   zhipuApiKey?: string;
   zhipuModel?: string;
+  zhipuPlanApiKey?: string;
+  zhipuPlanModel?: string;
+  aiMaxTokensOverrides?: Record<string, number>;
   siliconflowApiKey?: string;
   siliconflowModel?: string;
   volcanoArkApiKey?: string;
@@ -51,6 +55,7 @@ interface AIProvider {
 }
 
 let _aiProviderCache: AIProvider | null = null;
+let _lastProviderName = 'opencode-go'; // 供 aiMaxTokensOf 取 per-provider 覆盖（融合批）
 
 /** opencode-go 会话标识：进程内懒生成一个 UUID 全程复用（ticket 174：端点强制 x-opencode-session，
  *  缺失一律 400 MissingSessionID；官方要求每会话一个稳定 ID 用于路由/prompt 缓存优化） */
@@ -76,6 +81,21 @@ export function resetAIProviderCache(): void {
 }
 
 /** 解析 AI provider（override 优先级最高），逻辑与 Q3 getAIProvider 逐字一致 */
+
+/** 输出上限融合（上游 ADR-0148/0151）：per-provider 覆盖（aiMaxTokensOverrides）> 模型档位表
+ *  （model-limits 官方最大档）> 4096 兜底。调用方显式传值仍最优先（prompt mo.max_tokens）。 */
+function aiMaxTokensOf(model?: string): number {
+  try {
+    const s = getQ3Settings() as Record<string, unknown>;
+    const ov = s.aiMaxTokensOverrides as Record<string, number> | undefined;
+    if (ov && typeof ov[_lastProviderName] === 'number' && ov[_lastProviderName] > 0) return ov[_lastProviderName];
+    return resolveModelLimits(model)?.maxOutput || 4096;
+  } catch {
+    return 4096;
+  }
+}
+
+
 export async function getAIProvider(override?: string | { endpoint?: string; apiKey?: string; model?: string }): Promise<AIProvider> {
   if (!override && _aiProviderCache) return _aiProviderCache;
   const s = getQ3Settings();
@@ -88,6 +108,7 @@ export async function getAIProvider(override?: string | { endpoint?: string; api
     };
   }
   const name = (typeof override === 'string' && override) || s.aiProvider || 'opencode-go';
+  _lastProviderName = name;
   if (name === 'opencode-go') {
     if (!s.opencodeGoApiKey) {
       throw new Error('未配置 OpenCode Go API Key：插件设置 → AI 配置 → OpenCode Go API Key');
@@ -98,6 +119,20 @@ export async function getAIProvider(override?: string | { endpoint?: string; api
       model: s.opencodeGoModel || 'deepseek-v4-flash',
       noCors: true, // opencode.ai 无 CORS 头，fetch 必败 → 直接走 requestUrl
       headers: { 'x-opencode-session': opencodeSessionId() }, // ticket 174：端点强制，缺失 400
+    };
+    return _aiProviderCache;
+  }
+  // 智谱 Plan（上游 issue 411 融合批：Coding 套餐专用端点——Lite/Pro/Max 额度只在此端点生效，
+  // 走标准 paas/v4 会按量计费报余额不足）。思考方言沿用智谱 thinking:{type}（ticket 175 同款）
+  if (name === 'zhipu-plan') {
+    if (!s.zhipuPlanApiKey) {
+      throw new Error('未配置智谱 Plan API Key：插件设置 → AI 配置 → 智谱 Plan 密钥');
+    }
+    _aiProviderCache = {
+      endpoint: 'https://open.bigmodel.cn/api/coding/paas/v4',
+      apiKey: s.zhipuPlanApiKey,
+      model: s.zhipuPlanModel || 'glm-5.3-flash',
+      thinkingParam: 'thinking',
     };
     return _aiProviderCache;
   }
@@ -278,7 +313,7 @@ export class AIService {
     const body: Record<string, any> = {
       model: effModel,
       messages: [{ role: 'user', content: buildUserContent(promptText) }],
-      max_tokens: mo.max_tokens || 4096,
+      max_tokens: mo.max_tokens || aiMaxTokensOf(effModel),
       stream: true,
     };
     // 透传其余 modelOptions（response_format / enable_thinking 等，不支持的字段由 API 忽略）
