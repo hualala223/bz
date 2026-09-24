@@ -242,16 +242,19 @@ describe('swallowNextClick', () => {
   const fire = (el: EventTarget, type: string) =>
     el.dispatchEvent(new MouseEvent(type, { bubbles: true }));
 
+  // 上游 R12：键盘激活的 click 无坐标（clientX/Y===0）放行不吞——fire 须带真实坐标才算「拖拽松手」click
+  const fireClick = (el: EventTarget) =>
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }));
   it('吞掉随后一次 click：body 冒泡监听收不到（拖拽松手在遮罩上不再误关闭）', () => {
     const inner = document.createElement('div');
     document.body.appendChild(inner);
     const seen = vi.fn();
     document.body.addEventListener('click', seen);
     swallowNextClick();
-    fire(inner, 'click');
+    fireClick(inner);
     expect(seen).not.toHaveBeenCalled();
     // 只吞一发：下一次 click 正常放行
-    fire(inner, 'click');
+    fireClick(inner);
     expect(seen).toHaveBeenCalledTimes(1);
     inner.remove();
     document.body.removeEventListener('click', seen);

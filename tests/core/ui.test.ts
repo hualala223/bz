@@ -695,9 +695,9 @@ describe('bz ui 组件库', () => {
       fire(el, 'mousedown', 360);
       fire(document, 'mousemove', 560);
       fire(row, 'mouseup'); // 松手压在行上
-      fire(row, 'click');   // 浏览器补发的终端 click
+      fire(row, 'click', 360);   // 浏览器补发的终端 click（带坐标——无坐标是键盘 click，R12 放行不吞）
       expect(seen).not.toHaveBeenCalled();
-      fire(row, 'click');   // 之后的正常点击放行
+      fire(row, 'click', 360);   // 之后的正常点击放行
       expect(seen).toHaveBeenCalledTimes(1);
       row.remove();
       detach();

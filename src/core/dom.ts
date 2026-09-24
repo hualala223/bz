@@ -73,9 +73,13 @@ export function longPress(
 /** swallowNextClick()：拖拽收尾防线——吞掉紧随本次拖拽结束的终端 click（issue 222）。
  *  拖拽中 mousedown 落在面板、mouseup 落在遮罩/列表行时，浏览器把 click 派发到两者的
  *  公共祖先，误触发「点遮罩关闭」「行点击」等冒泡语义。capture 一次性拦截：click 触发
- *  即自毁；若未触发（如鼠标移出窗口松开）则下次 mousedown 撤防，不吞正常点击。 */
+ *  即自毁；若未触发（如鼠标移出窗口松开）则下次 mousedown 撤防，不吞正常点击。
+ *  键盘激活的 click（R12）无坐标（clientX/Y === 0）且无前置 mousedown（撤防监听不触发），
+ *  直接放行不吞——否则「窗口外松手 → 回窗先键盘激活按钮」时第一次 Enter 被误吞。 */
 export function swallowNextClick(): void {
   const swallow = (e: MouseEvent) => {
+    // 键盘 click 无坐标：不属于拖拽残影，放行（监听保持武装等真正的终端 click）
+    if (e.clientX === 0 && e.clientY === 0) return;
     document.removeEventListener('click', swallow, true);
     e.stopPropagation();
   };
@@ -93,6 +97,19 @@ const DOMAIN_MAP: Record<string, string> = {
 };
 
 /**
+ * favicon 取图失败负缓存（tombstone，会话内）：取失败的「域名+尺寸」不再重复发网请求——
+ * 列表每次重绘都会对同一批失效域名（内网地址/自建服务/拼错 url）原样重发必失败的请求
+ * （pv 深审新-14），tombstone 后 createSiteIcon 直接返回 null，调用方走字母回退。
+ * 会话级内存集即可：成功缓存走 localStorage 持久化，失败域名网络恢复后重开面板自然重试。
+ */
+const faviconFailures = new Set<string>();
+
+/** 测试专用：清空 favicon 失败负缓存（notice __resetNoticeForTests 同范式） */
+export function __resetFaviconFailuresForTests(): void {
+  faviconFailures.clear();
+}
+
+/**
  * createSiteIcon(domain, size=16)：网站 favicon 图标（yandex 取图 + localStorage 缓存）。
  * 高清修复：旧接口 `favicon/<domain>` 恒返 16px 小图，放大到 32/64px 头像位发糊——
  * 改走 v2 接口带 `size` 参数按需取高清源；缓存键升级 `favicon_v2_<domain>_<size>`，
@@ -102,6 +119,8 @@ export function createSiteIcon(domain: string | null | undefined, size = 16): HT
   if (!domain) return null;
   const mappedDomain = DOMAIN_MAP[domain] || domain;
   const cacheKey = `favicon_v2_${mappedDomain}_${size}`;
+  // 取过失败的「域名+尺寸」（按归一映射后键）直接短路，不再发网请求
+  if (faviconFailures.has(cacheKey)) return null;
 
   const img = document.createElement('img');
   img.className = 'bz-site-icon';
@@ -138,9 +157,10 @@ export function createSiteIcon(domain: string | null | undefined, size = 16): HT
     (img as any).onload = null;
   };
 
-  // 4. 加载失败则隐藏
+  // 4. 加载失败则隐藏并记 tombstone（会话内同「域名+尺寸」不再重试）
   img.onerror = function () {
     img.style.display = 'none';
+    faviconFailures.add(cacheKey);
     (img as any).onerror = null;
   };
 
@@ -164,16 +184,37 @@ export function createIconBtn(
   return b;
 }
 
-/** createOverlay(opts)：{maskId, popupId, onMaskClick, width, maxWidth} → {mask, popup, topify}
+/** 存活 overlay 登记表（CB10/A1）：createOverlay 即登记（open 时机），close 幂等注销。
+ *  自建遮罩弹窗（UP/RSS 管理、路径选择器等）的 close 句柄原先困在各自闭包里，域卸载与
+ *  main onunload 都拿不到——统一登记后 closeAllOverlays() 一处收口，全域受益。
+ *  调用方手动 mask.remove() 而不经 close 的旧登记（detach 残留）由 pruneDetached 惰性回收。 */
+interface LiveOverlayEntry {
+  mask: HTMLDivElement;
+  popup: HTMLDivElement;
+  /** close 包装（含自注销）：registerClose 覆写为调用方 close，缺省为摘除 mask+popup */
+  close: () => void;
+}
+const liveOverlays = new Set<LiveOverlayEntry>();
+
+/** 惰性回收：mask 与 popup 均已离场的登记视为已关（手动 remove 的旧路径），静默注销 */
+function pruneDetachedOverlays(): void {
+  for (const entry of liveOverlays) {
+    if (!entry.mask.isConnected && !entry.popup.isConnected) liveOverlays.delete(entry);
+  }
+}
+
+/** createOverlay(opts)：{maskId, popupId, onMaskClick, width, maxWidth} → {mask, popup, topify, registerClose}
  *  z-index 动态分配（ADR-0067）：创建时发号一次（创建即显示的场景够用）；
- *  show/hide 复用的面板每次显示调 topify() 重新发号，保证「谁后显示谁在上」 */
+ *  show/hide 复用的面板每次显示调 topify() 重新发号，保证「谁后显示谁在上」；
+ *  创建即登记进存活表（CB10/A1），close 经 registerClose 注入后幂等注销。 */
 export function createOverlay(opts: {
   maskId: string;
   popupId: string;
   onMaskClick?: () => void;
   width?: string;
   maxWidth?: number;
-}): { mask: HTMLDivElement; popup: HTMLDivElement; topify: () => void } {
+}): { mask: HTMLDivElement; popup: HTMLDivElement; topify: () => void; registerClose: (close: () => void) => void } {
+  pruneDetachedOverlays();
   const mask = document.createElement('div');
   mask.id = opts.maskId;
   mask.className = 'bz-overlay-mask';
@@ -188,5 +229,42 @@ export function createOverlay(opts: {
   popup.style.width = opts.width || '90%';
   popup.style.maxWidth = (opts.maxWidth || 400) + 'px';
   topifyZ(mask, popup);
-  return { mask, popup, topify: () => topifyZ(mask, popup) };
+  const entry: LiveOverlayEntry = {
+    mask,
+    popup,
+    close: () => {
+      liveOverlays.delete(entry); // 幂等注销（closeAllOverlays 与调用方 close 双入口都安全）
+      if (mask.isConnected) mask.remove();
+      if (popup.isConnected) popup.remove();
+    },
+  };
+  liveOverlays.add(entry);
+  return {
+    mask,
+    popup,
+    topify: () => topifyZ(mask, popup),
+    /** 注入调用方 close（UP/RSS 管理等自带 esc 注销/单例旗标复位的收尾）：包装为
+     *  「先自注销再执行」，重复触发与 closeAllOverlays 兜底都幂等 */
+    registerClose: (close: () => void) => {
+      entry.close = () => {
+        liveOverlays.delete(entry);
+        close();
+      };
+    },
+  };
+}
+
+/** 关闭全部存活 overlay（CB10/A1，main.ts onunload 调用；幂等，无存活时 no-op）：
+ *  逐个走登记的 close（含调用方注入的收尾），关一个注销一个 */
+export function closeAllOverlays(): void {
+  for (const entry of [...liveOverlays]) {
+    try {
+      entry.close();
+    } catch (e) {
+      // close 抛错不阻断其余浮层收口；DOM 兜底摘除防残留
+      entry.mask.remove();
+      entry.popup.remove();
+      liveOverlays.delete(entry);
+    }
+  }
 }

@@ -226,6 +226,8 @@ export default class BzPlugin extends Plugin {
   private unregisterGestures: (() => void) | null = null;
 
   async onload() {
+    // ESC 管理器软关恢复（上游 N1：禁用→再启用后 keydown 处理随 arm() 复位；幂等）
+    escManager.arm();
     const loaded = await this.loadData();
     this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
     // ADR-0009 迁移：共享数据路径 storagePath 初始化（旧 7 字段废弃仅兼容保留）
