@@ -6163,9 +6163,9 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
 /* ==================== 收藏本域样式（src/favorites/styles.css，issue 227「C5 终版」1:1 换血） ====================
  * 原型 .zcode/ui-prototypes/favorites-cork-5/c5-linen-full.html 逐字照搬（ADR-0101，用户拍板豁免铁律 6：
  * 面板 UI 不使用样式库/组件库，全部域内自带）。类名映射：.tags→.bz-fav-tags、.card→.bz-fav-card、
- * .ctx→.bz-fav-ctx、.sheet→.bz-fav-sheet、.form→.bz-fav-form、.dlg/.toast/.mask 走 core（不照搬）。
- * 主题：原型 body.dark 手动切换 → .theme-dark 变量组（跟随 Obsidian 亮暗）。
- * 所有浮层（菜单/抽屉/表单）与面板同挂 .bz-fav-scope 携带变量。
+ * .form→.bz-fav-form；菜单/抽屉已收编 core（2026-09-11：.bz-item-menu / .bz-item-sheet，皮肤变量
+ * 不随行——统一观感即本次目标）。主题：原型 body.dark 手动切换 → .theme-dark 变量组（跟随 Obsidian 亮暗）。
+ * 面板与表单浮层同挂 .bz-fav-scope 携带变量。
  */
 
 /* —— 变量（原型 :root / body.dark 两组逐字） —— */
@@ -6177,7 +6177,7 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
   --chip: #fff; --chip-ink: #6d6455; --chip-grey: #ece7db; --chip-grey-ink: #9a917d; --chip-add-bd: #b9b2a2; --chip-add-ink: #8a8171;
   --acc: #5a8f6d; --acc-deep: #3d6b4d; --on-acc: #fff;
   --ft-bd: #f0ece2; --menu: #fffdf8; --menu-bd: #e3dccb; --menu-hover: #f2eee0; --menu-ink: #55503f;
-  --fld-bd: #ddd5c2; --fld-bg: #fff; --fld-ink: #4a443a; --danger: #b3564d; --gold: #e0b73a; --gold-ink: #c9a227;
+  --fld-bd: #ddd5c2; --fld-bg: #fff; --fld-ink: #4a443a; --danger: #b3564d; --gold: #e0b73a;
   --mask: rgba(74,68,58,.38); --pop: #fffdf8; --pop-ink: #4a443a; --pop-mut: #9a917d; --pop-faint: #b3a98f;
 }
 .theme-dark .bz-fav-scope {
@@ -6188,7 +6188,7 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
   --chip: #35312a; --chip-ink: #cfc7b4; --chip-grey: #3a352d; --chip-grey-ink: #9a917d; --chip-add-bd: #6d6455; --chip-add-ink: #a89e8a;
   --acc: #6da37f; --acc-deep: #4c7a5d; --on-acc: #fff;
   --ft-bd: #454036; --menu: #35312a; --menu-bd: #4a443a; --menu-hover: #454036; --menu-ink: #d8d0bc;
-  --fld-bd: #55503f; --fld-bg: #2c2823; --fld-ink: #e0d8c4; --danger: #d0705f; --gold: #e0b73a; --gold-ink: #e0b73a;
+  --fld-bd: #55503f; --fld-bg: #2c2823; --fld-ink: #e0d8c4; --danger: #d0705f; --gold: #e0b73a;
   --mask: rgba(0,0,0,.55); --pop: #35312a; --pop-ink: #e0d8c4; --pop-mut: #9a917d; --pop-faint: #847c6a;
 }
 
@@ -6212,17 +6212,21 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
   box-shadow: 0 8px 30px rgba(0,0,0,.14);
 }
 .bz-fav-panel .bz-fav-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 20px; flex: none; position: relative; }
-.bz-fav-panel .bz-fav-head h1 { font-size: 14px; letter-spacing: 3px; color: var(--ink-title); font-weight: 700; margin: 0; }
-/* 移动端：面板即原型 .phone 内容（全屏；边框圆角交给全屏态，留内边距） */
-/* 移动端：面板即原型 .phone 内容（全屏；显式视口宽高——overlay 弹性子项不定宽会被卡墙 max-content 撑爆） */
-.bz-fav-panel.bz-fav-mob { width: 100vw; height: 100vh; max-width: 100vw; padding: 16px 14px 0; }
+.bz-fav-panel .bz-fav-head h1 { font-size: var(--bz-font-body); letter-spacing: 3px; color: var(--ink-title); font-weight: 700; margin: 0; }
+/* 桌面去标题（2026-09-23 拍板）：桌面头行只剩「收藏本」名牌 + 移动关闭钮——整行隐藏，
+   卡墙直接上移；移动端保留标题与 ✕（bz-fav-mob 不受影响）。头行动效对隐藏元素无害 */
+.bz-fav-panel:not(.bz-fav-mob) .bz-fav-head { display: none; }
+/* 移动端：面板即原型 .phone 内容（全屏；显式视口宽高——overlay 弹性子项不定宽会被卡墙 max-content 撑爆）。
+   高度接 core --bz-vvh 可视视口单源（UI-01/C4，memo/belongings/clipbook/cinema 四域先例）：
+   真机原生顶栏/底栏与软键盘弹出时面板随可视视口收缩，裸 100vh 会被原生栏遮住一截 */
+.bz-fav-panel.bz-fav-mob { width: 100vw; height: var(--bz-vvh, 100vh); max-width: 100vw; max-height: var(--bz-vvh, 100vh); padding: var(--bz-space-lg) 14px 0; }
 
 /* —— 磁贴标签（原型 .tags 逐字） —— */
 /* 选择器带 .bz-fav-scope 前缀（(0,2,1)）：脱离与 core reset button:not(.clickable-icon) (0,1,1)
    的同分顺序对抗，聚合顺序变化不再翻车（C1） */
 .bz-fav-tags { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; flex: none; }
 .bz-fav-scope .bz-fav-tags button {
-  border: none; cursor: pointer; font: 12px/1 var(--font-interface, system-ui); padding: 8px 14px;
+  border: none; cursor: pointer; font: 12px/1 var(--font-interface, system-ui); padding: var(--bz-space-sm) 14px;
   display: inline-flex; align-items: center; gap: 5px;
   background: var(--chip); color: var(--chip-ink); border-radius: 99px;
   box-shadow: 0 2px 6px var(--card-shadow); position: relative;
@@ -6238,26 +6242,40 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
 .bz-fav-tags button.bz-fav-chip--grey { background: var(--chip-grey); color: var(--chip-grey-ink); }
 .bz-fav-tags button.bz-fav-chip--grey.bz-fav-on { background: #8a8171; color: #fff; }
 .bz-fav-tags button.bz-fav-chip--grey.bz-fav-on::before { background: radial-gradient(circle at 35% 30%, #fff, #6d6455 75%); }
+/* 零计数但处于激活态的标签贴纸（UI-08）：条目被清空时保渲染防面板悬空——灰显弱化 + 计数 0，
+   仍可点击（再点取消筛选回全部） */
+.bz-fav-tags button.bz-fav-chip--empty { opacity: .55; }
+/* 桌面磁贴行限高（F5/呈报#61）：自定义标签无上界（issue 363），几十枚 chip 换行占高会把
+   卡墙（flex:1 min-height:0）挤到塌陷——限高约三行 + 纵向滚动保布局稳；顶垫 5px 防 chip
+   磁点 ::before(top:-4px) 被 overflow 裁边（移动单行横滑同款垫法，移动态不受本条限高）。
+   滚动条样式 core 界级单源通杀（ADR-0122），域内不自造 */
+.bz-fav-panel:not(.bz-fav-mob) .bz-fav-tags { max-height: 116px; overflow-y: auto; padding: 5px 0 6px; }
 .bz-fav-tags button.bz-fav-chip-add {
   background: transparent; border: 1.5px dashed var(--chip-add-bd); color: var(--chip-add-ink); box-shadow: none;
   display: inline-flex; align-items: center; gap: 5px;
 }
-.bz-fav-tags button.bz-fav-chip-add::before { display: none; }
+.bz-fav-tags button.bz-fav-chip-add::before { display: none; }@media (hover: hover) {
+
 .bz-fav-tags button.bz-fav-chip-add:hover { border-color: var(--acc); color: var(--acc); }
+}
 
 /* —— 卡片（原型 .card 逐字） —— */
 /* 卡墙：auto-fill 网格——列宽均分剩余空间（184 起步），行缘严格贴合内容区，左右只余对称内边距 */
+/* 左右 4px 垫 + 负 margin 找回：钉选金圈(盒外 2px)与软阴影不再被 overflow:auto 裁边，卡缘对齐不变。
+   负 token 必须 calc（UI-02/C-UI4，clipbook 同款纠偏）：负号直连 var 的写法是无效声明，整条被浏览器丢弃 */
 .bz-fav-board {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(184px, 1fr)); gap: 22px 20px;
-  align-items: start; padding-top: 6px; flex: 1; min-height: 0; overflow: auto;
+  align-items: start; padding: 6px var(--bz-space-xs) 0; margin: 10px calc(-1 * var(--bz-space-xs)) 0; flex: 1; min-height: 0; overflow: auto;
 }
 .bz-fav-board .bz-fav-card { width: auto; }
 .bz-fav-board .bz-fav-empty { grid-column: 1 / -1; }
 .bz-fav-card {
-  width: 184px; min-width: 0; background: var(--card); border-radius: 10px; padding: 24px 16px 13px; cursor: pointer; position: relative;
-  box-shadow: 0 4px 12px var(--card-shadow); transition: transform .15s, box-shadow .15s;
-}
+  width: 184px; min-width: 0; background: var(--card); border-radius: 10px; padding: var(--bz-space-xl) var(--bz-space-lg) 13px; cursor: pointer; position: relative;
+  box-shadow: 0 4px 12px var(--card-shadow); transition: transform var(--bz-dur-fast), box-shadow var(--bz-dur-fast);
+}@media (hover: hover) {
+
 .bz-fav-card:hover { transform: translateY(-4px); box-shadow: 0 10px 22px var(--card-shadow-hi); }
+}
 .bz-fav-card .bz-fav-tape {
   position: absolute; top: -9px; left: 50%; transform: translateX(-50%) rotate(-2deg);
   width: 66px; height: 18px; border-radius: 2px; background: rgba(150,190,220,.55); box-shadow: 0 1px 2px rgba(0,0,0,.1);
@@ -6268,22 +6286,24 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
   position: absolute; top: 10px; right: 10px; width: 12px; height: 12px; border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, #fff 0 20%, var(--c) 75%); box-shadow: 0 1px 3px rgba(0,0,0,.2);
 }
-.bz-fav-card h3 { font-size: 14px; margin: 0 0 6px; color: var(--ink-strong); }
+/* 外链角标 + 无链晃动反馈（F6/F1）2026-09-23 退役：点卡不再跳网站（开链/复制走右键菜单），
+   角标 markup 已从 shared.ts cardHtml 摘除，规则随之清出 */
+.bz-fav-card h3 { font-size: var(--bz-font-body); margin: 0 0 6px; color: var(--ink-strong); }
 .bz-fav-card p {
-  font-size: 12px; line-height: 1.65; color: var(--ink-mut); margin: 0;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  font-size: var(--bz-font-meta); line-height: 1.65; color: var(--ink-mut); margin: 0;
+  /* 2026-09-23 拍板：简介不省略，完整显示（卡高随内容自然生长；撤 -webkit-line-clamp 3 行截断） */
 }
 .bz-fav-card .bz-fav-ft {
-  margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--ft-bd); font-size: 10.5px; color: var(--ink-faint);
+  margin-top: 10px; padding-top: var(--bz-space-sm); border-top: 1px solid var(--ft-bd); font-size: 10.5px; color: var(--ink-faint);
   display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
 }
 .bz-fav-card .bz-fav-tags-row { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; }
-.bz-fav-card .bz-fav-tagb { padding: 3px 8px; border-radius: 99px; font-size: 10.5px; line-height: 1; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+.bz-fav-card .bz-fav-tagb { padding: 3px var(--bz-space-sm); border-radius: 99px; font-size: 10.5px; line-height: 1; white-space: nowrap; display: inline-flex; align-items: center; gap: var(--bz-space-xs); }
 .bz-fav-card.bz-fav-pinc { box-shadow: 0 4px 12px var(--card-shadow), 0 0 0 2px var(--gold); }
 .bz-fav-card.bz-fav-arch { opacity: .5; filter: grayscale(.5); }
-.bz-fav-empty { padding: 50px 0; text-align: center; color: var(--ink-faint); font-size: 13px; width: 100%; }
+.bz-fav-empty { padding: 50px 0; text-align: center; color: var(--ink-faint); font-size: var(--bz-font-label); width: 100%; }
 /* 移动端：双列网格（原型 .phone .m-board）；minmax(0,1fr) 防 line-clamp 卡片 max-content 撑爆轨道 */
-.bz-fav-panel.bz-fav-mob .bz-fav-board { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px 12px; align-items: start; }
+.bz-fav-panel.bz-fav-mob .bz-fav-board { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: var(--bz-space-lg) var(--bz-space-md); align-items: start; }
 .bz-fav-panel.bz-fav-mob .bz-fav-card { width: auto; }
 /* 移动端磁贴行：平铺单行横向滑动（原型 .phone .tags；顶垫 5px 防磁点被 overflow 裁掉） */
 .bz-fav-panel.bz-fav-mob .bz-fav-tags { flex-wrap: nowrap; overflow-x: auto; padding: 5px 0 6px; }
@@ -6291,7 +6311,7 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
 
 /* 移动端头行（原型 .m-head：标题居中，关闭钮绝对定位钉右缘不挤歪标题）。
    容器前缀提 0,2,0 压过 reset 的 button:not(.clickable-icon) 0,1,1，否则背景/阴影被 unset */
-.bz-fav-panel.bz-fav-mob .bz-fav-head { align-items: center; padding-top: 4px; }
+.bz-fav-panel.bz-fav-mob .bz-fav-head { align-items: center; padding-top: var(--bz-space-xs); }
 .bz-fav-panel .bz-fav-mob-close {
   display: none; flex: none; position: absolute; right: 0; top: 50%; transform: translateY(-50%);
   width: 24px; height: 24px; border-radius: 7px; border: none; background: var(--chip); color: var(--chip-ink);
@@ -6299,117 +6319,218 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
 }
 .bz-fav-panel.bz-fav-mob .bz-fav-mob-close { display: flex; }
 
-/* —— 右键菜单（原型 .ctx 逐字） —— */
-.bz-fav-ctx {
-  position: fixed; z-index: 500; /* 原型兜底值，插件端以 topifyZ 为准 */
-  min-width: 168px; background: var(--menu); border: 1px solid var(--menu-bd); border-radius: 10px;
-  box-shadow: 0 10px 28px rgba(0,0,0,.28); padding: 5px;
-}
-/* .bz-fav-scope 前缀（(0,2,1)）：脱离与 core reset (0,1,1) 的同分顺序对抗（C1） */
-.bz-fav-scope .bz-fav-ctx button {
-  display: flex; align-items: center; justify-content: flex-start; gap: 9px; width: 100%; border: none; background: none; cursor: pointer;
-  font: 12.5px/1 var(--font-interface, 'Microsoft YaHei'); color: var(--menu-ink); padding: 8px 10px; border-radius: 7px; text-align: left;
-}
-.bz-fav-ctx button:hover { background: var(--menu-hover); }
-.bz-fav-ctx button .bz-ic { color: var(--ink-mut); }
-.bz-fav-ctx button.bz-fav-danger { color: var(--danger); }
-.bz-fav-ctx button.bz-fav-danger .bz-ic { color: var(--danger); }
-.bz-fav-ctx .bz-fav-ctx-sep { height: 1px; background: var(--ft-bd); margin: 4px 6px; }
-
-/* —— 移动端底部抽屉（原型 .sheet 逐字） —— */
-.bz-fav-sheet-mask {
-  position: fixed; inset: 0; z-index: 400; /* 原型兜底值，插件端以 topifyZ 为准 */
-  background: var(--mask); display: none; align-items: flex-end;
-}
-.bz-fav-sheet-mask.bz-fav-show { display: flex; }
-.bz-fav-sheet {
-  width: 100%; background: var(--pop); border-radius: 18px 18px 0 0; padding: 16px 18px 20px;
-  box-shadow: 0 -10px 30px rgba(0,0,0,.3);
-}
-.bz-fav-sheet .bz-fav-sh-head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 12px; }
-.bz-fav-sheet .bz-fav-sh-dot {
-  flex: none; width: 12px; height: 12px; border-radius: 50%; margin-top: 4px;
+/* —— 2026-09-11 收编 core/item-actions：自绘右键菜单与底部抽屉的全部壳/动作行规则退役——
+   壳/动作行/遮罩/关闭手势/防 Obsidian button 居中压盖归共享层（.bz-item-menu / .bz-item-sheet，
+   与 diary/belongings/cinema 同源）。域内只留磁点头皮肤（favSheetHead 产物，
+   抽屉挂 body 不在 .bz-fav-panel 内，直接类选择器）。 —— */
+.bz-fav-sh-head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: var(--bz-space-md); }
+.bz-fav-sh-dot {
+  flex: none; width: 12px; height: 12px; border-radius: 50%; margin-top: var(--bz-space-xs);
   background: radial-gradient(circle at 35% 30%, #fff 0 20%, var(--c) 75%); box-shadow: 0 1px 3px rgba(0,0,0,.2);
 }
-.bz-fav-sheet .bz-fav-sh-title { font-size: 14px; color: var(--ink-strong); }
-.bz-fav-sheet .bz-fav-sh-meta { font-size: 11px; color: var(--ink-faint); margin-top: 3px; }
-.bz-fav-sheet .bz-fav-sh-acts { display: flex; flex-direction: column; }
-.bz-fav-sheet .bz-fav-sh-acts button {
-  display: flex; align-items: center; justify-content: flex-start; gap: 10px; border: none; background: none; cursor: pointer;
-  font: 13px/1 var(--font-interface, 'Microsoft YaHei'); color: var(--menu-ink);
-  padding: 11px 6px; text-align: left; border-bottom: 1px solid var(--ft-bd);
-}
-.bz-fav-sheet .bz-fav-sh-acts button:last-child { border-bottom: none; }
-.bz-fav-sheet .bz-fav-sh-acts button .bz-ic { color: var(--ink-mut); }
-.bz-fav-sheet .bz-fav-sh-acts button.bz-fav-danger { color: var(--danger); }
-.bz-fav-sheet .bz-fav-sh-acts button.bz-fav-danger .bz-ic { color: var(--danger); }
+/* 头文字取 Obsidian 全局色：抽屉挂 body 不在 .bz-fav-scope 树内，域米色变量取不到
+   （留 var(--ink-strong) 会解析失败退化为继承）——也与「和别的域一致」诉求同向 */
+.bz-fav-sh-title { font-size: var(--bz-font-body); color: var(--text-normal); }
+.bz-fav-sh-meta { font-size: var(--bz-font-caption); color: var(--text-muted); margin-top: 3px; }
 
-/* —— 图标尺寸对齐 c5 基准（ADR-0101 1:1，恢复基准非改视觉） ——
-   抽屉动作行 15px（c5-linen-full.html 动作按钮 icon(a.ic, 15)）；卡片标签徽记 11px
-   （域内原型 icon(ic, 11)；c5 该处为 emoji，lucide 化后以域内原型为准）。
-   插件端 .bz-ic 默认 1em（动作行 13px 字号=13px）、tagb 挂 --xs 12px（!important），
-   故 tagb 覆盖须同带 !important；原型端 svg 直出本就同值，不受此块影响。 */
-.bz-fav-sheet .bz-ic { width: 15px; height: 15px; }
+/* —— 卡片标签徽记 11px（域内原型 icon(ic, 11)；c5 该处为 emoji，lucide 化后以域内原型为准）。
+   插件端 .bz-ic 默认 1em、tagb 挂 --xs 12px（!important），覆盖须同带 !important。 —— */
 .bz-fav-card .bz-fav-tagb .bz-ic { width: 11px !important; height: 11px !important; }
 
-/* —— 表单（原型 .mask + .form 逐字） —— */
-.bz-fav-form-mask {
-  position: fixed; inset: 0; z-index: 600; /* 原型兜底值，插件端以 topifyZ 为准 */
-  background: var(--mask); backdrop-filter: blur(var(--bz-overlay-blur)); display: flex; align-items: center; justify-content: center;
-}
-.bz-fav-form {
-  width: min(430px, calc(100vw - 32px)); max-height: 86vh; overflow: auto; background: var(--pop); border-radius: 14px; padding: 20px 22px 18px;
+/* —— 表单弹窗（壳已收编 core uiModal，issue 365 第 5 项）——
+   遮罩/z 发号/遮罩点击关/ESC 关全归 .bz-overlay-mask 单源；域内只保留亚麻卡皮
+   （逐值照抄旧 .bz-fav-form，与确认流程框 #__shared_confirm_popup__.bz-fav-flow-dialog 同取值：
+   --pop 底 / 14px 圆角 / 0 16px 44px .32 阴影）。限高滚动走 core popup 82vh 单源。
+   壳类锚 scope（bz-fav-form 由单源内容根携带，壳不重复挂——F15 单例守卫双计教训）。 */
+.bz-overlay-popup.bz-fav-scope {
+  width: min(430px, calc(100vw - 32px));
+  background: var(--pop); border-radius: 14px; padding: 20px 22px 18px;
   box-shadow: 0 16px 44px rgba(0,0,0,.32);
 }
-.bz-fav-form h2 { font-size: 15px; color: var(--pop-ink); margin: 0 0 14px; letter-spacing: 2px; }
-.bz-fav-form .bz-fav-fld { margin-bottom: 12px; }
-.bz-fav-form .bz-fav-fld label { display: block; font-size: 11.5px; color: var(--pop-mut); margin-bottom: 5px; }
-.bz-fav-form input, .bz-fav-form textarea {
-  width: 100%; border: 1px solid var(--fld-bd); border-radius: 8px; background: var(--fld-bg); color: var(--fld-ink);
+/* 表单卡皮（func-6 独立类名后两内容根同皮）：.bz-fav-form（收藏表单）与 .bz-fav-tageditor
+   （标签编辑弹窗）各自为内容根——tageditor 不再复用 .bz-fav-form 类（该类是单例守卫/ESC
+   判活的专用契约钩子，复用会误命中双层遮罩），皮选择器以 :is 组并列承载。 */
+:is(.bz-fav-form, .bz-fav-tageditor) h2 { font-size: var(--bz-font-emphasis); color: var(--pop-ink); margin: 0 0 14px; letter-spacing: 2px; }
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-fld { margin-bottom: var(--bz-space-md); }
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-fld label { display: block; font-size: 11.5px; color: var(--pop-mut); margin-bottom: 5px; }
+:is(.bz-fav-form, .bz-fav-tageditor) input, :is(.bz-fav-form, .bz-fav-tageditor) textarea {
+  width: 100%; border: 1px solid var(--fld-bd); border-radius: var(--bz-radius-sm); background: var(--fld-bg); color: var(--fld-ink);
   font: 12.5px/1.6 var(--font-interface, 'Microsoft YaHei'); padding: 7px 10px; outline: none;
 }
-.bz-fav-form textarea { resize: vertical; min-height: 52px; }
-.bz-fav-form input:focus, .bz-fav-form textarea:focus { border-color: var(--acc); }
-.bz-fav-form .bz-fav-pick { display: flex; flex-wrap: wrap; gap: 7px; }
-.bz-fav-form .bz-fav-pick button {
+:is(.bz-fav-form, .bz-fav-tageditor) textarea { resize: vertical; min-height: 52px; }
+:is(.bz-fav-form, .bz-fav-tageditor) input:focus, :is(.bz-fav-form, .bz-fav-tageditor) textarea:focus { border-color: var(--acc); }
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-pick { display: flex; flex-wrap: wrap; gap: 7px; }
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-pick button {
   border: 1px solid var(--fld-bd); background: var(--fld-bg); color: var(--chip-ink); border-radius: 99px; cursor: pointer;
   font: 11.5px/1 var(--font-interface, 'Microsoft YaHei'); padding: 6px 11px;
   display: inline-flex; align-items: center; gap: 5px;
 }
-.bz-fav-form .bz-fav-pick button.bz-fav-on { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
-.bz-fav-form .bz-fav-inline { display: flex; align-items: center; gap: 8px; }
-.bz-fav-form .bz-fav-fld-desc { font-size: 11px; color: var(--pop-faint); }
-.bz-fav-form .bz-fav-sw {
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-pick button.bz-fav-on { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-inline { display: flex; align-items: center; gap: var(--bz-space-sm); }
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-fld-desc { font-size: var(--bz-font-caption); color: var(--pop-faint); }
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-sw {
   position: relative; width: 32px; height: 18px; border-radius: 99px; background: #b9b2a2; cursor: pointer;
-  transition: background .15s; flex: none; display: inline-block;
+  transition: background var(--bz-dur-fast); flex: none; display: inline-block;
 }
-.bz-fav-form .bz-fav-sw::after {
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-sw::after {
   content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff;
-  box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: left .15s;
+  box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: left var(--bz-dur-fast);
 }
-.bz-fav-form .bz-fav-sw.bz-fav-on { background: var(--acc); }
-.bz-fav-form .bz-fav-sw.bz-fav-on::after { left: 16px; }
-.bz-fav-form .bz-fav-err { color: var(--danger); font-size: 12px; min-height: 16px; margin-bottom: 6px; }
-.bz-fav-form .bz-fav-btns { display: flex; justify-content: flex-end; gap: 9px; }
-.bz-fav-form .bz-fav-btns button {
-  cursor: pointer; font: 12.5px/1 var(--font-interface, 'Microsoft YaHei'); padding: 8px 16px; border-radius: 8px;
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-sw.bz-fav-on { background: var(--acc); }
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-sw.bz-fav-on::after { left: 16px; }
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-err { color: var(--danger); font-size: var(--bz-font-meta); min-height: 16px; margin-bottom: 6px; }
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-btns { display: flex; justify-content: flex-end; gap: 9px; }
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-btns button {
+  cursor: pointer; font: 12.5px/1 var(--font-interface, 'Microsoft YaHei'); padding: var(--bz-space-sm) var(--bz-space-lg); border-radius: var(--bz-radius-sm);
   border: 1px solid var(--fld-bd); background: var(--fld-bg); color: var(--chip-ink);
 }
-.bz-fav-form .bz-fav-btns button.bz-fav-pri { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
-.bz-fav-form .bz-fav-btns button:hover { filter: brightness(.97); }
-.bz-fav-form .bz-fav-btns button:disabled { opacity: .55; cursor: default; }
-.bz-fav-form .bz-fav-btns .bz-fav-ai-btn { display: inline-flex; align-items: center; gap: 5px; color: var(--acc); border-color: var(--acc); }
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-btns button.bz-fav-pri { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }@media (hover: hover) {
 
-/* —— 触屏 44px 触控档（磁贴行按钮；延续 issue 219 系列守护口径） —— */
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-btns button:hover { filter: brightness(.97); }
+}
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-btns button:disabled { opacity: .55; cursor: default; }
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-btns .bz-fav-ai-btn { display: inline-flex; align-items: center; gap: 5px; color: var(--acc); border-color: var(--acc); }
+
+/* —— 键盘焦点可见（UI-06）：卡片 role=button + 置顶开关 role=switch 的键盘路径需要可见焦点——
+   仅 :focus-visible（键盘导航）时出现，指针点击不出现，ADR-0101 静态视觉拍板不受影响 —— */
+.bz-fav-card:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+:is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-sw:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.bz-fav-tags button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+
+/* ==================== 确认流程框（core/flow-dialog，issue 291：全域子弹窗统一） ====================
+   三处确认框（归档收藏 / 删除收藏 / 放弃未保存草稿，ui.ts）经
+   openFlowDialog({ className: 'bz-fav-flow-dialog bz-fav-scope' }) 与
+   confirmDiscard(..., 'bz-fav-flow-dialog bz-fav-scope') 挂类。为什么必须是这两个类：
+     · `bz-fav-flow-dialog` = 本域确认框专属类，承载下面这套取值；
+     · `bz-fav-scope` = 私有 token（--pop/--pop-ink/--pop-mut/--acc/--fld-bd/--on-acc）的定义者，
+       不命中则本块所有变量解析失败 → 必须跟着传（与 openForm 的 uiModal popup 域类同口径）。
+   取值全部照抄同域表单弹窗 `.bz-fav-form`（styles.css:163 起），让「归档/删除/放弃」三个确认框
+   与「添加·编辑收藏」表单弹窗同皮。core 侧不再自持壳层，底/圆角/阴影由
+   `.bz-overlay-popup` 消费的 --bz-* token 起底，这里用域私有 token 覆写。
+   暗色无需另写块：`.theme-dark .bz-fav-scope`（styles.css:21）整组换 token，本块全引用变量自动反转。 */
+#__shared_confirm_popup__.bz-fav-flow-dialog {
+  /* 亚麻底 + 同款皮：逐值对齐 .bz-fav-form（background: var(--pop)、border-radius: 14px、
+     box-shadow: 0 16px 44px rgba(0,0,0,.32)）。core 流程框固定 24px 内边距与 400px 定宽保留不改。 */
+  background: var(--pop);
+  border-radius: 14px;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, .32);
+}
+/* 标题/正文：对齐表单弹窗 h2（--pop-ink + 字距 2px）与字段说明文字（--pop-mut / --pop-faint），
+   让确认框读起来就是同一张亚麻纸上的字。 */
+#__shared_confirm_popup__.bz-fav-flow-dialog h4 {
+  color: var(--pop-ink);
+  letter-spacing: 2px;
+}
+#__shared_confirm_popup__.bz-fav-flow-dialog p {
+  color: var(--pop-mut);
+}
+/* 按钮：逐值对齐表单弹窗 `.bz-fav-form .bz-fav-btns button`（描边 --fld-bd / 底 --fld-bg /
+   字 --chip-ink），主动作取 `.bz-fav-pri`（--acc 底 + --on-acc 字）——即「保存」那枚绿钮。
+   只给颜色不给几何：盒子高度/字号/圆角仍由 core 按组件库 .bz-btn 定（core/styles.css
+   #__shared_confirm_cancel__ 段），故此块不写 height/padding/font-size。 */
+#__shared_confirm_popup__.bz-fav-flow-dialog #__shared_confirm_cancel__ {
+  border-color: var(--fld-bd);
+  background: var(--fld-bg);
+  color: var(--chip-ink);
+}
+#__shared_confirm_popup__.bz-fav-flow-dialog #__shared_confirm_ok__ {
+  border-color: var(--acc);
+  background: var(--acc);
+  color: var(--on-acc);
+}
+/* 危险主动作（删除收藏）：core 的 .bz-flow-dialog--danger 会把主钮降回中性次级样式，
+   本域按同一口径把 danger 文字色交给域 token（--danger 亮暗自动切换），主钮保持亚麻纸底。 */
+#__shared_confirm_popup__.bz-fav-flow-dialog.bz-flow-dialog--danger #__shared_confirm_ok__ {
+  border-color: var(--fld-bd);
+  background: var(--fld-bg);
+  color: var(--danger);
+}
+
+/* —— 触屏 40/44px 触控档（UI-13：磁贴行 44px；表单标签胶囊/按钮排原 25/33px 低于 §8.2
+   40px 下限，coarse 档补齐——compact 列表用 padding 抬档，不走外扩） —— */
 @media (pointer: coarse) {
   .bz-fav-scope .bz-fav-tags button { min-height: 44px; }
+  :is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-pick button,
+  :is(.bz-fav-form, .bz-fav-tageditor) .bz-fav-btns button { min-height: 40px; }
 }
 
 /* —— 窄面板兜底：桌面窄窗下面板宽 <520px 时卡墙退化为移动同款双列平摊（容器查询，Obsidian Chromium 支持） —— */
 .bz-fav-panel { container-type: inline-size; }
 @container (max-width: 520px) {
-  .bz-fav-panel .bz-fav-board { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px 12px; align-items: start; }
+  .bz-fav-panel .bz-fav-board { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: var(--bz-space-lg) var(--bz-space-md); align-items: start; }
   .bz-fav-panel .bz-fav-card { width: auto; }
+}
+
+/* ==================== 标签管理（issue 363：设置面板「标签管理」组 custom 行 + 编辑弹窗） ====================
+ * 容器与弹窗均挂 .bz-fav-scope 取域私有 token（bz-fav-flow-dialog 同款通道：设置面板/弹窗
+ * 不在 .bz-fav-scope 树内，缺它变量全部解析失败）。UI 全域内自绘（ADR-0101：favorites 不引
+ * 组件库按钮）——编辑弹窗壳已收编 core uiModal（issue 365 第 5 项同口径），内容根沿用
+ * .bz-fav-form 同皮与 .bz-fav-btns 按钮行样式，这里只补图标钮/添加钮/图标胶囊；
+ * 暗色随 .theme-dark .bz-fav-scope 整组变量自动反转。 */
+
+/* —— 管理列表（custom 行容器） —— */
+.bz-fav-tagmgr { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.bz-fav-tagmgr-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 5px 6px 5px 12px;
+  border: 1px solid var(--fld-bd); border-radius: 10px; background: var(--fld-bg);
+}
+.bz-fav-tagmgr-ic { display: inline-flex; align-items: center; color: var(--chip-ink); flex: none; }
+.bz-fav-tagmgr-ic svg { width: 15px; height: 15px; }
+.bz-fav-tagmgr-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pop-ink); }
+.bz-fav-tagmgr-ops { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+/* 行内小图标钮（上移/下移/编辑/删除；域内自绘） */
+.bz-fav-tagmgr-btn {
+  width: 26px; height: 26px; border-radius: 7px; cursor: pointer; flex: none;
+  border: none; background: transparent; color: var(--chip-ink);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.bz-fav-tagmgr-btn svg { width: 14px; height: 14px; }@media (hover: hover) {
+
+.bz-fav-tagmgr-btn:hover { background: var(--menu-hover); color: var(--acc-deep); }
+}
+.bz-fav-tagmgr-btn:disabled { opacity: .35; cursor: default; }@media (hover: hover) {
+
+.bz-fav-tagmgr-btn:disabled:hover { background: transparent; color: var(--chip-ink); }
+.bz-fav-tagmgr-btn--danger:hover { color: var(--danger); }
+}
+/* 添加标签钮（虚线描边呼应面板磁贴行「新收藏」chip） */
+.bz-fav-tagmgr-add {
+  margin-top: 2px; cursor: pointer;
+  border: 1.5px dashed var(--chip-add-bd); background: transparent; color: var(--chip-add-ink);
+  border-radius: 99px; font: 12px/1 var(--font-interface, system-ui); padding: var(--bz-space-sm) 14px;
+  display: inline-flex; align-items: center; gap: 5px; align-self: flex-start;
+}
+.bz-fav-tagmgr-add svg { width: 13px; height: 13px; }@media (hover: hover) {
+
+.bz-fav-tagmgr-add:hover { color: var(--acc-deep); border-color: var(--acc); }
+}
+
+/* —— 编辑弹窗（壳收编 uiModal maxWidth 380 档；内容根 .bz-fav-form 同皮 + .bz-fav-btns 按钮行，补图标胶囊） —— */
+.bz-fav-tageditor-ics { display: flex; flex-wrap: wrap; gap: 6px; }
+.bz-fav-tageditor-ic {
+  width: 34px; height: 34px; border-radius: 9px; cursor: pointer;
+  border: 1px solid var(--fld-bd); background: var(--fld-bg); color: var(--chip-ink);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.bz-fav-tageditor-ic svg { width: 16px; height: 16px; }@media (hover: hover) {
+
+.bz-fav-tageditor-ic:hover { border-color: var(--acc); color: var(--acc-deep); }
+}
+.bz-fav-tageditor-ic.bz-fav-on { border-color: var(--acc); background: var(--acc); color: var(--on-acc); }
+
+/* ==================== 动效层注入件（src/favorites/motion.ts 消费，2026-09-22 动效批） ====================
+   只服务动效注入装饰：绝对定位 + 不吃事件 + aria-hidden（属性由 motion.ts 注入时挂），
+   演出完即摘——终态 UI 与无动效版逐像素一致。不改任何既有选择器的几何；
+   滚动条样式仍归 core 界级单源（ADR-0122），域内不自造。 */
+/* 收藏落定/复贴的光泽扫层：外层沿卡片圆角裁切，内层斜向亮带横扫（transform 驱动） */
+.bz-favm-sheen {
+  position: absolute; inset: 0; border-radius: inherit; overflow: hidden; pointer-events: none;
+}
+.bz-favm-sheen-band {
+  position: absolute; top: -20%; bottom: -20%; left: 0; width: 46%;
+  transform: translateX(-140%) skewX(-18deg);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.55), transparent);
 }
 /* ==================== 复习计划域样式（src/review/styles.css） ==================== */
 /* ==================== 复习设置（ticket 168 切片 02/04/05：主面板与卡片样式随面板删除，仅剩设置弹窗内名单区） ==================== */

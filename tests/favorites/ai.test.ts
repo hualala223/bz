@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FavoritesAIService } from '../../src/favorites/ai';
 import { requestUrl } from '../mock-obsidian-entry';
 import { setSettingsProvider } from '../../src/core/settings-provider';
+import { setAISettingsProvider, resetAIProviderCache } from '../../src/core/ai';
 
 describe('fetchGitHubInfo', () => {
   beforeEach(() => {
@@ -69,40 +70,54 @@ describe('fetchGitHubInfo', () => {
   });
 });
 
-describe('isAvailable（ticket 23：真实读取插件 AI 配置，替代恒真 !!this.ai）', () => {
-  afterEach(() => {
+describe('isAvailable（ticket 23：真实读取插件 AI 配置，替代恒真 !!this.ai）', async () => {
+  afterEach(async () => {
     // 避免残留设置影响同文件后续用例（保持 provider 已注入，getSettings 不抛）
     setSettingsProvider(() => ({ aiProvider: 'opencode-go', opencodeGoApiKey: 'sk-x' }) as any);
+    setAISettingsProvider(() => ({ aiProvider: 'opencode-go', opencodeGoApiKey: 'sk-x' }) as any);
+    resetAIProviderCache();
   });
 
-  it('未配置任何 key → false', () => {
+  it('未配置任何 key → false', async () => {
     setSettingsProvider(() => ({ aiProvider: 'opencode-go', opencodeGoApiKey: '' }) as any);
-    expect(new FavoritesAIService().isAvailable()).toBe(false);
+    setAISettingsProvider(() => ({ aiProvider: 'opencode-go', opencodeGoApiKey: '' }) as any);
+    resetAIProviderCache();
+    await expect(new FavoritesAIService().isAvailable()).resolves.toBe(false);
   });
 
-  it('opencode-go（默认 provider）配 key → true', () => {
+  it('opencode-go（默认 provider）配 key → true', async () => {
     setSettingsProvider(() => ({ aiProvider: 'opencode-go', opencodeGoApiKey: 'sk-o' }) as any);
-    expect(new FavoritesAIService().isAvailable()).toBe(true);
+    setAISettingsProvider(() => ({ aiProvider: 'opencode-go', opencodeGoApiKey: 'sk-o' }) as any);
+    resetAIProviderCache();
+    await expect(new FavoritesAIService().isAvailable()).resolves.toBe(true);
   });
 
-  it('provider 未显式设置 → 按默认 opencode-go 口径判定', () => {
+  it('provider 未显式设置 → 按默认 opencode-go 口径判定', async () => {
     setSettingsProvider(() => ({ opencodeGoApiKey: 'sk-o' }) as any);
-    expect(new FavoritesAIService().isAvailable()).toBe(true);
+    setAISettingsProvider(() => ({ opencodeGoApiKey: 'sk-o' }) as any);
+    resetAIProviderCache();
+    await expect(new FavoritesAIService().isAvailable()).resolves.toBe(true);
   });
 
-  it('deepseek 配 key → true', () => {
+  it('deepseek 配 key → true', async () => {
     setSettingsProvider(() => ({ aiProvider: 'deepseek', deepseekApiKey: 'sk-d' }) as any);
-    expect(new FavoritesAIService().isAvailable()).toBe(true);
+    setAISettingsProvider(() => ({ aiProvider: 'deepseek', deepseekApiKey: 'sk-d' }) as any);
+    resetAIProviderCache();
+    await expect(new FavoritesAIService().isAvailable()).resolves.toBe(true);
   });
 
-  it('deepseek 缺 key → 不判死（true）：legacy quickadd data.json 兜底交由 getAIProvider 运行时判定（审查建议 C）', () => {
+  it('deepseek 缺 key → 测试环境无 quickadd data.json 兜底文件 → false（生产侧 getAIProvider 运行时读兜底，口径单源 core/ai）', async () => {
     setSettingsProvider(() => ({ aiProvider: 'deepseek', deepseekApiKey: '' }) as any);
-    expect(new FavoritesAIService().isAvailable()).toBe(true);
+    setAISettingsProvider(() => ({ aiProvider: 'deepseek', deepseekApiKey: '' }) as any);
+    resetAIProviderCache();
+    await expect(new FavoritesAIService().isAvailable()).resolves.toBe(false);
   });
 
-  it('opencode-go 缺 key 时 deepseek key 不顶替（provider 独立判定）', () => {
+  it('opencode-go 缺 key 时 deepseek key 不顶替（provider 独立判定）', async () => {
     setSettingsProvider(() => ({ aiProvider: 'opencode-go', opencodeGoApiKey: '', deepseekApiKey: 'sk-d' }) as any);
-    expect(new FavoritesAIService().isAvailable()).toBe(false);
+    setAISettingsProvider(() => ({ aiProvider: 'opencode-go', opencodeGoApiKey: '', deepseekApiKey: 'sk-d' }) as any);
+    resetAIProviderCache();
+    await expect(new FavoritesAIService().isAvailable()).resolves.toBe(false);
   });
 
   // ---------- ticket 175：新三家门控按各自密钥独立判定 ----------
@@ -111,15 +126,21 @@ describe('isAvailable（ticket 23：真实读取插件 AI 配置，替代恒真 
     ['zhipu', 'zhipuApiKey'],
     ['siliconflow', 'siliconflowApiKey'],
     ['volcano-ark', 'volcanoArkApiKey'],
-  ] as const)('%s 缺 key → false，配 key → true（新家无 legacy 兜底）', (provider, key) => {
+  ] as const)('%s 缺 key → false，配 key → true（新家无 legacy 兜底）', async (provider, key) => {
     setSettingsProvider(() => ({ aiProvider: provider }) as any);
-    expect(new FavoritesAIService().isAvailable()).toBe(false);
+    setAISettingsProvider(() => ({ aiProvider: provider }) as any);
+    resetAIProviderCache();
+    await expect(new FavoritesAIService().isAvailable()).resolves.toBe(false);
     setSettingsProvider(() => ({ aiProvider: provider, [key]: 'sk-new' }) as any);
-    expect(new FavoritesAIService().isAvailable()).toBe(true);
+    setAISettingsProvider(() => ({ aiProvider: provider, [key]: 'sk-new' }) as any);
+    resetAIProviderCache();
+    await expect(new FavoritesAIService().isAvailable()).resolves.toBe(true);
   });
 
-  it('新三家缺 key 时别家 key 不顶替（provider 独立判定）', () => {
+  it('新三家缺 key 时别家 key 不顶替（provider 独立判定）', async () => {
     setSettingsProvider(() => ({ aiProvider: 'zhipu', opencodeGoApiKey: 'sk-o', deepseekApiKey: 'sk-d' }) as any);
-    expect(new FavoritesAIService().isAvailable()).toBe(false);
+    setAISettingsProvider(() => ({ aiProvider: 'zhipu', opencodeGoApiKey: 'sk-o', deepseekApiKey: 'sk-d' }) as any);
+    resetAIProviderCache();
+    await expect(new FavoritesAIService().isAvailable()).resolves.toBe(false);
   });
 });

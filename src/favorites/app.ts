@@ -29,6 +29,13 @@ export class FavoritesApp {
     this.dataManager = new DataManager(storagePath);
     this.aiService = new FavoritesAIService();
     this.initialized = true;
+    // 标签定义收口（issue 363 修订）：旧伴生文件一次性迁移 → data.json 设置键 favoriteTags；
+    // 无键/空/坏回退内置 9 类 seed（seed 不落盘，首次改动才写键）
+    try {
+      await this.dataManager.loadTags();
+    } catch (e) {
+      console.error('[favorites-loadTags]', e);
+    }
   }
 
   /** 打开收藏面板（toggle 语义在 ui.openPanel 内） */
@@ -45,9 +52,5 @@ export class FavoritesApp {
       initFavoritesUI(app, this.dataManager, this.aiService);
       openForm(null);
     }
-  }
-
-  getDataManager(): DataManager | null {
-    return this.dataManager;
   }
 }

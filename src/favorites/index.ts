@@ -5,26 +5,24 @@
  */
 import type { App } from 'obsidian';
 import { FavoritesApp } from './app';
-import { openForm, unloadFavoritesUI } from './ui';
+import { unloadFavoritesUI } from './ui';
 
-let initialized = false;
-
-/** 幂等初始化（懒加载） */
-export function ensureFavorites(app: App): void {
-  if (initialized) return;
-  initialized = true;
+/** 幂等初始化（懒加载；app.init 自身幂等，instance 重置由 unloadFavorites 负责） */
+/** 文件同步入口（引用同步 + 同名自动关联；本地保留功能，上游已摘） */
+export { ensureFavoritesFileSync, unloadFavoritesFileSync } from './file-sync';
+export function ensureFavorites(): void {
   void FavoritesApp.getInstance().init();
 }
 
 /** 打开收藏面板（favorites-open-panel 命令回调） */
 export function openFavoritesPanel(app: App): void {
-  ensureFavorites(app);
+  ensureFavorites();
   void FavoritesApp.getInstance().openPanel(app);
 }
 
 /** 添加收藏（favorites-add-item 命令回调，直接打开添加弹窗） */
 export function addFavoriteItem(app: App): void {
-  ensureFavorites(app);
+  ensureFavorites();
   FavoritesApp.getInstance().openAdd(app);
 }
 
@@ -32,9 +30,5 @@ export function addFavoriteItem(app: App): void {
 export function unloadFavorites(): void {
   unloadFavoritesUI();
   FavoritesApp.instance = null;
-  initialized = false;
 }
-
-/** 文件同步入口（引用同步 + 同名自动关联，见 ./file-sync；本地线保留入口页磁贴同款接线） */
-export { ensureFavoritesFileSync, unloadFavoritesFileSync } from './file-sync';
 

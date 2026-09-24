@@ -459,22 +459,14 @@ describe('归物本设置 schema（⚙️ 收敛设置面板，ticket 177）', (
     expect(row.options.map((o: any) => o.value)).toEqual(['', 'using', 'idle', 'sold', 'discard']);
   });
 
-  it('移动端：schema 暴露「移动端默认全屏」toggle，直绑 belongingsMobileDefaultFullscreen', () => {
-    const prevMobile = MockPlatform.isMobile;
-    try {
-      MockPlatform.isMobile = true;
-      const schema = belongingSettingsSchema();
-      expect(schema.groups[2].visibleWhen!(settings as any)).toBe(true);
-      const row = schema.groups[2].rows[0] as any;
-      expect(row.name).toBe('移动端默认全屏');
-      expect(row.binding).toMatchObject({ key: 'belongingsMobileDefaultFullscreen' });
-    } finally {
-      MockPlatform.isMobile = prevMobile;
-    }
+  it('移动端全屏行已随上游外观组范式退役（favoritesMobileDefaultFullscreen 键保留兼容，schema 不再暴露）', () => {
+    const schema = favoritesSettingsSchema();
+    const all = schema.groups.flatMap((g) => g.rows as any[]);
+    expect(all.find((r) => r.binding?.key === 'favoritesMobileDefaultFullscreen')).toBeUndefined();
   });
 });
 
-describe('收藏本设置 schema（⚙️ 收敛设置面板，ticket 177）', () => {
+describe('收藏本设置 schema（上游移植批 3b 终态：外观/显示/标签管理 + 移动端）', () => {
   let settings: Record<string, unknown>;
   beforeEach(() => {
     resetObsidianMocks();
@@ -484,26 +476,19 @@ describe('收藏本设置 schema（⚙️ 收敛设置面板，ticket 177）', (
     setSettingsSaver(async () => {});
   });
 
-  it('桌面端：显示组随 favoritesTimeFormat 退役（ADR-0101），仅剩移动端组', () => {
+  it('组结构：外观（choiceCards 布局/主题）+ 显示（打开默认筛选/默认排序）+ 标签管理', () => {
     const schema = favoritesSettingsSchema();
-    expect(schema.groups).toHaveLength(1);
-    expect(schema.groups[0].name).toBe('移动端');
-    const rows = schema.groups[0].rows as any[];
-    expect(rows.find((r) => r.binding?.key === 'favoritesTimeFormat')).toBeUndefined();
-    expect(rows.find((r) => r.binding?.key === 'favoritesSortKey')).toBeUndefined();
+    const names = schema.groups.map((g) => g.name);
+    expect(names).toContain('外观');
+    expect(names).toContain('显示');
+    expect(names).toContain('标签管理');
+    const all = schema.groups.flatMap((g) => g.rows as any[]);
+    expect(all.find((r) => r.binding?.key === 'favoritesSkin')).toBeTruthy();
+    expect(all.find((r) => r.binding?.key === 'favoritesOpenFilter')).toBeTruthy();
+    expect(all.find((r) => r.binding?.key === 'favoritesDefaultSort')).toBeTruthy();
+    // 旧键零残留
+    expect(all.find((r) => r.binding?.key === 'favoritesTimeFormat')).toBeUndefined();
+    expect(all.find((r) => r.binding?.key === 'favoritesSortKey')).toBeUndefined();
   });
 
-  it('移动端：schema 暴露「移动端默认全屏」toggle，直绑 favoritesMobileDefaultFullscreen', () => {
-    const prevMobile = MockPlatform.isMobile;
-    try {
-      MockPlatform.isMobile = true;
-      const schema = favoritesSettingsSchema();
-      expect(schema.groups[0].visibleWhen!(settings as any)).toBe(true);
-      const row = schema.groups[0].rows[0] as any;
-      expect(row.name).toBe('移动端默认全屏');
-      expect(row.binding).toMatchObject({ key: 'favoritesMobileDefaultFullscreen' });
-    } finally {
-      MockPlatform.isMobile = prevMobile;
-    }
-  });
 });

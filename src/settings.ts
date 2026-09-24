@@ -381,6 +381,16 @@ export default interface BzSettings {
   /** 🎨 内容首页外观占位（issue 246 同范式）：布局=活动河单卡，主题=米白单卡 */
   homeLayout: string;
   homeSkin: string;
+  /** 🎨 收藏本面板布局皮肤（上游外观组范式；当前仅 default） */
+  favoritesSkin: string;
+  /** 🎨 收藏本主题（当前仅 linen 亚麻） */
+  favoritesSkinTheme: string;
+  /** 收藏本：打开面板默认筛选（上游 issue 296）：''=全部 / '@last'=记住上次 / 标签 label；非法值回落全部 */
+  favoritesOpenFilter: string;
+  /** 收藏本：上次筛选记忆（上游 issue 296；closePanel 写回；仅 favoritesOpenFilter='@last' 时消费） */
+  favoritesLastFilter: string;
+  /** 收藏本：默认排序（上游 issue 296）：new/old/title；置顶恒最前；非法值回落 new */
+  favoritesDefaultSort: string;
 
   // ===== 🎮 游戏库（gameshelf 域，上游 issue 368：Steam 直连自动拉库，一作一笔记）=====
   /** 📁 游戏文件夹（游戏库域数据源；缺省回落「我的/游戏」） */
@@ -762,6 +772,11 @@ export const DEFAULT_SETTINGS: BzSettings = {
   // 三类中前三类开 / 默认今天 / 显示时刻 / 预告卡开
   homeLayout: 'default',
   homeSkin: 'cream',
+  favoritesSkin: 'default',
+  favoritesSkinTheme: 'linen',
+  favoritesOpenFilter: '',
+  favoritesLastFilter: '',
+  favoritesDefaultSort: 'new',
 
   // 游戏库（gameshelf，上游 issue 368；目录缺省「我的/游戏」）
   gameshelfFolderPath: '我的/游戏',

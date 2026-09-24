@@ -15,7 +15,14 @@ import path from 'node:path';
 import { PREVIEW_DOMAINS } from '../../scripts/build-preview.mjs';
 
 const ROOT = process.cwd();
-const ALLOWED_EXTERNAL = ['../core/ui/str', '../core/domain-icons'];
+const ALLOWED_EXTERNAL = [
+  '../core/ui/str',
+  '../core/domain-icons',
+  // 上游 issue 363：标签定义迁 data.json 设置键，favorites render 经 config 读 getTags——
+  // settings-provider（注入式读层）/storage（路径纯函数）均零 obsidian 依赖，纯度语义（禁 obsidian/npm 包）不变
+  '../core/settings-provider',
+  '../core/storage',
+];
 
 /** 解析相对说明符 → 文件路径（带 .ts / /index.ts 消歧；解析失败回传补 .ts 便于报错） */
 function resolveSpec(fromFile: string, spec: string): string {
