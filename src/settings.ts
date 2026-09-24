@@ -326,6 +326,8 @@ export default interface BzSettings {
   clipbookSkin: string;
   /** 🎨 剪藏本面板主题（新闻纸皮单源 = src/clipbook/styles.css，未知值回落新闻纸） */
   clipbookSkinTheme: string;
+  /** 📎 剪藏图片本地化落地目录（上游 issue 329；空 = 关闭本地化） */
+  clipbookImageFolder: string;
 
   // ===== 📥 日常收集（collect 域，issue 246：QuickAdd「日常收集」宏换血）=====
   /** 📂 目标文件夹（收集 md 统一存放目录，vault 根相对） */
@@ -786,6 +788,7 @@ export const DEFAULT_SETTINGS: BzSettings = {
   favoritesOpenFilter: '',
   favoritesLastFilter: '',
   favoritesDefaultSort: 'new',
+  clipbookImageFolder: '',
 
   // 游戏库（gameshelf，上游 issue 368；目录缺省「我的/游戏」）
   gameshelfFolderPath: '我的/游戏',

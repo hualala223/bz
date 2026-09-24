@@ -15,18 +15,18 @@
  * - UP 名单列表：组内只留「管理」按钮行（计数在 desc），增删/配置在独立 UP 主弹窗
  *   （renderPanelSchema 渲染进自建 overlay，形态不变）。
  */
-import { requestUrl } from 'obsidian';
-import { notice } from '../core/notice';
+import { httpGetText, requestUrlAsFetch } from '../core/http';
+import { notice, notifySaveError } from '../core/notice';
 import { numStrBinding } from '../core/settings-common';
 import { createOverlay } from '../core/dom';
 import { escManager } from '../core/esc-manager';
 import type { SettingsRow, SettingsRowContext, SettingsSchema } from '../core/settings-schema';
 import {
-  readDataSourceState, writeSources, addBilibiliUp, removeBilibiliUp,
+  readDataSourceState, writeSources, addBilibiliUp, removeBilibiliUp, writeBilibiliUpInfo,
   writeBilibiliMaxItems, addRssFeed, removeRssFeed, writeFetchInterval, type DataSourceState,
 } from './news-source-settings';
 import { fetchNowNews, notifyManualFetchResult, localDatetime } from './news-fetcher';
-import { resolveUidFromInput, extractFeedTitleFromXml, looksLikeFeedXml, normalizeRssFeedUrl, normalizeFetchIntervalMin, FETCH_INTERVAL_STEPS, type BilibiliUpInfo, type RssFeed } from './news-data';
+import { resolveUidFromInputDetailed, fetchUpProfile, extractFeedTitleFromXml, looksLikeFeedXml, normalizeRssFeedUrl, normalizeFetchIntervalMin, FETCH_INTERVAL_STEPS, type BilibiliUpInfo, type RssFeed } from './news-data';
 
 /** 状态盒（构建期快照的可变副本）：三函数绑定 get/set 读它，save 经数据层落盘 */
 type DataSourceBox = DataSourceState;
@@ -120,7 +120,7 @@ export function dataSourceGroupRows(init: DataSourceState): SettingsRow[] {
           if (!(await writeBilibiliMaxItems(box.bilibiliMaxItems))) notifyWriteFailed('B站抓取条数');
         },
       } },
-    { type: 'number', name: '文章保留天数', desc: '已读与跳过文章的数据超期自动清理，默认 30 天', min: 1, step: 1,
+    { type: 'number', name: '文章保留天数', desc: '已读与跳过文章的数据超期自动清理，默认 30 天', min: 1, max: 3650, step: 1,
       binding: numStrBinding('newsRetentionUnsavedDays', 30) },
   ];
 }
@@ -133,9 +133,10 @@ function setRowDesc(ctx: SettingsRowContext, text: string): void {
 }
 
 /** C4：设置/名单写失败提示——news.json 损坏或读盘失败时数据层放弃落盘（F8 保护），
- *  调用方必须告知「改了但没存上」，不再给假成功反馈（正文无 emoji，类型用既有 error 档） */
+ *  调用方必须告知「改了但没存上」，不再给假成功反馈。
+ *  文案收编 core notifySaveError 单源（review-deep 一致#3）：保存失败（what）：原因 */
 function notifyWriteFailed(what: string): void {
-  notice(`写入失败（${what}）：news.json 不可读或已损坏`, 'error');
+  notifySaveError(new Error('news.json 不可读或已损坏'), what);
 }
 
 // ===== UP 主名单管理弹窗（ticket 126 + 127）=====
@@ -152,8 +153,9 @@ export interface UpManagerSchemaOptions {
   onChanged: () => void;
 }
 
-/** UP 弹窗级可变状态盒：添加/名单操作共享（schema 每次打开重建，状态随弹窗生命周期） */
-interface UpManagerBox {
+/** UP 弹窗级可变状态盒：添加/名单操作共享（schema 每次打开重建，状态随弹窗生命周期）；
+ *  导出供 openUpManagerModal 持有——打开即补资料的刷新链要操作同一个字盒（2026-09-22） */
+export interface UpManagerBox {
   inputValue: string;
   ups: string[];
   upInfo: Record<string, BilibiliUpInfo>;
@@ -164,10 +166,12 @@ interface UpManagerBox {
  * Cookie 可选行与「添加 UP 主」灰字描述随 2026-09-12 用户拍板移除）：
  * 添加行 = text + 行内按钮（actions，渲染器统一实现）；名单 = 通用 list 行
  * （头像/主副文案/移除，items 函数形式每次移除后以字盒为基底重建）。
+ * 资料（名字/头像）来源两路（2026-09-22）：添加时与打开弹窗时对缺资料条目直查
+ * fetchUpProfile（web-interface/card）回填；抓取轮从动态条目抽的 extractUpInfo 照旧覆盖。
  * 原「每日简报」组随每日简报退役删除（ADR-0121）；RSS 订阅管理在独立弹窗（rssManagerSettingsSchema）。
  */
-export function upManagerSettingsSchema(opts: UpManagerSchemaOptions): SettingsSchema {
-  const box: UpManagerBox = {
+export function upManagerSettingsSchema(opts: UpManagerSchemaOptions, boxIn?: UpManagerBox): SettingsSchema {
+  const box: UpManagerBox = boxIn ?? {
     inputValue: '',
     ups: [...opts.ups],
     upInfo: { ...opts.upInfo },
@@ -190,7 +194,7 @@ export function upManagerSettingsSchema(opts: UpManagerSchemaOptions): SettingsS
             actions: [{
               text: '添加',
               cta: true,
-              onClick: (value) => addUpUid(value, box, opts),
+              onClick: (value, ctx) => addUpUid(value, box, opts, ctx),
             }],
           },
           {
@@ -200,6 +204,7 @@ export function upManagerSettingsSchema(opts: UpManagerSchemaOptions): SettingsS
               key: uid,
               label: upDisplayName(uid, box.upInfo[uid]),
               sub: `UID ${uid}`,
+              // 头像来自 bilibiliUpInfo（添加时/打开弹窗时直查回填，或抓取轮从动态条目抽）
               imageUrl: box.upInfo[uid]?.avatar,
             })),
             emptyText: '暂无跟踪 UP 主，在上方粘贴主页链接或视频链接添加',
@@ -233,15 +238,52 @@ function upDisplayName(uid: string, info?: BilibiliUpInfo): string {
   return info && info.name ? info.name : `UP ${uid}`;
 }
 
-/** 添加动作：解析 UID 入库（去重），回填字盒并联动外部刷新 */
-async function addUpUid(raw: string | undefined, box: UpManagerBox, opts: UpManagerSchemaOptions): Promise<void> {
+/** 资料回填结果（C4 口径：网络取不到与写盘失败分型，调用方给准确提示） */
+type ProfileBackfillOutcome = 'filled' | 'none' | 'write-failed';
+
+/** 本会话已试过资料回填的 uid（成功与否都记账——取不到的 uid 不重复打接口） */
+const profileTried = new Set<string>();
+
+/**
+ * 后台补 UP 资料（名字/头像，2026-09-22）：只补缺的条目，每个 uid 每会话最多查一次；
+ * 取到即写盘（段级合并只动该 uid）+ 重渲列表，头像/名字当场就位。
+ * 逐条串行（B站接口风控敏感，不并发）；单条失败继续下一条。
+ */
+async function backfillUpProfiles(uids: string[], box: UpManagerBox, refresh: () => void): Promise<ProfileBackfillOutcome> {
+  let filled = false;
+  let writeFailed = false;
+  for (const uid of uids) {
+    if (!uid || profileTried.has(uid)) continue;
+    if (box.upInfo[uid]?.name && box.upInfo[uid]?.avatar) { profileTried.add(uid); continue; }
+    profileTried.add(uid);
+    const info = await fetchUpProfile(uid);
+    if (!info) continue; // 网络失败/风控/查无此人：抓取轮 extractUpInfo 还会兜底
+    if (!(await writeBilibiliUpInfo(uid, info))) { writeFailed = true; continue; }
+    box.upInfo[uid] = { ...box.upInfo[uid], ...info };
+    filled = true;
+  }
+  if (filled) refresh(); // 列表重建读到字盒里的新资料（头像 + 名字）
+  if (filled) return 'filled';
+  return writeFailed ? 'write-failed' : 'none';
+}
+
+/** 添加动作：解析 UID 入库（去重），回填字盒并联动外部刷新；入库后直查资料（名字/头像）。
+ *  ctx 用于资料到位后重渲列表——添加本身不 await 这次网络查询，慢网不卡列表刷新
+ *  （ctx 缺省 = 单测直调场景：不重渲，其余链路不变）。 */
+async function addUpUid(raw: string | undefined, box: UpManagerBox, opts: UpManagerSchemaOptions, ctx?: SettingsRowContext): Promise<void> {
   const input = String(raw || '').trim();
   if (!input) return;
-  const uid = await resolveUidFromInput(input);
-  if (!uid) {
+  // 新-8：网络失败与「无法识别」分文案（resolveUidFromInputDetailed 由批 B 落地）
+  const res = await resolveUidFromInputDetailed(input);
+  if (res.networkFailed) {
+    notice('网络读取 B站信息失败，请检查网络后重试', 'error');
+    return;
+  }
+  if (!res.uid) {
     notice('无法识别 UID，请粘贴 space.bilibili.com 内的主页链接', 'error');
     return;
   }
+  const uid = res.uid;
   // C4：数据层结果四分（已写入/已存在/入参非法/读盘失败），各给准确文案——不再把读盘失败说成「已在名单中」
   const outcome = await addBilibiliUp(uid);
   switch (outcome) {
@@ -250,6 +292,10 @@ async function addUpUid(raw: string | undefined, box: UpManagerBox, opts: UpMana
       box.ups = [...box.ups, uid];
       opts.onChanged();
       notice(`已添加 UP 主 ${uid}`, 'success');
+      void backfillUpProfiles([uid], box, ctx?.refreshVisibility ?? (() => {})).then((r) => {
+        if (r === 'none') notice('网络读取 UP 主资料失败，抓取时会自动回填', 'info');
+        else if (r === 'write-failed') notifyWriteFailed('回填 UP 主资料');
+      });
       return;
     case 'exists':
       notice('该 UP 主已在名单中', 'info');
@@ -268,6 +314,8 @@ async function addUpUid(raw: string | undefined, box: UpManagerBox, opts: UpMana
  * 首开在动态加载 renderer 期间 mask 尚未挂 DOM，只查 mask 存在性会漏掉同帧连点（叠出第二层）。
  */
 let upManagerOpen = false;
+/** close 句柄外提（CB10/A1）：域卸载兜底与 closeAllOverlays 都能收口闭包内的 close */
+let upManagerClose: (() => void) | null = null;
 
 /** 打开 UP 主名单管理弹窗：自建 overlay + 面板通用组件渲染（z 序与叠加行为零变化）。
  *  C25：单例守卫——已开或正在打开即直接返回，消灭连点叠层（各层各持 esc 句柄、遮罩叠遮罩、Esc 只关最上层） */
@@ -276,17 +324,21 @@ async function openUpManagerModal(opts: { ups: string[]; upInfo: Record<string, 
   upManagerOpen = true;
   let handle: { unregister(): void } | null = null;
   function close(): void {
+    upManagerClose = null;
     mask.remove();
     popup.remove();
     if (handle) handle.unregister();
     upManagerOpen = false;
   }
-  const { mask, popup } = createOverlay({
+  const { mask, popup, registerClose } = createOverlay({
     maskId: 'bz-up-manager-mask',
     popupId: 'bz-up-manager-popup',
     maxWidth: 560, // ticket 170 方案 A：加宽让描述换行，文字不再拥挤
     onMaskClick: close,
   });
+  // CB10/A1：close 登记进 core 存活表（closeAllOverlays 全域兜底可达）+ 域卸载外提句柄
+  upManagerClose = close;
+  registerClose(close);
 
   const header = document.createElement('div');
   header.className = 'bz-settings-header';
@@ -298,17 +350,26 @@ async function openUpManagerModal(opts: { ups: string[]; upInfo: Record<string, 
   const content = document.createElement('div');
   content.className = 'bz-settings-content';
 
+  /** 弹窗字盒：schema 与「打开即补资料」共用同一份——回填写进去，列表重建才看得到 */
+  const box: UpManagerBox = { inputValue: '', ups: [...opts.ups], upInfo: { ...opts.upInfo } };
+
   try {
     // 内容 = 面板通用渲染器（renderPanelSchema，行/组卡与设置面板同组件单源）；
     // 懒加载解析跨域环（settings-panel schemaLoaders ←→ 本域管理弹窗，函数级延迟解析）
     const { renderPanelSchema } = await import('../settings-panel/renderer');
-    renderPanelSchema(content, upManagerSettingsSchema(opts));
+    const { refresh } = renderPanelSchema(content, upManagerSettingsSchema(opts, box));
+    // 打开即补缺资料（存量名单的 uid 多半只有 uid、没有名字/头像）：后台逐条串行查，
+    // 查到即写盘 + 重渲列表；失败静默（抓取轮 extractUpInfo 还会兜底，不打扰评审）
+    void backfillUpProfiles(box.ups, box, refresh);
   } catch (e) {
     // 打开失败（动态加载/渲染异常）：close 复位守卫并清理半成品——否则单例标志滞留，「管理」此后无响应
     close();
     throw e;
   }
 
+  // 渲染期间域已收口（unloadClipbook/closeAllOverlays 走过 close）→ 不再挂载 DOM/esc 层
+  // （防卸载后弹窗复活成无 esc 句柄的孤儿浮层）
+  if (!upManagerOpen) return;
   popup.appendChild(header);
   popup.appendChild(content);
   document.body.appendChild(mask);
@@ -324,7 +385,8 @@ async function openUpManagerModal(opts: { ups: string[]; upInfo: Record<string, 
 }
 
 // ===== RSS 订阅管理弹窗（ADR-0121）=====
-// 与 UP 主管理同范式的独立 overlay（bz-rss-manager-mask/-popup，z 序 10100/10101）；
+// 与 UP 主管理同范式的独立 overlay（bz-rss-manager-mask/-popup，z-index 经 core createOverlay
+// 动态发号 ADR-0067，不再是静态档）；
 // 添加源时 requestUrl 试拉校验并预取 feed 自带标题（守护 30 分钟才拉一轮，坏 URL 当场拦截）。
 
 /** RSS 弹窗 schema 构建入参（lint 注册时以最小参数调用即可） */
@@ -340,23 +402,12 @@ interface RssManagerBox {
 }
 
 /** 试拉 RSS：取 XML 原文，须带 feed 结构标记（<rss>/<feed>/<RDF>，拦截恰好含 <title> 的
- *  普通 HTML 网页）再提取 feed 自带标题；10s 超时/非 2xx/非 feed 结构/解析不出 → null。
- *  导出（C23 回归测试用；生产仅 addRssFeedUrl 消费） */
+ *  普通 HTML 网页）再提取 feed 自带标题；10s 超时/非 2xx/网络错/非 feed 结构/解析不出 → null。
+ *  超时壳收编 core/http（issue 365）；导出（C23 回归测试用；生产仅 addRssFeedUrl 消费） */
 export async function fetchRssFeedTitle(url: string): Promise<string | null> {
-  try {
-    const timer = new Promise<null>((resolve) => setTimeout(() => resolve(null), 10000));
-    const req = requestUrl({ url, method: 'GET' }).then((resp) => {
-      if (resp.status < 200 || resp.status >= 300) return null;
-      if (!looksLikeFeedXml(resp.text)) return null;
-      return extractFeedTitleFromXml(resp.text);
-    });
-    // C23：超时胜出后 req 若迟到 reject 会成为 unhandled rejection——挂空 catch 兜底
-    //（race 尚在等待时 rejection 仍由下方 await 经外层 try 捕获，行为不变）
-    req.catch(() => {});
-    return await Promise.race([req, timer]);
-  } catch {
-    return null;
-  }
+  const xml = await httpGetText(url, { timeoutMs: 10000, fetchImpl: requestUrlAsFetch() });
+  if (!xml || !looksLikeFeedXml(xml)) return null;
+  return extractFeedTitleFromXml(xml);
 }
 
 /**
@@ -463,6 +514,8 @@ async function addRssFeedUrl(raw: string | undefined, box: RssManagerBox, opts: 
 
 /** C25：RSS 管理弹窗单例标志（语义同 upManagerOpen：首开异步加载期间 mask 未挂 DOM，同帧连点靠它拦住） */
 let rssManagerOpen = false;
+/** close 句柄外提（CB10/A1）：语义同 upManagerClose */
+let rssManagerClose: (() => void) | null = null;
 
 /** 打开 RSS 订阅管理弹窗：自建 overlay + 面板通用组件渲染（范式同 UP 主管理弹窗）。
  *  C25：单例守卫——已开或正在打开即直接返回，消灭连点叠层 */
@@ -471,17 +524,21 @@ async function openRssManagerModal(opts: { feeds: RssFeed[]; onChanged: () => vo
   rssManagerOpen = true;
   let handle: { unregister(): void } | null = null;
   function close(): void {
+    rssManagerClose = null;
     mask.remove();
     popup.remove();
     if (handle) handle.unregister();
     rssManagerOpen = false;
   }
-  const { mask, popup } = createOverlay({
+  const { mask, popup, registerClose } = createOverlay({
     maskId: 'bz-rss-manager-mask',
     popupId: 'bz-rss-manager-popup',
     maxWidth: 560,
     onMaskClick: close,
   });
+  // CB10/A1：同 UP 主弹窗——close 登记 core 存活表 + 域卸载外提句柄
+  rssManagerClose = close;
+  registerClose(close);
 
   const header = document.createElement('div');
   header.className = 'bz-settings-header';
@@ -502,6 +559,8 @@ async function openRssManagerModal(opts: { feeds: RssFeed[]; onChanged: () => vo
     throw e;
   }
 
+  // 渲染期间域已收口 → 不挂载 DOM/esc（同 UP 主弹窗口径）
+  if (!rssManagerOpen) return;
   popup.appendChild(header);
   popup.appendChild(content);
   document.body.appendChild(mask);
@@ -514,4 +573,14 @@ async function openRssManagerModal(opts: { feeds: RssFeed[]; onChanged: () => vo
     close,
   });
   handle = handleReg;
+}
+
+/**
+ * 域卸载兜底（CB10/A1，unloadClipbook 调用）：UP/RSS 管理弹窗开着时走各自 close 幂等收口
+ * （DOM 摘除 + esc 注销 + 单例旗标复位）；未开时 no-op。main.ts closeAllOverlays 全域兜底
+ * 之外的第二道——两道都以 close 收尾，先到先收、后到空转。
+ */
+export function unloadManagerModals(): void {
+  upManagerClose?.();
+  rssManagerClose?.();
 }

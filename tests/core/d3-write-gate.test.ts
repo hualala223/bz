@@ -30,6 +30,10 @@ const WHITELIST: Array<{ file: RegExp; reason: string; /** 防回归哨兵：预
     reason: '契约本体：三原语（串行队列/段写/留档）的原始 vault IO 实现集中于此，是豁免的定义基准',
   },
   {
+    file: /^src\/clipbook\/image-save\.ts$/,
+    reason: 'clipbook 域（上游 issue 329 移植批 3e）：剪藏图片/正文图片本地化写——二进制落 vault 与覆盖前回写为用户文档写，非 JSON 状态写',
+  },
+  {
     file: /^src\/gameshelf\/(notes|posters)\.ts$/,
     reason: 'gameshelf 域（上游 issue 368 移植批 2）：notes.ts vault.create 为「一作一笔记」用户文档写、posters.ts writeBinary 为 Steam 媒体二进制落地（封面/图标缓存）——均非 JSON 状态写，不适用三原语契约',
   },

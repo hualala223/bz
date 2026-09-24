@@ -8,7 +8,8 @@
  * - 剪藏目录扫描（目录不存在 → null 区分空态）。
  */
 import { readNewsData, writeNewsDataMerged, migrateLegacyStats, applyRetention, normalizeRetentionDays, statsHasData, type NewsWriteIntent } from './news-data';
-import { readClipbookData } from './data';
+import { readClipbookData, emptySidecar } from './data';
+import { clearArticleTracking } from './anchor';
 import { scanClipDirectory, type ClipNote } from './scan';
 import { clipUrlSet } from './store';
 import { articleKeyOf } from './constants';
@@ -27,11 +28,9 @@ export interface PanelData {
   upInfo: Record<string, { name?: string; avatar?: string }>;
 }
 
-/** 剪藏目录（读设置，去尾斜杠） */
-export function clipDir(): string {
-  const s = tryGetSettings() as any;
-  return ((s && s.articleDirectory) || '归档/网页剪藏').replace(/\/+$/, '');
-}
+// 剪藏目录：域内单源在 save.clipDir（尾斜杠归一 + 缺省串一处，CB4/A3），此处转发保旧导出位
+import { clipDir } from './save';
+export { clipDir };
 
 /** 整盘装载（news 保留清理 + 迁移 + 侧写 + 剪藏扫描）→ 结果写入 M */
 export async function readNewsAndSidecar(): Promise<PanelData> {
@@ -41,16 +40,18 @@ export async function readNewsAndSidecar(): Promise<PanelData> {
     M.articles = [];
     M.clipNotes = null;
     M.clipUrls = new Set();
-    M.sidecar = { articleOverrides: {}, savedArchive: [], order: [] };
+    M.sidecar = emptySidecar();
     M.upInfo = {};
+    M.stats = { totalRead: 0, totalSaved: 0, totalSkipped: 0, byPlatform: {}, byDate: {} }; // CB9：missing 分支复位统计脚注（state.ts 同款字面量），不留上一会话旧值
     return { status: 'missing', articles: [], sidecar: M.sidecar, clipNotes: null, clipUrls: M.clipUrls, upInfo: {} };
   }
   if (!res.ok) {
     M.articles = [];
     M.clipNotes = null;
     M.clipUrls = new Set();
-    M.sidecar = { articleOverrides: {}, savedArchive: [], order: [] };
+    M.sidecar = emptySidecar();
     M.upInfo = {};
+    M.stats = { totalRead: 0, totalSaved: 0, totalSkipped: 0, byPlatform: {}, byDate: {} }; // CB9：corrupt 分支复位统计脚注
     return { status: 'corrupt', articles: [], sidecar: M.sidecar, clipNotes: null, clipUrls: M.clipUrls, upInfo: {} };
   }
 
@@ -68,6 +69,8 @@ export async function readNewsAndSidecar(): Promise<PanelData> {
     const kept = new Set(cleaned.map((a: any) => articleKeyOf(a)));
     removedKeys = (data.articles || []).map((a: any) => articleKeyOf(a)).filter((k: string) => !kept.has(k));
     data = { ...data, articles: cleaned };
+    // 被清理条目的侧写三段（marks/savedImages/pendingSource）一并清掉，不随清理永久残留（issue 333 评审）
+    for (const k of removedKeys) void clearArticleTracking(k).catch(() => { /* 残留无害，不阻断装载 */ });
   }
   // 旧 stats 迁移（stats 段无真实数据时并入旧 news-stats.json 一次）
   let statsChanged = false;
@@ -94,6 +97,11 @@ export async function readNewsAndSidecar(): Promise<PanelData> {
   const clipNotes = await scanClipDirectory(clipDir(), {
     vault: getApp().vault,
   });
+  // 效率#2：被契约拒收的剪藏不再凭空蒸发——每次装载 warn 一次（含路径清单，控制台可定位；
+  // 面板内可视化呈现留给 UI 侧接线）
+  if (clipNotes && clipNotes.rejected > 0) {
+    console.warn(`[剪藏本] 剪藏目录有 ${clipNotes.rejected} 篇无法识别（缺 url/created frontmatter）`, clipNotes.rejectedPaths);
+  }
   const clipUrls = clipUrlSet(clipNotes || []);
 
   M.articles = data.articles;

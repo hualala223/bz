@@ -2,46 +2,53 @@
  * clipbook（剪藏本融合域，ADR-0082 / issue 177）：动作编排（保存/已读/在读/删除）。
  *
  * 语义对齐旧 news/reader.ts（saveToClip + markAsRead + recordStat + 域事件）：
- * - 保存（save）：B站视频 → 知识盒（ADR-0068，openKnowledgeAddTask 不标已读）；
+ * - 保存（save）：B站视频 → 文献盒（ADR-0068，openKnowledgeAddTask 不标已读）；
  *   普通文章 → 写剪藏笔记（save.ts），成功后标 news 已处理（read+saved、stats +1、
  *   发 news:read/saved 域事件——smartcat 行为流三跳 + auto-summary 补全依赖）。
  * - 已读（skip）：标 news 已处理（read+skipped、stats +1、发 news:read；C32 起仅在本轮
  *   真的写盘时发——重复标读（盘面已达成目标态）不重复喂 smartcat 行为流）。
  * - 正文保留（issue 274）：已处理不再删 body——会话目录已读/已收条目点开仍可阅全文；
  *   超龄条目由保留策略整条清理（news-data applyRetention）。
- * - 阅读时长：右栏/详情停留会话累计（对齐 ticket 076 openedAt/accumMs 语义，整分钟 ≥1）。
+ * - 阅读时长：右栏/详情停留会话累计（对齐 ticket 076 openedAt/accumMs 语义，整分钟 ≥1）；
+ *   issue 358 起满 1 分钟的会话段封存入账 clipbook.json 侧写 readLog（flushReadingSession：
+ *   切篇 / 处理动作落定 / 关面板、卸载），报告页由此派生，news.json 不加段。
  *
  * 本层负责编排 + 落盘串行队列；store.ts 提供原语。
  */
 import { getApp } from '../core/app';
 import { notice } from '../core/notice';
 import { emitDomainEvent } from '../core/domain-bus';
-import { tryGetSettings } from '../core/settings-provider';
 import { readNewsData, writeNewsDataMerged } from './news-data';
 import { localDayKey } from './constants';
 import type { NewsReadEvent } from '../smartcat/news-source';
-import { writeClipNote } from './save';
+import { writeClipNote, clipFilePathOf } from './save';
 import { articleKeyOf } from './constants';
-import { updateClipbookData } from './data';
+import { updateClipbookData, type ClipReadLogEntry } from './data';
 import { enqueueNewsWrite } from './write-queue';
 
 // ---------- 阅读会话计时（对齐 ticket 076：当前显示条目 + 累计可视毫秒） ----------
 let curKey = '';
+/** 当前会话条目元信息（issue 358：封存入账 readLog 时的 title/src 取自此；切换前保存旧篇） */
+let curMeta: { title: string; src: string } | null = null;
 let openedAt = 0;
 let accumMs = 0;
 
 /** 切换阅读目标（UI 选中变化/关闭时调用；同篇不重置累计）
  *  C7：同 key 重渲染（renderReader 反复触发）不再重置 openedAt——此前每次都重开计时，
- *  上一段可视时长被丢弃致行为流 durationMin 偏小；仅切换目标时归零重开。 */
-export function setReadingSession(key: string): void {
+ *  上一段可视时长被丢弃致行为流 durationMin 偏小；仅切换目标时归零重开。
+ *  issue 358：切换时旧篇先封存入账侧写 readLog（flushReadingSession），meta 传当前篇。 */
+export function setReadingSession(key: string, meta?: { title: string; src: string } | null): void {
   if (key !== curKey) {
-    // 切换目标：旧篇累计封存逻辑（本实现不跨条目恢复，故归零）
+    // 切换目标：旧篇累计封存入账 → 换篇重开（封存落盘 fire-and-forget，切篇不等写盘）
+    void flushReadingSession();
     curKey = key;
+    curMeta = meta || null;
     accumMs = 0;
     openedAt = Date.now();
   } else if (!openedAt) {
     // 同篇且已暂停：恢复计时起点
     openedAt = Date.now();
+    if (meta && !curMeta) curMeta = meta;
   }
 }
 
@@ -58,6 +65,64 @@ function durationMin(): number {
   const now = Date.now();
   const total = (openedAt ? now - openedAt : 0) + accumMs;
   return Math.max(1, Math.round(total / 60000));
+}
+
+/** 会话封存入账（issue 358）：把当前累计折成整分钟追加进侧写 readLog，然后清零累计。
+ *  只记满 1 分钟的段（快速略过不入账，对齐 durationMin 整分钟口径；不足整分钟丢弃）。
+ *  调用点：切篇（setReadingSession）/ 处理动作落定后（flowSave/flowMarkRead——行为流
+ *  emit 之后，不影响 durationMin）/ 关面板、卸载、开报告前（pause 之后补封存）。
+ *  返回落盘 promise（审查修复批 P3⑤）：openClipbookReport await 后再读侧写，
+ *  刚读段本次可见；其余调用点 void/fire-and-forget。写失败已 catch（⑧暂存补写，见下），
+ *  promise 恒 resolve 不 reject。 */
+export function flushReadingSession(): Promise<void> {
+  if (!curKey) return Promise.resolve();
+  const now = Date.now();
+  const total = (openedAt ? now - openedAt : 0) + accumMs;
+  openedAt = 0;
+  accumMs = 0;
+  if (total < 60000) return Promise.resolve();
+  const entry: ClipReadLogEntry = {
+    key: curKey,
+    title: curMeta?.title || '',
+    src: curMeta?.src || '',
+    minutes: Math.max(1, Math.round(total / 60000)),
+    ts: now,
+  };
+  return appendReadLog(entry).catch((e) => console.error('[剪藏本] 阅读时长入账失败', e));
+}
+
+/** 写盘失败暂存（审查修复批 P3⑧）：flush 落盘失败时段留内存，下次 appendReadLog
+ *  一并补写入账（原实现静默丢段）。上限防写盘长期失败时无限攒。 */
+const PENDING_READ_LOG_MAX = 500;
+const pendingReadLog: ClipReadLogEntry[] = [];
+
+/** readLog 追加 + 裁剪（读改写事务，与侧写其他写方同队列串行） */
+async function appendReadLog(entry: ClipReadLogEntry): Promise<void> {
+  // 批次 = 之前失败暂存的段 + 本次段，一次事务合并入账；成功才清暂存
+  const batch = [...pendingReadLog, entry];
+  try {
+    await updateClipbookData((cur) => {
+      return { ...cur, readLog: trimReadLog([...(cur.readLog || []), ...batch], entry.ts) };
+    });
+    pendingReadLog.length = 0;
+  } catch (e) {
+    pendingReadLog.push(entry);
+    if (pendingReadLog.length > PENDING_READ_LOG_MAX) {
+      pendingReadLog.splice(0, pendingReadLog.length - PENDING_READ_LOG_MAX);
+    }
+    throw e;
+  }
+}
+
+/** readLog 裁剪口径（issue 358）：保留最近 180 天 + 上限 5000 条（超出裁最旧）。
+ *  报告只看本周/本月，180 天窗口绰绰有余；防长年使用把 clipbook.json 无限撑大。 */
+const READ_LOG_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
+const READ_LOG_MAX_ENTRIES = 5000;
+
+export function trimReadLog(list: ClipReadLogEntry[], now: number): ClipReadLogEntry[] {
+  const floor = now - READ_LOG_RETENTION_MS;
+  const kept = list.filter((e) => e && typeof e.ts === 'number' && isFinite(e.ts) && e.ts >= floor);
+  return kept.length > READ_LOG_MAX_ENTRIES ? kept.slice(kept.length - READ_LOG_MAX_ENTRIES) : kept;
 }
 
 /** 测试钩子：读当前会话状态（C7 回归保护：同 key 重入不丢累计） */
@@ -155,21 +220,13 @@ function emitReadEvt(raw: any, state: 'saved' | 'skipped'): NewsReadEvent {
 
 // ---------- 对外动作 ----------
 
-/** 保存到剪藏本（news 条目）：写笔记（或分流知识盒）→ 标已处理 → 事件。返回是否成功 */
+/** 保存到剪藏本（news 条目）：写笔记（或分流文献盒）→ 标已处理 → 事件。返回是否成功 */
 export async function flowSave(article: any): Promise<boolean> {
   const raw = article && article.raw;
   if (!raw) return false;
-  const isBili = raw.platform === 'B站' && !!String(raw.url || '').trim();
-  if (isBili) {
-    // ADR-0068：B站视频保存改道知识盒（不写剪藏、不进行为流）。
-    // enh 包 11：分流后回写已处理态（read+saved、统计 +1）——条目随即出收件流，
-    // 防同一视频再次「保存到剪藏本」重复建任务；并给「已转入知识盒」明确反馈。
-    const { openKnowledgeAddTask } = await import('../knowledge');
-    openKnowledgeAddTask(getApp(), { url: raw.url, title: raw.title || null, uploader: raw.author || null });
-    await markHandledAndBump(raw, 'saved');
-    notice('已转入知识盒', 'success');
-    return true;
-  }
+  // B站条目不提供保存至剪藏（ADR-0147 推翻 ADR-0068 分流保存，用户拍板 2026-09-16）；
+  // UI 已不下发该动作，此处守卫防程序化误调。B站链接入知识盒走「影像」录入。
+  if (raw.platform === 'B站') return false;
   pauseReadingSession();
   try {
     const ok = await writeClipNote(raw); // 内部 notice 成功/失败；false = 空标题/取消覆盖/写盘异常
@@ -180,8 +237,11 @@ export async function flowSave(article: any): Promise<boolean> {
     // news:saved 保持恒发：笔记本轮确实写出（覆盖场景同样要登记 auto-summary 补全）。
     const evt = buildReadEvt(raw, 'saved');
     if (bump.changed) emitDomainEvent('news', { kind: 'read', evt });
-    // 保存联动 auto-summary：登记待补全（smartcat 订阅该剪藏 modify 补全 / 2 分钟降级）
-    emitDomainEvent('news', { kind: 'saved', evt, clipPath: `${dirOf()}/${String(raw.title || '').replace(/[\\/:*?"<>|]/g, '').trim()}.md` });
+    // 保存联动 auto-summary：登记待补全（smartcat 订阅该剪藏 modify 补全 / 2 分钟降级）；
+    // clipPath 走 clipFilePathOf 单源（CB4/A3）——与写盘路径同一组装，尾斜杠设置不再分叉
+    emitDomainEvent('news', { kind: 'saved', evt, clipPath: clipFilePathOf(raw.title) });
+    // 本篇已处理出收件流 → 会话封存入账 readLog（issue 358；行为流已 emit，不影响 durationMin）
+    void flushReadingSession();
     return true;
   } catch (e) {
     console.error('[剪藏本] 保存失败', e);
@@ -191,13 +251,20 @@ export async function flowSave(article: any): Promise<boolean> {
 
 /** 标记已读（skip 语义：read+skipped 骨架，行为流 news:skipped）。
  *  C32：emitReadEvt 仅在本轮真的落盘（changed）时发——「打开即已读」落盘窗口内再手动标读，
- *  盘面已是目标态（F3 守卫拦截）不再重复喂 smartcat 同篇 news:read。返回落盘结果供 UI 取快照。 */
-export async function flowMarkRead(article: any): Promise<HandledBump> {
+ *  盘面已是目标态（F3 守卫拦截）不再重复喂 smartcat 同篇 news:read。返回落盘结果供 UI 取快照。
+ *  opts.keepSession（审查修复批 P1①）：「打开即已读」（markReadOnOpen）路径传 true——
+ *  本篇**仍在阅读**，不暂停也不尾置封存会话；原实现的 pause + 写盘完成后尾置 flush 会在
+ *  异步窗口内清零该篇刚开的计时器，此后时长在切篇时以 total=0 丢弃（每篇未读条首次
+ *  阅读时长系统性不入账）。封存交给既有封存点：切篇 / 关面板 / 卸载 / 开报告。 */
+export async function flowMarkRead(article: any, opts?: { keepSession?: boolean }): Promise<HandledBump> {
   const raw = article && article.raw;
   if (!raw) return NO_BUMP;
-  pauseReadingSession();
+  const keepSession = !!opts?.keepSession;
+  if (!keepSession) pauseReadingSession();
   const res = await markHandledAndBump(raw, 'skipped');
   if (res.changed) emitReadEvt(raw, 'skipped');
+  // 手动标读：本篇已处理 → 会话封存入账 readLog（issue 358；行为流之后）
+  if (!keepSession) void flushReadingSession();
   return res;
 }
 
@@ -218,33 +285,97 @@ export async function flowDeleteNews(article: any): Promise<void> {
 // ---------- 批量已读 + 误操作撤销（enh 包 4/5） ----------
 
 /**
+ * 批量标记已读结果（新-9/CB12 反馈口径 + 批量撤销兜底）：
+ * - bumped = 本轮真正标读的条数（确认框停留窗口内面板「打开即已读」可能已消化若干篇，
+ *   通知按实际数，不按动作前快照虚报）；
+ * - snapshot = 动作前受影响条目 raw 快照（盘上顺序升序收集）——flowUndoMarkAllRead
+ *   批量撤销入口的恢复依据（撤销兜底此前只覆盖单篇，整源清扫误触无反悔门）。
+ */
+export interface MarkAllReadResult {
+  bumped: number;
+  snapshot: any[];
+}
+
+const NO_MARK_ALL: MarkAllReadResult = { bumped: 0, snapshot: [] };
+
+/**
  * 批量标记已读（rail 源行「全部标为已读」）：单次读改写——N 篇一次落盘，不逐篇入队
  * （防 N 次读-写窗口放大与 daemon 的竞态）；批量路径不逐篇发行为流事件
  * （news:read 为单篇阅读语义，整源清扫不属于「阅读」）。
  */
-export async function flowMarkAllRead(raws: any[]): Promise<void> {
+export async function flowMarkAllRead(raws: any[]): Promise<MarkAllReadResult> {
   const keys = new Set(raws.filter(Boolean).map((r) => articleKeyOf(r)));
-  if (!keys.size) return;
+  if (!keys.size) return NO_MARK_ALL;
   pauseReadingSession();
-  await enqueueNewsWrite(async () => {
+  return enqueueNewsWrite(async (): Promise<MarkAllReadResult> => {
     const res = await readNewsData();
-    if (!res.ok || res.missing) return;
+    if (!res.ok || res.missing) return NO_MARK_ALL;
     const today = localDayKey();
     const s = res.data.stats || { totalRead: 0, totalSaved: 0, totalSkipped: 0, byPlatform: {}, byDate: {} };
+    // CB3：stats 子桶缺段守卫（旧数据/手改盘可能缺 byPlatform/byDate，bumpStats 同款兜底——
+    // 此前只有整段兜底，缺子桶批量标读直接 TypeError）
+    if (!s.byPlatform) s.byPlatform = {};
+    if (!s.byDate) s.byDate = {};
     let bumped = 0;
+    const snapshot: any[] = [];
     const list = (res.data.articles || []).map((a: any) => {
       if (a.read === true || !keys.has(articleKeyOf(a))) return a;
       bumped++;
+      snapshot.push({ ...a }); // 动作前快照（盘上顺序 = 升序）
       const next: any = { ...a, read: true, state: 'skipped' };
       const platform = a.platform || '未知';
       s.byPlatform[platform] = (Number(s.byPlatform[platform]) || 0) + 1;
       s.byDate[today] = (Number(s.byDate[today]) || 0) + 1;
       return next;
     });
-    if (!bumped) return;
+    if (!bumped) return NO_MARK_ALL;
     s.totalRead = (Number(s.totalRead) || 0) + bumped;
     s.totalSkipped = (Number(s.totalSkipped) || 0) + bumped;
     await writeNewsDataMerged({ set: { articles: list, stats: s } });
+    return { bumped, snapshot };
+  });
+}
+
+/**
+ * 批量撤销「全部标为已读」：按 flowMarkAllRead 返回的动作前快照逐条恢复 read/state/body
+ * + 统计逐桶回退（与 flowUndoHandled 同口径：仅现态仍是已读的条目回退计数，重复撤销幂等）。
+ * 按快照原序（升序）遍历——恢复是字段级还原、不 splice 不动数组位置（memo 批降序 splice
+ * 错位的教训针对插回场景，此处无插回；保持升序与动作时同向，若日后演化为插回语义不踩坑）。
+ * 走既有串行写回队列，与 daemon/其他写方不互吞。
+ */
+export async function flowUndoMarkAllRead(snapshot: any[]): Promise<void> {
+  if (!snapshot || !snapshot.length) return;
+  const beforeByKey = new Map<string, any>();
+  for (const r of snapshot) if (r) beforeByKey.set(articleKeyOf(r), r);
+  if (!beforeByKey.size) return;
+  await enqueueNewsWrite(async () => {
+    const res = await readNewsData();
+    if (!res.ok || res.missing) return;
+    const s = res.data.stats;
+    let touched = false;
+    const list = (res.data.articles || []).map((a: any) => {
+      const before = beforeByKey.get(articleKeyOf(a));
+      if (!before) return a;
+      touched = true;
+      if (s && a.read === true) {
+        s.totalRead = Math.max(0, (Number(s.totalRead) || 0) - 1);
+        if (a.state === 'saved') s.totalSaved = Math.max(0, (Number(s.totalSaved) || 0) - 1);
+        else s.totalSkipped = Math.max(0, (Number(s.totalSkipped) || 0) - 1);
+        if (!s.byPlatform) s.byPlatform = {};
+        if (!s.byDate) s.byDate = {};
+        const platform = a.platform || '未知';
+        s.byPlatform[platform] = Math.max(0, (Number(s.byPlatform[platform]) || 0) - 1);
+        const day = localDayKey();
+        s.byDate[day] = Math.max(0, (Number(s.byDate[day]) || 0) - 1);
+      }
+      const restored: any = { ...a };
+      if (before.read === undefined) delete restored.read; else restored.read = before.read;
+      if (before.state === undefined) delete restored.state; else restored.state = before.state;
+      if (before.body === undefined) delete restored.body; else restored.body = before.body;
+      return restored;
+    });
+    if (!touched) return;
+    await writeNewsDataMerged({ set: s ? { articles: list, stats: s } : { articles: list } });
   });
 }
 
@@ -268,6 +399,9 @@ export async function flowUndoHandled(rawBefore: any): Promise<void> {
         s.totalRead = Math.max(0, (Number(s.totalRead) || 0) - 1);
         if (a.state === 'saved') s.totalSaved = Math.max(0, (Number(s.totalSaved) || 0) - 1);
         else s.totalSkipped = Math.max(0, (Number(s.totalSkipped) || 0) - 1);
+        // CB3：子桶缺段守卫（对齐 bumpStats；缺桶时先补建再回退，不 TypeError）
+        if (!s.byPlatform) s.byPlatform = {};
+        if (!s.byDate) s.byDate = {};
         const platform = a.platform || '未知';
         s.byPlatform[platform] = Math.max(0, (Number(s.byPlatform[platform]) || 0) - 1);
         const day = localDayKey();
@@ -296,9 +430,5 @@ export async function flowUndoDeleteNews(rawBefore: any): Promise<void> {
   });
 }
 
-/** 剪藏目录（设置读取） */
-function dirOf(): string {
-  const s = tryGetSettings() as any;
-  return ((s && s.articleDirectory) || '归档/网页剪藏').replace(/\/+$/, '');
-}
+// 剪藏目录/剪藏文件路径：域内单源在 save.ts（clipDir / clipFilePathOf，CB4/A3 收编，本地副本已删）
 

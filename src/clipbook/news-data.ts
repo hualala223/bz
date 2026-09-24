@@ -7,6 +7,7 @@
 import { TFile } from 'obsidian';
 import { getApp } from '../core/app';
 import { jsonFileStore, storageFile } from '../core/storage';
+import { httpGetText, requestUrlAsFetch } from '../core/http';
 import { articleKeyOf } from './constants';
 
 export const NEWS_JSON_PATH = 'CONFIG/STORAGE/news.json';
@@ -70,7 +71,8 @@ export interface ReadNewsResult {
   corrupt: boolean;
 }
 
-function emptyData(): NewsData {
+/** news.json 空数据形状单源（导出供 checkup 白名单契约锁引用，防段集漂移） */
+export function emptyData(): NewsData {
   return { articles: [], stats: DEFAULT_STATS(), bilibiliUps: [], bilibiliUpInfo: {}, bilibiliMaxItems: 10, bilibiliCookie: '', sources: { ...DEFAULT_SOURCES }, rssFeeds: [], lastFetchAt: 0, fetchIntervalMin: 30 };
 }
 
@@ -242,11 +244,12 @@ export async function readNewsData(): Promise<ReadNewsResult> {
   return { ok: true, missing, data: content, corrupt: false };
 }
 
-/** 写回 news.json 四段（整段覆盖；调用方负责先读盘保留非本域段；静默吞错保持现状） */
+/** 写回 news.json 四段（整段覆盖；调用方负责先读盘保留非本域段）。
+ *  CB2：错误透传不吞——旧 try/catch 静默让标已读/批量已读/删除在磁盘异常时全部假成功
+ *  （通知已弹、撤销链拿不到真态），与 C4/C26 口径（写失败必须可感知）对齐；
+ *  jsonFileStore 侧写失败已先留档再抛（modifyWithBackup），这里照抛原错误交调用方处置。 */
 export async function writeNewsData(data: NewsData): Promise<void> {
-  try {
-    await jsonFileStore<NewsData>(getNewsFilePath()).write(data);
-  } catch (e) { /* 静默 */ }
+  await jsonFileStore<NewsData>(getNewsFilePath()).write(data);
 }
 
 /** 合并写回意图：只声明本次真正改动的段；未声明段一律取磁盘现值 */
@@ -323,14 +326,16 @@ export async function writeNewsDataMerged(intent: NewsWriteIntent): Promise<void
 
 /**
  * UP 主 uid 解析（纯函数，本地规则部分；网络回填见 resolveUidFromInput）：
- * - 纯数字 uid（"546195"）→ 原样
+ * - 纯数字 uid（"546195"、长 uid "3706929260006322"）→ 原样。**位数不设上限**——原
+ *   `\d{1,10}` 上限按 B站 mid 位数定的，16 位长 uid 会被判「无法识别」（2026-09-22 拍板放开：
+ *   纯数字串就是 uid，不做位数分类）
  * - space.bilibili.com/<uid>（可带 https:// 与尾斜杠/参数）→ uid
  * - /video/BVxxx → 仅视频链接本地无法取 uid，返回 null（由调用方走 view API 回填）
  */
 export function parseUidFromText(text: string): string | null {
   const t = String(text || '').trim();
   if (!t) return null;
-  const pure = t.match(/^\d{1,10}$/);
+  const pure = t.match(/^\d+$/);
   if (pure) return pure[0];
   const space = t.match(/space\.bilibili\.com[\/:]*(\d+)/i);
   if (space) return space[1];
@@ -345,26 +350,70 @@ export function parseBvidFromText(text: string): string | null {
 }
 
 /**
+ * uid 解析结果（新-8 分型）：uid = 解析结果（null = 未取到）；networkFailed = 网络请求失败
+ * （超时/非 2xx/网络错，可稍后重试）——区别于「无法识别」（服务端应答正常但没取到 mid，
+ * 换主页链接/UID 重试才有意义）。调用方据此分文案，不把断网误指导为「换输入格式」。
+ */
+export interface UidResolveResult {
+  uid: string | null;
+  networkFailed: boolean;
+}
+
+/**
+ * 输入（主页链接 / 视频链接 / 纯 UID）→ uid，带失败分型（见 UidResolveResult）。
+ * 视频链接需经 B 站 view API 回填 uid，未登录可读；HTTP 通道走 core/http 单源
+ * （requestUrl 生产适配——移动端免 CORS，新-8：原生 fetch 在 Capacitor WebView 对
+ * api.bilibili.com 必败）。
+ */
+export async function resolveUidFromInputDetailed(text: string): Promise<UidResolveResult> {
+  const local = parseUidFromText(text);
+  if (local) return { uid: local, networkFailed: false };
+  const bvid = parseBvidFromText(text);
+  if (!bvid) return { uid: null, networkFailed: false };
+  const body = await httpGetText(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, {
+    timeoutMs: 10000,
+    fetchImpl: requestUrlAsFetch(),
+  });
+  if (body === null) return { uid: null, networkFailed: true };
+  try {
+    const json = JSON.parse(body);
+    const mid = json && json.data && json.data.owner ? String(json.data.owner.mid ?? '') : '';
+    return { uid: mid || null, networkFailed: false };
+  } catch {
+    return { uid: null, networkFailed: false };
+  }
+}
+
+/**
  * 输入（主页链接 / 视频链接 / 纯 UID）→ uid。视频链接需经 B 站 view API 回填 uid，
  * 未登录可读；失败/异常返回 null（调用方提示用主页链接/UID）。
  */
 export async function resolveUidFromInput(text: string): Promise<string | null> {
-  const local = parseUidFromText(text);
-  if (local) return local;
-  const bvid = parseBvidFromText(text);
-  if (!bvid) return null;
+  return (await resolveUidFromInputDetailed(text)).uid;
+}
+
+/**
+ * 单个 uid → UP 主资料（name + avatar）。接口 = B站 web-interface/card（匿名可读，不需要
+ * Cookie；实测 16 位长 uid 亦可查）。
+ * 失败一律收成 null：网络失败 / 非 2xx / 风控（code≠0 → 无 card）/ 无 card / 名字与头像全缺
+ * ——调用方保留 uid 兜底展示，不误报「已读取资料」。头像统一转 https（同 bilibiliUpInfo
+ * 段解析口径）。HTTP 通道走 core/http 单源（requestUrl 生产适配，移动端免 CORS）。
+ */
+export async function fetchUpProfile(uid: string): Promise<BilibiliUpInfo | null> {
+  const mid = String(uid || '').trim();
+  if (!mid) return null;
+  const body = await httpGetText(`https://api.bilibili.com/x/web-interface/card?mid=${encodeURIComponent(mid)}&photo=false`, {
+    timeoutMs: 10000,
+    fetchImpl: requestUrlAsFetch(),
+  });
+  if (body === null) return null;
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 10000);
-    const resp = await fetch(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, {
-      method: 'GET',
-      signal: ctrl.signal,
-    });
-    clearTimeout(timer);
-    if (!resp.ok) return null;
-    const json = await resp.json();
-    const mid = json && json.data && json.data.owner ? String(json.data.owner.mid ?? '') : '';
-    return mid || null;
+    const card = JSON.parse(body)?.data?.card;
+    if (!card) return null;
+    const name = card.name ? String(card.name).trim() : '';
+    const avatar = card.face ? String(card.face).replace(/^http:/, 'https:') : '';
+    if (!name && !avatar) return null;
+    return { ...(name ? { name } : {}), ...(avatar ? { avatar } : {}) };
   } catch {
     return null;
   }
