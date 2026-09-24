@@ -3,12 +3,16 @@
  * 文件不存在/解析失败 → 默认数据（懒创建：save 时建目录建文件，jsonStore 语义）；
  * 路径跟随共享数据路径 storagePath（ADR-0009）。
  * ticket 63：移除 reading 字段与 target 归一（旧数据残留字段读取时自然忽略，不迁移）。
+ * issue 357：可选段 archived（周归档行）——trimHistory 裁剪历史前先把离开 7 天保留窗的
+ * 条目按自然周聚合成归档行落账（trimWithArchive），「history 只留 7 天明细」拍板不变；
+ * 旧文件无此段照常工作（零迁移，首周起算）。
  */
 import type { App } from 'obsidian';
 import { tryGetSettings } from '../core/settings-provider';
 import { enqueueFileTask, jsonFileStore, storageFile } from '../core/storage';
-import type { PomodoroState, HistoryEntry } from './state';
+import type { PomodoroState, HistoryEntry, ArchivedWeek } from './state';
 import { createInitialState, PHASES } from './state';
+import { aggregateWeeks, mergeArchived } from './stats';
 
 export const POMODORO_FILE_PATH = 'CONFIG/STORAGE/pomodoro.json';
 
@@ -21,6 +25,8 @@ export interface PomodoroData {
   version: 1;
   state: PomodoroState;
   history: HistoryEntry[];
+  /** 周归档段（issue 357，可选）：离开 7 天保留窗的明细按自然周聚合；空数组不落盘，旧文件无此段 = 零迁移 */
+  archived?: ArchivedWeek[];
 }
 
 export function defaultPomodoroData(): PomodoroData {
@@ -28,24 +34,42 @@ export function defaultPomodoroData(): PomodoroData {
 }
 
 /**
- * 历史保留窗裁剪（上游 F13）：统计只消费近 7 个日历日（stats.ts last7Days/today*），窗外的完成
+ * 历史保留窗裁剪（F13）：统计只消费近 7 个日历日（stats.ts last7Days/today*），窗外的完成
  * 记录在落盘前裁掉——history 永不裁剪会让 pomodoro.json 随使用线性膨胀。
  * 窗口起点 = 今日零点 −6 天（与 last7Days 最左一天同一起点，日历日口径 DST 安全）；
  * 未来时间戳（时钟回拨）落在窗口右侧，保守保留。
- *
- * 下游口径核查（本地）：`stats.last7Days` 窗口起点与此完全一致；`home/weekly` 是自然周
- * （周一为起点，最长 7 天）→ 本窗口恒覆盖；`recap/aggregate` 只读今日；
- * `smartcat/pomodoro-source` 只订阅域事件不读 history；`checkup` 仅做字段漂移巡检。均无影响。
  */
 export function trimHistory(history: HistoryEntry[], now: number): HistoryEntry[] {
-  const floor = new Date(now);
-  floor.setHours(0, 0, 0, 0);
-  floor.setDate(floor.getDate() - 6);
-  const t = floor.getTime();
+  const t = retentionFloor(now);
   return history.filter((h) => h.ts >= t);
 }
 
-/** 容错归一：非法字段回退默认、history 过滤非法条目 */
+/** 保留窗窗口起点（今日零点 −6 天），trimHistory / trimWithArchive 同一口径 */
+function retentionFloor(now: number): number {
+  const floor = new Date(now);
+  floor.setHours(0, 0, 0, 0);
+  floor.setDate(floor.getDate() - 6);
+  return floor.getTime();
+}
+
+/**
+ * 裁剪 + 周归档（issue 357）：trimHistory 同款保留窗，被裁条目不直接丢弃——先按自然周
+ * 聚合（aggregateWeeks）再以周 key 判重增量合并进 archived（mergeArchived，同一周不重复建行）。
+ * 调用方保证每次传入的 history 只含「尚未被裁」的明细，故同一明细至多入账一次；
+ * 明细与归档按日恒不交（归档只含已离开窗口的日子），月趋势合成（stats.lastNMonths）不重复累计。
+ */
+export function trimWithArchive(
+  history: HistoryEntry[],
+  archived: ArchivedWeek[] | undefined,
+  now: number
+): { history: HistoryEntry[]; archived: ArchivedWeek[] } {
+  const floor = retentionFloor(now);
+  const removed = history.filter((h) => h.ts < floor);
+  const kept = removed.length ? history.filter((h) => h.ts >= floor) : history;
+  return { history: kept, archived: removed.length ? mergeArchived(archived, aggregateWeeks(removed)) : archived ?? [] };
+}
+
+/** 容错归一：非法字段回退默认、history 过滤非法条目、archived 过滤非法归档行 */
 function normalizeData(raw: any): PomodoroData {
   const def = defaultPomodoroData();
   if (!raw || typeof raw !== 'object') return def;
@@ -60,7 +84,54 @@ function normalizeData(raw: any): PomodoroData {
           ...(typeof h.task === 'string' && h.task ? { task: h.task } : {}),
         }))
     : [];
-  return { version: 1, state, history };
+  const archived = normalizeArchived(raw.archived);
+  return { version: 1, state, history, ...(archived.length ? { archived } : {}) };
+}
+
+/**
+ * archived 段容错归一（issue 357）：week 需 YYYY-MM-DD 且为真实存在的周一（Date 反解校验，
+ * 「2026-99-99」这类 rollover 假日期与错星期行一律拒收——审查修复批：假日期常驻、错行错档）；
+ * count/minutes 需非负数、tasks 值需有限数；同周重复行只保留首条（月趋势按周 key 累计，
+ * 重复行会期间双计）；空段不落键。
+ */
+function normalizeArchived(raw: any): ArchivedWeek[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const rows: ArchivedWeek[] = [];
+  for (const r of raw) {
+    if (
+      !r ||
+      typeof r.week !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(r.week) ||
+      typeof r.count !== 'number' ||
+      r.count < 0 ||
+      typeof r.minutes !== 'number' ||
+      r.minutes < 0
+    ) {
+      continue;
+    }
+    const [ys, ms, ds] = r.week.split('-').map(Number);
+    const d = new Date(ys, ms - 1, ds);
+    // Date 反解校验：构出的日期必须与字段逐项一致（防 99-99 rollover 成别的日期），
+    // 且星期必须落在周一（getDay: 1 = 周一，与 stats.weekKeyOf 周一起始口径一致）
+    if (d.getFullYear() !== ys || d.getMonth() !== ms - 1 || d.getDate() !== ds) continue;
+    if (d.getDay() !== 1) continue;
+    if (seen.has(r.week)) continue; // 同周重复行去重：保留首条
+    seen.add(r.week);
+    const tasks: Record<string, number> = {};
+    if (r.tasks && typeof r.tasks === 'object' && !Array.isArray(r.tasks)) {
+      for (const [t, m] of Object.entries(r.tasks as Record<string, unknown>)) {
+        if (typeof m === 'number' && Number.isFinite(m) && m >= 0) tasks[t] = m;
+      }
+    }
+    rows.push({
+      week: r.week,
+      count: r.count,
+      minutes: r.minutes,
+      ...(Object.keys(tasks).length ? { tasks } : {}),
+    });
+  }
+  return rows;
 }
 
 /** 逐字段校验 state（非法 phase/负数 remaining 一律回退默认；旧 target/reading 字段忽略不迁移） */

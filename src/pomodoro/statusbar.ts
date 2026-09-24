@@ -7,9 +7,12 @@ import { setIcon } from 'obsidian';
 import { pad2 } from '../core/utils';
 import type { App } from 'obsidian';
 import type { PomodoroState } from './state';
+import { motionStatusbarPop } from './motion';
 
 let statusEl: HTMLElement | null = null;
 let textSpan: HTMLElement | null = null;
+/** 动效层：相位签名记忆（run/paused/idle 变化时微跃一记；首记不出手） */
+let statusSig = '';
 
 export function mountPomodoroStatusBar(container: HTMLElement, app: App): void {
   if (statusEl) return;
@@ -36,12 +39,13 @@ export function unmountPomodoroStatusBar(): void {
     statusEl = null;
     textSpan = null;
   }
+  statusSig = '';
 }
 
 /**
  * ui.ts render 每 1s 调用：
- * 主番茄钟运行中：mm:ss；暂停（含后台自动暂停）：显示「已暂停」标签（.pomodoro-statusbar-paused 醒目标识）；
- * 空闲：空文本灰态（.pomodoro-statusbar-idle）。自动暂停/恢复只在此处体现，不加 toast（x6）。
+ * 主番茄钟运行中：mm:ss；暂停：显示「已暂停」标签（.pomodoro-statusbar-paused 醒目标识）；
+ * 空闲：空文本灰态（.pomodoro-statusbar-idle）。
  * 增强包：hover 反馈走 styles.css（对齐组件库交互基线）；专注归属任务名挂 title 悬停展示（状态栏空间宝贵，文本位留给倒计时）。
  */
 export function syncPomodoroStatusBar(state: PomodoroState, remainSec: number): void {
@@ -50,16 +54,26 @@ export function syncPomodoroStatusBar(state: PomodoroState, remainSec: number): 
   const paused = !running && state.paused;
   statusEl.classList.toggle('pomodoro-statusbar-idle', !running && !paused);
   statusEl.classList.toggle('pomodoro-statusbar-paused', paused);
-  statusEl.title = state.task ? `番茄钟：${state.task}` : '番茄钟';
+  // 动效层：相位变化微跃一记（空闲→计时→暂停的可感知切换）
+  const sig = running ? 'run' : paused ? 'paused' : 'idle';
+  if (statusSig !== sig) {
+    const first = statusSig === '';
+    statusSig = sig;
+    motionStatusbarPop(statusEl, sig, first);
+  }
+  // 深审 PE1：render 每秒驱动本函数，同值短路（textContent/title setter 同值也会重建文本节点）
+  const wantTitle = state.task ? `番茄钟：${state.task}` : '番茄钟';
+  if (statusEl.title !== wantTitle) statusEl.title = wantTitle;
   if (textSpan) {
     if (running) {
       const m = Math.floor(remainSec / 60);
       const s = remainSec % 60;
-      textSpan.textContent = `${pad2(m)}:${pad2(s)}`;
-    } else if (paused) {
-      textSpan.textContent = '已暂停';
+      const want = `${pad2(m)}:${pad2(s)}`;
+      if (textSpan.textContent !== want) textSpan.textContent = want;
     } else {
-      textSpan.textContent = '';
+      // 暂停恒「已暂停」通用标签（PF3 口径：toast 按阶段取文案，状态栏保持通用）
+      const want = paused ? '已暂停' : '';
+      if (textSpan.textContent !== want) textSpan.textContent = want;
     }
   }
 }

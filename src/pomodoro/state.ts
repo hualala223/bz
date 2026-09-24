@@ -19,13 +19,14 @@ export interface PomodoroState {
   remaining: number;
   paused: boolean;
   /**
-   * 暂停来源标记（仅冻结暂停写入）：'autopause' = 后台自动暂停产生的冻结；
-   * 缺省/undefined = 手动暂停或旧数据（兼容读取）。恢复/重置/跳过/手动暂停时清除。
+   * 暂停来源标记——**遗留兼容字段**：旧版「后台自动暂停」（2026-09-23 退役）写入的冻结标记。
+   * 本版不再写入；读取方仅剩 forceFocus 的放行判据（ui.ts updateButtons 与 setTask 拦截文案），
+   * 让升级时正好停在旧冻结态的 vault 不至于三键全禁用。恢复/重置/跳过/手动暂停时清除。
    */
   pausedBy?: 'autopause';
   /** 当前循环内已完成专注数（进长休后清零） */
   cycleFocusCount: number;
-  /** 当前专注归属任务标题（待办「专注这个」联动写入；专注自然完成写入历史后清除） */
+  /** 当前专注归属任务标题（备忘录「专注这个」联动写入；专注自然完成写入历史后清除） */
   task?: string;
 }
 
@@ -48,8 +49,24 @@ export interface HistoryEntry {
   ts: number;
   /** 实际专注时长（秒） */
   duration: number;
-  /** 归属任务标题（待办「专注这个」联动；普通开始无此字段，统计口径扩展预留） */
+  /** 归属任务标题（备忘录「专注这个」联动；普通开始无此字段，统计口径扩展预留） */
   task?: string;
+}
+
+/**
+ * 周归档行（issue 357）：离开 7 天保留窗的明细按自然周（周一起始，本地时区）聚合成一行，
+ * 落 pomodoro.json 可选段 archived——「history 只留 7 天明细」的既有拍板不变，只加归档层。
+ * 同一周不重复建行：以 week key 判重后增量合并（mergeArchived）。
+ */
+export interface ArchivedWeek {
+  /** 归属周 key = 该周周一的本地日期（YYYY-MM-DD） */
+  week: string;
+  /** 该周完成番茄数 */
+  count: number;
+  /** 该周专注总分钟数 */
+  minutes: number;
+  /** 任务分布：任务标题 → 分钟数（备忘录「专注这个」归属的统计扩展，可选） */
+  tasks?: Record<string, number>;
 }
 
 export type PomodoroEvent =
@@ -127,7 +144,7 @@ function completePhase(state: PomodoroState, now: number, d: Durations, o: Pomod
     longBreak = count >= d.longBreakInterval;
     if (longBreak) count = 0;
     // duration = 活跃专注时长：暂停期间时间不流逝（endTime 顺延），故恒等于名义工作时长
-    // 归属：待办「专注这个」联动时把任务标题写进历史（统计口径扩展预留）
+    // 归属：备忘录「专注这个」联动时把任务标题写进历史（统计口径扩展预留）
     historyEntry = { ts: now, duration: d.workMin * 60, ...(state.task ? { task: state.task } : {}) };
   }
   // 下一阶段

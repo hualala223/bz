@@ -6658,9 +6658,11 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
 .quiz-next-btn:hover { background:var(--bz-surface-hover); }
 /* ==================== 番茄钟域样式（src/pomodoro/styles.css） ==================== */
 /* ==================== 番茄钟状态栏（pomodoro，ticket 60 收敛：原注入样式，逐字搬运） ==================== */
-    .pomodoro-statusbar { display: inline-flex; align-items: center; gap: var(--bz-space-xs); cursor: pointer; padding: 2px var(--bz-space-xs); border-radius: var(--radius-s, var(--bz-radius-xs)); transition: background-color var(--bz-dur-fast) ease, opacity var(--bz-dur-fast) ease; }
+    .pomodoro-statusbar { display: inline-flex; align-items: center; gap: var(--bz-space-xs); cursor: pointer; padding: 2px var(--bz-space-xs); border-radius: var(--radius-s, var(--bz-radius-xs)); transition: background-color var(--bz-dur-fast) ease, opacity var(--bz-dur-fast) ease; }@media (hover: hover) {
+
     .pomodoro-statusbar:hover { background: var(--background-modifier-hover); color: var(--text-normal); } /* 悬停/可点反馈，对齐组件库交互基线 */
-    .pomodoro-statusbar-idle:hover { opacity: 0.75; } /* 空闲灰态悬停抬亮 */
+    .pomodoro-statusbar-idle:hover { opacity: 0.75; }
+} /* 空闲灰态悬停抬亮 */
     .pomodoro-statusbar .pomodoro-statusbar-icon { display: inline-flex; align-items: center; }
     .pomodoro-statusbar-idle { opacity: 0.45; }
     /* x6：暂停态与空闲态视觉区分（暂停显示「已暂停」标签；醒目标识，非空闲灰态） */
@@ -6669,10 +6671,24 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
 
 
 /* ==================== 番茄钟弹窗（pomodoro，ticket 60 收敛：原注入样式，逐字搬运） ==================== */
-    #pomodoro-mask { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bz-overlay); backdrop-filter: blur(var(--bz-overlay-blur)); } /* z 动态发号（ADR-0067）；遮罩色走 --bz-overlay（原写死 rgba 已对齐） */
-    #pomodoro-popup { width: 320px; padding: var(--bz-space-xl); border-radius: var(--bz-radius-lg); background: var(--pz-bg, var(--background-primary)); box-shadow: 0 8px 40px rgba(0,0,0,0.3); text-align: center; position: relative; }
+    #pomodoro-mask.bz-overlay-mask { padding: 0; } /* 三件套（fixed/inset/--bz-overlay 底/token blur/居中）已收编 .bz-overlay-mask 单源（issue 365）；padding 归零对齐原可用区，320px 弹窗窄屏不被裁 */
+    #pomodoro-popup { width: 320px; padding: var(--bz-space-xl); border-radius: var(--bz-radius-lg); background: var(--pz-bg, var(--background-primary)); box-shadow: 0 8px 40px rgba(0,0,0,0.3); text-align: center; position: relative;
+      /* 演出终态色（motion.ts 每帧据此插值）：紧迫升温的红、底色漂移的暖/冷两端。
+         停留在此层的理由是 colors-pass §2——主题换了跟着换，不再像写死 rgb 那样亮暗主题打架。
+         取不到时 motion 层整味缺席；各皮肤可按需覆写这三个 token 说自己一套话。 */
+      --pz-hot: var(--text-error, var(--color-red, #e24b4a));
+      --pz-tint-focus: var(--color-orange, #d85a30);
+      --pz-tint-break: var(--color-blue, #3d6eb4);
+    }
     #pomodoro-popup:focus { outline: none; } /* Space 快捷键承载焦点，不画焦点环 */
-    #pomodoro-ring-svg { width: 160px; height: 160px; margin: var(--bz-space-sm) auto; display: block; }
+    /* overflow: visible 是环光的必要项，不是装饰：进行中的辉光是挂在 #pomodoro-ring-progress 上的
+       drop-shadow（motion.ts setGlow，半径 7 = 专注 / 4 = 休息），它的绘制范围会溢出 circle 本体。
+       viewBox 0 0 120 120 的半宽只有 60，而环的实绘外缘已在 56（r 52 + 描边 8/2），
+       余量仅 4 单位 ≈ 8px；7 单位半径的辉光需要 ~2σ≈7 单位 → 缺这口余量就在 SVG 元素框上被硬切一刀。
+       （2026-09-23 用户报「番茄钟的光晕被裁切到一个方块中」：反解截图，切边距环心 60.08 用户单位、
+       与元素右边缘 368px 重合 = 视口裁切，非滤镜区域。）SVG 根的 UA 默认 overflow 是 hidden，
+       显式置 visible 后滤镜输出可绘到框外；面板 padding 24px，够它落。 */
+    #pomodoro-ring-svg { width: 160px; height: 160px; margin: var(--bz-space-sm) auto; display: block; overflow: visible; }
     .pomodoro-ring-track { fill: none; stroke: var(--pz-line, var(--background-modifier-border)); stroke-width: 8; }
     .pomodoro-ring-progress { fill: none; stroke: var(--pz-accent, var(--interactive-accent)); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 1s linear; }
     /* 本轮循环位置：N 个 6px 方点，已完成填 accent（增强包，替代「专注 2/4」文字小字） */
@@ -6684,25 +6700,75 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
     .pomodoro-phase-icon svg { width: 14px; height: 14px; }
     /* 当前专注任务名（待办「专注这个」联动）：弱化小字，超长省略，悬停 title 见全文 */
     .pomodoro-task { font-size: var(--bz-font-meta); color: var(--pz-faint, var(--text-faint)); margin-top: var(--bz-space-xs); max-width: 240px; margin-left: auto; margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    #pomodoro-time { font-size: 42px; font-weight: 600; color: var(--pz-fg, var(--text-normal)); font-variant-numeric: tabular-nums; }
+    /* 时间数字用等宽字（--bz-font-mono）：秒跳与整分进位时字宽不变，读数不左右抖 */
+    #pomodoro-time { font-size: 42px; font-weight: 600; color: var(--pz-fg, var(--text-normal)); font-variant-numeric: tabular-nums; font-family: var(--bz-font-mono, ui-monospace, Consolas, monospace); }
+    /* 时间字双层（2026-09-23 翻牌机）：可见文本层承载读屏与语义，滚动层绝对定位叠在上面。
+       文本层用 opacity:0 让位而非 visibility/display——后两者会把时间对辅助技术一并藏掉。
+       --pomodoro-reel-cell 是滚动行高单源：ui.ts 的位移算式直接引用它，不写死像素。 */
+    .pomodoro-time-box { position: relative; --pomodoro-reel-cell: 50px; transition: transform .3s ease; }
+    .pomodoro-time-box.reel-on #pomodoro-time { opacity: 0; }
+    /* 翻牌层 = 唯一可见层：字号/字重/等宽数字与文本层同口径，再放大一档（用户：默认数字太小）。
+       注意它不吃 #pomodoro-time 的 42px——那是兄弟不是父子，必须自己声明。 */
+    .pomodoro-time-reel { display: none; position: absolute; inset: 0; align-items: center; justify-content: center;
+      font-size: 45px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--pz-fg, var(--text-normal));
+      font-family: var(--bz-font-mono, ui-monospace, Consolas, monospace); letter-spacing: .02em; }
+    .pomodoro-time-box.reel-on .pomodoro-time-reel { display: flex; }
+    .pomodoro-rcol { display: inline-block; width: 29px; height: var(--pomodoro-reel-cell); overflow: hidden; vertical-align: top; }
+    .pomodoro-rinn { display: block; transition: transform .38s cubic-bezier(.34,.06,.16,1); }
+    .pomodoro-rinn > span { display: block; height: var(--pomodoro-reel-cell); line-height: var(--pomodoro-reel-cell); text-align: center; }
+    .pomodoro-rdot { display: inline-block; width: 16px; height: var(--pomodoro-reel-cell); line-height: var(--pomodoro-reel-cell); vertical-align: top; }
     .pomodoro-controls { display: flex; gap: var(--bz-space-sm); justify-content: center; margin-top: var(--bz-space-lg); }
-    .pomodoro-btn { padding: 6px 14px; border-radius: var(--bz-radius-sm); background: var(--pz-btn, var(--background-secondary)); color: var(--pz-btn-fg, var(--text-normal)); cursor: pointer; font-size: var(--bz-font-body); }
-    .pomodoro-btn:hover:not(:disabled) { background: var(--background-modifier-hover); }
+    .pomodoro-btn { padding: 6px 14px; border-radius: var(--bz-radius-sm); background: var(--pz-btn, var(--background-secondary)); color: var(--pz-btn-fg, var(--text-normal)); cursor: pointer; font-size: var(--bz-font-body); }@media (hover: hover) {
+
+    /* hover 不刷灰：--background-modifier-hover 是那层通用「灰罩」，用户 2026-09-24 明确不要
+       （「其他的按钮放上去，背景也变成了灰色，这也不行」）。改成本色轻微提亮——亮/暗主题
+       都不糊成灰，仍能给出「这颗可点」的反馈。确认态（.pomodoro-btn-armed）完全不参与。 */
+    .pomodoro-btn:hover:not(:disabled):not(.pomodoro-btn-armed) { filter: brightness(1.07); }
+}
     .pomodoro-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .pomodoro-btn-primary { background: var(--pz-accent, var(--interactive-accent)); color: var(--pz-on-accent, var(--text-on-accent)); }
-    .pomodoro-btn-primary:hover:not(:disabled) { background: var(--interactive-accent-hover); }
+    /* 二次确认态：按钮自己变成确认条（2026-09-24 替代确认弹窗）。警示色走 --pz-hot 单源。
+       hover/active 必须一并覆盖：上面 .pomodoro-btn:hover:not(:disabled) 是三类选择器，
+       比单类 .pomodoro-btn-armed 权重高——不补同权重且靠后的规则，鼠标停上去会被刷成灰底
+       （用户 2026-09-24 报：确认态配色被 hover 顶掉）。确认态是「等你表态」的状态色，不该随悬停变。 */
+    .pomodoro-btn-armed { background: var(--pz-hot, var(--text-error, var(--interactive-accent))); color: var(--pz-on-accent, var(--text-on-accent)); font-weight: 600; }
+@media (hover: hover) {
+
+    /* 确认态的 hover/active 也钉死警示色（BD 范式门禁：:hover 必须在 @media (hover: hover) 内） */
+    .pomodoro-btn-armed:hover:not(:disabled),
+    .pomodoro-btn-armed:active:not(:disabled) { background: var(--pz-hot, var(--text-error, var(--interactive-accent))); color: var(--pz-on-accent, var(--text-on-accent)); }
+
+    /* 主按钮同样不换底色：--interactive-accent-hover 是 Obsidian 主题变量，评审壳（以及部分主题）
+       拿不到 → 背景声明整条失效变透明，而字色是 --pz-on-accent 白字 → 白字糊在弹窗底色上「发白」
+       （用户 2026-09-24 报）。统一走本色轻微提亮，与次按钮同口径。 */
+    .pomodoro-btn-primary:hover:not(:disabled):not(.pomodoro-btn-armed) { background: var(--pz-accent, var(--interactive-accent)); filter: brightness(1.07); }
+}
     .pomodoro-stats { margin-top: var(--bz-space-lg); padding-top: var(--bz-space-md); border-top: 1px solid var(--pz-line, var(--background-modifier-border)); }
     #pomodoro-today { font-size: var(--bz-font-label); color: var(--pz-muted, var(--text-muted)); margin-bottom: var(--bz-space-sm); }
+    /* 统计两档切换（issue 357）：近 7 天 / 近 6 月；激活档填 accent，未激活弱化（消费 bz/pz token，不自造色值） */
+    .pomodoro-stat-tabs { display: flex; gap: var(--bz-space-xs); justify-content: center; margin-bottom: var(--bz-space-sm); }
+    .pomodoro-stat-tab { padding: 2px 10px; border-radius: var(--bz-radius-sm, var(--bz-radius-xs)); font-size: var(--bz-font-caption); color: var(--pz-faint, var(--text-faint)); background: transparent; cursor: pointer; }@media (hover: hover) {
+
+    /* 同按钮口径（2026-09-24）：hover 不刷灰罩。未激活 → 换本域次钮底色（--pz-btn，皮肤内）；
+       激活档 → 保持 accent（原规则只有单类 .pomodoro-stat-tab-on，会被上面两类 hover 顶成灰底）。 */
+    .pomodoro-stat-tab:hover:not(.pomodoro-stat-tab-on) { background: var(--pz-btn, var(--background-secondary)); }
+    .pomodoro-stat-tab-on:hover { background: var(--pz-accent, var(--interactive-accent)); filter: brightness(1.07); }
+}
+    .pomodoro-stat-tab-on { color: var(--pz-on-accent, var(--text-on-accent)); background: var(--pz-accent, var(--interactive-accent)); }
     .pomodoro-week { display: flex; gap: 6px; justify-content: center; align-items: flex-end; }
+    .pomodoro-week[hidden] { display: none; }
     .pomodoro-stat-day { display: flex; flex-direction: column; align-items: center; gap: 2px; }
     .pomodoro-stat-col { display: flex; align-items: flex-end; height: 40px; }
+    /* 柱顶数值签（深审 PC1 接线收尾，issue 357 月档「柱顶小时数」）：caption 档、muted 兜底链，
+       与短签同 2px gap（.pomodoro-stat-day），不另设 margin */
+    .pomodoro-stat-num { font-size: var(--bz-font-caption); color: var(--pz-muted, var(--text-muted)); line-height: 1; }
     .pomodoro-stat-bar { width: 10px; border-radius: 3px 3px 0 0; background: var(--interactive-accent); min-height: 2px; }
     .pomodoro-stat-label { font-size: var(--bz-font-caption); color: var(--pz-faint, var(--text-faint)); }
 
-/* ==================== 面板主题（皮肤）· 10 套 × 亮/暗两版（issue 264 吸收上游） ====================
-   口径（上游 2026-09-11 用户拍板「全都要，每套都要亮色和暗色」）：
+/* ==================== 面板主题（皮肤）· 10 套 × 亮/暗两版 ====================
+   口径（2026-09-11 用户拍板「全都要，每套都要亮色和暗色」）：
    - 皮肤类由 ui.ts::applySkinClass 挂在 #pomodoro-popup 上，取值 = 设置 pomodoroSkinTheme；
-   - 清单单源 = src/pomodoro/skin.ts::POMODORO_SKIN_THEMES（设置面板选项同表生成）；
+   - 清单单源 = src/pomodoro/render.ts::POMODORO_SKIN_THEMES（设置面板选项同表生成）；
    - **色值单源 = 下方 :root 的 --pz-<id>-* 表**（唯一色值出处；设置面板预览卡
      src/settings-panel/styles.css 引用同一批变量，加皮/改色两处自动同步）；
    - 每套皮只剩两行「消费变量声明」：亮色一行 + .theme-dark 暗色一行，把表值赋给
@@ -6792,28 +6858,27 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
     #pomodoro-popup.pomodoro-skin-night { --pz-bg:var(--pz-night-l); --pz-accent:var(--pz-night-a); --pz-muted:var(--pz-night-m); --pz-faint:var(--pz-night-f); --pz-btn:var(--pz-night-b); --pz-btn-fg:var(--pz-night-bf); --pz-on-accent:#fff; }
     .theme-dark #pomodoro-popup.pomodoro-skin-night { --pz-bg:var(--pz-night-d); --pz-accent:var(--pz-night-ad); --pz-fg:var(--pz-night-fgd); --pz-muted:var(--pz-night-md); --pz-faint:var(--pz-night-fd); --pz-btn:var(--pz-night-bd); --pz-btn-fg:var(--pz-night-bfd); --pz-on-accent:var(--pz-night-d); --pz-line:rgba(255,255,255,.14); }
 
-/* ==================== 本地独有段（issue 264 吸收时保留，上游无） ==================== */
-    #pomodoro-btn-settings { position: absolute; top: 16px; right: 16px; padding: 6px; background: none; border-radius: 8px; color: var(--text-muted); transition: opacity 0.2s; }
-    #pomodoro-btn-settings:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
-    #pomodoro-btn-settings.pomodoro-settings-hidden { opacity: 0; pointer-events: none; }
-    /* 今日专注时段分布：12 槽（2 小时一格）小方柱，条形语言与近 7 天柱一致（增强包） */
-    .pomodoro-hours { display: flex; gap: 4px; justify-content: center; align-items: flex-end; margin-top: 8px; }
-    .pomodoro-hour-bar { width: 8px; border-radius: 3px 3px 0 0; background: var(--background-modifier-border); min-height: 2px; }
-    .pomodoro-hour-bar-on { background: var(--interactive-accent); opacity: 0.7; }
-
-/* ==================== 移动端全屏态（.bz-panel-mtop 随 mfs 开关同挂摘） ====================
-   全屏时顶距工具类统一避让 Obsidian 移动端头（44px）；右上角设置钮为绝对定位，
-   不随文档流下移，需同步下移到避让区之下（常规小卡态无此钮规则，维持 16px） */
-@media (max-width: 768px) {
-    #pomodoro-popup.bz-panel-mtop #pomodoro-btn-settings { top: calc(max(44px, env(safe-area-inset-top, 0px)) + 12px); }
-}
+/* ==================== 世界退后（2026-09-23 特效批采纳 9）· 休息相位专用 ====================
+   休息不再只是「弹窗里变暗」：整个外部世界也后退一档，弹窗自己极缓地呼吸一下。
+   - 遮罩 backdrop-blur 加深（--bz-overlay-blur 单源 × 1.9 ≈ 15px，与 .bz-overlay-mask 同源变量）；
+   - 弹窗 6.4s 一息、幅度 8‰（与休息的呼吸周期同拍，见 motion.ts 的 BREATH_BREAK）。
+   类由 motion.ts::setRestDepth 挂/摘，只活在 break-* 相位；RM 口径与域内一致（不在此处单独降级）。 */
+#pomodoro-mask.bz-pm-rest { backdrop-filter: blur(calc(var(--bz-overlay-blur, 8px) * 1.9)); }
+#pomodoro-popup.bz-pm-rest { animation: bz-pm-rest-breath 6.4s ease-in-out infinite; }
+/* RM（?rm=1）：CSS 呼吸与 SMIL 流光同闸——class 由 setRestDepth 按 reduced() 挂 */
+#pomodoro-popup.bz-pm-rm.bz-pm-rest { animation: none; }
+@keyframes bz-pm-rest-breath { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.008); } }
 
 /* ==================== 触控热区（设计手册 §8.2，触屏 pointer:coarse） ====================
    ::after 外扩已收编 core .bz-touch-target（components.css，模板挂类）：
-   控制按钮 = --sm(-4px)、右上角设置钮 = 默认(-6px)；此处仅保留 padding 抬档。 */
+   控制按钮 = --sm(-4px)；此处仅保留 padding 抬档。 */
 @media (pointer: coarse) {
     .pomodoro-btn { padding: 10px var(--bz-space-lg); }
-    #pomodoro-btn-settings { padding: 10px; }
+    /* 统计两档切换钮触屏抬档（深审 ui P2-2，§8.2 40px 点按下限；裸钮约 19px）：
+       两钮左右相邻（gap 4px），挂 bz-touch-target--lg/-xl 的 ::after 外扩热区会互相盖住
+       命中区（右钮压左钮右缘）——故走 padding 抬档先例（attach 清单行同款）：
+       caption 11px + 上下 12px ≈ 41px 达标，仅触屏生效不扰桌面布局 */
+    .pomodoro-stat-tab { padding: var(--bz-space-md); }
 }
 /* ==================== 书库域样式（src/bookshelf/styles.css） ====================
    书脊墙 1:1 复刻（issue 218；原型 .zcode/ui-prototypes/bookshelf-10/p4-full.html）：
