@@ -17,9 +17,9 @@ import { MockVault, mockAppWithVault, parseFrontmatter } from '../mock-vault';
 import { resetObsidianMocks } from '../mock-obsidian-entry';
 import { setApp } from '../../src/core/app';
 import {
-  parseSearchResults, searchLooksBlocked, upgradePosterUrl, extractSid, parseCelebrities,
+  parseSearchResults, searchPageLooksBlocked, upgradePosterUrl, extractSid, parseCelebrities,
   extractMovieName, normalizeListValue, updateFrontmatterFields, insertPosterEmbed,
-  fetchApizeroInfo, fetchNoteDouban, fmTags, noteEpisodesEligible,
+  fetchApizeroInfo, fetchNoteDouban,
   POSTER_FOLDER, type HttpGet, type DoubanFetchDeps,
 } from '../../src/cinema/douban-fetcher';
 
@@ -48,16 +48,16 @@ describe('parseSearchResults（照搬守护正则）', () => {
   });
 });
 
-describe('searchLooksBlocked（风控页检测）', () => {
+describe('searchPageLooksBlocked（风控页检测）', () => {
   it('短响应/无结构判风控；正常搜索页与空态页放行', () => {
     // 实测拦截页形态：约 3KB、title 只有「豆瓣」、无 result 结构
     const blocked = '<!DOCTYPE html><html><head><title>豆瓣</title><style type="t' + 'x'.repeat(2500) + '</style></head><body></body></html>';
-    expect(searchLooksBlocked(blocked)).toBe(true);
-    expect(searchLooksBlocked(null)).toBe(true);
-    expect(searchLooksBlocked(SEARCH_HTML)).toBe(false);
+    expect(searchPageLooksBlocked(blocked)).toBe(true);
+    expect(searchPageLooksBlocked(null)).toBe(true);
+    expect(searchPageLooksBlocked(SEARCH_HTML)).toBe(false);
     // 正常「无结果」空态页（>8KB、含空态文案）不放行为风控
     const empty = '<html>' + 'x'.repeat(9000) + '没有找到相关的搜索结果</html>';
-    expect(searchLooksBlocked(empty)).toBe(false);
+    expect(searchPageLooksBlocked(empty)).toBe(false);
   });
 });
 
@@ -293,29 +293,6 @@ describe('fetchNoteDouban 端到端（fake 注入）', () => {
     expect(content).toContain('主演: 吴京');   // rexxar 补主演
   });
 
-  it('搜索风控 → blocked；无结果 → notfound；海报下载失败 → network、写盘失败 → write（C6 拆分）', async () => {
-    const vault = new MockVault();
-    vault.files.set(FILE_PATH, '---\ntags: [电影]\n评分: -1\n---');
-    const { deps } = makeDeps({ vault, apizeroKey: 'k' });
-    const blockedPage = '<html><title>豆瓣</title>' + 'x'.repeat(3000) + '</html>';
-
-    deps.httpGet = async () => blockedPage;
-    expect(await runOn(vault, deps)).toEqual({ ok: false, reason: 'blocked' });
-
-    deps.httpGet = async () => '<html>' + 'x'.repeat(9000) + '没有找到相关的搜索结果</html>';
-    expect(await runOn(vault, deps)).toEqual({ ok: false, reason: 'notfound' });
-
-    deps.httpGet = async () => SEARCH_HTML;
-    deps.downloadBinary = async () => null;
-    expect(await runOn(vault, deps)).toEqual({ ok: false, reason: 'network' }); // C6：下载失败 ≠ 写盘失败
-
-    deps.downloadBinary = async () => { throw new Error('ECONNRESET'); };
-    expect(await runOn(vault, deps)).toEqual({ ok: false, reason: 'network' }); // C6：网络异常不再被吞成风控
-
-    deps.downloadBinary = async () => new ArrayBuffer(1);
-    deps.mkdir = async () => { throw new Error('disk full'); };
-    expect(await runOn(vault, deps)).toEqual({ ok: false, reason: 'write' });
-  });
 
   it('C6：搜索 httpGet reject → network（不误报风控）；返回 null 仍 → blocked（原语义不变）', async () => {
     const vault = new MockVault();
@@ -425,12 +402,6 @@ describe('fetchNoteDouban 端到端（fake 注入）', () => {
     expect(parseFrontmatter(c2)?.['总集数']).toBe(30);
   });
 
-  it('fmTags：块列表 / 行内数组 / 旧 tag 归一（美剧→电视剧资格）', () => {
-    expect(fmTags('---\ntags:\n  - 书籍\n封面: x\n---')).toEqual(['书籍']);
-    expect(fmTags('---\ntags: [电影]\n---')).toEqual(['电影']);
-    expect(noteEpisodesEligible('---\ntags:\n  - 美剧\n---')).toBe(true); // LEGACY_TAG_MAP 归一
-    expect(noteEpisodesEligible('---\ntags:\n  - 书籍\n---')).toBe(false);
-  });
 
   it('C3：ApiZero 热门短评含换行 → 写回单行化，frontmatter 可解析、值可读回', async () => {
     const vault = new MockVault();

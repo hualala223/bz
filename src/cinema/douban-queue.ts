@@ -9,14 +9,17 @@
  */
 import type { App, TFile } from 'obsidian';
 import { requestUrl } from 'obsidian';
-import { notice } from '../core/notice';
+import { notice, notify } from '../core/notice';
 import { sleep } from '../core/utils';
 import { tryGetSettings } from '../core/settings-provider';
 import { M } from './state';
 import { doubanEligibleTag, getGroupSafe } from './constants';
 import { rebuildItems } from './data';
-import { fetchNoteDouban, type DoubanFetchDeps, type DoubanFetchOutcome } from './douban-fetcher';
+import { fetchNoteDouban, queryDoubanByName, downloadPosterToVault, type DoubanFetchDeps, type DoubanFetchOutcome, type DoubanQueryOutcome } from './douban-fetcher';
 import { fetchMdBookDouban } from '../bookshelf/douban-fetcher';
+
+/** 查询结果类型再导出：测试注入 `configureFetchQueue({ preview })` 时要用 */
+export type { DoubanQueryOutcome };
 
 /** 条目间隔 ms（防豆瓣限流，对齐原守护 FETCH_INTERVAL） */
 const FETCH_GAP_MS = 15000;
@@ -49,8 +52,11 @@ const attempted = new Set<string>();
 /** G8：已删除影片的取消集合——正在抓取时影片被删，完成后不再记失败 */
 const cancelled = new Set<string>();
 const failedNames: string[] = [];
+/** 本轮失败条目（呈报#23 / C4「重试」动作的重入队数据源，随 failedNames 同步清） */
+let failedEntries: QueueEntry[] = [];
 /** 风控失败单独聚合（文案区分：重启 Obsidian 重载插件后随 sweep 自动重试，非数据缺失） */
 let blockedNames: string[] = [];
+let blockedEntries: QueueEntry[] = [];
 let pumping = false;
 /** 测试注入 */
 let fetchFn: FetchNote | null = null;
@@ -61,7 +67,7 @@ let refreshDelayMs = 1500;
 // ---------- requestUrl 适配（生产默认 HTTP 通道） ----------
 
 /** 带 15s 超时的 requestUrl GET；非 2xx / 超时 → null（由调用方判形态）；
- *  网络异常向上抛（审查 C6：吞成 null 会被 searchLooksBlocked 误判为风控拦截） */
+ *  网络异常向上抛（审查 C6：吞成 null 会被 suggestLooksBlocked 误判为风控拦截） */
 async function httpGet(url: string, headers?: Record<string, string>): Promise<string | null> {
   const timer = new Promise<null>((resolve) => setTimeout(() => resolve(null), HTTP_TIMEOUT_MS));
   const req = requestUrl({ url, method: 'GET', headers, throw: false }).then((resp) => {
@@ -80,7 +86,7 @@ async function downloadBinary(url: string, headers?: Record<string, string>): Pr
   return await Promise.race([req, timer]);
 }
 
-/** 从插件设置读抓取配置（ApiZero Key / 豆瓣 Cookie，随库同步移动端；重抓命令复用） */
+/** 从插件设置读抓取配置（ApiZero Key / 豆瓣 Cookie，随库同步移动端；票 301 重抓复用） */
 export function fetchDepsFromSettings(app: App): DoubanFetchDeps {
   const s = (tryGetSettings() ?? {}) as Record<string, unknown>;
   const adapter = (app.vault as unknown as { adapter?: { writeBinary?: (p: string, d: ArrayBuffer) => Promise<void>; mkdir?: (p: string) => Promise<void> } }).adapter;
@@ -97,7 +103,34 @@ export function fetchDepsFromSettings(app: App): DoubanFetchDeps {
     },
     apizeroKey: typeof s.cinemaApizeroKey === 'string' ? s.cinemaApizeroKey.trim() : '',
     doubanCookie: typeof s.cinemaDoubanCookie === 'string' ? s.cinemaDoubanCookie.trim() : '',
+    posterFolder: typeof s.cinemaPosterFolder === 'string' ? s.cinemaPosterFolder.trim() : '',
   };
+}
+
+/** 表单「解析」查询器类型（测试注入面） */
+export type PreviewQuery = (app: App, name: string) => Promise<DoubanQueryOutcome>;
+/** 测试注入：解析查询器（默认走真 queryDoubanByName） */
+let previewFn: PreviewQuery | null = null;
+
+/** 表单「解析」入口（issue 395）：按片名查询豆瓣字段。
+ *  复用队列的 deps 组装（ApiZero Key / 豆瓣 Cookie / requestUrl 通道）——单一来源，
+ *  表单不自己拼一份 HTTP 层。 */
+export async function queryDoubanForPreview(app: App, name: string): Promise<DoubanQueryOutcome> {
+  return previewFn ? previewFn(app, name) : queryDoubanByName(name, fetchDepsFromSettings(app));
+}
+
+/** 保存海报的注入面（测试用；默认走真下载） */
+export type PreviewPosterSave = (app: App, name: string, posterUrl: string) => Promise<string | null>;
+/** 测试注入：保存海报落库（默认走真 downloadPosterToVault） */
+let posterFn: PreviewPosterSave | null = null;
+
+/** 「添加影视」保存时把解析到的海报落库（issue 397）：与队列抓取共用 downloadPosterToVault
+ *  与同一套 deps（requestUrl 下载 + adapter 写盘）。返回 vault 相对路径；null = 没落成
+ *  （没网 / 写盘失败 / 未配置），由调用方决定是否回退后台抓取补齐。 */
+export async function downloadPreviewPoster(app: App, name: string, posterUrl: string): Promise<string | null> {
+  if (posterFn) return posterFn(app, name, posterUrl);
+  const r = await downloadPosterToVault(name, posterUrl, fetchDepsFromSettings(app));
+  return r.ok ? r.path : null;
 }
 
 /** 测试注入：替换执行器 / 条目间隔 / 完成后刷新延迟 */
@@ -105,8 +138,14 @@ export function configureFetchQueue(hooks: {
   fetch?: FetchNote;
   gapMs?: number;
   refreshDelayMs?: number;
+  /** 解析查询器；传 null 复位（测试 afterEach 用） */
+  preview?: PreviewQuery | null;
+  /** 保存海报落库；传 null 复位（测试 afterEach 用） */
+  poster?: PreviewPosterSave | null;
 }): void {
   if (hooks.fetch) fetchFn = hooks.fetch;
+  if (hooks.preview !== undefined) previewFn = hooks.preview;
+  if (hooks.poster !== undefined) posterFn = hooks.poster;
   if (hooks.gapMs !== undefined) gapMs = hooks.gapMs;
   if (hooks.refreshDelayMs !== undefined) refreshDelayMs = hooks.refreshDelayMs;
 }
@@ -127,6 +166,10 @@ export function isFetching(path: string | null | undefined): boolean {
 export function enqueueDoubanFetch(file: TFile | null, name: string, kind: DoubanQueueKind = 'movie'): boolean {
   if (!file) return false;
   const key = file.path;
+  // G8 豁免只在「在抓被删」那一次：dequeue（删除）会无条件记 cancelled，删过**未入队**的
+  // 影片会留残留标记——同名重建后首次真失败会被 pump 当取消静默吞掉。入队即视为新会话条目，
+  // 先清残留（attempted 已由 dequeue 清除，此处兜对齐）。
+  cancelled.delete(key);
   if (attempted.has(key)) return false;
   attempted.add(key);
   pending.set(key, Date.now());
@@ -213,9 +256,23 @@ async function pump(): Promise<void> {
         refreshAfterFetch();
         continue;
       }
+      // 审计#12（issue 337）：写回前存在性守卫——目标笔记已被删（含插件外删除，不经 G8
+      // dequeueDoubanFetch）→ 静默出队：清会话去重标记（对齐 G8/C10，同名重建可重新入队），
+      // 不记失败不发错误通知（外部删除是用户意图，「重启后会自动重试」的文案对它不成立）
+      if (M.appRef && !M.appRef.vault.getAbstractFileByPath(entry.file.path)) {
+        console.info(`bz 影院：豆瓣抓取目标笔记已删除，静默出队：${entry.file.path}`);
+        attempted.delete(entry.file.path);
+        refreshAfterFetch();
+        continue;
+      }
       if (!r.ok) {
-        if (r.reason === 'blocked') blockedNames.push(entry.name);
-        else failedNames.push(entry.name);
+        if (r.reason === 'blocked') {
+          blockedNames.push(entry.name);
+          blockedEntries.push(entry);
+        } else {
+          failedNames.push(entry.name);
+          failedEntries.push(entry);
+        }
       }
       refreshAfterFetch();
     }
@@ -223,15 +280,52 @@ async function pump(): Promise<void> {
     pumping = false;
   }
   // 失败聚合通知：风控与一般失败分开文案。
-  //  会话去重只在插件卸载时重置，重开面板 sweep 会被拦下、不会重试（C5：文案如实）
+  //  会话去重只在插件卸载时重置，重开面板 sweep 会被拦下、不会重试（C5：文案如实）。
+  //  呈报#23（C4）：两份通知都挂「重试」动作——清会话去重标记重新入队（一键替代重启重载）。
+  //  C5 文案保留不冲突：不重试它仍会在重启重载后自动补抓。
   if (blockedNames.length > 0) {
-    notice(`豆瓣风控拦截，以下影片本轮未抓到：${blockedNames.join('、')}（重启 Obsidian（重载插件）后会自动重试）`, 'error');
+    const entries = blockedEntries; // 先捕获本轮数组：模块变量随通知清零，onClick 以捕获值为准
+    notify(`豆瓣风控拦截，以下影片本轮未抓到：${blockedNames.join('、')}（重启 Obsidian（重载插件）后会自动重试）`, {
+      type: 'error',
+      action: { label: '重试', onClick: () => requeueFailed(entries) },
+    });
     blockedNames = [];
+    blockedEntries = [];
   }
   if (failedNames.length > 0) {
-    notice(`以下影片豆瓣信息获取失败：${failedNames.join('、')}（重启 Obsidian（重载插件）后会自动重试）`, 'error');
+    const entries = failedEntries;
+    notify(`以下影片豆瓣信息获取失败：${failedNames.join('、')}（重启 Obsidian（重载插件）后会自动重试）`, {
+      type: 'error',
+      action: { label: '重试', onClick: () => requeueFailed(entries) },
+    });
     failedNames.length = 0;
+    failedEntries = [];
   }
+}
+
+/**
+ * 失败通知「重试」（呈报#23 / C4）：清会话去重标记后重新入队（enqueueDoubanFetch 内会
+ * 重置 loading 打点与队列快照）。笔记已删除的条目跳过并对齐审计#12 口径清去重标记；
+ * 全部不可重试时如实说明。条目**消费即出列**——重复点击不重复入队（防重复请求踩限流）。
+ */
+function requeueFailed(entries: QueueEntry[]): void {
+  const app = M.appRef;
+  if (!app) return;
+  let added = 0;
+  let gone = 0;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    entries.splice(i, 1);
+    attempted.delete(e.file.path);
+    const file = app.vault.getAbstractFileByPath(e.file.path) as TFile | null;
+    if (!file) {
+      gone++;
+      continue;
+    }
+    if (enqueueDoubanFetch(file, e.name)) added++;
+  }
+  if (added > 0) notice(`已重新入队 ${added} 部影片的豆瓣抓取`);
+  else if (gone > 0) notice('没有可重试的影片', 'warning');
 }
 
 /** 抓取落盘后刷新：立即一次（loading 退场）+ 延迟一次（等 metadataCache 消化磁盘变化，
@@ -255,6 +349,8 @@ export function shutdownDoubanQueue(): void {
   attempted.clear();
   cancelled.clear();
   failedNames.length = 0;
+  failedEntries = [];
   blockedNames = [];
+  blockedEntries = [];
   pumping = false;
 }

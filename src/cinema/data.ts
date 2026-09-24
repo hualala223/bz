@@ -3,8 +3,18 @@
  */
 import type { App, TFile } from 'obsidian';
 import { ALL_TAGS, getGroupSafe, LEGACY_TAG_MAP, STATUS_WANT, STATUS_WATCHING, STATUS_WATCHED } from './constants';
+import { extractMovieName } from './douban-fetcher';
 import type { CinemaItem } from './state';
 import { M } from './state';
+
+/** frontmatter `tags` → string[]（兼容数组 / 单个字符串 / 缺失）。
+ *  影院域 tag 归一化单源：UI 写盘（ui.ts 改名替换）与解析（parseMovieFile）共用，
+ *  避免同域第二份漂移（审查收口）。 */
+export function normalizeTags(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.map((t) => String(t));
+  if (typeof raw === 'string' && raw) return [raw];
+  return [];
+}
 
 /** 解析单条笔记（frontmatter → CinemaItem）；无 frontmatter 返回 null */
 export function parseMovieFile(file: TFile, app: App): CinemaItem | null {
@@ -12,13 +22,12 @@ export function parseMovieFile(file: TFile, app: App): CinemaItem | null {
   if (!cache || !cache.frontmatter) return null;
   const fm = cache.frontmatter;
 
-  const basename = file.basename;
-  const name = basename.match(/《(.+)》/)?.[1] ?? basename;
+  // 《名称》提取域内单源（审查批 C 收敛）：basename 无扩展名，与 fetcher 版（先剥 .md）语义一致
+  const name = extractMovieName(file.basename);
 
   // tags → typeTag（ALL_TAGS 顺序优先；无固定 tag 取首个；完全无 tag 跳过）
-  let rawTags = fm.tags;
-  if (typeof rawTags === 'string') rawTags = [rawTags];
-  const tags: string[] = Array.isArray(rawTags) ? rawTags.map((t: unknown) => String(t)) : [];
+  // 归一化走单源 normalizeTags（兼容数组/单字符串/缺失，与 UI/判定命令同口径）
+  const tags = normalizeTags(fm.tags);
   let typeTag: string | null = null;
   for (const t of ALL_TAGS) {
     if (tags.includes(t)) {
@@ -48,7 +57,7 @@ export function parseMovieFile(file: TFile, app: App): CinemaItem | null {
 
   return {
     file,
-    name,
+    name: name ?? '',
     typeTag,
     group: getGroupSafe(typeTag),
     watchDate,
@@ -62,6 +71,7 @@ export function parseMovieFile(file: TFile, app: App): CinemaItem | null {
     actors: fm['主演']?.toString() ?? null,
     region: fm['制片国家/地区']?.toString() ?? null,
     year: fm['上映日期'] ? String(fm['上映日期']).slice(0, 4) : null,
+    releaseDate: fm['上映日期'] ? String(fm['上映日期']) : null,
     doubanRating: fm['豆瓣评分'] !== undefined && fm['豆瓣评分'] !== '' ? String(fm['豆瓣评分']) : null,
     doubanUrl: /^https?:\/\//.test(String(fm['豆瓣链接'] ?? '')) ? String(fm['豆瓣链接']) : null,
     synopsis: fm['简介']?.toString() ?? null,
@@ -75,6 +85,8 @@ export function parseMovieFile(file: TFile, app: App): CinemaItem | null {
     // 集数（票 295）：fm 键「总集数」「正在看集数」仅剧类写入，读侧对任意值宽容解析
     episodesTotal: parseEpisodeCount(fm['总集数']),
     episodesWatching: parseEpisodeCount(fm['正在看集数']),
+    // 豆瓣热门短评（上游 issue 409 融合）：fm 键「热门短评」单值原文
+    hotComment: fm['热门短评']?.toString() ?? null,
     // 章节（票 301，对齐集数口径）：fm 键「总章节数」「正在看章节」仅书籍写入
     chaptersTotal: parseEpisodeCount(fm['总章节数']),
     chaptersWatching: parseEpisodeCount(fm['正在看章节']),
@@ -104,6 +116,24 @@ export function parseEpisodeCount(raw: unknown): number | null {
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) return null;
   return Math.round(n);
+}
+
+
+/**
+ * 海报路径 rename 联动目标扫描（issue 337 审计#11）：`海报` 是纯路径非双链，
+ * Obsidian 改名海报文件不联动 frontmatter。扫影院目录全部 md 的 metadataCache frontmatter，
+ * 返回 海报==oldPath 的笔记（不依赖面板是否开过，M.items 未填充也能命中）。
+ * 读法与 parseMovieFile 同口径（toString 剥引号——metadataCache 已解析 YAML）。
+ */
+export function findPosterRenameTargets(app: App, oldPath: string): TFile[] {
+  if (!oldPath) return [];
+  const files = app.vault.getMarkdownFiles().filter((f) => f.path.startsWith(M.folderPath + '/'));
+  const hits: TFile[] = [];
+  for (const file of files) {
+    const fm = app.metadataCache.getFileCache(file)?.frontmatter;
+    if (fm && fm['海报'] != null && String(fm['海报']) === oldPath) hits.push(file);
+  }
+  return hits;
 }
 
 /** 重建条目列表（扫描 M.folderPath 下全部 md） */

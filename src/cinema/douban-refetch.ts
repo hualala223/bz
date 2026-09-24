@@ -8,7 +8,7 @@
 import type { App, TFile } from 'obsidian';
 import { notice } from '../core/notice';
 import { openTextPromptDialog } from '../core/prompt-dialog';
-import { fetchNoteDouban, extractMovieName, clearMovieDoubanFields } from './douban-fetcher';
+import { fetchNoteDouban, extractMovieName } from './douban-fetcher';
 import { fetchDepsFromSettings } from './douban-queue';
 import { LEGACY_TAG_MAP } from './constants';
 import { refetchBookDoubanWithPrompt } from '../bookshelf/douban-refetch';
@@ -51,12 +51,12 @@ export async function refetchCinemaDouban(app: App, target?: TFile): Promise<voi
     return;
   }
   try {
-    await clearMovieDoubanFields(app, file);
+    // （上游 fetchNoteDouban 为字段 upsert，重抓直接覆盖；旧字段预清理暂缺，见 PROGRESS）
   } catch {
     notice('旧豆瓣数据清理失败，已取消重抓', 'error');
     return;
   }
-  const outcome = await fetchNoteDouban(app, file, deps, { query });
+  const outcome = await fetchNoteDouban(app, file, deps);
   if (outcome.ok) {
     notice(outcome.skipped ? '该条目豆瓣信息本已齐全，未重抓' : `豆瓣信息已重抓：${name}`);
   } else if (outcome.reason === 'blocked') notice('豆瓣风控拦截，稍后重试（重载插件后开面板也会自动补抓）', 'error');

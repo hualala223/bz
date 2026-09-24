@@ -458,6 +458,10 @@ export default interface BzSettings {
   /** 影视：移动端默认全屏（默认开——主面板/影视分析/影视报告同控，原 JS 内联强制全屏） */
   // ===== 🎬 影院（cinema 域；上游 ADR-0087 起接管旧影视域）=====
   cinemaFolderPath: string;
+  /** 🖼 影院海报文件夹（上游 issue 397；留空用默认目录） */
+  cinemaPosterFolder: string;
+  /** 📺 剧集按季合并（上游 ADR-0168） */
+  cinemaMergeSeasons: boolean;
   cinemaSortMode: string;
   cinemaStatusFilter: string;
   cinemaGridColumns: string;
@@ -676,6 +680,8 @@ export const DEFAULT_SETTINGS: BzSettings = {
   // 影院（cinema；上游 ADR-0087 起接管影视；缺省回落默认目录，旧 movieFolderPath 键已退役；
   // ADR-0127 票 292：默认目录改 我的/娱乐，旧值 我的/影视 由启动迁移平移）
   cinemaFolderPath: '我的/娱乐',
+  cinemaPosterFolder: '',
+  cinemaMergeSeasons: true,
   cinemaSortMode: 'date',
   cinemaStatusFilter: '',
   cinemaGridColumns: '5',
