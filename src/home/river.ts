@@ -36,7 +36,7 @@ import { DataManager as FavoritesDataManager } from '../favorites/data';
 import { getStoragePath as getFavoritesPath } from '../favorites/config';
 import { readRecentEntries, countSameDay } from '../collect/store';
 import type { CollectEntry } from '../collect/data';
-import { EMPTY_COUNTS, EMPTY_SUMMARY, dateStrOf } from './shared';
+import { EMPTY_COUNTS, EMPTY_SUMMARY, dateStrOf, parsePlanCheckins } from './shared';
 import type { RiverData, RiverDay, RiverCounts, RiverStreak, RiverSummary, RiverWeekDay, CollectRecentItem } from './shared';
 
 // 兼容再出口：类型与规则纯函数单源在 ./shared（旧引用 `from './river'` 零改）
@@ -183,6 +183,25 @@ async function collectCollectSnapshot(
   for (const e of all.slice(0, 3)) recent.push({ category: e.category, text: e.text });
 }
 
+/** 计划卡（外部插件 PlanFlow，ADR-0132/票 304）：今日打卡 已勾/总数。
+ *  只读解析 planflow 的每日笔记「## ✅ 今日打卡」小节（解析纯函数 parsePlanCheckins 在 ./shared）；
+ *  路径按 planflow 默认 rootPath `CONFIG/计划` + 年目录约定 `计划{year}`（planflow ADR-0002）。
+ *  只读契约：文件缺失/读失败/解析失败一律留 0（计数回落域副题），不建目录不写任何文件；
+ *  不读 planflow 设置（data.json）——用户改过 rootPath 时计数隐藏，属 ADR-0132 已知限制。 */
+async function collectPlanCounts(app: App, now: number, c: RiverCounts): Promise<void> {
+  const d = new Date(now);
+  const filePath = `CONFIG/计划/计划${d.getFullYear()}/每日/${dateStrOf(now)}.md`;
+  if (!fileExists(app, filePath)) return;
+  try {
+    const f = app.vault.getAbstractFileByPath(filePath) as TFile;
+    const r = parsePlanCheckins(await app.vault.read(f));
+    c.planDone = r.done;
+    c.planTotal = r.total;
+  } catch {
+    /* 解析失败：计数留 0 */
+  }
+}
+
 /** 番茄钟是否正在专注（计时中或暂停中；item-1789106079981 彩点 warn 条件）——
  *  跨域**只读**：isFocusing 无副作用（不加载、不恢复、不通知），动态 import 遵守 ADR-0002；
  *  失败回落 false（同 ui.ts readPomodoroFocusing 先例；ensure 兜底留给 ui 层，本层不触发恢复副作用）。 */
@@ -251,6 +270,7 @@ export async function collectRiver(app: App, now: number = Date.now()): Promise<
         () => collectBelongingsCounts(app, counts),
         () => collectTodoCounts(app, counts),
         () => collectCollectSnapshot(app, now, counts, collectRecent),
+        () => collectPlanCounts(app, now, counts),
       ].map(safe)
     ),
     collectFocusing(),

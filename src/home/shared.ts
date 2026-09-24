@@ -43,6 +43,9 @@ export const DOMAINS: HomeDomain[] = [
   { id: 'diary', commandId: 'bz-diary-open', name: '日记本', sub: '写今天的闪念', icon: iconOf('diary') },
   // 待办（todo 域，上游 memo 换血接替 ADR-0092/0117，本地命名走 ADR-0118）：上游 09-10 起补入首页入口（票 288）
   { id: 'todo', commandId: 'bz-todo-open', name: '待办', sub: '随手记与待办', icon: iconOf('todo') },
+  // 计划（外部插件 PlanFlow 只读接入，ADR-0132/票 304）：DOMAINS 首张外部插件卡——
+  // 命令 id 是 planflow 插件的既有命令（无 bz- 前缀），planflow 未启用时走 runCommand 失败提示
+  { id: 'plan', commandId: 'planflow:open-planboard', name: '计划', sub: '计划打卡与目标追踪（PlanFlow）', icon: iconOf('plan') },
   { id: 'cinema', commandId: 'bz-cinema-open', name: '娱乐', sub: '电影/剧集/书籍 想看与在看', icon: iconOf('cinema') },
   { id: 'review', commandId: 'bz-review-open', name: '复习计划', sub: '到期卡片队列', icon: iconOf('review') },
   { id: 'pomodoro', commandId: 'bz-pomodoro-open', name: '番茄钟', sub: '专注计时', icon: iconOf('pomodoro') },
@@ -88,6 +91,8 @@ export const DOMAIN_DOT: Record<string, string> = {
   settings: '#8a8f99',
   // 日常收集（collect 域，issue 246）：琥珀色快照卡同源
   collect: '#c98a2e',
+  // 计划（外部插件 PlanFlow 卡，ADR-0132）：planflow 深空蓝主题同系
+  plan: '#4a6fa5',
 };
 
 /** 全量域 id（钉选候选/迷你 chips 遍历顺序） */
@@ -280,6 +285,12 @@ export const DOMAIN_MENU: Record<string, DomainMenuAction[]> = {
     { label: '重建索引', commandId: 'bz-secondbrain-rebuild-index', icon: 'refresh-cw', keepHome: true },
   ],
   belongings: [{ label: '加物品', commandId: 'bz-belongings-add', icon: 'archive' }],
+  // 计划（外部插件 PlanFlow，ADR-0132）：planflow 现有命令面仅此 1 条——「打开计划总览」
+  // 与左键等价，挂菜单是用户点名的形态统一（破「不放打开 X」惯例，diary「打开今日日记」先例同款）。
+  // planflow 未启用时 runCommand 走现成失败提示；其后续扩命令面可再挂。
+  plan: [
+    { label: '打开计划总览', commandId: 'planflow:open-planboard', icon: 'target' },
+  ],
   // 保险库：此前是空菜单（无域快捷动作）；锁定是唯一「不开面板」的一步动作
   // （上游 bz-encrypt-lock-vault 的本地命令名 = bz-encrypt-lock，票 288 映射）
   encrypt: [
@@ -373,6 +384,10 @@ export interface RiverCounts {
   belongingsTotal: number;
   /** 今日收集条数（collect 域目标文件的只读聚合；非标准格式行不计） */
   collectToday: number;
+  /** 计划卡（外部插件 PlanFlow，ADR-0132）：今日打卡 已勾/总数（只读解析其每日笔记「## ✅ 今日打卡」小节）。
+   *  planflow 数据缺失/格式变动时两值留 0 → 计数文案回落域副题（不报错不阻塞）。 */
+  planDone: number;
+  planTotal: number;
 }
 
 export const EMPTY_COUNTS: RiverCounts = {
@@ -390,6 +405,8 @@ export const EMPTY_COUNTS: RiverCounts = {
   favoritesTotal: 0,
   belongingsTotal: 0,
   collectToday: 0,
+  planDone: 0,
+  planTotal: 0,
 };
 
 /** 时间线摘要（recap RecapSummary + todoCreated：彩点规则的需要） */
@@ -697,8 +714,44 @@ export function riverCountText(id: string, data: RiverData): string | null {
       return `登记 ${c.belongingsTotal} 件`;
     case 'collect':
       return `今日 ${c.collectToday} 条`;
+    // 计划卡（ADR-0132）：planflow 数据缺失/未打卡 → 总数 0 回落域副题
+    case 'plan':
+      return c.planTotal > 0 ? `今日打卡 ${c.planDone}/${c.planTotal}` : null;
     default:
       return null; // recap/knowledge/reading-report/attach/encrypt/smartcat/settings/pomodoro 走域副题
   }
+}
+
+/* ---------- 计划卡计数解析（外部插件 PlanFlow，ADR-0132；纯函数，node 可测） ---------- */
+
+/** planflow 每日笔记「今日打卡」小节标题（planflow 代码内模板固定；前缀 emoji ✅ 允许任意空白） */
+const PLAN_CHECKIN_HEADING_RE = /^#{2,6}\s+✅\s*今日打卡\s*$/;
+
+/**
+ * 解析 planflow 每日笔记 → 今日打卡 { 已勾, 总数 }（纯函数，node 可测）。
+ *
+ * 口径（ADR-0132）：只数 `## ✅ 今日打卡` 小节内的任务行（`- [ ]` / `- [x]`，`*` 列表符同认）；
+ * 碰到下一个任意级标题即止（小节边界）。每日笔记由 planflow 代码内模板生成，plan 行（含
+ * emoji/标签/日期后缀）与临时任务行都是标准任务行——统一计入，不做行内容甄别。
+ * 小节不存在 / 无任务行 → { 0, 0 }（调用方据此隐藏计数，回落域副题）。
+ */
+export function parsePlanCheckins(dailyMd: string): { done: number; total: number } {
+  const lines = (dailyMd || '').split(/\r?\n/);
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (PLAN_CHECKIN_HEADING_RE.test(lines[i])) { start = i; break; }
+  }
+  if (start < 0) return { done: 0, total: 0 };
+  let done = 0;
+  let total = 0;
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^#{1,6}\s/.test(line)) break; // 下一个标题 = 小节结束
+    const m = line.match(/^\s*[-*]\s+\[([ xX])\]/);
+    if (!m) continue;
+    total++;
+    if (m[1].toLowerCase() === 'x') done++;
+  }
+  return { done, total };
 }
 

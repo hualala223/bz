@@ -45,6 +45,8 @@ export const DOMAIN_ICONS: Readonly<Record<string, string>> = {
   smartcat: 'cat',
   knowledge: 'list-video',
   collect: 'inbox',
+  // 外部插件卡（无 bz 命令）：plan = PlanFlow 首页卡（ADR-0132，目标语义）
+  plan: 'target',
   // 命令专属域
   'settings-panel': 'settings-2',
 };

@@ -52,12 +52,17 @@ describe('DOMAIN_MENU 形状', () => {
       expect(list.length).toBeGreaterThan(0);
       for (const a of list) {
         expect(a.label.trim()).not.toBe('');
-        // 票 303 追加白名单：磁贴本体开的是日记本面板，「打开今日日记」要的是日记文件，语义不同（用户点名特例）
-        if (a.label !== '打开今日日记') {
+        // 「打开 X」白名单（均为用户点名特例）：
+        // - 票 303「打开今日日记」：磁贴本体开的是日记本面板，这条要的是日记文件，语义不同
+        // - ADR-0132/票 304「打开计划总览」：外部插件 PlanFlow 命令面仅此 1 条，形态统一（Q6(b)）
+        if (a.label !== '打开今日日记' && a.label !== '打开计划总览') {
           expect(a.label.startsWith('打开')).toBe(false);
         }
         expect(a.label).not.toContain('整理顺序');
-        expect(a.commandId).toMatch(/^bz-[a-z0-9-]+$/);
+        // 命令 id 两类：bz 域命令（bz-*）｜外部插件既有命令（<插件>:<id>，ADR-0132 仅 planflow:open-planboard）
+        expect(
+          /^bz-[a-z0-9-]+$/.test(a.commandId) || a.commandId === 'planflow:open-planboard',
+        ).toBe(true);
         expect(a.icon).toBeTruthy();
       }
     }

@@ -550,6 +550,10 @@ _Avoid_: toast、气泡、原生通知、Notice
 
 _注意_：`src/diary/` 这个目录名两边都在用但装的不是同一套东西——本地是日记面板 + 每日捕获写链路，上游另含升格后的回忆墙。跨线看代码时先确认是哪条线。
 
+### 计划卡（home 域外部插件接入，ADR-0132）
+
+**计划卡**：内容首页（home 域）指向**外部插件 PlanFlow**（`planflow`，独立插件，六视图计划打卡系统）的入口卡——`DOMAINS` 里 bz 域卡之外的**首张外部插件卡**。左键与右键都只执行 planflow 的既有命令（`planflow:open-planboard`，不新增 bz 命令）；计数「今日打卡 N/M」为只读解析 planflow 的计划数据（`CONFIG/计划/计划{year}/`），**bz 不写 planflow 数据、不拥有其数据格式**。planflow 保持独立插件（2026-09-24 grill 裁决 Q1(b)），吸收议题如重启须按 ADR-0117/0120 分块纪律重新立项。
+
 ## Rules
 
 - 面板 DOM 的 id/类名与原 QuickAdd 脚本保持一致，外部依赖此约定。

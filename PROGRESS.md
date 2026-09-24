@@ -2,6 +2,17 @@
 
 > 进度同步总表（AGENTS.md）。每票一节，状态：计划中 → 进行中 → 门禁 → 已交付。
 
+## 内容首页「计划」卡：PlanFlow 外部插件只读接入（票 304 / ADR-0132）— 2026-09-24
+
+**状态：已交付**（grill-with-docs Q1–Q6 收敛：planflow **不吸收**保持独立插件 Q1(b)，域卡+计数 Q5(b)，右键照挂 Q6(b)——首张外部插件卡入 DOMAINS）。
+
+- [x] `src/core/domain-icons.ts`：`DOMAIN_ICONS.plan = 'target'`（原型图标表同步补 target svg）
+- [x] `src/home/shared.ts`：`DOMAINS` 加 plan 卡（commandId 直呼 `planflow:open-planboard`，无 bz- 前缀——外部插件既有命令，不新增命令面）；`DOMAIN_MENU.plan` 挂「打开计划总览」1 条（破「不放打开 X」惯例，用户点名，diary 先例同款）；`DOMAIN_DOT.plan`
+- [x] 计数「今日打卡 N/M」（Q5(b)）：`shared.ts` 纯函数 `parsePlanCheckins`（只认 planflow 每日笔记 `## ✅ 今日打卡` 小节任务行，下一任意级标题截断）+ `RiverCounts.planDone/planTotal`；`river.ts` `collectPlanCounts` 只读采集（`CONFIG/计划/计划{year}/每日/YYYY-MM-DD.md`，缺失/失败留 0 不建文件，不读 planflow 设置）；`riverCountText` plan 分支（总数 0 → null 回落域副题）
+- [x] 零侵入面：不动 diary 投影、不动 memo.json、planflow 仓库零改动（ADR-0132 决策 5）；home.json 新 id 走 `applyOrder` 缺省落位既有契约
+- [x] 测试：`tests/home/plan-card.test.ts` 10 用例（解析四态/计数分支/卡面菜单形状/MockVault 采集三态含不建文件）；`entry-menu.test.ts` 守卫更新（「打开 X」白名单 + 外部命令 id 放行）
+- [x] 门禁：tsc 0 错；esbuild production 过（vault 产物 + 根三件套再生不提交；home prototype-render.js 重出并 grep 验证）；vitest home 域 + render-purity 10 文件 120 用例全绿
+
 ## 打开今日日记：编辑器右键 + 命令直达（票 303）— 2026-09-24
 
 **状态：已交付**（grill-with-docs 三问一轮拍板「全部推荐」：编辑器右键 / 模板自动建档 / 注册命令）。

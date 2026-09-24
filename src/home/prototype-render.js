@@ -53,6 +53,7 @@ var BZR_home = (() => {
     menuHeadHtml: () => menuHeadHtml,
     nextHtml: () => nextHtml,
     panelFrameHtml: () => panelFrameHtml,
+    parsePlanCheckins: () => parsePlanCheckins,
     pomodoroMenuAction: () => pomodoroMenuAction,
     reorderTo: () => reorderTo,
     riverCountText: () => riverCountText,
@@ -106,6 +107,8 @@ var BZR_home = (() => {
     smartcat: "cat",
     knowledge: "list-video",
     collect: "inbox",
+    // 外部插件卡（无 bz 命令）：plan = PlanFlow 首页卡（ADR-0132，目标语义）
+    plan: "target",
     // 命令专属域
     "settings-panel": "settings-2"
   };
@@ -120,6 +123,9 @@ var BZR_home = (() => {
     { id: "diary", commandId: "bz-diary-open", name: "日记本", sub: "写今天的闪念", icon: iconOf("diary") },
     // 待办（todo 域，上游 memo 换血接替 ADR-0092/0117，本地命名走 ADR-0118）：上游 09-10 起补入首页入口（票 288）
     { id: "todo", commandId: "bz-todo-open", name: "待办", sub: "随手记与待办", icon: iconOf("todo") },
+    // 计划（外部插件 PlanFlow 只读接入，ADR-0132/票 304）：DOMAINS 首张外部插件卡——
+    // 命令 id 是 planflow 插件的既有命令（无 bz- 前缀），planflow 未启用时走 runCommand 失败提示
+    { id: "plan", commandId: "planflow:open-planboard", name: "计划", sub: "计划打卡与目标追踪（PlanFlow）", icon: iconOf("plan") },
     { id: "cinema", commandId: "bz-cinema-open", name: "娱乐", sub: "电影/剧集/书籍 想看与在看", icon: iconOf("cinema") },
     { id: "review", commandId: "bz-review-open", name: "复习计划", sub: "到期卡片队列", icon: iconOf("review") },
     { id: "pomodoro", commandId: "bz-pomodoro-open", name: "番茄钟", sub: "专注计时", icon: iconOf("pomodoro") },
@@ -161,7 +167,9 @@ var BZR_home = (() => {
     smartcat: "#e67341",
     settings: "#8a8f99",
     // 日常收集（collect 域，issue 246）：琥珀色快照卡同源
-    collect: "#c98a2e"
+    collect: "#c98a2e",
+    // 计划（外部插件 PlanFlow 卡，ADR-0132）：planflow 深空蓝主题同系
+    plan: "#4a6fa5"
   };
   var ALL_DOMAIN_IDS = DOMAINS.map((d) => d.id);
   function applyOrder(order, domains = DOMAINS) {
@@ -257,6 +265,12 @@ var BZR_home = (() => {
       { label: "重建索引", commandId: "bz-secondbrain-rebuild-index", icon: "refresh-cw", keepHome: true }
     ],
     belongings: [{ label: "加物品", commandId: "bz-belongings-add", icon: "archive" }],
+    // 计划（外部插件 PlanFlow，ADR-0132）：planflow 现有命令面仅此 1 条——「打开计划总览」
+    // 与左键等价，挂菜单是用户点名的形态统一（破「不放打开 X」惯例，diary「打开今日日记」先例同款）。
+    // planflow 未启用时 runCommand 走现成失败提示；其后续扩命令面可再挂。
+    plan: [
+      { label: "打开计划总览", commandId: "planflow:open-planboard", icon: "target" }
+    ],
     // 保险库：此前是空菜单（无域快捷动作）；锁定是唯一「不开面板」的一步动作
     // （上游 bz-encrypt-lock-vault 的本地命令名 = bz-encrypt-lock，票 288 映射）
     encrypt: [
@@ -296,7 +310,9 @@ var BZR_home = (() => {
     clippingUnread: 0,
     favoritesTotal: 0,
     belongingsTotal: 0,
-    collectToday: 0
+    collectToday: 0,
+    planDone: 0,
+    planTotal: 0
   };
   var EMPTY_SUMMARY = {
     diary: 0,
@@ -461,9 +477,34 @@ var BZR_home = (() => {
         return `登记 ${c.belongingsTotal} 件`;
       case "collect":
         return `今日 ${c.collectToday} 条`;
+      case "plan":
+        return c.planTotal > 0 ? `今日打卡 ${c.planDone}/${c.planTotal}` : null;
       default:
         return null;
     }
+  }
+  var PLAN_CHECKIN_HEADING_RE = /^#{2,6}\s+✅\s*今日打卡\s*$/;
+  function parsePlanCheckins(dailyMd) {
+    const lines = (dailyMd || "").split(/\r?\n/);
+    let start = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (PLAN_CHECKIN_HEADING_RE.test(lines[i])) {
+        start = i;
+        break;
+      }
+    }
+    if (start < 0) return { done: 0, total: 0 };
+    let done = 0;
+    let total = 0;
+    for (let i = start + 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (/^#{1,6}\s/.test(line)) break;
+      const m = line.match(/^\s*[-*]\s+\[([ xX])\]/);
+      if (!m) continue;
+      total++;
+      if (m[1].toLowerCase() === "x") done++;
+    }
+    return { done, total };
   }
 
   // src/home/layouts/river/render.ts

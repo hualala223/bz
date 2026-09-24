@@ -61,7 +61,7 @@
 | knowledge（知识盒，ADR-0072 自 bili-downloader 迁出；票 290/ADR-0126 正名，旧名 literature/文献盒） | knowledge.json（视频转文献任务队列；旧 literature.json 一次性迁移）+ 文献目录笔记（`文献盒/*.md` 文件夹名不变，设置键 `knowledgeDirectory`） |
 | smartcat（小橘） | smartcat.json + smartcat-behavior.json + smartcat-memory.json |
 | auto-summary | 剪藏 frontmatter |
-| home（内容首页，上游并入） | home.json（钉选偏好；各域只读快照） |
+| home（内容首页，上游并入） | home.json（钉选偏好；各域只读快照）；含首张外部插件卡「计划」（planflow 只读接入，ADR-0132——bz 不拥有其数据格式） |
 | recap（今日回顾，上游并入） | 只读聚合五域当天痕迹 |
 | checkup（数据体检，上游并入） | 全插件数据只读巡检（D4） |
 | diary-wall（回忆墙，上游并入） | `我的/日记/*.md` 只读派生媒体视图（ADR-0081） |
