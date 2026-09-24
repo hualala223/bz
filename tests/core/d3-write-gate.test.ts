@@ -30,6 +30,10 @@ const WHITELIST: Array<{ file: RegExp; reason: string; /** 防回归哨兵：预
     reason: '契约本体：三原语（串行队列/段写/留档）的原始 vault IO 实现集中于此，是豁免的定义基准',
   },
   {
+    file: /^src\/gameshelf\/(notes|posters)\.ts$/,
+    reason: 'gameshelf 域（上游 issue 368 移植批 2）：notes.ts vault.create 为「一作一笔记」用户文档写、posters.ts writeBinary 为 Steam 媒体二进制落地（封面/图标缓存）——均非 JSON 状态写，不适用三原语契约',
+  },
+  {
     file: /^src\/core\/json-store\.ts$/,
     reason: 'jsonStore 薄封装哨兵：现无裸写（转发 jsonFileStore）；此文件一旦出现直写即违约',
     sentinel: true,

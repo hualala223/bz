@@ -289,6 +289,7 @@ function attachRowMenu(el: HTMLElement, app: any, river: RiverData): void {
       onClick: () => {
         if (spec.keepHome) {
           // 即时类：面板留着，动作跑完刷新一次数据（计数/彩点当场归位）
+          if (spec.busyText) notice(spec.busyText); // 慢动作 busy 反馈（上游 eff P3-2：Steam 拉库 1-3s 防重复点击）
           runCommandAndRefresh(spec.commandId, app);
           return;
         }

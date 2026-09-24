@@ -30,6 +30,8 @@ import { maybeFetchNews, fetchNowNews, notifyManualFetchResult } from './clipboo
 import { openFavoritesPanel, addFavoriteItem, unloadFavorites } from './favorites';
 // 书架墙（bookshelf 域，上游并存式新域终局换血：数据同源，旧 library 退役）
 import { openBookshelf, openBookshelfReport, unloadBookshelf, refetchBookshelfDouban } from './bookshelf';
+// 游戏库（gameshelf 域，上游 issue 368：Steam 直连自动拉库，我的/游戏/*.md 一作一笔记）
+import { openGameshelf, openGameshelfStats, syncGameshelf, unloadGameshelf } from './gameshelf';
 // 阅读数据分析报告（读书报告内嵌化 ADR-0091：独立弹窗退役，报告为书架墙面板内视图）
 import { unloadReadingReport } from './reading-report';
 // 影院（cinema 域，上游 ADR-0087 起接管影视；旧 movie 域已退役。ADR-0090：报告窗并入影院内嵌分析页）
@@ -160,6 +162,12 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   // 第二大脑（ticket 103：原闪念正名接管，主面板为统一入口）
   { id: 'bz-secondbrain-panel', name: '第二大脑面板', icon: 'brain', callback: () => openSecondBrainPanel(getApp()) },
   // f7：与「第二大脑面板」区分——本命令打开参考侧边栏（右侧窄窗/移动端抽屉参考 tab）
+  // 游戏库（gameshelf 域，上游 issue 368）
+  { id: 'bz-gameshelf-open', name: '游戏库', icon: 'gamepad-2', callback: () => openGameshelf(getApp()) },
+  // 立即同步（首页入口菜单）：不开面板直接拉库（即时类，首页菜单里 keepHome）
+  { id: 'bz-gameshelf-sync', name: '同步游戏库', icon: 'refresh-cw', callback: () => void syncGameshelf(getApp()) },
+  // 数据统计（首页入口菜单）：直开游戏库面板并落统计页
+  { id: 'bz-gameshelf-stats', name: '游戏库数据统计', icon: 'chart-bar', callback: () => openGameshelfStats(getApp()) },
   { id: 'bz-secondbrain-open', name: '第二大脑参考', icon: 'zap', callback: () => openSecondBrainReference(getApp()) },
   { id: 'bz-secondbrain-chat', name: '第二大脑对话', icon: 'message-circle', callback: () => openSecondBrainChat(getApp()) },
   // 自动双链（ticket 111）：当前笔记重跑一次关联（正文大改后的手动兜底入口）
@@ -394,6 +402,8 @@ export default class BzPlugin extends Plugin {
     // 第二大脑：窄窗/抽屉 DOM、5s 防抖定时器、DeepSeek 服务、模块单例复位（ticket 107 补接线——
     // 原先 unloadSecondBrain 导出但从未被调用，禁用插件后残留窗体且防抖 refresh 仍会触发）
     unloadSecondBrain();
+    // 游戏库（gameshelf 域：面板 DOM + 模块单例复位）
+    unloadGameshelf();
     // 各域卸载清理补全（fix(main)：unload 函数均不内部触发 ensure，可无条件调用；
     // 未初始化域调用为幂等空清理，不引起无谓装载）
     unloadBelongings();

@@ -5,6 +5,7 @@
 import moment from 'moment';
 import { requestUrl } from 'obsidian';
 import { getApp } from './app';
+import { notice } from './notice';
 
 /** HTML 转义 */
 export function escapeHtml(str: string): string {
@@ -225,4 +226,207 @@ export function bytesEqual(a: ArrayLike<number>, b: ArrayLike<number>): boolean 
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;
+}
+
+// ===== 上游移植批 2 增量（源 yeshimei/bz@42c00d1d；本地 formatRelativeTime/relTime 文案冻结不动） =====
+const CLIPBOARD_CLEAR_DELAY_MS = 60_000; // 敏感文本剪贴板自动清空延时（上游 encrypt 深审随件）
+let clipboardClearTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * YAML 双引号标量转义核心（纯串进纯串出）：先 `\` 后 `"` 再换行折空格。
+ * 顺序铁律：必须先转义反斜杠——否则值含 `\` 时产出 `\\"` 之类被 YAML 当转义序列
+ * 解读，值读取时变形或整体解析失败（C27/AS1 同根）。
+ * 三域收编（一致#1）：clipbook save 写侧（恒包裹）、auto-summary parser 重建
+ * （恒包裹 + unquote 反转义对齐）、cinema 影片模板（条件包裹）此前各持一份私有实现，
+ * 收编为本原语 + 两个形态出口。
+ */
+export function escapeYamlText(s: string): string {
+  return String(s ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/[\r\n]+/g, ' ');
+}
+
+/**
+ * YAML 恒包裹形态：值一律输出为 `"…"` 双引号标量。
+ * clipbook 写侧契约（url/author/site/summary/date 标量与 tags 数组项）与
+ * auto-summary frontmatter 重建共用——读侧 unquote 反转义同源对齐（AS1）。
+ */
+export function yamlEscapeQuoted(v: unknown): string {
+  return `"${escapeYamlText(String(v ?? ''))}"`;
+}
+
+/**
+ * YAML 条件包裹形态（cinema 影片模板契约）：换行先行单行化（C3），
+ * 仅含 YAML 特殊字符或空格时才双引号包裹，否则裸输出（保持既有序列化策略，
+ * 不与恒包裹强并——一致#1 修法：两出口一原语）。
+ */
+export function yamlScalarOf(val: unknown): string {
+  let s = String(val);
+  if (/[\r\n]/.test(s)) s = s.replace(/[ \t]*[\r\n]+[ \t]*/g, ' ');
+  if (/[:"\-#[\]{}|>'?]/.test(s) || s.includes(' ')) {
+    return '"' + escapeYamlText(s) + '"';
+  }
+  return s;
+}
+
+/**
+ * 双引号标量反转义（写侧 escapeYamlText 的逆）：`\\` → `\`、`\"` → `"`。
+ * 仅处理写侧会产出的两形转义，未知转义序列（`\n` 等字面）原样保留——
+ * 写侧把真换行折成空格、不产出 `\n` 转义，字面 `\n` 两字符经 `\\` 转义往返不变形（AS1）。
+ */
+export function unescapeYamlText(s: string): string {
+  return s.replace(/\\(.)/g, (m: string, c: string) => (c === '"' || c === '\\' ? c : m));
+}
+
+/** parseLocalDay(s)：日期串前缀 'YYYY-MM-DD…' → 本地当日 0 点毫秒（非法返回 null）。
+ *  刻意不走 new Date(str)：'YYYY-MM-DD' 会被按 UTC 解析，时区西移处周边界漂移一天。
+ *  单源收编（home 深审 A1）：原宿主 home/weekly.ts（零 UI 消费的死模块），recap/aggregate
+ *  跨域顶层拉它曾构成全仓唯一的域间顶层静态环（home/river → recap/aggregate → home/weekly，
+ *  违反 ADR-0002）——下沉重单源后 recap 改引此处，环断；日期串工具与 localDayKey 同居。 */
+export function parseLocalDay(s: unknown): number | null {
+  const m = /^\s*(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(s ?? ''));
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  return new Date(y, mo - 1, d).getTime();
+}
+
+/** hash31(str)：h*31 稳定字符串散列（>>>0；站标派色/派样式共用口径，charCodeAt 逐单元版） */
+export function hash31(str: string): number {
+  let h = 0;
+  const t = String(str || '');
+  for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0;
+  return h >>> 0;
+}
+
+/** debounce(fn, ms)：尾触防抖，返回带 cancel() 的防抖函数（新收敛能力；既有手写定时器形态各异，暂不批量替换） */
+export function debounce<T extends (...args: any[]) => void>(fn: T, ms: number): T & { cancel(): void } {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  const wrapped = (...args: Parameters<T>) => {
+    if (t !== undefined) clearTimeout(t);
+    t = setTimeout(() => {
+      t = undefined;
+      fn(...args);
+    }, ms);
+  };
+  (wrapped as T & { cancel(): void }).cancel = () => {
+    if (t !== undefined) {
+      clearTimeout(t);
+      t = undefined;
+    }
+  };
+  return wrapped as T & { cancel(): void };
+}
+
+/** 安全随机密码（crypto.getRandomValues 拒绝采样，与旧密码本同款） */
+export function secureRandomPassword(length: number, charset: string): string {
+  const n = charset.length;
+  if (!(length > 0) || n === 0) return '';
+  const LIMIT = Math.floor(0x100000000 / n) * n;
+  let pwd = '';
+  while (pwd.length < length) {
+    const buf = new Uint32Array(length - pwd.length);
+    crypto.getRandomValues(buf);
+    for (let i = 0; i < buf.length && pwd.length < length; i++) {
+      if (buf[i] >= LIMIT) continue;
+      pwd += charset.charAt(buf[i] % n);
+    }
+  }
+  return pwd;
+}
+
+/** 取消未触发的自动清空（卸载清理用，防插件禁用后定时器仍写剪贴板） */
+export function cancelClipboardClear(): void {
+  if (clipboardClearTimer !== null) {
+    clearTimeout(clipboardClearTimer);
+    clipboardClearTimer = null;
+  }
+}
+
+/** 对已写入敏感内容的剪贴板布防 60s 自动清空 */
+export function armClipboardClear(): void {
+  if (clipboardClearTimer !== null) clearTimeout(clipboardClearTimer);
+  clipboardClearTimer = setTimeout(() => {
+    clipboardClearTimer = null;
+    try {
+      void navigator.clipboard.writeText('').catch(() => {});
+    } catch (e) {
+      /* 尽力而为 */
+    }
+  }, CLIPBOARD_CLEAR_DELAY_MS);
+}
+
+/** 复制敏感内容并布防自动清空 */
+export function copySensitiveText(text: string): Promise<void> {
+  try {
+    return navigator.clipboard.writeText(text).then(() => armClipboardClear());
+  } catch (e) {
+    return Promise.reject(e);
+  }
+}
+
+/**
+ * 复制敏感内容（含降级兜底）+ 自动清空（issue 365 收口单源）。
+ * encrypt/ui（日记正文复制）与 password-vault（面板复制 + quick-pick 快速取密）
+ * 原各持一份逐字雷同的「copySensitiveText 失败 → textarea+execCommand 选中法」兜底，
+ * 收编为本函数；两域一律走这里，域内不再自留副本。
+ * 行为口径（三份旧实现逐字等价）：
+ * - navigator.clipboard.writeText 成功 → true（60s 清空随 copySensitiveText 布防）；
+ * - 失败（权限拒绝/非安全上下文/clipboard 缺失）→ textarea 选中法兜底，
+ *   execCommand('copy') 成功同样布防 60s 自动清空，返回其布尔结果；
+ * - 兜底亦抛错 → false（不布防清空）。
+ */
+export async function copySensitiveWithFallback(text: string): Promise<boolean> {
+  try {
+    await copySensitiveText(text);
+    return true;
+  } catch (e) {
+    // 降级：textarea 选中法
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      if (ok) armClipboardClear();
+      return ok;
+    } catch (e2) {
+      return false;
+    }
+  }
+}
+
+/**
+ * 打开外部链接（系统浏览器）单源（审查 P3 一致#14 收口）：
+ * memo/ui openItem、favorites/ui openExternal、knowledge/ui _openExternal 三份私有副本
+ * 收编至此，域内不再自留副本。行为口径（与 favorites 版逐字等价——三份中最完整的一份）：
+ * - app.openUrl(url)（Obsidian 原生，桌面/移动均可用）成功 → 完成；
+ * - openUrl 缺失/抛错（故意不带 ?.，缺失须落 TypeError 才进兜底链）→ electron shell.openExternal；
+ * - 无 electron（移动端/jsdom）→ window.open 兜底（favorites F14：不再静默）；
+ * - 全链失败 → 人话提示（error）。
+ * app 由调用方注入（memo 传 M.appRef，favorites 传 appOf()，knowledge 传 getApp()），
+ * 本函数不自取——调用时机多在面板闭包里，appRef 与面板生命周期一致更稳。
+ */
+export function openExternalUrl(app: unknown, url: string): void {
+  try {
+    (app as any).openUrl(url);
+    return;
+  } catch (e) { /* 落 electron 兜底 */ }
+  try {
+    const electron = (window as any).require && (window as any).require('electron');
+    if (electron && electron.shell) {
+      electron.shell.openExternal(url);
+      return;
+    }
+  } catch (e) { /* 落 window.open 兜底 */ }
+  try {
+    const w = window.open(url, '_blank');
+    if (w) return;
+  } catch (e) { /* 环境不支持（jsdom 等）落提示 */ }
+  notice('无法打开链接，请复制到浏览器打开', 'error');
 }

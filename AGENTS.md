@@ -1,6 +1,6 @@
 # AGENTS.md — 包仔（bz）Obsidian 插件
 
-独立 Obsidian 插件，**24 功能域**（详见领域清单，逐一以 `src/<域>/` 目录为准；2026-09 自上游线 yeshimei/bz 并入 home/recap/checkup/diary-wall/settings-panel 五域，memo 域由 todo 待办域换血接替、movie 域由 cinema 影院域换血接替、news+clipping 域由 clipbook 剪藏本融合域换血接替、password 域并入 encrypt 统一保险库；2026-09 collect 日常收集域换血接替外部 QuickAdd「日常收集」宏，ADR-0107，见 PROGRESS）。2026-09-14 核正：原写「26 功能域」为文档漂移，逐项见下方领域清单脚注。数据沿用既有格式（`CONFIG/STORAGE/*.json`、`我的/*.md`、frontmatter），旧数据直接可读。**项目语言：中文**。
+独立 Obsidian 插件，**25 功能域**（详见领域清单，逐一以 `src/<域>/` 目录为准；2026-09 自上游线 yeshimei/bz 并入 home/recap/checkup/diary-wall/settings-panel 五域，memo 域由 todo 待办域换血接替、movie 域由 cinema 影院域换血接替、news+clipping 域由 clipbook 剪藏本融合域换血接替、password 域并入 encrypt 统一保险库；2026-09 collect 日常收集域换血接替外部 QuickAdd「日常收集」宏，ADR-0107，见 PROGRESS）。2026-09-14 核正：原写「26 功能域」为文档漂移，逐项见下方领域清单脚注。数据沿用既有格式（`CONFIG/STORAGE/*.json`、`我的/*.md`、frontmatter），旧数据直接可读。**项目语言：中文**。
 
 ## 交互约定
 
@@ -18,7 +18,7 @@
 
 ## 架构
 
-- `src/main.ts`：命令裸注册表、设置页、懒加载、onunload（**76 条命令** = `COMMANDS` 表 **74** 条 + 表外裸注册 1 条 + diary 域 init 内 1 条。表内 74 = 57 条显式字面量 + 1 条 `ATTACH_COMMAND_ID`（`bz-attach-move`）+ 16 条 collect 汉字分类经 `...DEFAULT_COLLECT_CATEGORIES.map(categoryCommandId)` 展开；表外 = `bz-diary-open`；域内 init = `bz-diary-write`（`src/diary/ui/quote.ts:15`）。核算口径 = `tests/smoke.test.ts` 的 `EXPECTED_COMMAND_IDS`（59 字面量 + 16 条 collect 展开 = 75）另加 `bz-diary-write`。2026-09-14 票 288：新增 `bz-pomodoro-focus-toggle/skip/pause` 3 条（68→71）；同日票 289：新增视频生成文献笔记命令（71→72，上游 issue 278 命令入口，函数本就存在）；同日票 290：知识盒域正名，`bz-literature-*` 三条 id 更名 `bz-knowledge-*`（条数不变）；2026-09-22 票 296：新增 `bz-cinema-export` 导出感想（72→73）；2026-09-23 票 301：新增 `bz-bookshelf-douban-refetch` / `bz-cinema-douban-refetch` 豆瓣重抓（73→75）；2026-09-24 票 303：新增 `bz-diary-open-today` 打开今日日记（75→76））
+- `src/main.ts`：命令裸注册表、设置页、懒加载、onunload（**76 条命令** = `COMMANDS` 表 **74** 条 + 表外裸注册 1 条 + diary 域 init 内 1 条。表内 74 = 57 条显式字面量 + 1 条 `ATTACH_COMMAND_ID`（`bz-attach-move`）+ 16 条 collect 汉字分类经 `...DEFAULT_COLLECT_CATEGORIES.map(categoryCommandId)` 展开；表外 = `bz-diary-open`；域内 init = `bz-diary-write`（`src/diary/ui/quote.ts:15`）。核算口径 = `tests/smoke.test.ts` 的 `EXPECTED_COMMAND_IDS`（59 字面量 + 16 条 collect 展开 = 75）另加 `bz-diary-write`。2026-09-14 票 288：新增 `bz-pomodoro-focus-toggle/skip/pause` 3 条（68→71）；同日票 289：新增视频生成文献笔记命令（71→72，上游 issue 278 命令入口，函数本就存在）；同日票 290：知识盒域正名，`bz-literature-*` 三条 id 更名 `bz-knowledge-*`（条数不变）；2026-09-22 票 296：新增 `bz-cinema-export` 导出感想（72→73）；2026-09-23 票 301：新增 `bz-bookshelf-douban-refetch` / `bz-cinema-douban-refetch` 豆瓣重抓（73→75）；2026-09-24 票 303：新增 `bz-diary-open-today` 打开今日日记（75→76）；同日上游移植批 2（上游 issue 368/ADR-0161，源 yeshimei/bz@42c00d1d）：新增 `bz-gameshelf-open` / `bz-gameshelf-sync` / `bz-gameshelf-stats` 游戏库三命令（76→79，域数 24→25））
 - `src/core/`：共享层（不挂 window）——app/settings-provider/ai/json-store/domain-bus/obsidian-adapter/path-classify/esc-manager/flow-dialog/utils/dom/changelog/notice（自绘 toast）/settings-modal/settings-schema/settings-common
 - `src/<域>/`：index.ts + data + ui + styles.css（该域样式源头，聚合进根 `styles.css`）；`src/settings.ts`；根 `styles.css`（构建聚合产物，勿手改）；`docs/adr/`；`CONTEXT.md`；`.scratch/<feature>/`
 - **依赖方向（ADR-0002）**：`core ← config/state ← parser ← store ← ui ← main`。store 无 DOM；UI 刷新靠回调订阅；禁止模块顶层互访，函数级引用环须函数体内延迟解析。
@@ -43,7 +43,7 @@
 
 **统一视觉**：头部行用 `.bz-win-head`，关闭按钮用 `.bz-win-close`，按钮秩序：功能 → ⚙️ → 关闭；弹窗不放关闭按钮，靠 mask + ESC；全屏避让用全局规则。样式已集中 styles.css，勿另写差异。
 
-## 领域清单（`CONFIG/STORAGE/` 下的数据只写文件名；共 **24 域**，与 `src/<域>/` 目录一一对应，`core` 为共享层不计入）
+## 领域清单（`CONFIG/STORAGE/` 下的数据只写文件名；共 **25 域**，与 `src/<域>/` 目录一一对应，`core` 为共享层不计入）
 
 | 域 | 数据 |
 |---|---|
@@ -55,6 +55,7 @@
 | favorites | favorites.json |
 | reading-report | metadataCache 统计 |
 | cinema（娱乐，ADR-0127 票 292 起门面正名「娱乐」，上游换血接替 movie，ADR-0087） | `我的/娱乐/*.md`（AI 分析页内嵌，ADR-0090；2026-09-22 票 292 起默认目录 我的/影视 → 我的/娱乐，启动时自动迁移） |
+| gameshelf（游戏库，上游 issue 368/ADR-0161 建域；2026-09-24 上游移植批 2 并入本地） | `我的/游戏/*.md`（一作一笔记，AppID 为身份）+ Steam 凭据 data.json `gameshelfSteamId/ApiKey`（掩码行）；媒体缓存目录 `gameshelfPosterFolder` |
 | review | review.json |
 | quiz | quiz.json |
 | secondbrain（第二大脑） | secondbrain.json（meta/panel/link 三段）+ secondbrain.vec |

@@ -85,6 +85,8 @@ const EXPECTED_COMMAND_IDS = [
   // ticket 276：今日已复习列表（点击打开原文，强制阅读模式）
   'bz-review-today',
   'bz-secondbrain-panel', 'bz-secondbrain-open', 'bz-secondbrain-chat', 'bz-secondbrain-rebuild-links', 'bz-secondbrain-link-all', 'bz-secondbrain-rebuild-index',
+  // 游戏库（gameshelf 域，上游 issue 368 移植）：三命令
+  'bz-gameshelf-open', 'bz-gameshelf-sync', 'bz-gameshelf-stats',
   'bz-pomodoro-open',
   // 首页入口菜单三支（票 288 / 上游 issue 288）：相位敏感动作
   'bz-pomodoro-focus-toggle', 'bz-pomodoro-skip', 'bz-pomodoro-pause',

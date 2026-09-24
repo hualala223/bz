@@ -21,15 +21,106 @@ export function esc(s: unknown): string {
   return escapeHtml(String(s ?? ''));
 }
 
-/** 本地时间 YYYY-MM-DD HH:mm:ss（票 275：自影院域私有实现收敛单源，实现与上游逐字节等价） */
+/** pad2(n)：两位数补零（月/日/时/分/秒；与 core/utils pad2 同语义，零依赖单源落此——
+ *  render 纯层白名单仅本文件，须经此消费；utils.pad2 转发兼容既有 import 路径） */
+export function pad2(n: number | string): string {
+  return String(n).padStart(2, '0');
+}
+
+/** 本地时间戳 YYYY-MM-DD HH:mm:ss（created/archivedAt 等写入格式；零依赖故居此，favorites/cinema 共用） */
 export function localNow(): string {
   const d = new Date();
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+/** 相对时间跨域单源（2026-09 收编拍板，favorites relTime 为蓝本）：刚刚 / N 分钟前 /
+ *  N 小时前 / N 天前（带空格），超 7 天回落 M-D 短日期；空串返回 ''，解析失败原串返回。
+ *  s 为 localNow 写入格式（' ' 换 'T' 兼容 ISO）；now 可注入（测试/评审壳重放）。
+ *  消费：favorites/shared、password-vault/render 直转（render 纯层白名单内），
+ *  core/utils formatRelativeTime 转基础档（昨天/前天/周几等 moment 增强档留 utils）。
+ *  smartcat（absence.ts 自持档位）待后续收编；review/render「N 分钟后」未来向语义不同不收。 */
+export function relTime(s: string | undefined, now: number = Date.now()): string {
+  if (!s) return '';
+  const d = new Date(s.replace(' ', 'T'));
+  if (isNaN(d.getTime())) return s;
+  const diff = now - d.getTime();
+  const m = 60000, h = 3600000, day = 86400000;
+  if (diff < m) return '刚刚';
+  if (diff < h) return Math.floor(diff / m) + ' 分钟前';
+  if (diff < day) return Math.floor(diff / h) + ' 小时前';
+  if (diff < 7 * day) return Math.floor(diff / day) + ' 天前';
+  return `${d.getMonth() + 1}-${pad2(d.getDate())}`;
+}
+
+/** 空态字符串版（与 core/ui/empty.ts uiEmpty 同 markup 口径：bz-empty / bz-empty-ic /
+ *  bz-empty-title / bz-empty-desc；icon 传空串跳过图标节点、desc 传空串跳过描述节点，
+ *  与 DOM 版 if (opts.icon) / if (opts.desc) 对齐）。零依赖居此：icon 用 iconSpan 占位串
+ *  （渲染入 DOM 后 mountIcons 兑现），不经 core/ui/empty（其 import icon.ts 拖 obsidian，
+ *  render 纯层禁入）。title/desc 经 esc 转义——icon 是受信 lucide 名不转义。 */
+export function emptyHtmlStr(icon: string, title: string, desc?: string): string {
+  return `<div class="bz-empty">${icon ? iconSpan(icon, 'bz-empty-ic') : ''}<div class="bz-empty-title">${esc(title)}</div>${desc ? `<div class="bz-empty-desc">${esc(desc)}</div>` : ''}</div>`;
 }
 
 /** lucide 图标占位串（`<i data-lucide>`）：渲染入 DOM 后由 mountIcons 兑现成 SVG——
  *  插件 = core/ui icons.ts mountIcons（setIcon），评审壳 = prototype-icons.js 内联 SVG（壳层差异表） */
 export function iconSpan(name: string, extra = ''): string {
   return `<i data-lucide="${name}" class="bz-ic${extra ? ' ' + extra : ''}"></i>`;
+}
+
+/** stripMdExt(name)：剥离结尾 .md 扩展名（大小写不敏感；与 core/utils stripMdExt 同语义）。
+ *  一致性批下沉（一致#7）：单源实现落此零依赖区——render 纯层白名单仅本文件，
+ *  memo/secondbrain 的 render.ts 由此消费内联 `.replace(/\.md$/i,'')` 的收口；
+ *  core/utils 同款转发保既有 import 路径兼容（pad2 范式）。 */
+export function stripMdExt(name: string): string {
+  return String(name || '').replace(/\.md$/i, '');
+}
+
+/** localDayKey(ts)：本地时区日期键 YYYY-MM-DD（A9/C3 审查收编：正典实现落零依赖区——
+ *  review/stats 等纯数据层为保 node 直测不能引 core/utils（拖 moment/getApp/notice 的 obsidian 面），
+ *  复写由此而生；正典落此 + core/utils 转发保既有 import 路径（stripMdExt 同款范式），
+ *  后续各域私货 dateKey 逐批收编）。实现照抄 core/utils localDayKey 正典。 */
+export function localDayKey(ts: number | Date = Date.now()): string {
+  const d = ts instanceof Date ? ts : new Date(ts);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/** stripTitleMarks(s)：剥离首尾书名号《》（A9/C3 同批下沉；实现照抄 core/utils 正典，
+ *  core/utils 转发保既有 import 路径兼容）。 */
+export function stripTitleMarks(s: string): string {
+  return String(s || '').replace(/^《|》$/g, '');
+}
+
+// ==================== 属性转义 / 平台派色（encrypt×password-vault 双域收口，全域扫描 2026-09 批次 G） ====================
+
+/** 属性值 HTML 转义（data-* 属性上下文：& " < >，不转 '), 与 esc（元素文本上下文）互补 */
+export function escAttr(s: string): string {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/** 已知平台品牌色映射（密码条目头像底色；password-vault 域 render.ts 消费；原 encrypt 侧同款已随 ADR-0158 退役） */
+export const PLATFORM_COLOR_MAP: Record<string, string> = {
+  github: '#5a5f73',
+  微信: '#3eb575',
+  支付宝: '#4f7cf7',
+  notion: '#111111',
+  哔哩哔哩: '#fb7299',
+  招商银行: '#d43d3d',
+  豆瓣: '#3fa34d',
+};
+
+/** 哈希回退调色板（8 色） */
+export const PALETTE = ['#7c6bd6', '#3e8e5a', '#c98a1e', '#4f7cf7', '#d43d3d', '#2a9d8f', '#b4551d', '#5a5f73'];
+
+/** 平台色：品牌色映射 + h*31 哈希回退（纯层内联散列，保持零依赖） */
+export function colorOf(platform: string): string {
+  const k = Object.keys(PLATFORM_COLOR_MAP).find((x) => (platform || '').toLowerCase().includes(x.toLowerCase()));
+  if (k) return PLATFORM_COLOR_MAP[k];
+  let h = 0;
+  const t = platform || '?';
+  for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0;
+  return PALETTE[h % PALETTE.length];
 }

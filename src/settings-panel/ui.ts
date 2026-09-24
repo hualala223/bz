@@ -72,6 +72,7 @@ const schemaLoaders: Record<string, () => Promise<SettingsSchema>> = {
   },
   appearance: async () => (await import('./schema')).appearanceSettingsSchema(),
   diary: async () => (await import('../diary/ui/panel')).diarySettingsSchema(),
+  gameshelf: async () => (await import('../gameshelf/settings')).gameshelfSettingsSchema(),
   'diary-wall': async () => (await import('../diary-wall/settings')).diaryWallSettingsSchema(),
   todo: async () => (await import('../todo/settings')).todoSettingsSchema(),
   belongings: async () => (await import('../belongings/ui')).belongingSettingsSchema(),
@@ -138,6 +139,8 @@ export const DOMAINS: DomainDef[] = [
   { id: 'reading-report', name: '阅读报告', icon: DOMAIN_ICONS['reading-report'], desc: '阅读统计', noSettings: true },
 
   { id: 'cinema', name: '娱乐', icon: DOMAIN_ICONS.cinema, desc: '电影/剧集/书籍等条目与海报', schemaLoader: schemaLoaders.cinema },
+  // 游戏库（gameshelf 域，上游 issue 368）：设置面板「域页」内联 schema（外观→目录→Steam）
+  { id: 'gameshelf', name: '游戏库', icon: DOMAIN_ICONS.gameshelf, desc: 'Steam 游戏库同步与统计', schemaLoader: schemaLoaders.gameshelf },
   { id: 'bookshelf', name: '书库', icon: 'book-open', desc: '藏书与读书笔记', schemaLoader: schemaLoaders.bookshelf },
   { id: 'review', name: '复习计划', icon: DOMAIN_ICONS.review, desc: '间隔重复与做题', schemaLoader: schemaLoaders.review },
   { id: 'quiz', name: '做题家', icon: 'graduation-cap', desc: '复习出题与做题', noSettings: true },
@@ -157,7 +160,7 @@ export const DOMAINS: DomainDef[] = [
 export const NAV_SECS: Array<{ title: string; ids: string[] }> = [
   { title: '基础', ids: ['global', 'appearance', 'ai'] },
   { title: '记录', ids: ['diary', 'diary-wall', 'todo', 'belongings', 'clipping', 'favorites'] },
-  { title: '媒体与知识', ids: ['cinema', 'bookshelf', 'review', 'secondbrain', 'knowledge'] },
+  { title: '媒体与知识', ids: ['cinema', 'bookshelf', 'gameshelf', 'review', 'secondbrain', 'knowledge'] },
   { title: '工具', ids: ['pomodoro', 'encrypt', 'smartcat'] },
 ];
 

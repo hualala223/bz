@@ -180,3 +180,33 @@ export function planMoves(resources: string[], destFolder: string, allPaths: str
   }
   return out;
 }
+
+// ===== 上游移植批 2 随件：tests/mock-vault 依赖的链接提取纯函数（与上游逐字等价） =====
+
+export function stripNonLinkSegments(content: string): string {
+  // 1) fenced code：``` / ~~~ 开围栏行到同字符闭合围栏行，整段丢弃
+  const kept: string[] = [];
+  let fence: '`' | '~' | null = null;
+  for (const line of content.split(/\r?\n/)) {
+    if (fence) {
+      const closeRe = fence === '`' ? /^\s*`{3,}\s*$/ : /^\s*~{3,}\s*$/;
+      if (closeRe.test(line)) fence = null;
+      continue;
+    }
+    const open = line.match(/^\s*(`{3,}|~{3,})/);
+    if (open) {
+      fence = open[1][0] as '`' | '~';
+      kept.push('');
+      continue;
+    }
+    kept.push(line);
+  }
+  let text = kept.join('\n');
+  // 2) HTML 注释整段丢弃（注释内任何引用真机均不解析）
+  text = text.replace(/<!--[\s\S]*?-->/g, '');
+  // 3) inline code：成对反引号段以等长空白替换（保留行结构；未配对的孤立反引号保留）
+  text = text.replace(/(`+)[\s\S]*?\1/g, (seg) => seg.replace(/[^\n]/g, ' '));
+  return text;
+}
+
+/** 解析笔记内容的全部链接引用（wikilink + Markdown 链接，含嵌入） */

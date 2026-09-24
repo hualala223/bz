@@ -82,20 +82,29 @@ var BZR_home = (() => {
   var DOMAIN_ICONS = {
     // 面板专属域（无对应命令）
     global: "settings",
-    appearance: "palette",
+    // 通知（2026-09-12）：自「通用」域拆出的独立面板页；「设置」页并入通用后 appearance 键退役
+    notice: "bell",
     ai: "sparkles",
     // 域入口命令与面板导航共用
     home: "layout-grid",
-    recap: "calendar-heart",
-    memo: "sticky-note",
-    todo: "check-square",
+    memo: "check-square",
     belongings: "package",
     clipping: "scissors",
     favorites: "star",
     diary: "notebook-pen",
-    "diary-wall": "images",
     "reading-report": "bar-chart-3",
     cinema: "clapperboard",
+    gameshelf: "gamepad-2",
+    // 本地独有域（上游无此二域/已退役 recap）：批 5 结构批随 recap 摘除一并复审
+    recap: "calendar-heart",
+    "diary-wall": "images",
+    collect: "inbox",
+    launcher: "app-window",
+    // 本地暂存键：appearance（本地保留原生设置页至批 5）、plan（票 304 计划卡）、
+    // todo（本地待办独立组，上游已并入 memo 图标）
+    appearance: "palette",
+    plan: "target",
+    todo: "check-square",
     bookshelf: "book-open",
     review: "repeat-2",
     secondbrain: "brain",
@@ -103,12 +112,9 @@ var BZR_home = (() => {
     pomodoro: "timer",
     attach: "folder-down",
     encrypt: "lock",
-    password: "key-round",
+    "password-vault": "key",
     smartcat: "cat",
     knowledge: "list-video",
-    collect: "inbox",
-    // 外部插件卡（无 bz 命令）：plan = PlanFlow 首页卡（ADR-0132，目标语义）
-    plan: "target",
     // 命令专属域
     "settings-panel": "settings-2"
   };
@@ -127,6 +133,8 @@ var BZR_home = (() => {
     // 命令 id 是 planflow 插件的既有命令（无 bz- 前缀），planflow 未启用时走 runCommand 失败提示
     { id: "plan", commandId: "planflow:open-planboard", name: "计划", sub: "计划打卡与目标追踪（PlanFlow）", icon: iconOf("plan") },
     { id: "cinema", commandId: "bz-cinema-open", name: "娱乐", sub: "电影/剧集/书籍 想看与在看", icon: iconOf("cinema") },
+    // 游戏库（gameshelf 域，上游 issue 368）：Steam 自动拉库，无手动登记
+    { id: "gameshelf", commandId: "bz-gameshelf-open", name: "游戏库", sub: "Steam 库存与时长", icon: iconOf("gameshelf") },
     { id: "review", commandId: "bz-review-open", name: "复习计划", sub: "到期卡片队列", icon: iconOf("review") },
     { id: "pomodoro", commandId: "bz-pomodoro-open", name: "番茄钟", sub: "专注计时", icon: iconOf("pomodoro") },
     { id: "favorites", commandId: "bz-favorites-open", name: "收藏本", sub: "收藏条目", icon: iconOf("favorites") },
@@ -229,6 +237,12 @@ var BZR_home = (() => {
       // 从「想看」池随机抽一部并直接开详情（抽不动脑子时的入口）
       { label: "随机抽一部", commandId: "bz-cinema-random-pick", icon: "shuffle" }
     ],
+    // 游戏库（上游 2026-09-17 用户点名补快捷命令）：立即同步=即时类（keepHome）/ 数据统计=开面板落统计页
+    gameshelf: [
+      { label: "立即同步", commandId: "bz-gameshelf-sync", icon: "refresh-cw", keepHome: true, busyText: "正在同步游戏库…" },
+      // 图标 chart-bar 与「阅读分析报告」的 bar-chart-3 错开（报告/统计类图标互异惯例）
+      { label: "数据统计", commandId: "bz-gameshelf-stats", icon: "chart-bar" }
+    ],
     review: [
       // 上游 bz-review-start/add 本地复习命令面不同（review 域冻结），映射本地既有命令（票 288）
       // 「今日复习」= 按数量复习（bz-review-count，count.ts 抽卡流程）；此前误挂 bz-review-today
@@ -304,6 +318,8 @@ var BZR_home = (() => {
     reviewOverdue: 0,
     reviewDueTomorrow: 0,
     cinemaWant: 0,
+    gameshelfTotal: 0,
+    gameshelfMinutes: 0,
     cinemaWatching: 0,
     bookshelfReading: 0,
     bookshelfFinished: 0,
@@ -467,6 +483,8 @@ var BZR_home = (() => {
         return c.reviewOverdue > 0 ? `${c.reviewTotal} 张 · 逾期 ${c.reviewOverdue}` : `${c.reviewTotal} 张在册`;
       case "cinema":
         return `想看 ${c.cinemaWant} · 在看 ${c.cinemaWatching}`;
+      case "gameshelf":
+        return c.gameshelfTotal > 0 ? `${c.gameshelfTotal} 款 · ${Math.round((c.gameshelfMinutes || 0) / 60)} 小时` : null;
       case "bookshelf":
         return `在读 ${c.bookshelfReading} · 读完 ${c.bookshelfFinished}`;
       case "clipping":

@@ -18,6 +18,15 @@ export interface BzModalOpts {
   className?: string;              // 附加到 popup 的类
 }
 
+/** 存活模态登记表（上游移植随件）：插件卸载时 closeAllModals() 统一收口，防禁用后遮罩残留
+ *  且 ESC 已被 escManager.destroy 短路。遍历副本：close 会同步改集合。 */
+const liveModals = new Set<() => void>();
+
+/** 关闭全部存活 uiModal（unload 收口；未打开时 no-op，可无条件调用） */
+export function closeAllModals(): void {
+  for (const close of [...liveModals]) close();
+}
+
 /** 打开居中模态，返回 { mask, popup, close } */
 export function uiModal(opts: BzModalOpts): { mask: HTMLElement; popup: HTMLElement; close: () => void } {
   const mask = document.createElement('div');
@@ -57,8 +66,10 @@ export function uiModal(opts: BzModalOpts): { mask: HTMLElement; popup: HTMLElem
   function close() {
     if (closed) return;
     closed = true;
+    if (!mask.isConnected) return; // 幂等：closeAllModals/ESC/✕/遮罩多路只走一次
     mask.remove();
     escHandle?.unregister();
+    liveModals.delete(close);
     opts.onClose?.();
   }
 
@@ -74,5 +85,6 @@ export function uiModal(opts: BzModalOpts): { mask: HTMLElement; popup: HTMLElem
   });
 
   document.body.appendChild(mask);
+  liveModals.add(close);
   return { mask, popup, close };
 }

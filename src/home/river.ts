@@ -28,6 +28,7 @@ import { tryGetSettings } from '../core/settings-provider';
 import { storageFile } from '../core/storage';
 import { reviewApp } from '../review/app';
 import type { ReviewItem } from '../review/data';
+import { rebuildItems } from '../gameshelf/notes';
 import { parseMovieFile } from '../cinema/data';
 import { STATUS_WANT, STATUS_WATCHING } from '../cinema/constants';
 import { scanMarkdownBooks, loadEpubItems } from '../bookshelf/data';
@@ -153,6 +154,14 @@ async function collectFavoritesCounts(app: App, c: RiverCounts): Promise<void> {
   c.favoritesTotal = (Array.isArray(all) ? all : []).filter((i) => !(i as { archived?: boolean }).archived).length;
 }
 
+/** 游戏库：款数 + 总时长（上游 issue 368 批）。rebuildItems 单源口径（AppID 合法笔记，含已下架；
+ *  metadataCache 零 IO）；顺手刷新 gameshelf 内存缓存无害——面板打开时本就整体重建。 */
+function collectGameshelfCounts(app: App, c: RiverCounts): void {
+  const items = rebuildItems(app);
+  c.gameshelfTotal = items.length;
+  c.gameshelfMinutes = items.reduce((sum, it) => sum + (it.playtimeMin || 0), 0);
+}
+
 /** 归物：登记件数（口径同 snapshot） */
 async function collectBelongingsCounts(app: App, c: RiverCounts): Promise<void> {
   const filePath = storageFile('belongings.json');
@@ -268,6 +277,7 @@ export async function collectRiver(app: App, now: number = Date.now()): Promise<
         () => collectClippingCounts(app, counts),
         () => collectFavoritesCounts(app, counts),
         () => collectBelongingsCounts(app, counts),
+        () => collectGameshelfCounts(app, counts),
         () => collectTodoCounts(app, counts),
         () => collectCollectSnapshot(app, now, counts, collectRecent),
         () => collectPlanCounts(app, now, counts),

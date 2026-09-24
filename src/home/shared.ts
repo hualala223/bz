@@ -47,6 +47,8 @@ export const DOMAINS: HomeDomain[] = [
   // 命令 id 是 planflow 插件的既有命令（无 bz- 前缀），planflow 未启用时走 runCommand 失败提示
   { id: 'plan', commandId: 'planflow:open-planboard', name: '计划', sub: '计划打卡与目标追踪（PlanFlow）', icon: iconOf('plan') },
   { id: 'cinema', commandId: 'bz-cinema-open', name: '娱乐', sub: '电影/剧集/书籍 想看与在看', icon: iconOf('cinema') },
+  // 游戏库（gameshelf 域，上游 issue 368）：Steam 自动拉库，无手动登记
+  { id: 'gameshelf', commandId: 'bz-gameshelf-open', name: '游戏库', sub: 'Steam 库存与时长', icon: iconOf('gameshelf') },
   { id: 'review', commandId: 'bz-review-open', name: '复习计划', sub: '到期卡片队列', icon: iconOf('review') },
   { id: 'pomodoro', commandId: 'bz-pomodoro-open', name: '番茄钟', sub: '专注计时', icon: iconOf('pomodoro') },
   { id: 'favorites', commandId: 'bz-favorites-open', name: '收藏本', sub: '收藏条目', icon: iconOf('favorites') },
@@ -190,6 +192,8 @@ export interface DomainMenuAction {
   dynamic?: 'phase';
   /** 危险动作（清空/批量改数据类）：菜单项与抽屉项红色强调 */
   kind?: 'danger';
+  /** 慢动作 busy 提示（上游 eff P3-2）：点击瞬间给「正在同步」类反馈防重复点击 */
+  busyText?: string;
   /**
    * 执行后**不关首页面板**（只读/即时类动作，如锁定保险库、暂停专注）——
    * 关面板再执行会让用户看不到结果，且下次打开还要重走一遍。执行完由 ui.ts 刷新面板数据。
@@ -248,6 +252,12 @@ export const DOMAIN_MENU: Record<string, DomainMenuAction[]> = {
     { label: '娱乐分析报告', commandId: 'bz-cinema-analysis', icon: 'bar-chart-3' },
     // 从「想看」池随机抽一部并直接开详情（抽不动脑子时的入口）
     { label: '随机抽一部', commandId: 'bz-cinema-random-pick', icon: 'shuffle' },
+  ],
+  // 游戏库（上游 2026-09-17 用户点名补快捷命令）：立即同步=即时类（keepHome）/ 数据统计=开面板落统计页
+  gameshelf: [
+    { label: '立即同步', commandId: 'bz-gameshelf-sync', icon: 'refresh-cw', keepHome: true, busyText: '正在同步游戏库…' },
+    // 图标 chart-bar 与「阅读分析报告」的 bar-chart-3 错开（报告/统计类图标互异惯例）
+    { label: '数据统计', commandId: 'bz-gameshelf-stats', icon: 'chart-bar' },
   ],
   review: [
     // 上游 bz-review-start/add 本地复习命令面不同（review 域冻结），映射本地既有命令（票 288）
@@ -376,6 +386,9 @@ export interface RiverCounts {
   reviewOverdue: number;
   reviewDueTomorrow: number;
   cinemaWant: number;
+  /** 游戏库：游戏款数（游戏目录 AppID 合法笔记数，含已下架）与总游玩分钟 */
+  gameshelfTotal: number;
+  gameshelfMinutes: number;
   cinemaWatching: number;
   bookshelfReading: number;
   bookshelfFinished: number;
@@ -398,6 +411,8 @@ export const EMPTY_COUNTS: RiverCounts = {
   reviewOverdue: 0,
   reviewDueTomorrow: 0,
   cinemaWant: 0,
+  gameshelfTotal: 0,
+  gameshelfMinutes: 0,
   cinemaWatching: 0,
   bookshelfReading: 0,
   bookshelfFinished: 0,
@@ -704,6 +719,8 @@ export function riverCountText(id: string, data: RiverData): string | null {
       return c.reviewOverdue > 0 ? `${c.reviewTotal} 张 · 逾期 ${c.reviewOverdue}` : `${c.reviewTotal} 张在册`;
     case 'cinema':
       return `想看 ${c.cinemaWant} · 在看 ${c.cinemaWatching}`;
+    case 'gameshelf':
+      return c.gameshelfTotal > 0 ? `${c.gameshelfTotal} 款 · ${Math.round((c.gameshelfMinutes || 0) / 60)} 小时` : null;
     case 'bookshelf':
       return `在读 ${c.bookshelfReading} · 读完 ${c.bookshelfFinished}`;
     case 'clipping':

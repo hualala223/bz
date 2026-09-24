@@ -381,6 +381,22 @@ export default interface BzSettings {
   /** 🎨 内容首页外观占位（issue 246 同范式）：布局=活动河单卡，主题=米白单卡 */
   homeLayout: string;
   homeSkin: string;
+
+  // ===== 🎮 游戏库（gameshelf 域，上游 issue 368：Steam 直连自动拉库，一作一笔记）=====
+  /** 📁 游戏文件夹（游戏库域数据源；缺省回落「我的/游戏」） */
+  gameshelfFolderPath: string;
+  /** 📁 游戏海报文件夹（封面/图标本地缓存目录；空 = 关闭本地缓存） */
+  gameshelfPosterFolder: string;
+  /** 🎮 SteamID64（17 位数字；GetOwnedGames/GetRecentlyPlayedGames 查询主体） */
+  gameshelfSteamId: string;
+  /** 🎮 Steam Web API 密钥（steamcommunity.com/dev/apikey 免费申请；掩码行） */
+  gameshelfSteamApiKey: string;
+  /** 🎮 自动同步开关（打开面板时数据过期即后台拉库；默认开） */
+  gameshelfAutoSync: boolean;
+  /** 🎨 游戏库面板布局（外观组占位单卡；当前仅 default 海报墙） */
+  gameshelfLayout: string;
+  /** 🎨 游戏库面板主题（当前仅 ink 墨黑） */
+  gameshelfSkinTheme: string;
   // ===== 首页时间线（issue 287，2026-09-11 用户点名六项；issue 288 拆组 + 去「已跳过」）=====
   /** 时间线字号档：compact 紧凑 / normal 标准 / loose 宽松（域 UI 在 .bz-home-panel 上挂 data-tl-size） */
   homeTimelineSize: string;
@@ -746,6 +762,15 @@ export const DEFAULT_SETTINGS: BzSettings = {
   // 三类中前三类开 / 默认今天 / 显示时刻 / 预告卡开
   homeLayout: 'default',
   homeSkin: 'cream',
+
+  // 游戏库（gameshelf，上游 issue 368；目录缺省「我的/游戏」）
+  gameshelfFolderPath: '我的/游戏',
+  gameshelfPosterFolder: '',
+  gameshelfSteamId: '',
+  gameshelfSteamApiKey: '',
+  gameshelfAutoSync: true,
+  gameshelfLayout: 'default',
+  gameshelfSkinTheme: 'ink',
   homeTimelineSize: 'normal',
   homeTimelineRange: 'week',
   homeTimelineProduce: true,

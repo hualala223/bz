@@ -113,6 +113,20 @@ interface TextRow extends RowBase, TextualCommit {
   actions?: RowAction[];
 }
 
+
+/** 单行掩码行（上游 2026-09-23 收编档位，凭据类设置专用）：密码框 + 右侧眼睛切明文，
+ *  其余（防抖落盘 / 失焦回车提交 / refreshKey 联动 / actions / onCommit）与 text 行同内核。
+ *  凭据类设置一律走本档，别用 text 行裸奔。 */
+export interface SecretRow extends RowBase, TextualCommit {
+  type: 'secret';
+  name: string;
+  binding: RowBinding<string>;
+  placeholder?: string | ((snapshot: SettingsSnapshot) => string);
+  onChange?: (value: string, ctx: SettingsRowContext) => void;
+  /** 行内附加按钮（渲染于输入框左侧，与 text 行同口径） */
+  actions?: RowAction[];
+}
+
 interface TextAreaRow extends RowBase, TextualCommit {
   type: 'textarea';
   name: string;
@@ -249,6 +263,7 @@ interface ListRow extends RowBase {
 export type SettingsRow =
   | ToggleRow
   | TextRow
+  | SecretRow
   | TextAreaRow
   | NumberRow
   | SelectRow
@@ -376,7 +391,24 @@ export function renderSettingsInto(container: HTMLElement, schema: SettingsSchem
   };
 
   /** 文本类行（text/textarea/number）：原 main.ts textSetting 语义逐字收口 */
-  const renderTextualRow = (body: HTMLElement, row: TextRow | TextAreaRow | NumberRow): void => {
+  /** 掩码行眼睛钮：切 input.type password↔text（上游 2026-09-23 收编档位同实现） */
+  const wireSecretEye = (setting: Setting, el: { type: string }): void => {
+    let revealed = false;
+    setting.addExtraButton((b) => {
+      b.setIcon('eye').setTooltip('显示 / 隐藏');
+      b.extraSettingsEl.setAttribute('aria-label', '显示密钥');
+      b.extraSettingsEl.setAttribute('aria-pressed', 'false');
+      b.onClick(() => {
+        revealed = !revealed;
+        el.type = revealed ? 'text' : 'password';
+        b.setIcon(revealed ? 'eye-off' : 'eye');
+        b.extraSettingsEl.setAttribute('aria-pressed', String(revealed));
+        b.extraSettingsEl.setAttribute('aria-label', revealed ? '隐藏密钥' : '显示密钥');
+      });
+    });
+  };
+
+  const renderTextualRow = (body: HTMLElement, row: TextRow | TextAreaRow | NumberRow | SecretRow): void => {
     const ctx: SettingsRowContext = { rowEl: body, refreshVisibility: reevaluate };
     const setting = new Setting(body).setName(row.name);
     if (row.desc) setting.setDesc(row.desc);
@@ -509,6 +541,16 @@ export function renderSettingsInto(container: HTMLElement, schema: SettingsSchem
     if (row.type === 'text') setting.addText(addInto);
     else if (row.type === 'textarea') setting.addTextArea(addInto);
     else setting.addText(addInto);
+    // 单行掩码（type:'secret'）：密码框 + 眼睛切明文（切形态只翻 input.type，不动值不落盘）
+    if (row.type === 'secret' && currentText) {
+      const el = (currentText as { inputEl?: { type: string; autocomplete: string; spellcheck: boolean } }).inputEl;
+      if (el) {
+        el.type = 'password';
+        el.autocomplete = 'off';
+        el.spellcheck = false;
+        wireSecretEye(setting, el);
+      }
+    }
   };
 
   const renderRow = (body: HTMLElement, rowArg: SettingsRow, parentToggleKey?: string | null): void => {
@@ -725,6 +767,7 @@ export function renderSettingsInto(container: HTMLElement, schema: SettingsSchem
       case 'text':
       case 'textarea':
       case 'number':
+      case 'secret':
         renderTextualRow(body, row);
         return;
     }

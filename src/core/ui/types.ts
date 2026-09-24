@@ -37,8 +37,8 @@ export interface BzChipOpts {
   label: string;
   icon?: BzIconName;
   count?: number;          // 徽标计数
-  selected?: boolean;      // 选中实底 --on
-  selectedSoft?: boolean;  // 选中软底 --sel（品牌软底，区别于实底）
+  selected?: boolean;      // 选中实底 --on（显式声明即切换 chip：缺省挂 aria-pressed 并随态落 true/false）
+  selectedSoft?: boolean;  // 选中软底 --sel（品牌软底，区别于实底；同样缺省挂 aria-pressed）
   removable?: boolean;     // 带删除钮（不暗示选中态；选中与否由 selected/selectedSoft 显式声明）
   locked?: boolean;        // 锁定虚线
   title?: string;
@@ -119,11 +119,13 @@ export interface BzSelectOpts<T extends string = string> {
   onChange: (value: T) => void;
 }
 
-/** 搜索框（.bz-search：前缀搜索图标 + 输入） */
+/** 搜索框（.bz-search：前缀搜索图标 + 输入 + 尾部清除钮） */
 export interface BzSearchOpts {
   placeholder?: string;
   value?: string;
   onInput?: (v: string) => void;
+  /** 尾部清除钮（有词才现，clipbook 效率#12 全域拍板口径）；默认开。自带同款钮的域传 false 关掉防双钮 */
+  clearable?: boolean;
 }
 
 /** 主头行（.bz-main-head：分组标题 + 计数 + spacer + 主按钮） */
@@ -139,7 +141,7 @@ export interface BzRailItem {
   name: string;
   icon?: BzIconName;       // 前缀 lucide 图标（.bz-ic）
   boxedIcon?: BzIconName;  // 前缀图标底座（.bz-rail-ic 20px 小方块）
-  emoji?: string;          // 前缀 emoji 行头（.bz-rail-emoji 14px 槽；issue 201，同 todo 场景行头）
+  emoji?: string;          // 前缀 emoji 行头（.bz-rail-emoji 14px 槽；issue 201，同 memo 场景行头）
   badge?: { t: string; label: string; tint?: string }; // 字母/字徽标（t=文本，label=aria 名，tint=底色注入 --bz-rail-tint）
   dot?: string;            // 状态色点（色值 → --bz-rail-tint）
   count?: string | number; // 计数

@@ -1,5 +1,9 @@
+import { stripNonLinkSegments, parseLinkRefs } from '../src/attach/data';
+
 /**
  * 内存 vault mock：可读写的虚拟文件树（UI/数据层测试复用）。
+ * getFileCache / resolvedLinks 的链接提取与 src/attach/data.ts stripNonLinkSegments
+ * 单源（ARCH-T1 校准）：假层与实现侧「代码块内引用不算链接」口径一致，防盲区对盲区假绿。
  */
 export class MockVault {
   files = new Map<string, string>();
@@ -21,6 +25,8 @@ export class MockVault {
       this.modifiedPaths.push(path);
     },
     exists: async (path: string): Promise<boolean> => this.files.has(path) || this.binaryFiles.has(path) || this.dirs.has(path),
+    /** 绝对路径解析（douban-queue spawn 用）；固定前缀便于测试映射回 vault 相对路径 */
+    getFullPath: (path: string): string => '/mock-vault-root/' + path,
     remove: async (path: string): Promise<void> => {
       this.files.delete(path);
       this.binaryFiles.delete(path);
@@ -29,8 +35,6 @@ export class MockVault {
     mkdir: async (path: string): Promise<void> => {
       this.dirs.add(path);
     },
-    /** 宿主绝对路径解析（douban-queue spawn 用，issue 261）；固定前缀便于测试映射回 vault 相对路径 */
-    getFullPath: (path: string): string => '/mock-vault-root/' + path,
     /** adapter 级二进制读写（store-file 冲突自愈/迁移等经 app.vault.adapter 直读直写 .vec 用） */
     readBinary: async (path: string): Promise<ArrayBuffer> => {
       const bytes = this.binaryFiles.get(path);
@@ -100,6 +104,11 @@ export class MockVault {
     return null;
   }
 
+  /** vault 文件 → 本地资源 URL（真实 Obsidian 给 app://…；测试给固定前缀便于断言） */
+  getResourcePath(f: any): string {
+    return 'app://mock-vault/' + (f?.path ?? '');
+  }
+
   file(path: string): any {
     const content = this.files.get(path) ?? (this.binaryFiles.has(path) ? '<binary>' : undefined);
     const basename = path.split('/').pop()!.replace(/\.[^./]+$/, '');
@@ -110,7 +119,14 @@ export class MockVault {
       extension: path.includes('.') ? path.split('.').pop() : '',
       name: path.split('/').pop()!,
       parent: { path: parentPath },
-      stat: Promise.resolve({ ctime: Date.UTC(2024, 0, 1, 12, 0), birthtime: Date.UTC(2024, 0, 1, 12, 0) }),
+      // 同步 FileStats 形状（与真机一致；await 普通对象无害，diary/parser 等两读法都兼容）
+      stat: {
+        ctime: Date.UTC(2024, 0, 1, 12, 0),
+        birthtime: Date.UTC(2024, 0, 1, 12, 0),
+        mtime: Date.UTC(2024, 0, 1, 12, 0),
+        // 字节数（Obsidian FileStats 契约；home 活动河「第二大脑存储占用」消费）
+        size: new TextEncoder().encode(content ?? '').length,
+      },
       content,
     };
   }
@@ -234,7 +250,10 @@ export class MockVault {
   }
 }
 
-/** 解析 frontmatter（简易 YAML 子集：key: value 行 + `  - ` 列表项） */
+/** 解析 frontmatter（简易 YAML 子集：key: value 行 + `  - ` 列表项）。
+ *  fail-closed（深审批A T2）：值含「: 」与「key: 值后裸行」两种破损形态返回 null——
+ *  真机 js-yaml 对两者整体解析失效（Obsidian 视为无 frontmatter），mock 原先 fail-open
+ *  照收导致 FM 破坏类缺陷在测试环境不可见。 */
 export function parseFrontmatter(content: string): Record<string, any> | null {
   const m = content.match(/^---\n([\s\S]*?)\n---\s*(?:\n|$)/);
   if (!m) return null;
@@ -259,11 +278,26 @@ export function parseFrontmatter(content: string): Record<string, any> | null {
         (value.startsWith('"') && value.endsWith('"')) ||
         (value.startsWith("'") && value.endsWith("'"))
       ) {
+        const raw = value;
         value = value.slice(1, -1); // 与 Obsidian parseFrontmatter 一致：剥引号
+        // YAML 双引号标量的转义（\n \" \\）与 JSON 兼容：经 processFrontMatter 序列化
+        // （JSON.stringify 包裹）写回的多行/特殊值在此还原（T2 mock 保真配套）
+        if (raw.startsWith('"')) {
+          try {
+            value = JSON.parse(raw);
+          } catch {
+            /* 非法转义：保留剥引号结果 */
+          }
+        }
       } else if (/^-?\d+(\.\d+)?$/.test(value)) {
         value = Number(value); // 与 Obsidian parseFrontmatter 一致：数字
       } else if (value === 'true') {
         value = true;
+      } else if (/:\s/.test(value)) {
+        // fail-closed（深审批A T2）：非引号值内再出现「: 」——真机 js-yaml 报
+        // 「mapping values are not allowed here」**整体失效**（Obsidian 视为无 frontmatter），
+        // mock 原先按首个冒号切分照收 → FM 破坏类缺陷在测试环境不可见。对齐 fail-closed。
+        return null;
       }
       fm[key] = value;
     } else if (/^\s*-\s+/.test(line)) {
@@ -276,9 +310,56 @@ export function parseFrontmatter(content: string): Record<string, any> | null {
         if (/^-?\d+(\.\d+)?$/.test(v)) v = Number(v);
         fm[lastKey].push(v);
       }
+    } else if (line.trim() !== '') {
+      // fail-closed（深审批A T2）：无冒号且非列表项的裸行（多行文本裸插 frontmatter 的
+      // 第二行起，如旧建档模板把多行影评直拼进 YAML）——真机 js-yaml 报 bad indentation
+      // 整体失效，mock 原先静默跳过照收。对齐 fail-closed；空行在 YAML 块映射中合法，放行。
+      return null;
     }
   }
   return fm;
+}
+
+/**
+ * 全库链接图（Obsidian `metadataCache.resolvedLinks` 的 mock）：`{ 源路径: { 目标路径: 出现次数 } }`。
+ * 口径对齐 Obsidian：只收**能解析到库内文件**的 wikilink（含 `![[嵌入]]`），断链不入图；
+ * 目标解析 = 全路径优先（补 .md 兜底）→ 全库同名（去目录、去扩展名、大小写不敏感，取字典序首个）。
+ * 每次访问现算（测试里 vault 随用例变化），调用方不会拿到过期快照。
+ */
+function buildResolvedLinks(vault: MockVault): Record<string, Record<string, number>> {
+  const paths = [...vault.files.keys()];
+  const resolveOne = (target: string): string | null => {
+    const t = String(target ?? '').replace(/\\/g, '/').trim();
+    if (!t) return null;
+    if (vault.files.has(t)) return t;
+    if (vault.files.has(t + '.md')) return t + '.md';
+    const base = (t.split('/').pop() ?? '').replace(/\.md$/i, '').toLowerCase();
+    if (!base) return null;
+    const hit = paths
+      .filter((p) => p.toLowerCase().endsWith('.md'))
+      .filter((p) => (p.split('/').pop() ?? '').replace(/\.md$/i, '').toLowerCase() === base)
+      .sort()[0];
+    return hit ?? null;
+  };
+  const out: Record<string, Record<string, number>> = {};
+  for (const [path, content] of vault.files) {
+    if (!path.toLowerCase().endsWith('.md')) continue;
+    // frontmatter 里的 [[...]]（related / mounted 等）**不进 resolvedLinks**——真机同样不含，
+    // 它们由 frontmatter 单独承载；不剥掉会与消费方的 frontmatter 解析重复计数。
+    // 正文再剥代码块/inline code/HTML 注释（ARCH-T1：真机 cache 排除这些段落，假层同口径）
+    const body = stripNonLinkSegments(content.replace(/^---\r?\n[\s\S]*?\r?\n---/, ''));
+    const bag: Record<string, number> = {};
+    const re = /!?\[\[([^\[\]]+?)\]\]/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(body)) !== null) {
+      const inner = m[1].split('|')[0].split('#')[0].trim();
+      const p = resolveOne(inner);
+      if (!p) continue; // 断链不入图（与 Obsidian 一致）
+      bag[p] = (bag[p] ?? 0) + 1;
+    }
+    if (Object.keys(bag).length) out[path] = bag;
+  }
+  return out;
 }
 
 /** 构造带 frontmatter 解析的测试 app */
@@ -289,16 +370,36 @@ export function mockAppWithVault(vault: MockVault) {
       const listeners: Record<string, Function[]> = {};
       return {
         getFileCache: (f: any) => {
-          // 兼容 TFile 对象与路径字符串（encrypt 域 embeds 收集用）
+          // 兼容 TFile 对象与路径字符串（encrypt / attach 域附件收集用）
           const path = typeof f === 'string' ? f : f?.path ?? '';
           const content = vault.files.get(path) ?? '';
           const fm = parseFrontmatter(content);
-          // wikilink 嵌入解析（Obsidian 自带链接信息；encrypt 域附件收集的主数据源）
+          // frontmatter 段与正文段分离；正文再剥真机 cache 不承认为链接的段落
+          // （fenced/inline code/HTML 注释——与 src/attach/data.ts stripNonLinkSegments
+          // 单源，ARCH-T1：假层与实现侧围栏口径对齐，防「盲区对盲区」假绿）
+          const fmBody = content.replace(/^---\r?\n[\s\S]*?\r?\n---/, '');
+          const fmSeg = fmBody === content ? '' : content.slice(0, content.length - fmBody.length);
+          const body = stripNonLinkSegments(fmBody);
+          // 四形态提取复用 attach parseLinkRefs（单源：F10 剥壳 / target 剥 |#^ 后缀同口径）——
+          // embeds = `![[...]]` wiki 嵌入 + `![](...)` md 图片嵌入（真机 FileCache.embeds 面）；
+          // links = `[[...]]` wikilink + `[](...)` md 链接（真机 FileCache.links 面，断链也在）
           const embeds: { link: string }[] = [];
-          const re = /!\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]/g;
-          let m: RegExpExecArray | null;
-          while ((m = re.exec(content)) !== null) embeds.push({ link: m[1].trim() });
-          return fm || embeds.length ? { frontmatter: fm, embeds } : null;
+          const links: { link: string }[] = [];
+          for (const ref of parseLinkRefs(body)) {
+            (ref.embeds ? embeds : links).push({ link: ref.target });
+          }
+          // frontmatter 段内的链接（真机 FileCache.frontmatterLinks；renameFile 会更新）
+          const frontmatterLinks: { link: string }[] = [];
+          if (fmSeg) {
+            for (const ref of parseLinkRefs(fmSeg)) frontmatterLinks.push({ link: ref.target });
+          }
+          return fm || embeds.length || links.length || frontmatterLinks.length
+            ? { frontmatter: fm, embeds, links, frontmatterLinks }
+            : null;
+        },
+        /** 全库链接图（真机由 Obsidian 维护；见 buildResolvedLinks）。getter = 每次现算快照 */
+        get resolvedLinks() {
+          return buildResolvedLinks(vault);
         },
         // 事件监听（changed 等），供实时同步类测试 emit
         on: (event: string, cb: (...args: any[]) => void): any => {
@@ -325,7 +426,10 @@ export function mockAppWithVault(vault: MockVault) {
       getActiveFile: () => null,
     },
     fileManager: {
-      /** processFrontMatter：读文件 → 回调改 fm → 序列化写回（保留正文；数组用 [] 简式） */
+      /** processFrontMatter：读文件 → 回调改 fm → 序列化写回（保留正文；数组用 [] 简式）。
+       *  字符串值序列化保真（T2 配套）：多行 / 含「: 」的裸值直拼会写破 YAML（真机走
+       *  js-yaml 序列化不产生破损）——双引号包裹转义（JSON 字符串字面量 ≈ YAML 双引号标量子集），
+       *  parseFrontmatter 侧按双引号转义还原。 */
       processFrontMatter: async (file: any, cb: (fm: Record<string, any>) => void) => {
         const path = typeof file === 'string' ? file : file.path;
         const content = vault.files.get(path) ?? '';
@@ -335,6 +439,12 @@ export function mockAppWithVault(vault: MockVault) {
         const lines = ['---'];
         for (const [k, v] of Object.entries(fm)) {
           if (Array.isArray(v)) lines.push(`${k}: [${v.join(', ')}]`);
+          // 字符串值序列化保真（T2 配套）：多行 / 含「: 」/ date-like 的裸值要么写破 YAML、
+          // 要么被真机 YAML 重新解析成 timestamp（Moment 对象 → 英文星期）——真机
+          // processFrontMatter 由 js-yaml 序列化会加引号保型，mock 同样双引号包裹转义
+          // （JSON 字符串字面量 ≈ YAML 双引号标量子集），parseFrontmatter 侧按双引号转义还原
+          else if (typeof v === 'string' && (/[\r\n]/.test(v) || /:\s/.test(v) || /^\d{4}-\d{2}-\d{2}/.test(v)))
+            lines.push(`${k}: ${JSON.stringify(v)}`);
           else lines.push(`${k}: ${v}`);
         }
         lines.push('---');
