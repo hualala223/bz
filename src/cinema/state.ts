@@ -38,6 +38,9 @@ export interface CinemaItem {
   actors: string | null;
   region: string | null;
   year: string | null;
+  /** 完整上映日期原文（frontmatter「上映日期」，如 2013-01-08）。year 只留前 4 位
+   *  （卡片副行 / 分析页片龄统计按年聚合），详情弹窗要的是完整日期，故另存一份（687/687 有值） */
+  releaseDate: string | null;
   doubanRating: string | null;
   doubanUrl: string | null;
   synopsis: string | null;
@@ -59,6 +62,8 @@ export interface CinemaItem {
   chaptersWatching: number | null;
   /** 书籍字段行（作者/出版社/出版年/译者/ISBN/页数/出品方 非空项；详情卡「豆瓣信息」区渲染，票 301） */
   bookInfo: [string, string][];
+  /** 豆瓣热门短评原文（frontmatter「热门短评」；451/687 抓到，中位 39 字、最长 465） */
+  hotComment: string | null;
 }
 
 /** 排序模式：date=最近观看（默认）/ created=按创建 / rating=按评分 */
@@ -74,10 +79,13 @@ export interface CinemaState {
   countryFilter: string | null;
   /** 排序模式 */
   sortMode: CinemaSortMode;
-  /** 当前视图：list / ai / stat */
+  /** 当前视图：list / ai */
   view: CinemaViewKind;
   searchKeyword: string;
   searchDebounceTimer: ReturnType<typeof setTimeout> | null;
+  /** 面板内最近一次键入时刻（Date.now()，0=从未输入）。后台整刷（豆瓣补抓 / vault 事件）
+   *  据此判定「用户还在打字」→ 顺延渲染，不再打断输入（issue: 影院搜索框打几个字就失焦） */
+  lastInputAt: number;
   appRef: App | null;
   folderPath: string;
   renderFn: (() => void) | null;
@@ -104,6 +112,7 @@ export const M: CinemaState = {
   view: 'list',
   searchKeyword: '',
   searchDebounceTimer: null,
+  lastInputAt: 0,
   appRef: null,
   folderPath: DEFAULT_FOLDER,
   renderFn: null,
@@ -127,6 +136,7 @@ export function resetCinemaState(): void {
   M.view = 'list';
   M.searchKeyword = '';
   M.searchDebounceTimer = null;
+  M.lastInputAt = 0;
   M.appRef = null;
   M.folderPath = DEFAULT_FOLDER;
   M.renderFn = null;

@@ -1,9 +1,10 @@
 /**
  * 影院（cinema）域设置 schema（接入设置面板；窗口内无设置按钮，收敛进 Obsidian 设置面板）
- * issue 194：补「显示」组——默认排序/默认状态筛选（打开面板时读，非法值回落，见 index.ts readDefaultView）。
+ * issue 194：补「显示」组——默认排序/默认状态筛选（打开面板时读，非法值回落，见 index.ts applyDefaultView）。
  */
 import { numStrBinding } from '../core/settings-common';
 import type { SettingsSchema } from '../core/settings-schema';
+import { POSTER_FOLDER } from './douban-fetcher';
 
 export function cinemaSettingsSchema(): SettingsSchema {
   return {
@@ -38,9 +39,12 @@ export function cinemaSettingsSchema(): SettingsSchema {
         name: '目录',
         rows: [
           { type: 'path', mode: 'single', name: '娱乐文件夹', desc: '娱乐读取的条目文件夹，日记本也从这里读条目', binding: { key: 'cinemaFolderPath' } },
+          { type: 'path', mode: 'single', name: '影视文件夹', desc: '影院读取的影视文件夹，日记本也从这里读影视', binding: { key: 'cinemaFolderPath' } },
+          { type: 'path', mode: 'single', name: '海报文件夹', desc: '豆瓣抓取的海报图片保存位置，留空用默认目录', binding: { key: 'cinemaPosterFolder' }, fallbackValue: () => POSTER_FOLDER },
           // 旧「每批加载数量」（cinemaPageSize）已删除：全仓无消费点（列表一次全量渲染），属死配置
         ],
       },
+      // 「数据抓取」组（ApiZero Key / 豆瓣 Cookie）已挪入设置面板「数据源凭据」组（ADR-0133 收编，issue 331 定名）
       {
         icon: 'rss',
         name: '数据抓取',
@@ -84,6 +88,14 @@ export function cinemaSettingsSchema(): SettingsSchema {
             min: 2,
             max: 12,
             step: 1,
+          },
+          // issue 376 / ADR-0168：剧集按季合并（纯渲染层分组；同一部剧 ≥2 季才合并，单季照旧一卡）。
+          // 2026-09-20：缺省**开**（用户拍板），并入的「剧名：副标题」特别篇在卡片详情里单列
+          {
+            type: 'toggle',
+            name: '剧集按季合并',
+            desc: '同一部剧的各季合并成一张卡片，卡片上显示各季进度',
+            binding: { key: 'cinemaMergeSeasons' },
           },
         ],
       },
