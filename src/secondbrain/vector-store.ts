@@ -32,7 +32,7 @@ import { buildConfig, IS_MOBILE } from './config';
 import { loadStore, mutateStore } from './store-file';
 import { MobileBuffer } from './binary';
 import { embedChunks, hashChunks, noteTitleFromPath } from './chunk';
-import { euclideanSq, normalizeVec, vptree_build, vptree_search, VPNode, Vec } from './vptree';
+import { isValidVector, normalizeVec } from './vector-math';
 import { parallelMap } from './parallel';
 import { TFIDF } from './tfidf';
 import { searchTextIndex } from './text-search';
@@ -63,6 +63,15 @@ export interface SecondBrainMeta {
   _dim: number;
 }
 
+/** 归一化矩阵缓存（ADR-0185） */
+interface NormCache {
+  src: Float32Array;
+  dim: number;
+  rows: number;
+  data: Float32Array;
+  valid: Uint8Array;
+}
+
 export interface SearchHit {
   path: string;
   chunk: string;
@@ -87,11 +96,8 @@ export class VectorStore {
   /** 初始 load 完成信号（域入口注入；主面板打开时等待，防启动竞态误入引导态——ticket 107） */
   initialLoad: Promise<void> | null = null;
 
-  /** VP 索引缓存：树 + 归一化向量 + 缓存键 + 来源数组身份（内容变更即失效） */
-  private vpTree: VPNode | null = null;
-  private vpVecs: Float32Array[] | null = null;
-  private vpMetaKey: string | null = null;
-  private vpSrc: Float32Array | null = null;
+  /** 归一化矩阵缓存（issue 425/ADR-0185）：检索全扫用，键=来源数组身份+维度+行数 */
+  private normCache: NormCache | null = null;
   /** 进行中的 refresh（并发去重：重复调用复用同一 promise，ticket 107） */
   private refreshPromise: Promise<void> | null = null;
 
@@ -211,11 +217,8 @@ export class VectorStore {
     this.vectors = new Float32Array(0);
     this.dim = 0;
     this.meta._dim = 0;
-    // VP 索引缓存随内容失效（来源数组身份已变，此处显式置空双保险）
-    this.vpTree = null;
-    this.vpVecs = null;
-    this.vpMetaKey = null;
-    this.vpSrc = null;
+    // 归一化缓存随内容失效（来源数组身份已变）
+    this.normCache = null;
     await this.refresh(updateProgress);
   }
 
@@ -580,65 +583,90 @@ export class VectorStore {
     }
   }
 
-  /** VP 索引缓存（QA L645-654）：键含 dim/count/noteCount，另加来源数组身份校验（内容变即重建） */
-  private buildVPIndex(vecs: Float32Array[]): void {
-    const metaKey = JSON.stringify({ dim: this.meta._dim, count: vecs.length, hash: Object.keys(this.meta.notes).length });
-    if (this.vpMetaKey === metaKey && this.vpSrc === this.vectors && this.vpTree && this.vpVecs) return;
-    const normalized = vecs.map((v) => normalizeVec(v));
-    this.vpTree = vptree_build(
-      normalized,
-      normalized.map((_, i) => i)
-    );
-    this.vpVecs = normalized.map((v) => Float32Array.from(v));
-    this.vpMetaKey = metaKey;
-    this.vpSrc = this.vectors;
-    console.log(`[secondbrain] VP-Tree built: ${normalized.length} vecs`);
-  }
 
   /** 向量检索：查询嵌入 → VP-Tree topK×3 候选 → cos=1−d²/2 → 去重 → topK → score^0.35（QA L655-691） */
+  /**
+   * 向量检索（上游 issue 425/ADR-0185 移植批 4）：查询嵌入 → 暴力全扫余弦（归一化点积）→ 去重 → topK。
+   * 全扫精确无近似：VP-Tree 近似召回会漏真实最近邻，且其距离→余弦换算只对单位向量成立
+   * （零向量距离恒 1.0 → 旧公式反推 0.5 → 锐化后 78% 恒霸榜，即 ADR-0185 病根）。
+   * 分数即原始余弦 [0,1]，与参考面板百分比同尺，不再幂次锐化。
+   * ⚠️ F2 冻结：本方法只读 this.vectors/meta；.vec 二进制布局、加载/保存路径零改动。
+   */
   async vectorSearch(query: string, topK = 20, baseUrl?: string): Promise<SearchHit[]> {
     const queryEmbedding = await getEmbedding(query, true, baseUrl);
-    if (!queryEmbedding) return [];
+    if (!queryEmbedding || !isValidVector(queryEmbedding)) return [];
     const dim = this.meta._dim || this.dim;
     if (!dim || this.vectors.length === 0) return [];
-
-    const vecs: Float32Array[] = [];
-    for (let i = 0; i < this.vectors.length; i += dim) {
-      vecs.push(this.vectors.subarray(i, i + dim));
+    if (queryEmbedding.length !== dim) {
+      throw new Error(`查询向量维度 ${queryEmbedding.length} 与索引维度 ${dim} 不符（索引需重建）`);
     }
-    this.buildVPIndex(vecs);
 
-    const k = Math.min(topK * 3, vecs.length);
-    const queryNorm = normalizeVec(queryEmbedding);
-    const candidates = vptree_search(this.vpTree, this.vpVecs!, queryNorm, k);
+    const cache = this.buildNormCache(dim);
+    const q = Float32Array.from(normalizeVec(queryEmbedding));
 
-    const paths = Object.keys(this.meta.notes);
-    const hits: SearchHit[] = candidates.map((r) => {
-      let vecIdx = r.idx;
-      let accPath = paths[0] ?? '';
-      for (const p of paths) {
-        const count = this.meta.notes[p].chunks.length;
-        if (vecIdx < count) {
-          accPath = p;
-          break;
+    const hits: SearchHit[] = [];
+    let row = 0;
+    for (const [path, note] of Object.entries(this.meta.notes)) {
+      for (const chunk of note.chunks) {
+        if (row >= cache.rows) break;
+        if (cache.valid[row]) {
+          const off = row * dim;
+          let dot = 0;
+          for (let i = 0; i < dim; i++) dot += cache.data[off + i] * q[i];
+          hits.push({ path, chunk: chunk.text, score: Math.max(0, dot) });
         }
-        vecIdx -= count;
+        row++;
       }
-      const cosSim = Math.max(0, 1 - r.dist / 2);
-      return { path: accPath, chunk: this.meta.notes[accPath]?.chunks[vecIdx]?.text || '', score: cosSim };
-    });
+      if (row >= cache.rows) break;
+    }
 
     const seen = new Set<string>();
     const deduped: SearchHit[] = [];
-    for (const item of hits) {
+    for (const item of hits.sort((a, b) => b.score - a.score)) {
       const key = item.path + '::' + item.chunk;
       if (seen.has(key)) continue;
       seen.add(key);
       deduped.push(item);
+      if (deduped.length >= topK) break;
     }
-    const topResults = deduped.sort((a, b) => b.score - a.score).slice(0, topK);
-    for (const r of topResults) r.score = Math.pow(r.score, 0.35);
-    return topResults;
+    return deduped;
+  }
+
+  /**
+   * 归一化矩阵缓存（上游 ADR-0185 逐字）：零向量/非有限行整行跳过；行序不变量告警。
+   * 缓存键 = 来源数组身份 + 维度 + 行数——内容变更即换新缓冲，身份比对即失效。
+   */
+  private buildNormCache(dim: number): NormCache {
+    const rows = Math.floor(this.vectors.length / dim);
+    const cached = this.normCache;
+    if (cached && cached.src === this.vectors && cached.dim === dim && cached.rows === rows) return cached;
+    const data = new Float32Array(rows * dim);
+    const valid = new Uint8Array(rows);
+    let skipped = 0;
+    for (let r = 0; r < rows; r++) {
+      const off = r * dim;
+      let norm = 0;
+      let ok = true;
+      for (let i = 0; i < dim; i++) {
+        const x = this.vectors[off + i];
+        if (!Number.isFinite(x)) { ok = false; break; }
+        norm += x * x;
+      }
+      if (!ok || !(norm > 0) || !Number.isFinite(norm)) { skipped++; continue; }
+      const inv = 1 / Math.sqrt(norm);
+      for (let i = 0; i < dim; i++) data[off + i] = this.vectors[off + i] * inv;
+      valid[r] = 1;
+    }
+    if (skipped > 0) {
+      console.warn(`[secondbrain] 检索跳过 ${skipped}/${rows} 条无效向量（零向量或非有限分量）——重新索引可修复`);
+    }
+    const expected = Object.values(this.meta.notes).reduce((n, note) => n + note.chunks.length, 0);
+    if (expected !== rows) {
+      console.warn(`[secondbrain] .vec 行数 ${rows} 与 meta 段落总数 ${expected} 不一致（损坏态），本次检索仅覆盖 ${Math.min(rows, expected)} 行——重新索引可修复`);
+    }
+    console.log(`[secondbrain] 检索归一化缓存已构建: ${rows} 行 × ${dim} 维`);
+    this.normCache = { src: this.vectors, dim, rows, data, valid };
+    return this.normCache;
   }
 
   /** 桌面检索：向量优先，异常降级文本；移动端直走文本索引（QA L694-699 + bz 降级改进） */

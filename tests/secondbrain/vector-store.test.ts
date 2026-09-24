@@ -786,19 +786,19 @@ describe('VectorStore（检索链路）', () => {
     expect(top1[0].path).toBe('b.md');
   });
 
-  it('VP 索引缓存：键相同且 vectors 引用未变时跳过重建，引用变更后重建', async () => {
+  it('归一化缓存：vectors 引用未变时跳过重建，引用变更后重建（ADR-0185）', async () => {
     const { vs } = seedOrthoStore();
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
       vi.mocked(getEmbedding).mockResolvedValue([1, 0]);
       await vs.vectorSearch('q1', 5);
       await vs.vectorSearch('q2', 5);
-      const builds = () => logSpy.mock.calls.filter((c) => String(c[0]).includes('VP-Tree built')).length;
-      expect(builds()).toBe(1); // 同键同引用 → 复用
+      const builds = () => logSpy.mock.calls.filter((c) => String(c[0]).includes('归一化缓存已构建')).length;
+      expect(builds()).toBe(1); // 同缓冲身份 → 复用
 
       vs.vectors = new Float32Array([1, 0, 0, 1]); // 内容相同但引用已变
       await vs.vectorSearch('q3', 5);
-      expect(builds()).toBe(2); // 引用校验触发重建
+      expect(builds()).toBe(2); // 身份校验触发重建
     } finally {
       logSpy.mockRestore();
     }
