@@ -4,7 +4,7 @@
  * 命令 id 统一 `bz-` 前缀（ADR-0004 修订：2025 用户决策统一品牌前缀），不设置默认快捷键，
  * 卸载时 removeCommand 清理——取代原脚本的 window.__*CommandRegistered 防重标志。
  */
-import { Plugin, PluginSettingTab } from 'obsidian';
+import { Plugin, PluginSettingTab, Setting } from 'obsidian';
 import { notice, cleanupNotices } from './core/notice';
 import { escManager } from './core/esc-manager';
 import { closeItemMenu } from './core/item-actions';
@@ -521,6 +521,10 @@ function ensureSecondBrainOnReady(app: any) {
 // ticket 131：两区块 schema 化（ADR-0064 声明式渲染器），原私有 textSetting/toggleSetting/
 // pathSetting helper 退役（text 防抖落盘/onCommit 一次性提示语义收口 core 渲染器）。
 
+// ===== 设置页（上游 issue 345：原生设置页不再平铺设置项，只留一个「打开设置面板」按钮——
+// 全部设置已聚合 settings-panel 面板；原 ADR-0009 单页平铺退役，mainSettingsSchema
+// 聚合器仍留在 core/settings-main-schema 供面板与测试全量断言）=====
+
 export class BzSettingTab extends PluginSettingTab {
   plugin: BzPlugin;
 
@@ -532,20 +536,11 @@ export class BzSettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    // AI 服务商切换 → 密钥行显隐走 visibleWhen；存储路径 onCommit warning 文案逐字保留
-    // （schema 定义见 core/settings-main-schema.ts）；渲染器统一完成徽标/两行式标注/初始显隐
-    renderSettingsInto(containerEl, mainSettingsSchema());
-    // 🐱 小橘电源区块（ticket 103 回归恢复：设置页开关 + 三档关闭方式，立即生效）——
-    // schema 由 smartcat 域提供（core 不反向依赖域，ADR-0002），此处注入对账回调；
-    // ⚙️ 设置弹窗电源组（src/smartcat/ui.ts）仍保留，双入口同键不冲突
-    renderSettingsInto(
-      containerEl,
-      smartcatMainSettingsSchema({
-        onPowerStateChange: (enabled, offMode) => {
-          void applySmartcatPowerState(this.plugin.app, enabled, normalizeSmartcatOffMode(offMode));
-        },
-      })
-    );
+    new Setting(containerEl)
+      .setName('打开设置面板')
+      .setDesc('全部设置（AI、数据存储路径、通知、各域）都在 bz 设置面板中集中管理')
+      .addButton((btn) =>
+        btn.setButtonText('打开设置面板').setCta().onClick(() => openSettingsPanel(this.plugin.app))
+      );
   }
-
 }

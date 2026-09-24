@@ -22,6 +22,7 @@ var BZR_belongings = (() => {
   var render_exports = {};
   __export(render_exports, {
     ICON: () => ICON,
+    MAX_PRICE: () => MAX_PRICE,
     SORT_OPTS: () => SORT_OPTS,
     STATUS: () => STATUS,
     STATUS_LABELS: () => STATUS_LABELS,
@@ -42,6 +43,7 @@ var BZR_belongings = (() => {
     emptyHtml: () => emptyHtml,
     esc: () => esc,
     exitDateOf: () => exitDateOf,
+    exitDayTsOf: () => exitDayTsOf,
     exitedStatus: () => exitedStatus,
     filtered: () => filtered,
     flowBtnsHtml: () => flowBtnsHtml,
@@ -61,6 +63,8 @@ var BZR_belongings = (() => {
     moneyUnitLabel: () => moneyUnitLabel,
     moneyWith: () => moneyWith,
     panelHtml: () => panelHtml,
+    parseLocalDay: () => parseLocalDay,
+    recoveredOf: () => recoveredOf,
     renderPanelView: () => renderPanelView,
     resolveYear: () => resolveYear,
     segmentedHtml: () => segmentedHtml,
@@ -75,6 +79,7 @@ var BZR_belongings = (() => {
     stockCount: () => stockCount,
     todayStr: () => todayStr,
     totalAssets: () => totalAssets,
+    trimDailyNum: () => trimDailyNum,
     yearsAvailable: () => yearsAvailable,
     yearsOptionsHtml: () => yearsOptionsHtml
   });
@@ -87,8 +92,18 @@ var BZR_belongings = (() => {
   function esc(s) {
     return escapeHtml(String(s != null ? s : ""));
   }
+  function pad2(n) {
+    return String(n).padStart(2, "0");
+  }
+  function emptyHtmlStr(icon, title, desc) {
+    return `<div class="bz-empty">${icon ? iconSpan(icon, "bz-empty-ic") : ""}<div class="bz-empty-title">${esc(title)}</div>${desc ? `<div class="bz-empty-desc">${esc(desc)}</div>` : ""}</div>`;
+  }
   function iconSpan(name, extra = "") {
     return `<i data-lucide="${name}" class="bz-ic${extra ? " " + extra : ""}"></i>`;
+  }
+  function localDayKey(ts = Date.now()) {
+    const d = ts instanceof Date ? ts : new Date(ts);
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
   }
 
   // src/belongings/emoji-icon-map.ts
@@ -571,9 +586,11 @@ var BZR_belongings = (() => {
     close: "x",
     del: "trash-2",
     empty: "package",
-    chevR: "chevron-right",
-    chevD: "chevron-down"
+    chevD: "chevron-down",
+    report: "bar-chart-3"
+    // 年度资产报告工具行入口（issue 356）
   };
+  var MAX_PRICE = 1e12;
   var STATUS = {
     using: { label: "使用中", key: "using", ic: "check-circle" },
     idle: { label: "闲置", key: "idle", ic: "package" },
@@ -607,8 +624,7 @@ var BZR_belongings = (() => {
     return moneyWith((Number(n) || 0).toLocaleString("zh-CN", { maximumFractionDigits: 0 }), unit);
   }
   function todayStr() {
-    const d = /* @__PURE__ */ new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return localDayKey();
   }
   function catEmoji(cat) {
     const m = String(cat || "").match(/^(\p{Extended_Pictographic})/u);
@@ -657,22 +673,33 @@ var BZR_belongings = (() => {
   function exitDateOf(it) {
     return isExited(it) ? it.exit_date || null : null;
   }
+  function exitDayTsOf(it) {
+    var _a, _b;
+    return isExited(it) ? (_b = (_a = parseLocalDay(it.exit_date)) == null ? void 0 : _a.getTime()) != null ? _b : null : null;
+  }
+  function recoveredOf(it) {
+    return it.current_status === STATUS.sold.label && Number(it.sold_price) > 0 ? Number(it.sold_price) : 0;
+  }
+  function trimDailyNum(n) {
+    const v = Number(n) || 0;
+    if (v === 0) return "—";
+    return v < 0.01 ? v.toFixed(4) : v.toFixed(2).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+  }
   function parseLocalDay(raw) {
     const parts = String(raw || "").slice(0, 10).split("-").map(Number);
     const [y, m, d] = parts;
     if (!y || !m || !d) return null;
-    return new Date(y, m - 1, d);
+    if (m < 1 || m > 12) return null;
+    const dt = new Date(y, m - 1, d);
+    if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+    return dt;
   }
   function daysUsed(it) {
     const start = parseLocalDay(it.purchase_date);
     if (!start) return 0;
-    const ex = exitDateOf(it);
-    let end = /* @__PURE__ */ new Date();
-    if (ex) {
-      const parsed = parseLocalDay(ex);
-      if (parsed) end = parsed;
-    }
-    return Math.max(0, Math.floor((end.getTime() - start.getTime()) / 864e5));
+    const ex = exitDayTsOf(it);
+    const end = ex != null ? ex : Date.now();
+    return Math.max(0, Math.floor((end - start.getTime()) / 864e5));
   }
   function dailyCostOf(it) {
     const days = daysUsed(it);
@@ -680,7 +707,7 @@ var BZR_belongings = (() => {
     return days > 0 ? price / days : price;
   }
   function inStock(it) {
-    return it.current_status === "使用中" || it.current_status === "闲置";
+    return it.current_status === STATUS.using.label || it.current_status === STATUS.idle.label;
   }
   function stockCount(items) {
     return items.filter(inStock).length;
@@ -693,7 +720,7 @@ var BZR_belongings = (() => {
     let days = 0;
     for (const it of items) {
       cost += Number(it.purchase_price) || 0;
-      if (it.current_status === "已转卖" && Number(it.sold_price) > 0) cost -= Number(it.sold_price);
+      cost -= recoveredOf(it);
       days += daysUsed(it);
     }
     return days ? cost / days : 0;
@@ -742,7 +769,6 @@ var BZR_belongings = (() => {
     return `<div class="bz-bel-detail">
     <div class="bz-bel-detail-head">
       <div class="bz-bel-detail-title">${esc(it.name)}</div>
-      <button class="bz-icon-btn" data-bd-close title="关闭">${iconSpan(ICON.close)}</button>
     </div>
     <div class="bz-bel-detail-idrow">
       <span class="bz-bel-cell-em">${itemEmHtml(it)}</span>
@@ -811,7 +837,8 @@ var BZR_belongings = (() => {
       <div class="bz-btn-row bz-bel-form-actions">
         <div class="bz-bel-form-spacer"></div>
         <button type="button" class="bz-btn bz-btn--ghost" data-bm-cancel>取消</button>
-        <button type="button" class="bz-btn bz-btn--primary" id="bm-save">${editing ? "更新" : "保存"}</button>
+        <!-- 提交动词全域拍板（review-deep 一致#9）：编辑=保存、新建=添加（favorites 同款收敛） -->
+        <button type="button" class="bz-btn bz-btn--primary" id="bm-save">${editing ? "保存" : "添加"}</button>
       </div>
     </div>
   </div>`;
@@ -865,16 +892,17 @@ var BZR_belongings = (() => {
     </div>
     <div class="bz-bel-chips" data-bel-chips></div>
     <div class="bz-toolrow bz-bel-toolrow">
-      <div class="bz-search">${iconSpan(ICON.search)}<input class="bz-input" type="text" data-bel-search placeholder="搜索名称 / 分类…"></div>
+      <div class="bz-search">${iconSpan(ICON.search)}<input class="bz-input" type="text" data-bel-search placeholder="搜索名称 / 分类 / 备注…"><button type="button" class="bz-bel-search-clear" data-bel-search-clear title="清除搜索" aria-label="清除搜索" hidden style="position:absolute;right:6px;top:50%;transform:translateY(-50%);border:none;background:transparent;cursor:pointer;color:var(--bz-text-3);padding:2px;line-height:0"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
       <div class="bz-bel-yearsel">
-        <div class="bz-bel-select" data-bel-year role="button" tabindex="0" aria-haspopup="listbox"><span class="bz-bel-select-label">全部年份</span>${iconSpan(ICON.chevD, "bz-bel-select-chev")}</div>
+        <div class="bz-bel-select bz-touch-target" data-bel-year role="button" tabindex="0" aria-haspopup="listbox"><span class="bz-bel-select-label">全部年份</span>${iconSpan(ICON.chevD, "bz-bel-select-chev")}</div>
         <div class="bz-bel-dropmenu" data-bel-yearmenu role="listbox"></div>
       </div>
       <div class="bz-bel-yearsel bz-bel-mobsortsel-wrap">
-        <div class="bz-bel-select" data-bel-mobsortsel role="button" tabindex="0" aria-haspopup="listbox"><span class="bz-bel-select-label">最近购入</span>${iconSpan(ICON.chevD, "bz-bel-select-chev")}</div>
+        <div class="bz-bel-select bz-touch-target" data-bel-mobsortsel role="button" tabindex="0" aria-haspopup="listbox"><span class="bz-bel-select-label">最近购入</span>${iconSpan(ICON.chevD, "bz-bel-select-chev")}</div>
         <div class="bz-bel-dropmenu" data-bel-mobsortmenu role="listbox"></div>
       </div>
       <div class="bz-bel-sort" data-bel-sort></div>
+      <button class="bz-icon-btn bz-bel-reportbtn" data-bel-report title="年度资产报告" aria-label="年度资产报告">${iconSpan(ICON.report)}</button>
       <button class="bz-btn bz-btn--md bz-bel-addbtn" data-bel-add>${iconSpan(ICON.add, "bz-ic--sm")} 记一笔</button>
     </div>
     <div class="bz-mobstrip" data-bel-mobstatus></div>
@@ -905,7 +933,7 @@ var BZR_belongings = (() => {
     }).join("");
   }
   function yearsOptionsHtml(items, cur) {
-    return '<div class="bz-bel-dropopt' + (cur === "" ? " is-cur" : "") + '" data-v="" role="option">全部年份</div>' + yearsAvailable(items).map((y) => `<div class="bz-bel-dropopt${cur === y ? " is-cur" : ""}" data-v="${y}" role="option">${y}</div>`).join("");
+    return '<div class="bz-bel-dropopt' + (cur === "" ? " is-cur" : "") + '" data-v="" role="option">全部年份</div>' + yearsAvailable(items).map((y) => `<div class="bz-bel-dropopt${cur === y ? " is-cur" : ""}" data-v="${esc(y)}" role="option">${y}</div>`).join("");
   }
   function sortOptionsHtml(cur) {
     return SORT_OPTS.map((o) => `<div class="bz-bel-dropopt${cur === o.v ? " is-cur" : ""}" data-v="${o.v}" role="option">${o.label}</div>`).join("");
@@ -915,7 +943,10 @@ var BZR_belongings = (() => {
   }
   function kpisHtml(items, unit = "cny") {
     const gone = items.filter(isExited);
-    const recover = gone.reduce((s, i) => s + (Number(i.sold_price) || 0), 0);
+    const recover = gone.reduce(
+      (s, i) => s + (i.current_status === "已转卖" && Number(i.sold_price) > 0 ? Number(i.sold_price) : 0),
+      0
+    );
     const kpi = (num, label, opts = {}) => `<div class="bz-bel-kpi${opts.hero ? " bz-bel-kpi--hero" : ""}${opts.click ? " bz-bel-kpi--click" : ""}"${opts.click ? ' data-bel-statclick="asset" title="只看在库（使用中与闲置）"' : ""}><b>${num}</b><span>${esc(label)}</span></div>`;
     return kpi(String(stockCount(items)), "在库件数", { hero: true, click: true }) + kpi(moneyShort(totalAssets(items), unit), "在库投入", { click: true }) + kpi(moneyWith(avgDailyCost(items).toFixed(2), unit), "日均成本") + kpi(`${gone.length} 件 · ${moneyShort(recover, unit)}`, "已离场 · 回收");
   }
@@ -926,7 +957,11 @@ var BZR_belongings = (() => {
     return `投入 ${moneyShort(totalAssets(items), unit)} · 日均 ${moneyWith(avgDailyCost(items).toFixed(2), unit)}`;
   }
   function emptyHtml(noMatch) {
-    return `<div class="bz-empty">${iconSpan(ICON.empty, "bz-empty-ic")}<div class="bz-empty-title">${noMatch ? "没有符合条件的物品" : "这里还没有物品"}</div><div class="bz-empty-desc">${noMatch ? "换个筛选条件，或清除搜索" : "点「记一笔」登记第一个物品"}</div></div>`;
+    return emptyHtmlStr(
+      ICON.empty,
+      noMatch ? "没有符合条件的物品" : "这里还没有物品",
+      noMatch ? "换个筛选条件，或清除搜索" : "点「记一笔」登记第一个物品"
+    );
   }
   function cellHtml(it, idx, unit = "cny") {
     var _a;
@@ -936,9 +971,12 @@ var BZR_belongings = (() => {
     const daily = dailyCostOf(it);
     const key = statusKeyOf(it.current_status);
     const exitNote = gone ? `${it.exit_date ? " → " + esc(String(it.exit_date).slice(0, 10)) : ""}${it.current_status === "已转卖" && Number(it.sold_price) > 0 ? " · 售出 " + moneyShort(Number(it.sold_price), unit) : ""}` : "";
-    const dailyStr = daily < 0.01 ? daily.toFixed(4) : daily.toFixed(2).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
-    const mut = gone ? `${esc(String(it.purchase_date || "").slice(0, 10) || "日期未知")} 起 · 陪伴 ${days || "—"} 天${exitNote}` : `${esc(String(it.purchase_date || "").slice(0, 10) || "日期未知")} 起 · ${days || "—"} 天 · 日均 ${moneyWith(dailyStr, unit)}`;
-    return `<div class="bz-bel-cell${gone ? " bz-bel-cell--gone" : ""}${idle ? " bz-bel-cell--idle" : ""}" data-bel-id="${esc(it.id)}">
+    const dailyStr = trimDailyNum(daily);
+    const mut = gone ? `${esc(String(it.purchase_date || "").slice(0, 10) || "日期未知")} 起 · 陪伴 ${days || "—"} 天${exitNote}` : (
+      // 呈报#20（B4）：0 元日均 trimDailyNum 给「—」，不再套 moneyWith（否则出「￥—」）
+      `${esc(String(it.purchase_date || "").slice(0, 10) || "日期未知")} 起 · ${days || "—"} 天 · 日均 ${dailyStr === "—" ? dailyStr : moneyWith(dailyStr, unit)}`
+    );
+    return `<div class="bz-bel-cell${gone ? " bz-bel-cell--gone" : ""}${idle ? " bz-bel-cell--idle" : ""}" data-bel-id="${esc(it.id)}" role="button" tabindex="0" aria-label="${esc(it.name)}，${esc(it.current_status)}，${moneyShort(Number(it.purchase_price) || 0, unit)}">
     <span class="bz-bel-cell-idx">NO.${String(idx + 1).padStart(2, "0")} — ${esc(catNameOf(it.category) || "未分类")}</span>
     <span class="bz-bel-tag bz-bel-tag--${key}">${iconSpan(((_a = STATUS[key]) == null ? void 0 : _a.ic) || "box", "bz-ic--sm")}${esc(it.current_status)}</span>
     <span class="bz-bel-cell-em">${itemEmHtml(it)}</span>
@@ -947,8 +985,8 @@ var BZR_belongings = (() => {
     <span class="bz-bel-mut">${mut}</span>
   </div>`;
   }
-  function gridHtml(items, view, unit = "cny") {
-    return `<div class="bz-bel-grid" data-bel-grid>${filtered(items, view).map((it, idx) => cellHtml(it, idx, unit)).join("")}</div>`;
+  function gridHtml(items, view, unit = "cny", list) {
+    return `<div class="bz-bel-grid" data-bel-grid>${(list != null ? list : filtered(items, view)).map((it, idx) => cellHtml(it, idx, unit)).join("")}</div>`;
   }
   function renderPanelView(root, items, view, hooks, unit = "cny") {
     var _a;
@@ -989,7 +1027,7 @@ var BZR_belongings = (() => {
       const noMatch = !!view.q || view.status !== null || view.year !== "";
       content.innerHTML = emptyHtml(noMatch);
     } else {
-      content.innerHTML = gridHtml(items, view, unit);
+      content.innerHTML = gridHtml(items, view, unit, list);
       const gridEl = content.querySelector("[data-bel-grid]");
       const cols = (getComputedStyle(gridEl).gridTemplateColumns || "").split(" ").filter(Boolean).length || 1;
       const rem = list.length % cols;
