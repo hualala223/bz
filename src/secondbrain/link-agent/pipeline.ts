@@ -1,25 +1,26 @@
 /**
- * 自动双链管线（ticket 111）：embedding 可达性门 → 增量索引 → 知识盒内向量近邻 Top-K →
- * core AI 裁判（ADR-0052 统一通道）→ 单侧写入 related。
+ * 自动关联管线（ticket 111；ADR-0141 正名并限定三盒）：embedding 可达性门 → 增量索引 →
+ * **三盒内**向量近邻 Top-K → core AI 裁判（ADR-0052 统一通道）→ 单侧写入 related。
  *
- * 流程对齐 spec `.scratch/secondbrain-link-agent/spec.md`「核心流程」②③④⑥（范围词按需求变更
- * 泛化为 linkAgentScopes 可配置清单，缺省回退「文献盒」）：
+ * 流程对齐 spec `.scratch/secondbrain-link-agent/spec.md`「核心流程」②③④⑥。范围口径见 ADR-0141 §2：
+ * 关联范围**恒为三个盒子**（文献盒 / 卡片盒 / 主题盒，core/knowledge-boxes 单源），
+ * **两端都限**（被处理端 + 候选端），**手动命令与知识盒显式通道亦无豁免**（盒外直接 out-of-scope）。
  * - 探测短超时 ~1.5s（复用 secondBrainRemoteOllamaUrl/Ollama 客户端配置，移动端远程优先同 doRefresh 规则）；
  * - 不可达 → 入队（secondbrain.json link.queue 段）；可达 → 就地完整管线；
  * - 裁判 prompt 指令前缀固定（命中供应商前缀缓存），强调「只链实质关联，存疑不链」；
  * - 写入幂等：related 已存在的链不重复添加；linkAgentMaxLinks > 0 时裁判提示附上限且写入侧截断；
  * - 队列消费：域初始化发现队列非空且服务可达即自动消费，完成后合并通知；
- * - 存量补链（ticket 115）：启动时（队列消费之后）扫描关联范围内缺 related 的存量笔记批量建链，
- *   手动命令 bz-secondbrain-link-all 同路径兜底；批次与监听批次共用串行锁；
- * - 正文大改自动重跑（v1.4/ticket 119）：每次成功建链后把**全文内容哈希**记为基准
+ * - 存量补链（ticket 115）：启动时（队列消费之后）扫描三盒内缺 related 的存量笔记批量建链，
+ *   手动命令 bz-knowledge-link-all 同路径兜底；批次与监听批次共用串行锁；
+ * - 正文大改自动重跑（v1.4/ticket 119）：每次处理完成后把**全文内容哈希**记为基准
  *   （secondbrain.json link.state 段，ticket 120 起）；修改监听按基准过滤——内容未实质变化（含自写 related 触发的
  *   modify）不重跑，哈希不同 / 无基准才重跑该篇；
+ * - 「已尝试且 0 条」不再重试（ADR-0141 §6）：AI 判定无实质关联的笔记在基准里记 empty，
+ *   正文未变即不进存量补链目标（此前每次启动都重跑一轮裁判）；
  * - 已有 related 不再自动建链（v1.7/ticket 167）：尊重开关 `linkAgentRespectRelated`（默认开）开启时，
  *   创建 / 修改 / 队列消费三条自动路径对 **related 非空** 的笔记一律跳过（`skipped-related`，队列条目顺带移除）；
- *   手动命令 bz-secondbrain-rebuild-links 传 respectRelated:false 豁免（显式意图强制重跑）；
- * - 死链清理：关联范围（linkAgentScopes）各笔记 related 中指向不存在文件的条目移除；encrypt 锁定文件一律跳过。
- * - 文献笔记生成即跑（issue 298）：知识盒生成视频/术语文献笔记后经 'knowledge:tasks' 域事件调
- *   processNoteNow 立即建链（不等约 60 秒批次防抖、不受 linkAgentScopes 限制，串行锁排队）。
+ *   手动命令 bz-knowledge-relink 传 respectRelated:false 豁免（显式意图强制重跑）；
+ * - 死链清理：三个盒子内各笔记 related 中指向不存在文件的条目移除；encrypt 锁定文件一律跳过。
  */
 import { stripMdExt } from '../../core/utils';
 import type { App, TFile } from 'obsidian';
@@ -27,18 +28,20 @@ import { notice, notify, NoticeHandle } from '../../core/notice';
 import { tryGetSettings } from '../../core/settings-provider';
 import { buildConfig, IS_MOBILE } from '../config';
 import { AI } from '../ai';
+import { judgeOrFallback } from '../../core/jev-fallback';
+import type { JevQuestion, JevAnswer } from '../../core/jev';
 import type { SearchHit } from '../vector-store';
 import {
   computeBackfillTargets,
-  getLinkAgentScopes,
+  inLinkScope,
   LinkQueueItem,
   computeHash,
   enqueuePaths,
   dequeuePath,
   hasRelatedEntries,
+  isSettledEmpty,
   loadQueue,
   loadLinkState,
-  matchesScope,
   mergeRelated,
   parseRelatedEntries,
   parseJudgeOutput,
@@ -83,6 +86,8 @@ export type ProcessOutcome =
   | { status: 'queued' }
   | { status: 'skipped' }
   | { status: 'skipped-related' }
+  /** ADR-0141 §2：路径在三个盒子之外（自动路径不会走到，手动命令与知识盒通道据此提示拒绝） */
+  | { status: 'out-of-scope' }
   | { status: 'failed'; error: string };
 
 export interface BatchSummary {
@@ -105,10 +110,24 @@ const JUDGE_PROMPT_PREFIX = [
   '你是笔记库的双链裁判。给定一篇新笔记的档案卡和若干候选笔记的档案卡，',
   '逐一判断候选与新笔记是否存在实质的知识关联（共同主题、直接引用、同一事件或人物、强互补上下文）。',
   '标准：只链实质关联，存疑不链；宁缺勿滥。',
-  '输出要求：严格 JSON 数组 [{"id":<候选编号>,"reason":"一句话理由"}]，按关联强度降序；无关联输出 []；不要输出 JSON 以外的任何文字。',
+  '输出要求：严格 JSON 数组 [{"id":<候选编号>}]，按关联强度降序；无关联输出 []；不要输出 JSON 以外的任何文字。',
 ].join('');
 
-/** 候选池倍数：先取全局近邻大池，再过滤到知识盒范围截断 Top-K */
+/**
+ * 关联判定阈值（issue 392 决策 4）：三维 Noul 共用一个阈值，不新增设置键。
+ * 首版 0.5 是拍的——三维拆分的判定数据还没有（实测只有单维度 Noul 数据），灰度后按真实误建率调；
+ * 调阈值不需要动提示词，这正是把判据放进代码的意义。
+ */
+const JUDGE_DIM_MIN = 0.5;
+
+/** 命中维度中文标签（拼入 reason，仅调试/批次日志用，不写 frontmatter、不额外调用 LLM） */
+const JUDGE_DIM_LABEL: Record<'topic' | 'ref' | 'complement', string> = {
+  topic: '同一主题',
+  ref: '直接指向',
+  complement: '内容互补',
+};
+
+/** 候选池倍数：先取全局近邻大池，再过滤到文献盒范围截断 Top-K */
 const CANDIDATE_POOL_MIN = 24;
 
 function settingNumber(v: unknown, fallback: number): number {
@@ -118,6 +137,12 @@ function settingNumber(v: unknown, fallback: number): number {
 
 function boolSetting(v: unknown, fallback: boolean): boolean {
   return v === undefined || v === null ? fallback : v === true;
+}
+
+/** 从 Jev 答案取 Noul 概率；缺键/非 noul/非数字均按 0 处理（issue 392 决策 9：缺键 = 0，不抛错） */
+function noulScore(a: JevAnswer | undefined): number {
+  if (a && a.type === 'noul' && typeof a.noul === 'number' && Number.isFinite(a.noul)) return a.noul;
+  return 0;
 }
 
 /** 剥 frontmatter 后的正文摘要（新笔记档案卡首块共用；检索查询不再用它截断） */
@@ -180,6 +205,16 @@ export class LinkAgent {
     return settingNumber(s.linkAgentTopK, 8) || 8;
   }
 
+  /**
+   * 候选相似度下限（issue 330/ADR-0146，issue 425/ADR-0185 换算）：vectorSearch 分数
+   * （原始余弦 [0,1]，与参考面板百分比同尺）低于此值的候选直接剔除、不送 AI 裁判；0 = 不过滤。
+   * 默认 0.30——原锐化尺 0.65（score^0.35）同语义换算而来，见 ADR-0185。
+   */
+  private get minScore(): number {
+    const s = tryGetSettings() as any;
+    return settingNumber(s.linkAgentMinScore, 0.3);
+  }
+
   private get maxLinks(): number {
     const s = tryGetSettings() as any;
     return settingNumber(s.linkAgentMaxLinks, 0);
@@ -200,16 +235,34 @@ export class LinkAgent {
   }
 
   /**
+   * 入口守卫（processNote / applyLinks 共用，**判定顺序只有这一处**——两处各写一遍必然漂移：
+   * 曾出现「不存在的盒外 .md」在一处判 out-of-scope、另一处判 skipped 的分叉）：
+   * - 非 md（含文件不存在）→ `skipped`；
+   * - encrypt 锁定 → `skipped`（硬跳过先于盒界：锁定目录的文件不拿「是否在盒内」说事）；
+   * - 三盒之外 → `out-of-scope`（ADR-0141 §2：自动路径与手动命令同一口径，无豁免）；
+   * - 否则返回 `{ file }`（读内容不必再查一次 vault）。
+   */
+  private resolveTarget(path: string): { file: TFile } | { status: 'skipped' } | { status: 'out-of-scope' } {
+    const file = this.app.vault.getAbstractFileByPath(path) as TFile | null;
+    if (!file || file.extension !== 'md') return { status: 'skipped' };
+    if (isEncryptLockedPath(this.app, path)) return { status: 'skipped' };
+    if (!inLinkScope(path)) return { status: 'out-of-scope' };
+    return { file };
+  }
+
+  /**
    * 单篇完整管线；assumeReachable=true 时跳过探测（队列消费已在入口统一探过）。
+   * 范围卫（ADR-0141 §2）：**盒外路径一律拒绝**（out-of-scope）——自动路径与手动命令同一口径，
+   * 不再有「手动触发即显式意图、不受范围限制」的豁免；判定统一走 resolveTarget。
    * v1.7/ticket 167：respectRelated !== false 时，frontmatter related 非空 → `skipped-related` 跳过
    * （创建 / 修改 / 队列消费三条自动路径统一；存量补链目标天然只收缺 related 者，此门不触发）。
    */
   async processNote(path: string, opts?: { assumeReachable?: boolean; respectRelated?: boolean }): Promise<ProcessOutcome> {
     const s = tryGetSettings() as any;
     if (s.linkAgentEnabled === false) return { status: 'skipped' };
-    const file = this.app.vault.getAbstractFileByPath(path) as TFile | null;
-    if (!file || file.extension !== 'md') return { status: 'skipped' };
-    if (isEncryptLockedPath(this.app, path)) return { status: 'skipped' };
+    const target = this.resolveTarget(path);
+    if (!('file' in target)) return { status: target.status };
+    const file = target.file;
 
     let content = '';
     try {
@@ -241,71 +294,149 @@ export class LinkAgent {
 
     const candidates = await this.findCandidates(path, content);
 
-    // ③ 裁判（core AI，ADR-0052 统一通道）
-    let picks: ReturnType<typeof parseJudgeOutput> = [];
+    // ③ 裁判（Jev 优先，失败回落 LLM；ADR-0173 §2 / issue 392）
+    let links: SearchHit[] = [];
     if (candidates.length > 0) {
-      const prompt = this.buildJudgePrompt(file, content, candidates);
-      let text = '';
       try {
-        text = await AI.ask(prompt);
+        links = await this.judge(file, content, candidates);
       } catch (e) {
-        // 裁判失败：保留队列/下次重试（spec「错误处理与边界」）
+        // 两道都不可用：保留队列/下次重试（spec「错误处理与边界」；issue 392 决策 7）
         await enqueuePaths([path], { [path]: hash });
         return { status: 'failed', error: e instanceof Error ? e.message : String(e) };
       }
-      picks = parseJudgeOutput(text, candidates.length);
     }
 
     // ④ 写入：通过裁判的对子写入新笔记侧 related（单侧、幂等、上限截断在写入侧兜底）
-    const links = picks
-      .map((p) => candidates[p.id - 1])
-      .filter((c) => !!c && c.path !== path && !!this.app.vault.getAbstractFileByPath(c.path));
     const created = await this.writeRelated(file, links.map((c) => c.path));
     // v1.4/ticket 119：写入后把当前文件全文哈希记为基准（含本次 related 写入——
-    // 自写触发的 modify 事件后续经基准过滤掉，防止自触发死循环）
-    await this.recordLinkBaseline(path);
+    // 自写触发的 modify 事件后续经基准过滤掉，防止自触发死循环）。
+    // ADR-0141 §6：一条都没建出即记 empty——存量补链不再反复重跑同一篇（正文变则哈希变，自然重算）。
+    await this.recordLinkBaseline(path, { empty: created === 0 });
     return { status: 'done', created };
   }
 
   /**
-   * 单篇即时建链（issue 298）：知识盒生成文献笔记后**立刻**跑，不经批次防抖、不受关联范围限制
-   * （生成即显式目标，语义同手动重跑「显式意图」）。经串行锁执行——与监听批次 / 存量补链排队互斥，
-   * 避免并发 refresh 与裁判请求交错。
+   * 关联预演（issue 309）：**只算不写**——近邻检索 + AI 裁判，返回命中的目标（含展示名）。
+   * 知识盒录入面板在「AI 出内容之后、确认写入之前」调它，把关联过程就地展示出来；
+   * 草稿尚未落盘，故 selfPath 传空串（自身不可能出现在候选里），提示词的「新笔记」卡用伪文件
+   * （标题取草稿标题；frontmatter 读不到即退化为纯标题卡）。
+   * 经串行锁执行（与监听批次 / 补链 / 单篇即时建链互斥）；
+   * embedding 不可达 → queued（与服务不可达同语义：不是失败，服务恢复后可重算）；裁判失败 → failed。
+   * opts.signal = 调用方中断（issue 327）：直达 AI.ask 的取消通道，abort 后本次检索与裁判不再消耗。
+   */
+  async previewLinks(
+    content: string,
+    title = '',
+    opts?: { signal?: AbortSignal }
+  ): Promise<{ status: 'done'; picks: Array<{ path: string; title: string }> } | { status: 'queued' } | { status: 'skipped' } | { status: 'failed'; error: string }> {
+    const s = tryGetSettings() as any;
+    if (s.linkAgentEnabled === false) return { status: 'skipped' };
+    const text = String(content || '').trim();
+    if (!text) return { status: 'done', picks: [] };
+    return this.runSerial(async () => {
+      try {
+        await this.store.refresh();
+      } catch (e) {
+        console.warn('[link-agent] 预演前刷新索引失败', e);
+      }
+      let candidates: SearchHit[] = [];
+      try {
+        // rethrow：检索不可达必须以抛错冒头（findCandidates 默认吞错返空），否则 queued 语义死路、面板会冒充「暂无关联」
+        candidates = await this.findCandidates('', text, { rethrowSearchFailure: true });
+      } catch {
+        return { status: 'queued' as const }; // 检索不可达：按「服务不可达」处理，不冒充失败
+      }
+      if (!candidates.length) return { status: 'done' as const, picks: [] };
+      const ghost = { path: '', basename: title || '待落盘草稿', extension: 'md' } as unknown as TFile;
+      let links: SearchHit[] = [];
+      try {
+        links = await this.judge(ghost, text, candidates, { signal: opts?.signal });
+      } catch (e) {
+        return { status: 'failed' as const, error: e instanceof Error ? e.message : String(e) };
+      }
+      return {
+        status: 'done' as const,
+        picks: links.map((c) => ({ path: c.path, title: this.linkTitleOf(c.path) })),
+      };
+    });
+  }
+
+  /**
+   * 写入预演结果（issue 309）：确认写入落盘后调用——把预览阶段选中的目标写进该篇 related，
+   * 并记基准哈希（自写 related 触发的 modify 事件后续被过滤，不循环重跑）。
+   * 幂等、单侧、上限截断在写入侧兜底（同 writeRelated 契约）；盒外路径拒绝（ADR-0141 §2）。
+   */
+  async applyLinks(path: string, targetPaths: string[]): Promise<ProcessOutcome> {
+    const s = tryGetSettings() as any;
+    if (s.linkAgentEnabled === false) return { status: 'skipped' };
+    const target = this.resolveTarget(path); // 与 processNote 同一守卫与顺序
+    if (!('file' in target)) return { status: target.status };
+    const file = target.file;
+    return this.runSerial(async () => {
+      const targets = [...new Set((targetPaths || []).filter((p) => !!p && p !== path && !!this.app.vault.getAbstractFileByPath(p)))];
+      const created = await this.writeRelated(file, targets);
+      await this.recordLinkBaseline(path, { empty: created === 0 });
+      return { status: 'done' as const, created };
+    });
+  }
+
+  /** 候选路径 → 展示名（frontmatter.title 优先、退回文件名；文件缺失退回路径） */
+  private linkTitleOf(path: string): string {
+    const f = this.app.vault.getAbstractFileByPath(path) as TFile | null;
+    if (!f) return path;
+    try {
+      const fm = this.app.metadataCache.getFileCache(f)?.frontmatter as Record<string, unknown> | undefined;
+      const t = fm ? (fm.title ?? fm['标题']) : '';
+      if (typeof t === 'string' && t.trim()) return t.trim();
+    } catch {
+      /* 缓存缺失：退回文件名 */
+    }
+    return f.basename;
+  }
+
+  /**
+   * 单篇即时建链（issue 298）：知识盒生成文献笔记后**立刻**跑，不经批次防抖。
+   * 范围卫不豁免（ADR-0141 §2）：盒外路径直接 out-of-scope（调用方据此提示拒绝）。
+   * 经串行锁执行——与监听批次 / 存量补链排队互斥，避免并发 refresh 与裁判请求交错。
+   * @param force 显式意图强制重跑（手动命令 bz-knowledge-relink）：跳过「已有 related 不再建链」尊重门
    * 通知受 linkAgentNotify 门控（同键合并单条）：N>0 报新建条数；不可达报入队；失败报错；N=0 静默。
    */
-  async processNoteNow(path: string, opts?: { silent?: boolean }): Promise<ProcessOutcome> {
-    const outcome = await this.runSerial(() => this.processNote(path));
+  async processNoteNow(path: string, opts?: { silent?: boolean; force?: boolean }): Promise<ProcessOutcome> {
+    const outcome = await this.runSerial(() =>
+      this.processNote(path, opts?.force ? { respectRelated: false } : undefined)
+    );
     if (!this.notifyEnabled || opts?.silent) return outcome;
     if (outcome.status === 'done') {
       if (outcome.created > 0) {
-        notify(`自动双链：已为文献笔记新建关联 ${outcome.created} 条`, {
+        notify(`自动关联：已为文献笔记新建关联 ${outcome.created} 条`, {
           type: 'success',
           dedupeKey: LINK_NOTE_NOW_NOTICE_KEY,
         });
       }
     } else if (outcome.status === 'queued') {
-      notify('自动双链：embedding 服务不可达，已入队待服务恢复后自动处理', {
+      notify('自动关联：embedding 服务不可达，已入队待服务恢复后自动处理', {
         type: 'info',
         dedupeKey: LINK_NOTE_NOW_NOTICE_KEY,
       });
     } else if (outcome.status === 'failed') {
-      notify(`自动双链处理失败：${outcome.error}`, { type: 'warning', dedupeKey: LINK_ERROR_NOTICE_KEY });
+      notify(`自动关联处理失败：${outcome.error}`, { type: 'warning', dedupeKey: LINK_ERROR_NOTICE_KEY });
     }
     return outcome;
   }
 
   /**
-   * v1.4/ticket 119：记录某篇的正文基准哈希（写盘成功后调用）。
+   * v1.4/ticket 119：记录某篇的基准哈希（处理完成后调用）。
    * - 只记录"当前文件内容"（含本次写入的 related）——这样自写触发的 vault:md-modified
    *   到冲刷时哈希与基准相同 → 被过滤跳过，不会循环重跑；
-   * - 失败静默（下一次成功建链会重记）。
+   * - ADR-0141 §6：empty=true 表示本次一条都没建出（存量补链据此不再重试同一篇）；
+   * - 失败静默（下一次处理会重记）。
    */
-  async recordLinkBaseline(path: string): Promise<void> {
+  async recordLinkBaseline(path: string, opts?: { empty?: boolean }): Promise<void> {
     try {
       const file = this.app.vault.getAbstractFileByPath(path) as TFile | null;
       if (!file) return;
       const content = await this.app.vault.read(file);
-      await upsertLinkState(path, computeHash(content));
+      await upsertLinkState(path, computeHash(content), opts?.empty === true);
     } catch (e) {
       console.warn('[link-agent] 基准哈希记录失败', e);
     }
@@ -351,14 +482,16 @@ export class LinkAgent {
   }
 
   /**
-   * 候选生成（ticket 116：来源 = 白名单索引库全部笔记，不再按 linkAgentScopes 过滤）：
-   * 全局大池近邻 → 去自身 → 剔除已不存在文件与 encrypt 锁定 → 按 path 去重取最优 → Top-K。
-   * 关联范围（linkAgentScopes）只决定"哪些笔记会被关联"（目标/触发侧），不限制候选来源。
+   * 候选生成（ADR-0141 §2：**候选端同样限三盒**——ticket 116「候选 = 白名单索引库全部笔记」口径作废）：
+   * 全局大池近邻 → 去自身 → 剔除盒外 / 已不存在文件 / encrypt 锁定 → 相似度下限粗筛（issue 330/ADR-0146，
+   * 低于 linkAgentMinScore 的直接剔除不送 AI 裁判）→ 按 path 去重取最优 → Top-K。
+   * 盒外笔记（日记、剪藏、旧卡片盒）即便已进索引也不会被召回，保证关联结果永远指向盒内。
    * 查询端（ticket 118）：**全文嵌入**——正文全文（剥 frontmatter、去空白，超长按 LINK_QUERY_MAX_CHARS 安全截尾）
    * 送向量模型生成查询向量，而非 800 字摘要，提高召回。
    */
-  async findCandidates(selfPath: string, content: string): Promise<SearchHit[]> {
+  async findCandidates(selfPath: string, content: string, opts?: { rethrowSearchFailure?: boolean }): Promise<SearchHit[]> {
     const topK = this.maxTopK;
+    const minScore = this.minScore;
     const cfg = buildConfig();
     const baseUrl = IS_MOBILE ? cfg.OLLAMA_REMOTE_URL || cfg.OLLAMA_URL : undefined;
     const pool = Math.max(topK * 3, CANDIDATE_POOL_MIN);
@@ -366,14 +499,18 @@ export class LinkAgent {
     try {
       hits = await this.store.vectorSearch(bodyExcerpt(content, LINK_QUERY_MAX_CHARS), pool, baseUrl);
     } catch (e) {
+      // 预演（previewLinks）要区分「真空候选」与「检索不可达」——后者是 queued 不是「暂无关联」
+      if (opts?.rethrowSearchFailure) throw e;
       console.warn('[link-agent] 近邻检索失败', e);
       return [];
     }
     const bestByPath = new Map<string, SearchHit>();
     for (const hit of hits) {
       if (hit.path === selfPath) continue;
+      if (!inLinkScope(hit.path)) continue;
       if (!this.app.vault.getAbstractFileByPath(hit.path)) continue;
       if (isEncryptLockedPath(this.app, hit.path)) continue;
+      if (minScore > 0 && hit.score < minScore) continue;
       const cur = bestByPath.get(hit.path);
       if (!cur || hit.score > cur.score) bestByPath.set(hit.path, hit);
     }
@@ -395,6 +532,135 @@ export class LinkAgent {
       lines.push(this.dossierCard(f, (c.chunk || '').slice(0, 200)));
     });
     return lines.join('\n');
+  }
+
+  /**
+   * 统一裁判入口（issue 392 决策 1；编排单源 `core/jev-fallback`，ADR-0181）：
+   * `processNote` 与 `previewLinks` 共用，筛选与排序只在这里做一次。
+   * - Jev 未配置（密钥为空——issue 424/ADR-0184 起常开，无总开关）→ 直接走原 LLM 路径（零风险回退，行为与接入前一致）；
+   * - Jev 优先：`request()` 里一次问完所有候选的三个独立 Noul 维度（材料惰性构造，未就绪/已取消不白拼）；
+   * - Jev 抛**非 abort** 错误（请求失败 / 答案畸形）→ 同一次 `judge()` 内用现有 prompt + `parseJudgeOutput` 回落 LLM（对用户不可见）；
+   *   注：`request()` 抛错同样落进回落（材料构造已移入原语的 try）——比接入前「直接上抛入队」宽松一档，有意如此；
+   * - `signal.aborted` → 抛 `AbortError`、**不回落**（用户主动放弃，回落等于白烧一次 LLM，issue 392 决策 6）；
+   * - 两道都抛错 → 上抛，由 `processNote` 入队 / `previewLinks` 返 failed（issue 392 决策 7）。
+   * @returns 选中的候选：已按强度降序、已剔除自身与不存在的文件。
+   */
+  private async judge(
+    selfFile: TFile,
+    selfContent: string,
+    candidates: SearchHit[],
+    opts?: { signal?: AbortSignal }
+  ): Promise<SearchHit[]> {
+    if (!candidates.length) return [];
+    return judgeOrFallback<SearchHit[]>({
+      signal: opts?.signal,
+      // 材料惰性构造：Jev 未就绪 / 已取消时不该白拼档案卡（要读 vault）
+      request: () => ({
+        state: this.buildJudgeState(selfFile, selfContent, candidates),
+        questions: this.buildJevQuestions(candidates),
+      }),
+      parse: (answers) => this.judgeByJev(candidates, answers),
+      fallback: () => this.judgeByLLM(selfFile, selfContent, candidates, opts),
+    });
+  }
+
+  /**
+   * Jev 回落路径（原 LLM 裁判）：组 prompt → `AI.ask` → `parseJudgeOutput`。
+   * 失败（含 abort）一律上抛，由 `judge()` 调用方决定入队/failed。
+   */
+  private async judgeByLLM(
+    selfFile: TFile,
+    selfContent: string,
+    candidates: SearchHit[],
+    opts?: { signal?: AbortSignal }
+  ): Promise<SearchHit[]> {
+    // AI.ask 失败/取消直接上抛：processNote 入队、previewLinks failed（issue 392 决策 7）
+    const text = await AI.ask(this.buildJudgePrompt(selfFile, selfContent, candidates), { signal: opts?.signal });
+    const picks = parseJudgeOutput(text, candidates.length);
+    return picks
+      .map((p) => candidates[p.id - 1])
+      .filter((c) => !!c && c.path !== selfFile.path && !!this.app.vault.getAbstractFileByPath(c.path));
+  }
+
+  /**
+   * Jev 结果 → 选中候选（issue 392 决策 3）：代码内判定，不看模型返回顺序。
+   * - 建链：`ref ≥ M` 或 `topic ≥ M 且 complement ≥ M`，`M = JUDGE_DIM_MIN`；
+   * - 排序：`score = max(topic, ref, complement)` 降序，稳定排序使同分保持候选原序（= 向量相似度降序）；
+   * - 缺键维度按 0；`answers` 整体缺失/非对象 → 抛错（issue 392 决策 9，交由 `judge()` 回落 LLM）。
+   */
+  private judgeByJev(candidates: SearchHit[], answers: Record<string, JevAnswer>): SearchHit[] {
+    if (!answers || typeof answers !== 'object' || Array.isArray(answers)) {
+      // 整体缺失/非对象：视作响应畸形，抛错走回落（不静默当成「零命中」伪装成「这批确实没有关联」）
+      throw new Error('Jev 响应缺少 answers 字段（整体缺失/非对象）');
+    }
+    const selected: Array<{ hit: SearchHit; score: number; reason: string }> = [];
+    candidates.forEach((c, i) => {
+      const id = i + 1; // 候选序号与 buildJudgePrompt 的 id 同序（从 1 起）
+      const topic = noulScore(answers[`c${id}_topic`]);
+      const ref = noulScore(answers[`c${id}_ref`]);
+      const complement = noulScore(answers[`c${id}_complement`]);
+      const link = ref >= JUDGE_DIM_MIN || (topic >= JUDGE_DIM_MIN && complement >= JUDGE_DIM_MIN);
+      if (!link) return;
+      const score = Math.max(topic, ref, complement);
+      const dims: string[] = [];
+      if (ref >= JUDGE_DIM_MIN) dims.push(JUDGE_DIM_LABEL.ref);
+      if (topic >= JUDGE_DIM_MIN) dims.push(JUDGE_DIM_LABEL.topic);
+      if (complement >= JUDGE_DIM_MIN) dims.push(JUDGE_DIM_LABEL.complement);
+      selected.push({ hit: c, score, reason: dims.join(' · ') });
+    });
+    // 稳定降序：同分保持候选原序（findCandidates 已是向量相似度降序）
+    selected.sort((a, b) => b.score - a.score);
+    if (selected.length) {
+      console.debug(
+        '[link-agent] Jev 判定建链：',
+        selected.map((s) => `${s.hit.path}（${s.reason}，score=${s.score.toFixed(3)}）`)
+      );
+    }
+    return selected.map((s) => s.hit);
+  }
+
+  /**
+   * 构造 Jev 的 `state`（档案卡拼接，改成 instructions 口径，不要求模型输出 JSON）。
+   * 沿用 `buildJudgePrompt` 的档案卡形态（## 新笔记 / ## 候选笔记 + dossierCard）。
+   */
+  private buildJudgeState(selfFile: TFile, selfContent: string, candidates: SearchHit[]): string {
+    const lines: string[] = [
+      '你是笔记库的双链裁判。给定一篇新笔记的档案卡和若干候选笔记的档案卡，',
+      '逐一判断候选与新笔记是否存在实质的知识关联。标准：只链实质关联，存疑不链；宁缺勿滥。',
+    ];
+    lines.push('', '## 新笔记');
+    lines.push(this.dossierCard(selfFile, bodyExcerpt(selfContent, 400)));
+    lines.push('', '## 候选笔记');
+    candidates.forEach((c, i) => {
+      const f = this.app.vault.getAbstractFileByPath(c.path) as TFile | null;
+      lines.push(`### id=${i + 1}`);
+      lines.push(this.dossierCard(f, (c.chunk || '').slice(0, 200)));
+    });
+    return lines.join('\n');
+  }
+
+  /**
+   * 构造 Jev 问题：每个候选问三个独立 Noul 维度，键固定 `c{i}_topic` / `c{i}_ref` / `c{i}_complement`
+   * （i = 候选序号，从 1 起，与 buildJudgePrompt 的 id 同序）。一次调用问完所有候选所有维度（加问不加价）。
+   */
+  private buildJevQuestions(candidates: SearchHit[]): Record<string, JevQuestion> {
+    const questions: Record<string, JevQuestion> = {};
+    candidates.forEach((_, i) => {
+      const id = i + 1;
+      questions[`c${id}_topic`] = {
+        type: 'noul',
+        instructions: `候选笔记 id=${id} 与新笔记之间：两者讨论的是同一个主题、概念或问题吗？`,
+      };
+      questions[`c${id}_ref`] = {
+        type: 'noul',
+        instructions: `候选笔记 id=${id} 与新笔记之间：一方是否直接引用、明确提及或指向另一方（含同一人物 / 事件 / 作品 / 术语）？`,
+      };
+      questions[`c${id}_complement`] = {
+        type: 'noul',
+        instructions: `候选笔记 id=${id} 与新笔记之间：一方是否是另一方的展开、解释、案例或反例（内容互补）？`,
+      };
+    });
+    return questions;
   }
 
   /** 档案卡紧凑格式：标题/tags/summary/首块截断 */
@@ -485,7 +751,7 @@ export class LinkAgent {
     const notifyOn = this.notifyEnabled && !opts?.silent;
     let handle: NoticeHandle | null = null;
     if (notifyOn) {
-      handle = notify(`自动双链：处理中 0/${paths.length} 篇`, { type: 'progress', dedupeKey: LINK_BATCH_NOTICE_KEY });
+      handle = notify(`自动关联：处理中 0/${paths.length} 篇`, { type: 'progress', dedupeKey: LINK_BATCH_NOTICE_KEY });
     }
     for (let i = 0; i < paths.length; i++) {
       const outcome = await this.processNote(paths[i], opts);
@@ -499,7 +765,7 @@ export class LinkAgent {
       }
       if (notifyOn) {
         // 同键合并：存活则原地更新消息并重置计时（notice 单框语义）
-        notify(`自动双链：处理中 ${i + 1}/${paths.length} 篇`, { type: 'progress', dedupeKey: LINK_BATCH_NOTICE_KEY });
+        notify(`自动关联：处理中 ${i + 1}/${paths.length} 篇`, { type: 'progress', dedupeKey: LINK_BATCH_NOTICE_KEY });
       }
     }
     if (notifyOn) {
@@ -563,6 +829,9 @@ export class LinkAgent {
       } else if (outcome.status === 'skipped-related') {
         // v1.7/ticket 167：尊重门跳过——条目代表「待处理」，已接管即处理完毕，移除避免队列滞留
         await dequeuePath(items[i].path);
+      } else if (outcome.status === 'out-of-scope') {
+        // ADR-0141 §2：盒外条目永远跑不了（范围不再可配），就地清理不留滞留
+        await dequeuePath(items[i].path);
       }
       if (notifyOn) {
         notify(`待处理关联：处理中 ${i + 1}/${items.length} 篇`, { type: 'progress', dedupeKey: LINK_BATCH_NOTICE_KEY });
@@ -588,12 +857,13 @@ export class LinkAgent {
   }
 
   /**
-   * 存量补链（ticket 115）：扫描关联范围内**缺 related** 的存量笔记批量建链。
+   * 存量补链（ticket 115）：扫描三盒内**缺 related** 的存量笔记批量建链。
    * - 探测 embedding 可达：不可达 → 返回 unreachable（启动调用方静默跳过，下次启动重试）；
-   * - 目标清单 = scope 内 md、frontmatter 无 related、排除 encrypt 锁定与队列内待重试条目；
+   * - 目标清单 = 三盒内 md、frontmatter 无 related、排除 encrypt 锁定 / 队列内待重试条目 /
+   *   已尝试且 0 条且正文未变者（ADR-0141 §6）；
    *   related 即进度检查点——中断/重启后续跑只处理仍未连接的，天然增量；
    * - 批次走 processBatch（入口已探测，批内 assumeReachable 不再逐篇探测），与监听批次串行互斥；
-   * - 启动调用忽略结果且批次全程静默（ticket 6，index 传 silent:true）；手动命令 bz-secondbrain-link-all 按 status 通知。
+   * - 启动调用忽略结果且批次全程静默（ticket 6，index 传 silent:true）；手动命令 bz-knowledge-link-all 按 status 通知。
    */
   async backfillMissingLinks(opts?: { silent?: boolean }): Promise<BackfillResult> {
     if ((tryGetSettings() as any).linkAgentEnabled === false) return { status: 'disabled' };
@@ -605,22 +875,42 @@ export class LinkAgent {
     return { status: 'done', summary };
   }
 
-  /** 存量补链目标清单（app 层把 vault / metadataCache / encrypt 边界 / 队列翻译成纯谓词） */
+  /**
+   * 存量补链目标清单（app 层把 vault / metadataCache / encrypt 边界 / 队列 / 基准翻译成纯谓词）。
+   * 范围恒为三盒（ADR-0141 §2）；「已尝试且 0 条且正文未变」的笔记不再进目标（ADR-0141 §6）。
+   */
   private async computeBackfillTargets(): Promise<string[]> {
     const vault = this.app.vault as any;
     const cache = (this.app as any).metadataCache as any;
-    const scopes = getLinkAgentScopes();
     let queued: Set<string>;
     try {
       queued = new Set((await loadQueue()).map((i) => i.path));
     } catch {
       queued = new Set();
     }
+    // ADR-0141 §6：已尝试 0 条者读回正文比基准哈希——只读这批（通常几十篇），一致即判「已结算」跳过。
+    // 读不到 / 状态文件损坏一律按未结算（保守重试一次，不误杀）。
+    const settled = new Set<string>();
+    try {
+      const state = await loadLinkState();
+      for (const [path, entry] of Object.entries(state)) {
+        if (entry.empty !== true) continue;
+        try {
+          const f = vault.getAbstractFileByPath?.(path);
+          if (!f || (f.extension && f.extension !== 'md')) continue;
+          if (isSettledEmpty(entry, computeHash(await this.app.vault.read(f)))) settled.add(path);
+        } catch {
+          /* 读不到：按未结算（重试一次） */
+        }
+      }
+    } catch {
+      /* 基准不可读：不启用「已结算」过滤 */
+    }
     const files = (typeof vault.getMarkdownFiles === 'function' ? vault.getMarkdownFiles() : []) as { path: string }[];
     return computeBackfillTargets(
       files.map((f) => f.path),
       {
-        inScope: (p) => matchesScope(scopes, p),
+        inScope: (p) => inLinkScope(p),
         hasRelated: (p) => {
           try {
             const fm = cache?.getFileCache?.(vault.getAbstractFileByPath(p))?.frontmatter as Record<string, unknown> | undefined;
@@ -629,13 +919,13 @@ export class LinkAgent {
             return true; // 缓存不可读视作已连接，防止同一批反复重试
           }
         },
-        excluded: (p) => isEncryptLockedPath(this.app, p) || queued.has(p),
+        excluded: (p) => isEncryptLockedPath(this.app, p) || queued.has(p) || settled.has(p),
       }
     );
   }
 
   /**
-   * 死链清理：解析关联范围（linkAgentScopes，空 = 不扫描）内各笔记 related，移除指向不存在文件的失效条目（非 wikilink 条目不动）。
+   * 死链清理：解析**三个盒子**内各笔记 related，移除指向不存在文件的失效条目（非 wikilink 条目不动）。
    * encrypt 域锁定文件一律跳过：保险箱锁定态无法区分「已删除」与「已加密」，整体跳过本次清理；
    * 解锁态下清单内路径视为存活。返回实际移除条数；有移除才通知（零变化静默）。
    */
@@ -686,7 +976,7 @@ export class LinkAgent {
     };
 
     let removedTotal = 0;
-    const scopedFiles = mdFiles.filter((f) => matchesScope(getLinkAgentScopes(), f.path));
+    const scopedFiles = mdFiles.filter((f) => inLinkScope(f.path));
     for (const file of scopedFiles) {
       let entries: string[];
       try {

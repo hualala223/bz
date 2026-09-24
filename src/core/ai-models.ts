@@ -185,3 +185,7 @@ export async function fetchProviderModels(
     .filter((m) => (seen.has(m) ? false : (seen.add(m), true)))
     .map((m) => ({ id: m, detail: desc.label }));
 }
+export function isQwen3Embedding8b(model: unknown): boolean {
+  const m = String(model ?? '');
+  return /qwen3[-_]?embedding[:\-_.]?8b/i.test(m);
+}

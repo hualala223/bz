@@ -6,26 +6,33 @@
  *   ticket 107 起索引未就绪时不自动嵌入）；
  * - 三个命令入口：主面板（统一入口）/ 参考侧边栏 / AI 对话；ticket 107 起本地无向量数据时
  *   后两者统一转开主面板引导态；
- * - ticket 111：自动双链管线（link agent）——linkAgentEnabled 开关注册监听与队列消费；
- * - ticket 115：启动存量补链（队列消费后串行）+ 手动命令 bz-secondbrain-link-all 兜底；
+ * - ticket 111：自动关联管线（link agent）——linkAgentEnabled 开关注册监听与队列消费；
+ * - ticket 115：启动存量补链（队列消费后串行）；手动命令（bz-knowledge-link-all / bz-knowledge-relink）
+ *   随功能归属迁知识盒（ADR-0141 §1）；
  * - ticket 119（v1.4）：正文大改自动重跑——修改监听按基准哈希过滤，内容实质变化才重跑建链；
- * - issue 298：文献笔记生成即跑——知识盒生成视频/术语文献笔记后经 'knowledge:tasks' 立即建链
- *   （不等批次防抖、不受关联范围限制）；
- * - unload 全量清理：定时器、订阅、面板 DOM、DeepSeek 服务、link agent。
+ * - issue 309：文献笔记建链改走显式通道——getLinkBridge() 给知识盒录入面板三段能力：
+ *   preview（AI 出内容即起跑预演，草稿未落盘也能算）/ apply（落盘后写预演结果）/ now（兜底单篇管线）/ backfill（批量补链），
+ *   面板内 loading → 完成后就地显示关联；原「生成即跑」的 'knowledge:tasks' 订阅已删除；
+ * - issue 360：每周知识动态——启动后延迟调度静默聚合（weekly-ui.scheduleWeeklyDigest，
+ *   周界判定 lastRunAt 滚动 7 天，无新内容零打扰，有内容通知挂「查看详情」）；
+ *   命令 bz-secondbrain-weekly（本周知识动态）随时手动重聚并开详情弹层；
+ * - unload 全量清理：定时器、订阅、面板 DOM、link agent、每周动态弹层与调度
+ *   （AI 通道无持久资源，issue 359 起单例已退役）。
  */
 import type { App } from 'obsidian';
 import { onDomainEvent } from '../core/domain-bus';
-import { notice } from '../core/notice';
+import { setLinkBridge } from '../core/link-now';
 import { tryGetSettings } from '../core/settings-provider';
 import { IS_MOBILE } from './config';
 import { VectorStore } from './vector-store';
-import { resetDeepseekAI } from './ai';
+import { setVectorSearchSource } from './readonly';
 import { SecondBrainPanel, confirmFullRebuild } from './panel';
 import { ReferencePanel } from './reference-panel';
 import { ChatPanel } from './chat-panel';
 import { MobilePanel } from './mobile-panel';
 import { LinkAgent } from './link-agent/pipeline';
-import { LinkAgentWatcher, startQueueConsumption, startStartupBackfill } from './link-agent/watch';
+import { LinkAgentWatcher, createLinkBridge, startQueueConsumption, startStartupBackfill } from './link-agent/watch';
+import { scheduleWeeklyDigest, unloadWeeklyDigest, runWeeklyManual } from './weekly-ui';
 
 let appRef: App | null = null;
 let store: VectorStore | null = null;
@@ -36,7 +43,7 @@ let reference: ReferencePanel | null = null;
 let chat: ChatPanel | null = null;
 let mobile: MobilePanel | null = null;
 
-// 自动双链管线（ticket 111）：随 linkAgentEnabled 开关注册（ADR-0003）
+// 自动关联管线（ticket 111）：随 linkAgentEnabled 开关注册（ADR-0003）
 let linkAgent: LinkAgent | null = null;
 let linkWatcher: LinkAgentWatcher | null = null;
 
@@ -51,6 +58,11 @@ export function ensureSecondBrain(app: App): void {
   appRef = app;
   const s = new VectorStore(app);
   store = s;
+  // issue 318：注册只读检索桥（窄口叶子模块；消费方值导入本 index 会把整条 UI 栈拖进构建闭包，见 readonly.ts）
+  setVectorSearchSource({
+    isIndexReady: () => !!store?.isIndexReady(),
+    search: (query: string, topK?: number) => (store ? store.search(query, topK) : Promise.resolve([])),
+  });
   // ticket 107：load 完成信号挂到 store 上，主面板打开时等待它——避免启动竞态下
   // 读到尚未装载的空库而误入引导态
   s.initialLoad = (async () => {
@@ -78,13 +90,15 @@ export function ensureSecondBrain(app: App): void {
       store?.refresh().catch((e) => console.warn('[secondbrain] 后台刷新失败', e));
     }, 5000);
   });
-  // ticket 111：自动双链——linkAgentEnabled=false 时无任何监听与写入
+  // ticket 111：自动关联——linkAgentEnabled=false 时无任何监听与写入
   try {
     if ((tryGetSettings() as any).linkAgentEnabled !== false) {
       linkAgent = new LinkAgent({ app, store: s });
-      // initialLoad 传入监听器：文献笔记生成即跑链路先等索引装载完成（issue 298）
+      // initialLoad 传入监听器：显式建链通道先等索引装载完成（issue 309）
       linkWatcher = new LinkAgentWatcher(app, linkAgent, s.initialLoad);
       linkWatcher.start();
+      // issue 309：知识盒录入面板的自动关联通道（预演 / 落盘后写入 / 兜底单篇建链）
+      setLinkBridge(createLinkBridge(linkAgent, s.initialLoad));
       // 域初始化发现队列非空且 embedding 可达 → 自动消费，无需询问；
       // 队列消费之后串行执行存量补链（ticket 115：关联范围内缺 related 的存量笔记批量建链，
       // 补链目标排除队列内待重试条目避免重复算力；启动路径全程静默——批次进度/完成 toast 均不弹，
@@ -103,8 +117,10 @@ export function ensureSecondBrain(app: App): void {
       })();
     }
   } catch (e) {
-    console.warn('[secondbrain] 自动双链初始化失败', e);
+    console.warn('[secondbrain] 自动关联初始化失败', e);
   }
+  // issue 360：每周知识动态——启动后延迟调度（错开队列消费与存量补链），到周界且有实质内容才通知
+  scheduleWeeklyDigest(app, s, s.initialLoad);
 }
 
 /** 卸载清理（main.onunload 调用） */
@@ -126,11 +142,21 @@ export function unloadSecondBrain(): void {
   linkWatcher?.destroy();
   linkWatcher = null;
   linkAgent = null;
+  setLinkBridge(null);
+  unloadWeeklyDigest(); // issue 360：每周动态调度定时器 + 详情弹层 DOM/ESC 句柄一并清理
   store = null;
+  setVectorSearchSource(null); // issue 318：卸载即撤销只读检索桥（未初始化/已卸载取到 null）
   appRef = null;
   initialized = false;
-  resetDeepseekAI();
 }
+
+/** 只读检索面（issue 318）：类型出口留在 index（对外 API 不破）；实现与取用走叶子模块 readonly.ts */
+export type { ReadonlyVectorSearch } from './readonly';
+
+/** 移动端远程地址自动跟随本机 IP（issue 423/ADR-0183 起，issue 424/ADR-0184 改跟随）：
+ *  main.ts onload 调一次——桌面端探测本机局域网 IP，插件写下的旧值随 IP 漂移刷新
+ *  （手机端读同步值）；实现见 local-ip.ts */
+export { ensureRemoteOllamaUrl } from './local-ip';
 
 function ensureReference(): void {
   if (!appRef || !store) return;
@@ -231,70 +257,17 @@ export function openSecondBrainChat(app: App): void {
 }
 
 /**
- * 命令 bz-secondbrain-link-all（ticket 115）：对关联范围内**所有未连接（缺 related）的存量笔记**
- * 手动批量补链——启动自动补链的显式兜底入口，同路径同串行锁；embedding 不可达 / 无目标均明确通知。
+ * 命令 bz-secondbrain-weekly（issue 360 本周知识动态）：随时手动触发——打开详情弹层并
+ * 强制重聚一轮（不等周界；force 下首轮无基线也只立基线，弹层如实呈空态）。
+ * 索引未就绪（空库引导态）转开主面板：无索引数据时无动态可聚合。
  */
-export async function runSecondBrainLinkAll(app: App): Promise<void> {
-  if ((tryGetSettings() as any).linkAgentEnabled === false) {
-    notice('自动双链已在第二大脑设置中关闭');
+export function openSecondBrainWeekly(app: App): void {
+  ensureSecondBrain(app);
+  if (!store?.isIndexReady()) {
+    openSecondBrainPanel(app);
     return;
   }
-  ensureSecondBrain(app);
-  if (!linkAgent) return;
-  try {
-    const result = await linkAgent.backfillMissingLinks();
-    if (result.status === 'done') {
-      const { summary } = result;
-      notice(
-        summary.created > 0
-          ? `批量补链完成：处理 ${summary.processed} 篇 / 新建关联 ${summary.created} 条`
-          : '批量补链完成：未发现实质关联，未新建',
-        'success'
-      );
-    } else if (result.status === 'unreachable') {
-      notice('embedding 服务不可达，无法补链；服务恢复后可在下次启动自动补链', 'info');
-    } else if (result.status === 'no-targets') {
-      notice('当前无待补链笔记：关联范围内未连接的笔记已处理完', 'info');
-    } else {
-      notice('批量补链跳过（自动双链已关闭）', 'info');
-    }
-  } catch (e) {
-    console.warn('[secondbrain] 批量补链失败', e);
-    notice(`批量补链失败：${e instanceof Error ? e.message : String(e)}`, 'error');
-  }
+  void runWeeklyManual(app, store);
 }
 
-/**
- * 命令 bz-secondbrain-rebuild-links（ticket 111）：对当前打开笔记重跑一次关联
- * （正文大改后的手动兜底入口）。手动触发即显式意图：不受 linkAgentScopes 范围限制，
- * 任何笔记可跑（候选仍按 linkAgentScopes 过滤）；embedding 不可达时入队待自动消费。
- * v1.7/ticket 167：显式传 respectRelated:false 豁免「已有 related 不再自动建链」——手动重跑始终强制。
- */
-export async function rebuildSecondBrainLinks(app: App): Promise<void> {
-  const file = app.workspace.getActiveFile?.() as { path: string } | null;
-  if (!file) {
-    notice('请先打开一个笔记');
-    return;
-  }
-  if ((tryGetSettings() as any).linkAgentEnabled === false) {
-    notice('自动双链已在第二大脑设置中关闭');
-    return;
-  }
-  ensureSecondBrain(app);
-  if (!linkAgent) return;
-  try {
-    const outcome = await linkAgent.processNote(file.path, { respectRelated: false });
-    if (outcome.status === 'done') {
-      notice(outcome.created > 0 ? `已新建关联 ${outcome.created} 条` : '未发现实质关联，未新建', 'success');
-    } else if (outcome.status === 'queued') {
-      notice('embedding 服务不可达，已加入待处理队列，服务可达后自动处理', 'info');
-    } else if (outcome.status === 'failed') {
-      notice(`关联处理失败：${outcome.error}`, 'error');
-    } else {
-      notice('该笔记暂无法处理（文件缺失或位于加密目录）', 'info');
-    }
-  } catch (e) {
-    console.warn('[secondbrain] 重跑关联失败', e);
-    notice(`关联处理失败：${e instanceof Error ? e.message : String(e)}`, 'error');
-  }
-}
+/** 命令 bz-secondbrain-open：参考侧边栏（移动端为底部抽屉参考 tab）；空库统一转开主面板引导 */

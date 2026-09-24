@@ -33,6 +33,8 @@ import { loadStore, mutateStore } from './store-file';
 import { MobileBuffer } from './binary';
 import { embedChunks, hashChunks, noteTitleFromPath } from './chunk';
 import { isValidVector, normalizeVec } from './vector-math';
+import { rerankScores } from './rerank';
+import { rerankActive } from './config';
 import { parallelMap } from './parallel';
 import { TFIDF } from './tfidf';
 import { searchTextIndex } from './text-search';
@@ -76,6 +78,8 @@ export interface SearchHit {
   path: string;
   chunk: string;
   score: number;
+  /** 重排分（上游 issue 429；bge-m3 下不激活恒缺省） */
+  rerankScore?: number;
 }
 
 interface ChunkTask {
@@ -407,7 +411,7 @@ export class VectorStore {
     }
 
     // 读取 + 分块；指纹三层判定（ticket 173/ADR-0078，自愈态除外——indexIncomplete 必须整库重嵌）
-    const minChunk = CONFIG.CHUNK_MIN_LENGTH || 50;
+    const minChunk = 1; // 上游 issue 424：不按长度丢块（该限制已删；只影响未来重建，存量库不动）
     const fileChunksMap = new Map<string, (ChunkTask | null)[]>();
     const fileHashes = new Map<string, string>();
     const globalTasks: ChunkTask[] = [];
@@ -592,7 +596,7 @@ export class VectorStore {
    * 分数即原始余弦 [0,1]，与参考面板百分比同尺，不再幂次锐化。
    * ⚠️ F2 冻结：本方法只读 this.vectors/meta；.vec 二进制布局、加载/保存路径零改动。
    */
-  async vectorSearch(query: string, topK = 20, baseUrl?: string): Promise<SearchHit[]> {
+  async vectorSearch(query: string, topK = 20, baseUrl?: string, signal?: AbortSignal): Promise<SearchHit[]> {
     const queryEmbedding = await getEmbedding(query, true, baseUrl);
     if (!queryEmbedding || !isValidVector(queryEmbedding)) return [];
     const dim = this.meta._dim || this.dim;
@@ -629,7 +633,27 @@ export class VectorStore {
       deduped.push(item);
       if (deduped.length >= topK) break;
     }
-    return deduped;
+    return this.applyRerank(query, deduped, baseUrl, signal);
+  }
+
+  /** 模型重建门（融合批）：本地 meta 无 _model 跟踪、默认 bge-m3 未变——恒 false（F2：绝不自动重建） */
+  needsModelRebuild(): boolean {
+    return false;
+  }
+
+  /** 重排接线（上游 ADR-0186 融合）：bge-m3 下 rerankActive() 恒 false → 原样返回（纯增强层，失败静默回退） */
+  private async applyRerank(query: string, hits: SearchHit[], baseUrl?: string, signal?: AbortSignal): Promise<SearchHit[]> {
+    if (hits.length < 2 || !rerankActive()) return hits;
+    try {
+      const scores = await rerankScores(query, hits.map((h) => h.chunk), baseUrl, signal);
+      const paired = hits.map((h, i) => ({ h, r: scores[i] ?? 0 }));
+      paired.sort((a, b) => b.r - a.r);
+      return paired.map(({ h, r }) => ({ ...h, rerankScore: r }));
+    } catch (e: any) {
+      if (/abort/i.test(String(e?.name || '') + String(e?.message || ''))) throw e;
+      console.warn('[secondbrain] 重排失败，回退余弦序:', e?.message || e);
+      return hits;
+    }
   }
 
   /**
@@ -670,11 +694,11 @@ export class VectorStore {
   }
 
   /** 桌面检索：向量优先，异常降级文本；移动端直走文本索引（QA L694-699 + bz 降级改进） */
-  async search(query: string, topK = 20, onDegraded?: (reason: unknown) => void): Promise<SearchHit[]> {
+  async search(query: string, topK = 20, onDegraded?: (reason: unknown) => void, signal?: AbortSignal): Promise<SearchHit[]> {
     if (IS_MOBILE) return searchTextIndex(query, this.meta.notes, topK);
     try {
       // ticket 46：检索整体限时（与 Ollama 统一超时同值）——挂起/超时即降级文本，避免 30s 阻塞参考面板/对话
-      return await this.withSearchTimeout(this.vectorSearch(query, topK));
+      return await this.withSearchTimeout(this.vectorSearch(query, topK, undefined, signal));
     } catch (e) {
       console.warn('[secondbrain] 向量检索失败，降级为文本检索', e);
       onDegraded?.(e); // 降级信号：调用方（参考面板）可给用户降级提示
@@ -701,7 +725,7 @@ export class VectorStore {
   }
 
   /** 移动端三级检索：远程向量 → TF-IDF（复用已建索引）→ 文本（QA L704-718） */
-  async searchMobile(query: string, topK = 20): Promise<SearchHit[]> {
+  async searchMobile(query: string, topK = 20, signal?: AbortSignal): Promise<SearchHit[]> {
     const CONFIG = buildConfig();
     if (this.searchMode === 'remote' && CONFIG.OLLAMA_REMOTE_URL) {
       try {

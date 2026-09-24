@@ -18,19 +18,19 @@
 import type { App } from 'obsidian';
 import { notice } from '../core/notice';
 import { topifyZ } from '../core/z-order';
-import { isMobileEnv } from '../core/mobile';
 import { mountIcons } from '../core/ui';
 import { openFlowDialog } from '../core/flow-dialog';
 import { escManager } from '../core/esc-manager';
 import { formatRelativeTime } from '../core/utils';
 import { tryGetSettings, getSettings, saveSettings } from '../core/settings-provider';
 import { openSettingsModal } from '../core/settings-modal';
+import { numStrBinding } from '../core/settings-common';
 import type { SettingsSchema } from '../core/settings-schema';
 import { buildConfig, IS_MOBILE } from './config';
 import type { VectorStore } from './vector-store';
 import { parsePathList, formatPathList } from './whitelist';
-import { getLanIPs, formatRemoteOllamaUrl, pickPrimaryLanIp } from './local-ip';
 import { loadStore } from './store-file';
+import { openWeeklyDigest, renderPanelWeeklyCard } from './weekly-ui';
 import {
   panelShellHtml,
   panelCardsHtml,
@@ -44,6 +44,17 @@ import {
   buildSourceTree,
   fmtCompact,
 } from './render';
+import {
+  motionPanelIn,
+  motionPanelOut,
+  motionStatsIn,
+  motionDistIn,
+  motionGuideIn,
+  motionProgressIn,
+  motionPhaseToContent,
+  motionSummaryIn,
+  motionTeardown,
+} from './motion';
 
 export { computeStats, buildSourceTree, fmtCompact } from './render';
 export type { SecondBrainStats, SourceDistItem, RecentNote, SourceTreeNode } from './render';
@@ -64,13 +75,13 @@ export interface PanelOptions {
 export function confirmFullRebuild(): Promise<boolean> {
   return openFlowDialog({
     title: '重新索引',
-    message: '将清空现有向量索引，按当前白名单全部重嵌入（约等于首次初始化全量跑一遍）。期间参考侧边栏与对话的向量检索会降级为文本匹配。确定继续吗？',
+    message: '将清空现有向量索引，按当前索引范围（三个盒子与额外检索目录）全部重嵌入（约等于首次初始化全量跑一遍）。期间参考侧边栏与对话的向量检索会降级为文本匹配。确定继续吗？',
     // 皮肤类（issue 291）：确认框挂 body，脱离主面板根，须显式带 .bz-sb-flow-dialog
     // 才拿到 --sb-* token（否则掉回 core 裸样式）；单源生效于三处入口
     className: 'bz-sb-flow-dialog',
     actions: [
       { label: '取消', value: 'cancel' },
-      // 刻意不标 danger（issue 291 评审）：清空的是**可重建的派生数据**（向量索引按白名单重嵌入即恢复），
+      // 刻意不标 danger（issue 291 评审）：清空的是**可重建的派生数据**（向量索引按索引范围重嵌入即恢复），
       // 用户笔记与配置一字不动 —— 非不可逆数据破坏，故保留普通高亮主动作。
       { label: '开始重建', value: 'ok', cta: true },
     ],
@@ -92,6 +103,10 @@ export class SecondBrainPanel {
   private expandedDirs = new Set<string>();
   /** 设置页「重新索引」意图标记（ticket 108：确认后打开面板即自动全量重建） */
   private rebuildRequested = false;
+  /** 动效层：是否曾开过（重开走快档唤醒） */
+  private motionOpened = false;
+  /** 动效层：开/关代次——退场期间被重开时，迟到的退场收口不得把新显示位收回 none（首页同款教训） */
+  private motionSeq = 0;
 
   constructor(app: App, store: VectorStore, opts: PanelOptions) {
     this.app = app;
@@ -111,14 +126,29 @@ export class SecondBrainPanel {
     topifyZ(this.mask!, this.popup!); // ADR-0067：显示即发号，谁后显示谁在上
     this.mask!.style.display = 'block';
     this.popup!.style.display = 'flex';
+    this.motionSeq++; // 新代次：在途退场收口作废
+    // 动效层：面板壳唤醒（boot 消费标志置位；统计编排由 renderStats 末的 motionStatsIn 接力）
+    motionPanelIn(this.popup!, this.motionOpened);
+    this.motionOpened = true;
+    // 评审便利：#replay 重播编排（motion.ts hashchange 钩子消费；插件内无害）
+    (window as unknown as Record<string, unknown>).__bzSbReplay = () => {
+      motionPanelIn(this.popup, true);
+      motionStatsIn(this.popup, true);
+    };
     // 先等初始 load 完成再定形态（防启动竞态把已有索引误判为空库）
     await this.render();
   }
 
   close(): void {
     this.removeEscapeListener(); // [l2-sb] 面板关闭即注销 ESC 层级（与 open 成对）
-    if (this.mask) this.mask.style.display = 'none';
-    if (this.popup) this.popup.style.display = 'none';
+    // 动效层：先演退场再收 display（常驻节点退场钉死由 motionPanelOut 收口时 cancel——
+    // 无 WAAPI 宿主同步收口，display:none 绝不晚到）；退场期间被重开由 motionSeq 守卫
+    const seq = this.motionSeq;
+    motionPanelOut(this.popup, () => {
+      if (seq !== this.motionSeq) return; // 退场途中已重开：不抢显示位
+      if (this.mask) this.mask.style.display = 'none';
+      if (this.popup) this.popup.style.display = 'none';
+    });
   }
 
   /** [l2-sb] ESC 关闭走 escManager 层级（ticket 141 迁移）：open 注册、close 注销成对（幂等）——
@@ -138,6 +168,7 @@ export class SecondBrainPanel {
 
   destroy(): void {
     this.removeEscapeListener();
+    motionTeardown(); // 动效层：循环/延时总清场（防永动孤儿）
     this.mask?.remove();
     this.popup?.remove();
     this.mask = null;
@@ -160,6 +191,12 @@ export class SecondBrainPanel {
       await this.runRebuild();
       return;
     }
+    // 换 Embedding 模型（issue 422/ADR-0182）：旧向量按旧维度存，不可混用 → 打开面板即自动全量重建
+    // （无需用户再点按钮），并提示原因；重建期间进度视图与「全量重建」同一形态
+    if (this.store.needsModelRebuild()) {
+      await this.runModelRebuild();
+      return;
+    }
     if (!this.store.isIndexReady()) {
       if (this.store.isRefreshing()) {
         // 初始向量化仍在后台跑（关页重开场景）：先展示进度视图，不 await——
@@ -180,6 +217,7 @@ export class SecondBrainPanel {
   }
 
   private showContent(skipRefresh = false): void {
+    motionPhaseToContent(); // 动效层：引导/进度相位切回内容，收突触呼吸循环
     const onboard = document.getElementById('bz-sb-onboard');
     const content = document.getElementById('bz-sb-content');
     if (onboard) onboard.style.display = 'none';
@@ -207,6 +245,7 @@ export class SecondBrainPanel {
     if (onboard) onboard.style.display = 'flex';
     if (content) content.style.display = 'none';
     for (const b of this.popup?.querySelectorAll('.bz-sb-panel-func') ?? []) b.classList.add('bz-sb-btn-hidden');
+    motionGuideIn(onboard); // 动效层：星核呼吸 + 文案接力浮现
   }
 
   /** 进入纯进度形态（自动运行，无按钮；title 由调用方给定） */
@@ -228,6 +267,7 @@ export class SecondBrainPanel {
     if (onboard) onboard.style.display = 'flex';
     if (content) content.style.display = 'none';
     for (const b of this.popup?.querySelectorAll('.bz-sb-panel-func') ?? []) b.classList.add('bz-sb-btn-hidden');
+    motionProgressIn(onboard); // 动效层：脑核突触呼吸 + 进度槽微光
   }
 
   /** 进度回调解析：把 store.updateProgress 文案换算成进度条（面板销毁后不再写 DOM） */
@@ -298,6 +338,13 @@ export class SecondBrainPanel {
     }
   }
 
+  /** 换 Embedding 模型后的自动全量重建（issue 422/ADR-0182）：库内记录模型与当前配置不一致
+   *  （含重启后 load 期已清库的两态）时由 render 分派到此——先提示原因再走重建全流程。 */
+  private async runModelRebuild(): Promise<void> {
+    notice('Embedding 模型已更换，正在重建向量索引', 'info');
+    await this.runRebuild();
+  }
+
   /** 组装弹窗 DOM（markup 全部出自 render.ts；本方法只绑定事件） */
   private createUI(): void {
     if (this.mask && document.body.contains(this.mask)) return;
@@ -316,6 +363,7 @@ export class SecondBrainPanel {
       if (this.expandedDirs.size) {
         this.expandedDirs.clear();
         this.renderDist();
+        motionDistIn(popup.querySelector<HTMLElement>('#bz-sb-dist')); // 动效层：复位重绘微编排
       } else {
         this.close();
       }
@@ -328,6 +376,9 @@ export class SecondBrainPanel {
       this.close();
       this.opts.onOpenReference();
     });
+    // 本周知识动态（issue 360 真机回归）：只读挂入口——点开详情弹层叠在面板上，
+    // 主面板不关不动（区别于对话/参考的跳转语义）
+    popup.querySelector('#bz-sb-weekly-open')?.addEventListener('click', () => openWeeklyDigest(this.app));
 
     // 底部操作：手动增量 / 全量重建（flow 确认，同设置页「重新索引」语义）
     popup.querySelector('#bz-sb-incr')?.addEventListener('click', () => {
@@ -353,6 +404,7 @@ export class SecondBrainPanel {
       if (this.expandedDirs.has(path)) this.expandedDirs.delete(path);
       else this.expandedDirs.add(path);
       this.renderDist();
+      motionDistIn(popup.querySelector<HTMLElement>('#bz-sb-dist')); // 动效层：枝突伸展微编排
     });
 
     document.body.appendChild(mask);
@@ -392,7 +444,7 @@ export class SecondBrainPanel {
     this.enterProgressView('正在初始化向量数据库');
     this.initializing = true;
     let sawCountedDone = false; // ✅ 向量化完成：N 篇…（ticket 3 起仅全部成功才发）
-    let sawWarning = false; // ⚠️ 白名单空 / 无符合条件的文件
+    let sawWarning = false; // ⚠️ 索引范围内没有文件
     let sawFail = false; // [3] 「N 段向量化失败」提示（Ollama 服务异常或部分失败）
     try {
       await this.store.refresh((msg) => {
@@ -407,14 +459,14 @@ export class SecondBrainPanel {
         this.showContent(true); // 刚完成全量索引，跳过重复自动刷新
         await this.renderStats(); // 但统计必须立即渲染（skipRefresh 不带渲染）
       } else if (sawFail || sawCountedDone) {
-        // [3]：失败段提示（缺 ✅ 完整完成）或全跑完仍未登记 → 判为 Ollama/数据不可用，先于白名单提示
+        // [3]：失败段提示（缺 ✅ 完整完成）或全跑完仍未登记 → 判为 Ollama/数据不可用，先于「范围为空」提示
         status.textContent =
           '没有成功向量化任何内容：请确认 Ollama 服务与 Embedding 模型可用' +
-          (IS_MOBILE ? '（移动端需配置「远程 Ollama URL」）' : '') +
+          (IS_MOBILE ? '（移动端需在 AI 面板配置「移动端远程地址」）' : '') +
           '后重试';
         this.revealInitBtn('重试初始化');
       } else if (sawWarning) {
-        status.textContent = '白名单目录内没有可索引的 Markdown 笔记：请检查 ⚙️ 设置中的「白名单目录」';
+        status.textContent = '三个盒子与额外检索目录内都没有可索引的笔记：请检查 ⚙️ 设置中的「目录与分类」';
         this.revealInitBtn('重试初始化');
       } else {
         status.textContent = '未发现可索引的笔记内容';
@@ -538,6 +590,7 @@ export class SecondBrainPanel {
 
     mountIcons(popup);
     void this.loadSummaryAndLinks();
+    motionStatsIn(popup); // 动效层：记忆星图编排（boot 首渲才演，刷新静默）
   }
 
   /** 来源树渲染（renderStats 与展开点击共用；展开集会话内记忆） */
@@ -555,7 +608,8 @@ export class SecondBrainPanel {
     mountIcons(dist);
   }
 
-  /** AI 库摘要 + 自动建链数（secondbrain.json panel/link 段，异步回填；生成入口已移除，旧值仍可展示） */
+  /** AI 库摘要 + 自动建链数 + 每周动态入口卡（secondbrain.json panel/link/weekly 段，异步回填；
+   *  摘要生成入口已移除，旧值仍可展示） */
   private async loadSummaryAndLinks(): Promise<void> {
     try {
       const store = await loadStore(this.app);
@@ -567,6 +621,7 @@ export class SecondBrainPanel {
       if (aiCard) aiCard.style.display = summary ? '' : 'none';
       if (aiTxt && summary) {
         aiTxt.innerHTML = panelSummaryHtml(summary, store.panel?.generatedAt ? formatRelativeTime(store.panel.generatedAt) : '');
+        motionSummaryIn(aiCard); // 动效层：摘要卡异步回填浮现
       }
       const linkedTotal = Object.keys(store.link?.state || {}).length;
       const log = popup.querySelector('#bz-sb-log');
@@ -576,6 +631,8 @@ export class SecondBrainPanel {
           `<span class="bz-sb-log-sep">·</span>${panelLogHtml([{ text: `自动建链 ${linkedTotal} 条` }])}`
         );
       }
+      // issue 360：近期动态入口卡（有非空摘要才显示；点击开详情弹层）
+      renderPanelWeeklyCard(popup, this.app, store.weekly?.digest ?? null);
     } catch {
       /* 读库失败不阻断统计展示 */
     }
@@ -591,46 +648,19 @@ function topLevelName(path: string): string {
 // ==================== ⚙️ 域设置弹窗（主面板 / 窄窗共用） ====================
 
 /**
- * 第二大脑设置 schema（ticket 131；ADR-0064）：基础/自动双链/检索/对话/面板 五组卡片。
+ * 第二大脑设置 schema（ticket 131；ADR-0064）：外观/服务/检索/对话 四组卡片。
  * - ticket 100 文案修正：含符号标题（（本地）/（ms）/（电脑）/…）改写自然句，键名/行为/通知文案零变化；
  * - 省略 desc 的行保持省略（lint 只查有 name/desc 的行，不为过 lint 加文案）；
- * - 「本机局域网 IP」行为态（探测 IP 动态 desc + 「填入远程 URL」确认覆盖 + 输入框即时回显）
- *   走 custom 插槽保行为；「重新索引」确认已 flow 化（openFlowDialog）不动。
+ * - issue 422/ADR-0182：「Embedding 模型」行迁出（AI 面板 Embedding 组）；
+ * - issue 423/ADR-0183：「Ollama 本地 URL」「移动端远程地址」两行迁 AI 面板「Embedding」组；
+ * - issue 424/ADR-0184（用户拍板）：「本机局域网 IP」行与「局域网 IP 提示」行删除——IP 探测
+ *   与远程地址写入改为**全自动**（桌面端启动自动跟随，见 local-ip.ensureRemoteOllamaUrl），
+ *   本页不再展示 IP、也不放「填入远程 URL」按钮（原按钮与提示均失去存在理由）；「服务」组
+ *   只留「额外检索目录」。同批删除「检索」组四行（段落最小长度 / 上下文限制 / 防抖延迟 /
+ *   光标轮询）——前两者不再限制，防抖与轮询固化为常量（config.ts）。
  * 置于模块顶层供文案 lint 直接引用。 */
 
-/** 本机局域网 IP 描述（schema 构建期探测；「填入远程 URL」动作实时重探）。
- *  含 IP/接口符号，copy-lint-c 白名单豁免——IP 列表是本行的信息本体（ticket 122 自查路径）。 */
-function lanIpDesc(): string {
-  if (isMobileEnv()) return ''; // 移动端整行隐藏（visibleWhen），不做 os 探测
-  const lanIPs = getLanIPs();
-  if (lanIPs.length === 0) {
-    return '未能探测本机局域网 IP，请确认电脑已联网，移动端远程地址需手动填写电脑的局域网 IP';
-  }
-  const primary = pickPrimaryLanIp(lanIPs);
-  return `本机当前局域网 IP 为 ${lanIPs.map((l) => `${l.ip}，${l.iface}`).join('；')}。移动端连不上时，把远程地址填为${primary ? ` ${formatRemoteOllamaUrl(primary.ip)}` : '此处 IP'}`;
-}
-
 export function secondBrainSettingsSchema(): SettingsSchema {
-  // [f2-sb] 重载提示：以下开关均为启动快照配置（监听注册发生在域初始化），一次弹窗会话只提示一次（文案冻结）
-  let reloadWarned = false;
-  const warnReload = () => {
-    if (reloadWarned) return;
-    reloadWarned = true;
-    notice('第二大脑设置已保存，重载插件后生效', 'info');
-  };
-  // 远程 Ollama URL 输入框引用（「填入远程 URL」按钮确认覆盖后即时回显）
-  /** text 行 trim 落盘（沿用原 onChange 口径：v.trim() 写内存，防抖落盘读内存值） */
-  const trimStore = (key: string) => (v: string) => {
-    (getSettings() as any)[key] = v.trim();
-  };
-  /** 缺省开语义（键缺失视为开，沿用原 !== false 口径） */
-  const boolDefaultOn = (key: string) => ({
-    get: () => (tryGetSettings() as any)[key] !== false,
-    set: (v: boolean) => {
-      (getSettings() as any)[key] = v;
-    },
-    save: () => saveSettings(),
-  });
   /** 逗号分隔串 ↔ 多选路径数组（存储格式冻结——英文逗号分隔字符串） */
   const pathsOf = (key: string) => ({
     get: () => parsePathList(String((tryGetSettings() as any)[key] ?? '')),
@@ -655,155 +685,43 @@ export function secondBrainSettingsSchema(): SettingsSchema {
         // 2026-09-12：组名「基础」→「服务」（内容全是 Ollama 连接与模型，原名字不达意）
         name: '服务',
         rows: [
-          { type: 'text', name: 'Ollama 本地 URL', desc: '本地 Ollama 服务地址，留空用默认端口', binding: { key: 'secondBrainOllamaUrl' }, onChange: trimStore('secondBrainOllamaUrl') },
-          // 远程 Ollama URL（移动端）：声明 text 行 + 行内「填入远程 URL」按钮（actions 统一实现，
-          // 动作完成后渲染器重读绑定回填显示——custom 输入框引用持快手已退役）
-          {
-            type: 'text',
-            name: '移动端远程地址',
-            desc: '手机上连本地向量库走这个地址',
-            binding: { key: 'secondBrainRemoteOllamaUrl' },
-            onChange: (v) => trimStore('secondBrainRemoteOllamaUrl')(v),
-            actions: [{
-              text: '填入远程 URL',
-              cta: true,
-              onClick: () => {
-                const lanIPs = getLanIPs();
-                const primary = pickPrimaryLanIp(lanIPs);
-                if (!primary) {
-                  notice('未探测到本机局域网 IP，请手动填写');
-                  return;
-                }
-                const target = formatRemoteOllamaUrl(primary.ip);
-                // 返回 Promise：渲染器等确认框 resolve 后再回填输入框显示值
-                return openFlowDialog({
-                  title: '填入远程 Ollama URL',
-                  message: `将「移动端远程地址」覆盖为 ${target}？`,
-                  actions: [
-                    { label: '取消', value: 'cancel' },
-                    // 刻意不标 danger（issue 291 评审）：这是「填便利值」而非删除类动作——
-                    // 只是把被探测到的局域网地址写进设置项，用户随时可手改回，
-                    // 不构成不可逆数据破坏，故保留普通高亮主动作。
-                    { label: '覆盖', value: 'ok', cta: true },
-                  ],
-                }).then((v) => {
-                  if (v === 'ok') {
-                    (getSettings() as any).secondBrainRemoteOllamaUrl = target;
-                    void saveSettings();
-                  }
-                });
-              },
-            }],
-          },
-          // 本机局域网 IP（展示行，actions 已并上侧「填入远程 URL」按钮；custom 双分支已退役）
-          {
-            type: 'info',
-            name: '本机局域网 IP',
-            visibleWhen: () => !isMobileEnv(),
-            desc: lanIpDesc(),
-          },
-          {
-            type: 'info',
-            name: '局域网 IP 提示',
-            visibleWhen: () => isMobileEnv(),
-            desc: '连不上远程库时，在电脑上查看本机 IP 并核对上方地址',
-          },
-          { type: 'text', name: 'Embedding 模型', desc: '向量化用的嵌入模型名，留空用默认', binding: { key: 'secondBrainEmbeddingModel' }, onChange: trimStore('secondBrainEmbeddingModel') },
-          // 白名单文件夹（ticket 128 统一选择器：chips + 选择按钮；存储格式冻结——英文逗号分隔字符串）
+          // 「Embedding 模型」行迁 AI 面板（issue 422/ADR-0182）；「Ollama 本地 URL」「移动端远程地址」
+          // 两行同迁该组（issue 423/ADR-0183）；「本机局域网 IP」自查行与「局域网 IP 提示」行删除
+          // （issue 424/ADR-0184：IP 探测与远程地址写入全自动，不再需要人工核对）。
+          // 额外检索目录（ticket 128 统一选择器：chips + 选择按钮；存储格式冻结——英文逗号分隔字符串）
+          // ADR-0141 §3：三个盒子恒含索引，本行语义降级为「三盒之外还要纳入检索的目录」
           {
             type: 'path',
             mode: 'multi',
-            name: '白名单文件夹',
-            desc: '纳入第二大脑检索与候选来源的笔记文件夹，留空则不索引',
+            name: '额外检索目录',
+            desc: '三个盒子之外还要纳入检索的笔记文件夹',
             binding: pathsOf('secondBrainAllowPaths'),
-            pickerTitle: '选择白名单目录',
-            pickerDesc: '白名单为目录前缀语义：勾选祖先目录即覆盖其下全部子目录',
+            pickerTitle: '选择额外检索目录',
+            pickerDesc: '目录前缀语义：勾选祖先目录即覆盖其下全部子目录',
             buttonText: '选择',
-            emptyText: '暂未选择（留空 = 不索引任何目录）',
+            emptyText: '暂未选择（三个盒子已自动纳入）',
           },
           // 「启用」开关已删（2026-09-12 用户拍板：去掉启动开关，启动即无条件自动加载）
-        ],
-      },
-      {
-        icon: 'link',
-        name: '自动双链',
-        rows: [
-          // 自动双链（ticket 111）：总开关为明细设置的显隐开关（visibleWhen 声明式联动 + 徽标自动刷新）
-          { type: 'toggle', name: '自动双链', desc: '关联范围内新笔记落盘时自动建双链，候选近邻经 AI 裁判筛选', binding: boolDefaultOn('linkAgentEnabled'), onChange: warnReload },
-          {
-            type: 'text',
-            name: '单篇候选数量 TopK',
-            desc: '每篇笔记的近邻候选数，来源为白名单索引库的全部笔记',
-            // number 键（linkAgentTopK）不走键直绑（收窄到 string），三函数绑定 + onChange 钳制复写
-            binding: {
-              get: () => String((getSettings() as any).linkAgentTopK ?? 8),
-              set: (v: string) => {
-                (getSettings() as any).linkAgentTopK = v;
-              },
-              save: () => saveSettings(),
-            },
-            visibleWhen: (s) => s.linkAgentEnabled !== false,
-            isChild: true,
-            onChange: (v) => {
-              const n = Math.floor(Number(v));
-              (getSettings() as any).linkAgentTopK = Number.isFinite(n) && n > 0 ? n : 8;
-            },
-          },
-          {
-            type: 'text',
-            name: '每篇关联上限',
-            desc: '0 表示不限量，由 AI 裁判自行决定，沿用复习域惯例',
-            // number 键（linkAgentMaxLinks）同上
-            binding: {
-              get: () => String((getSettings() as any).linkAgentMaxLinks ?? 0),
-              set: (v: string) => {
-                (getSettings() as any).linkAgentMaxLinks = v;
-              },
-              save: () => saveSettings(),
-            },
-            visibleWhen: (s) => s.linkAgentEnabled !== false,
-            isChild: true,
-            onChange: (v) => {
-              const n = Math.floor(Number(v));
-              (getSettings() as any).linkAgentMaxLinks = Number.isFinite(n) && n > 0 ? n : 0;
-            },
-          },
-          { type: 'toggle', name: '完成通知', desc: '处理完成后通知提醒，关闭则全程静默', binding: boolDefaultOn('linkAgentNotify'), visibleWhen: (s) => s.linkAgentEnabled !== false, isChild: true },
-          { type: 'toggle', name: '失效关联自动清理', desc: '笔记删除后自动移除指向它的失效 related 条目', binding: boolDefaultOn('linkAgentAutoClean'), visibleWhen: (s) => s.linkAgentEnabled !== false, isChild: true },
-          { type: 'toggle', name: '已有关联不再建链', desc: '笔记已有关联时自动跳过处理', binding: boolDefaultOn('linkAgentRespectRelated'), visibleWhen: (s) => s.linkAgentEnabled !== false, isChild: true },
-          // 关联范围（ticket 128 统一选择器：chips + 选择按钮；格式冻结——英文逗号分隔字符串）
-          {
-            type: 'path',
-            mode: 'multi',
-            name: '关联范围',
-            desc: '决定哪些笔记会被自动关联，并作为落盘监听与补链目标',
-            binding: pathsOf('linkAgentScopes'),
-            visibleWhen: (s) => s.linkAgentEnabled !== false,
-            isChild: true,
-            pickerTitle: '选择关联范围目录',
-            buttonText: '选择', // ticket 170：去 emoji
-            emptyText: '暂未选择（留空 = 不自动关联）',
-          },
         ],
       },
       {
         icon: 'search',
         name: '检索',
         rows: [
-          // 2026-09-12：检索组六行原本零描述（参数名裸奔），补齐自然句说明
-          { type: 'text', name: '参考结果数 TopK', desc: '参考侧返回的近邻条数，越大越全也越慢', binding: { key: 'secondBrainTopK' }, onChange: trimStore('secondBrainTopK') },
-          { type: 'text', name: '对话参考结果数', desc: '对话时注入上下文的参考条数', binding: { key: 'secondBrainChatTopK' }, onChange: trimStore('secondBrainChatTopK') },
-          { type: 'text', name: '段落最小长度', desc: '短于该字符数的段落不入向量索引', binding: { key: 'secondBrainChunkMinLength' }, onChange: trimStore('secondBrainChunkMinLength') },
-          { type: 'text', name: '上下文限制', desc: '单次注入对话的上下文字符上限', binding: { key: 'secondBrainContextLimit' }, onChange: trimStore('secondBrainContextLimit') },
-          { type: 'text', name: '防抖延迟毫秒', desc: '输入停顿该毫秒数后才开始检索', binding: { key: 'secondBrainDebounceDelay' }, onChange: trimStore('secondBrainDebounceDelay') },
-          { type: 'text', name: '光标轮询毫秒', desc: '光标位置轮询间隔，越小跟随越快', binding: { key: 'secondBrainCursorPollInterval' }, onChange: trimStore('secondBrainCursorPollInterval') },
+          // 2026-09-23：检索组原为 text 行（每键自己 Number() + 钳制），改标准 number 行——
+          // 键仍存字符串（消费侧 Number(x) || 默认，见 config.ts），故走 numStrBinding 适配器
+          // （cinema/encrypt/password-vault 同款），min/max 由输入框兜住手滑值。
+          // issue 424/ADR-0184：后四行（段落最小长度 / 上下文限制 / 防抖延迟毫秒 / 光标轮询毫秒）
+          // 删除——前两者不再限制（分块全留），防抖 300ms 与轮询 500ms 固化为常量（config.ts）。
+          { type: 'number', name: '参考结果数 TopK', desc: '参考侧返回的近邻条数，越大越全也越慢', binding: numStrBinding('secondBrainTopK', 20), min: 1, max: 50, step: 1 },
+          { type: 'number', name: '对话参考结果数', desc: '对话时注入上下文的参考条数', binding: numStrBinding('secondBrainChatTopK', 20), min: 1, max: 50, step: 1 },
         ],
       },
       {
         icon: 'message-square',
         name: '对话',
         rows: [
-          { type: 'text', name: '最大历史记录', desc: '对话保留的历史轮数上限', binding: { key: 'secondBrainMaxHistory' }, onChange: trimStore('secondBrainMaxHistory') },
+          { type: 'number', name: '最大历史记录', desc: '对话保留的历史轮数上限', binding: numStrBinding('secondBrainMaxHistory', 10), min: 1, max: 200, step: 1 },
           // 「AI 通道」跳转按钮已删（2026-09-12 用户拍板）：设置面板不放跳转移交类按钮
         ],
       },

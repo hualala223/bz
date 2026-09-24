@@ -83,7 +83,7 @@ const EXPECTED_COMMAND_IDS = [
   // 上游线 P2/P3：复习统计报告 + 快速复制密码
   'bz-review-report', 'bz-encrypt-copy-password',
   // ticket 276：今日已复习列表（点击打开原文，强制阅读模式）
-  'bz-secondbrain-panel', 'bz-secondbrain-open', 'bz-secondbrain-chat', 'bz-secondbrain-rebuild-links', 'bz-secondbrain-link-all', 'bz-secondbrain-rebuild-index',
+  'bz-secondbrain-panel', 'bz-secondbrain-open', 'bz-secondbrain-chat', 'bz-secondbrain-rebuild-index', 'bz-secondbrain-weekly',
   // 游戏库（gameshelf 域，上游 issue 368 移植）：三命令
   'bz-gameshelf-open', 'bz-gameshelf-sync', 'bz-gameshelf-stats',
   'bz-pomodoro-open',

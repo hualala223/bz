@@ -9,7 +9,7 @@
  *   active-leaf-change，防抖 DEBOUNCE_DELAY 后独立检索（L1995-1999/L2016-2031）
  * - 参考卡：过滤当前文件、单击懒渲染 markdown 展开（L2076-2085）；
  *   长按 500ms 震动 navigator.vibrate(30) → jumpToChunk → 收起抽屉（L2086-2099）
- * - AI tab：DeepSeek 开关、Enter 发送、markdown 渲染回退纯文本；
+ * - AI tab：Enter 发送、markdown 渲染回退纯文本（AI 通道统一走主设置页 AI 设置，issue 359）；
  *   提示词与桌面同构但「【参考内容】」简写「【参考】」（L2135-2161）
  * - store.initMobile() 三级检索初始化（L1928-1929）
  */
@@ -24,6 +24,7 @@ import { getCurrentContext } from './context';
 import { jumpToChunk, renderMarkdown } from './ui-tools';
 import { AI } from './ai';
 import { CHAT_CHIPS } from './render';
+import { motionMobileCards, motionMsgIn, motionTeardown } from './motion';
 import { appendChatHistory, loadChatHistory, type ChatHistoryEntry } from './store-file';
 import type { SearchHit, VectorStore } from './vector-store';
 
@@ -264,18 +265,31 @@ export class MobilePanel {
     }, buildConfig().DEBOUNCE_DELAY);
   }
 
+  /** 在途检索（issue 428「只查最新」）：新查询/空上下文发起即中断上一轮，关闭抽屉也中断 */
+  private inflight: AbortController | null = null;
+
   async refreshResults(query: string): Promise<void> {
     const CONFIG = buildConfig();
+    // 只查最新（issue 428）：接了新上下文就中断上一轮（真中断远程嵌入 HTTP）——
+    // 快速改字时否则会有一串远程查询排队，旧结果返回来还会盖掉最新一轮
+    this.inflight?.abort();
+    const ac = new AbortController();
+    this.inflight = ac;
     if (!query || query.length < 2) {
+      this.inflight = null;
       this.refResults = [];
       this.refError = null;
       if (this.mode === 'ref') this.renderRefTab();
       return;
     }
     try {
-      this.refResults = await this.store.searchMobile(query, CONFIG.TOP_K);
+      this.refResults = await this.store.searchMobile(query, CONFIG.TOP_K, ac.signal);
+      if (this.inflight === ac) this.inflight = null;
       this.refError = null; // 本次检索成功：清除上一轮失败态
     } catch (e) {
+      // 被更新的一轮中断：本轮作废，列表态归新查询所有——静默收口
+      if (ac.signal.aborted) return;
+      if (this.inflight === ac) this.inflight = null;
       console.warn('[secondbrain] 移动端检索失败', e);
       this.refResults = [];
       // ticket 141：与桌面 reference-panel 同款真实错误提示（不再吞成「暂无相关笔记」）
@@ -373,6 +387,7 @@ export class MobilePanel {
         holdTimer = null;
       });
     }
+    motionMobileCards(this.body); // 动效层：向量召回接力 + 分数条充能
   }
 
   /** AI tab：桌面同构重排（issue 251 移动对齐）——标签气泡 + 推荐问法 + 带聚焦态输入行 */
@@ -485,6 +500,7 @@ export class MobilePanel {
     div.appendChild(bubble);
     this.chatMessagesDiv.appendChild(div);
     mountIcons(div);
+    motionMsgIn(div); // 动效层：气泡入列（user 弹性落座 / assistant 浮起）
     this.chatMessagesDiv.scrollTop = this.chatMessagesDiv.scrollHeight;
   }
 
@@ -492,6 +508,9 @@ export class MobilePanel {
   close(): void {
     this.escHandle?.unregister();
     this.escHandle = null;
+    // 在途检索兜底中断（issue 428）：抽屉关了就不再有接管者，请求没必要跑完
+    this.inflight?.abort();
+    this.inflight = null;
     if (this.evLeaf) {
       try {
         this.app.workspace.offref(this.evLeaf);
@@ -508,6 +527,7 @@ export class MobilePanel {
     this.debounceTimer = null;
     this.sheet.classList.remove('bz-sb-mb-open');
     this.mini.classList.remove('bz-sb-mb-visible');
+    motionTeardown(); // 动效层：循环/延时总清场
     setTimeout(() => {
       this.sheet.remove();
       this.mini.remove();

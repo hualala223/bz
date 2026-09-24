@@ -5,7 +5,8 @@
  * 消息气泡（user 墨底右对齐 / assistant 白卡）+ 检索中态（呼吸点）+ 引用卡列表 + 推荐问法
  * 常驻 chips。markup 出 render.ts 纯层；本文件只留行为。
  *
- * 行为逐行保留：DeepSeek 统一走主设置页 AI 服务商；RAG 提示词逐字对齐 QA L1718（每问独立
+ * 行为逐行保留：对话统一走主设置页 AI 设置（core AIService，issue 359 起 DeepSeek 专用形态退役）；
+ * RAG 提示词逐字对齐 QA L1718（每问独立
  * 检索 CHAT_TOP_K 条，context 格式 `[path] (xx%)\nchunk`）；历史仅 UI 展示 + 裁剪
  * MAX_HISTORY×2 条不进 prompt；多行 textarea（Enter 发送 / Shift+Enter 换行 / isComposing
  * 组合态不发送）；请求可取消（发送钮原地切「停止」，AbortController 中止）；流式增量渲染
@@ -25,6 +26,15 @@ import { renderMarkdown } from './ui-tools';
 import { AI } from './ai';
 import { appendChatHistory, clearChatHistory, loadChatHistory, type ChatHistoryEntry } from './store-file';
 import { chatShellHtml, chatUserMsgHtml, chatAiMsgHtml, chatThinkingHtml, chatCitesHtml, sbSourceColor, computeStats } from './render';
+import {
+  motionChatIn,
+  motionChatOut,
+  motionMsgIn,
+  motionSearchWave,
+  motionCitesIn,
+  motionChatClear,
+  motionTeardown,
+} from './motion';
 import type { SearchHit, VectorStore } from './vector-store';
 
 /** 欢迎语（首次进入 / 清空后共用一份文案） */
@@ -46,6 +56,8 @@ export class ChatPanel {
   private inFlight: AbortController | null = null;
   /** 轮次序号：清空对话 / 销毁后，旧轮的回调不再写 UI 与历史 */
   private seq = 0;
+  /** 动效层：开/关代次——退场期间被重开时，迟到的退场收口不得收回新显示位 */
+  private motionSeq = 0;
 
   constructor(store: VectorStore, app: App) {
     this.app = app;
@@ -130,12 +142,19 @@ export class ChatPanel {
     if (!this.alive) return;
     this.mask.style.display = 'block';
     this.popup.style.display = 'flex';
+    this.motionSeq++; // 新代次：在途退场收口作废
+    motionChatIn(this.popup); // 动效层：弹层唤醒（先撤退场残留，重开走快档）
     this.input.focus();
   }
 
   close(): void {
-    this.mask.style.display = 'none';
-    this.popup.style.display = 'none';
+    // 动效层：先演退场再收 display（收口 cancel 钉帧，防「关→再开」整屏隐形）；重开竞态由 motionSeq 守卫
+    const seq = this.motionSeq;
+    motionChatOut(this.popup, () => {
+      if (seq !== this.motionSeq) return; // 退场途中已重开：不抢显示位
+      this.mask.style.display = 'none';
+      this.popup.style.display = 'none';
+    });
   }
 
   /** 完全销毁（unload 调用）：摘 ESC 层、中止在途请求并移除 DOM */
@@ -145,6 +164,7 @@ export class ChatPanel {
     this.inFlight = null;
     this.escHandle?.unregister();
     this.escHandle = null;
+    motionTeardown(); // 动效层：循环/延时总清场
     this.mask.remove();
     this.popup.remove();
   }
@@ -224,7 +244,8 @@ export class ChatPanel {
     if (!userMsg) return;
     this.input.value = '';
     this.autoGrowInput();
-    this.addChatMessage('user', userMsg);
+    const userEl = this.addChatMessage('user', userMsg);
+    motionMsgIn(userEl); // 动效层：提问弹性落座
     this.persistHistory([{ role: 'user', content: userMsg }]);
 
     const CONFIG = buildConfig();
@@ -241,6 +262,8 @@ export class ChatPanel {
     live.innerHTML = chatAiMsgHtml();
     (live.querySelector('.bz-sb-chat-bubble') as HTMLElement).innerHTML = chatThinkingHtml(CONFIG.CHAT_TOP_K);
     this.messagesDiv.appendChild(live);
+    motionMsgIn(live); // 动效层：检索中气泡浮起
+    motionSearchWave(this.messagesDiv); // 动效层：检索涟漪扫过记忆层
     this.messagesDiv.scrollTop = this.messagesDiv.scrollHeight;
     let acc = '';
     try {
@@ -263,17 +286,18 @@ export class ChatPanel {
       });
       live.remove();
       if (seq === this.seq) {
-        this.addChatMessage('assistant', answer, results); // 引用卡仅会话内展示（ADR-0110 §4）
+        const finalMsg = this.addChatMessage('assistant', answer, results); // 引用卡仅会话内展示（ADR-0110 §4）
+        motionMsgIn(finalMsg); // 动效层：回答气泡点亮
+        motionCitesIn(finalMsg.querySelector<HTMLElement>('.bz-sb-chat-cites')); // 动效层：引用召回 + 联想连线
         this.persistHistory([{ role: 'assistant', content: answer }]);
       }
     } catch (e: any) {
       live.remove();
       if (seq !== this.seq) return; // 已清空/销毁：旧轮不再补写 UI
-      if (controller.signal.aborted) {
-        this.addChatMessage('assistant', '已停止生成。'); // 取消提示仅 UI 呈现，不落历史
-      } else {
-        this.addChatMessage('assistant', '出错了：' + (e?.message || e));
-      }
+      const note = controller.signal.aborted
+        ? this.addChatMessage('assistant', '已停止生成。') // 取消提示仅 UI 呈现，不落历史
+        : this.addChatMessage('assistant', '出错了：' + (e?.message || e));
+      motionMsgIn(note); // 动效层：提示气泡浮起
     } finally {
       if (seq === this.seq) {
         this.inFlight = null;
@@ -308,8 +332,11 @@ export class ChatPanel {
     this.sendBtn.removeAttribute('data-state');
     this.sendBtn.title = '发送';
     this.history = [];
-    this.messagesDiv.innerHTML = '';
-    this.addChatMessage('assistant', welcomeText(buildConfig().CHAT_TOP_K));
+    // 动效层：旧记忆逐条蒸发后再交还重写（welcome 弹出由 rewrite 内 motionMsgIn 接）
+    motionChatClear(this.messagesDiv, () => {
+      const w = this.addChatMessage('assistant', welcomeText(buildConfig().CHAT_TOP_K));
+      motionMsgIn(w);
+    });
     try {
       await clearChatHistory(this.app);
     } catch (e) {

@@ -1,22 +1,25 @@
 /**
- * 自动双链监听器（ticket 111；ADR-0003 事件随开关注册，模式对齐 src/review/watch.ts）：
- * - vault md 创建事件（域事件总线通用兜底通道）过滤关联范围（linkAgentScopes，缺省回退「文献盒」）
+ * 自动关联监听器（ticket 111；ADR-0141 正名与三盒范围；ADR-0003 事件随开关注册，模式对齐 src/review/watch.ts）：
+ * - vault md 创建事件（域事件总线通用兜底通道）过滤**三个盒子**（core/knowledge-boxes 单源）
  *   → 防抖聚合约 60 秒一批跑管线；
- * - v1.4（ticket 119）：vault md **修改**事件同样过滤关联范围 → 防抖聚合 → 冲刷时先经
+ * - v1.4（ticket 119）：vault md **修改**事件同样过滤三盒 → 防抖聚合 → 冲刷时先经
  *   基准哈希过滤（filterChangedForRelink：内容未实质变化 / 自写 related 不重跑），
  *   只对真正改动的存量笔记重跑建链（正文大改自动重跑）；
  * - 删除事件订阅 → 防抖合并触发死链清理（低频巡检 30 分钟兜底）；删除同时移除该篇基准哈希；
- * - 文献笔记生成即跑（issue 298）：订阅 'knowledge:tasks'（知识盒生成视频/术语文献笔记的域事件）
- *   → 立即对该篇跑 processNoteNow，不等批次防抖、不受 linkAgentScopes 限制；
- * - linkAgentScopes 中出现白名单未包含目录时一次性引导提示（只提示，不代改配置）。
+ * - 改名事件订阅（issue 339）：队列条目与基准哈希键 oldPath→newPath 去抖合并 rekey——
+ *   改名笔记不重复入队、基准不丢（向量索引不在此处理，doRefresh 的删除+重嵌自愈兜底）；
+ * - 文献笔记建链改走**显式通道**（issue 309）：createLinkBridge 给知识盒录入面板 preview / apply / now
+ *   三段能力（AI 出内容即起跑预演，面板内 loading → 完成后就地显示）。原「订阅 'knowledge:tasks'
+ *   生成即跑」的被动路径已删除——它不向调用方回报进度，且与调用方写入结果无法对齐；
+ * - ADR-0141 §3：「请去补白名单」类引导提示（maybeGuideAllowPaths / guideIndexCoverage）退役——
+ *   三个盒子恒含索引，再没有「目录不在白名单」的场景。
  * 依赖方向：本层经 index.ts 接线；refresh 类副作用全部收敛在 LinkAgent。
  */
 import type { App } from 'obsidian';
 import { onDomainEvent } from '../../core/domain-bus';
-import { notice } from '../../core/notice';
+import type { LinkBridge } from '../../core/link-now';
 import { tryGetSettings } from '../../core/settings-provider';
-import { buildConfig } from '../config';
-import { getLinkAgentScopes, isUnderFolder, matchesScope } from './data';
+import { inLinkScope, rekeyLinkPaths } from './data';
 import { LINK_BATCH_DELAY_MS, LinkAgent } from './pipeline';
 
 /** 死链清理防抖窗口（删除事件合并；测试可注入短值） */
@@ -25,25 +28,63 @@ export function __setLinkCleanDebounceMsForTests(ms: number): void {
   LINK_CLEAN_DEBOUNCE_MS = ms;
 }
 
+/** 改名 rekey 防抖窗口（issue 339：窗口内多次改名合并成一次 store 写，链式改名按序回放；测试可注入短值） */
+export let LINK_REKEY_DEBOUNCE_MS = 1500;
+export function __setLinkRekeyDebounceMsForTests(ms: number): void {
+  LINK_REKEY_DEBOUNCE_MS = ms;
+}
+
 /** 低频巡检间隔（spec「核心流程⑤」：启动后低频巡检兜底） */
 export const LINK_SWEEP_INTERVAL_MS = 30 * 60 * 1000;
 
-/** 白名单引导提示的会话级一次性标志（测试可复位） */
-let allowPathsGuideShown = false;
-/** 生成即跑的索引覆盖引导标志（文献笔记目录未进索引白名单时提示一次；测试可复位） */
-let indexDirGuideShown = false;
-export function __resetLinkAgentGuideForTests(): void {
-  allowPathsGuideShown = false;
-  indexDirGuideShown = false;
-}
-
 /**
- * 知识盒生成事件载荷（'knowledge:tasks' 通道；只取本链路关心的两个字段，
- * 其余字段由派发方定义——本层不复制业务结构）。
+ * 自动关联通道（issue 309；ADR-0141 起归知识盒消费）：知识盒录入面板的三段能力 + 批量补链，
+ * 全部**等待**结果回填面板。
+ * - preview：AI 出内容后立刻跑（草稿未落盘，只算不写）→ 面板就地显示「分析中… → 关联名」；
+ * - apply：确认写入落盘后，把预演结果写进该篇 related；
+ * - now：无预演结果时的兜底（完整跑一遍单篇管线；force 供手动命令强制重跑用）；
+ * - backfill：批量补链（三盒内缺 related 的笔记），知识盒「为未关联笔记批量补链」命令用。
+ * 四者都先等索引装载完成（避免 in-flight refresh 与 load 并发读到半装载索引）；
+ * 通知一律静默——进度与结果由面板自己呈现，不再叠加 toast。
+ * 范围由实现侧把关（ADR-0141 §2：盒外路径返回 out-of-scope，本层不重复判定）。
  */
-export interface KnowledgeNoteEvent {
-  kind?: string;
-  notePath?: string | null;
+export function createLinkBridge(
+  agent: LinkAgent,
+  initialLoad?: Promise<void> | null
+): LinkBridge {
+  const ready = async (): Promise<void> => {
+    try {
+      await initialLoad;
+    } catch {
+      /* 装载失败不阻断（管线内部各自兜底） */
+    }
+  };
+  return {
+    now: async (path: string, opts?: { force?: boolean }) => {
+      const p = String(path || '').trim();
+      if (!p) return { status: 'done' as const, created: 0 };
+      await ready();
+      return agent.processNoteNow(p, { silent: true, force: opts?.force === true });
+    },
+    preview: async (content: string, title?: string, opts?: { signal?: AbortSignal }) => {
+      await ready();
+      return agent.previewLinks(content, title, opts);
+    },
+    apply: async (path: string, targetPaths: string[]) => {
+      const p = String(path || '').trim();
+      if (!p) return { status: 'done' as const, created: 0 };
+      await ready();
+      return agent.applyLinks(p, targetPaths);
+    },
+    backfill: async () => {
+      await ready();
+      const result = await agent.backfillMissingLinks();
+      if (result.status === 'done') {
+        return { status: 'done' as const, processed: result.summary.processed, created: result.summary.created };
+      }
+      return { status: result.status };
+    },
+  };
 }
 
 export class LinkAgentWatcher {
@@ -59,9 +100,13 @@ export class LinkAgentWatcher {
   private pendingCreates = new Set<string>();
   /** 防抖批次缓冲（修改事件聚合，v1.4/ticket 119） */
   private pendingModifies = new Set<string>();
+  /** 改名 rekey 防抖缓冲（issue 339：窗口内事件按序合并，冲刷时整批一次 store 写） */
+  private pendingRenames: Array<{ oldPath: string; newPath: string }> = [];
   private batchTimer: ReturnType<typeof setTimeout> | null = null;
   /** 死链清理防抖定时器 */
   private cleanTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 改名 rekey 防抖定时器（issue 339） */
+  private renameTimer: ReturnType<typeof setTimeout> | null = null;
   /** 低频巡检定时器 */
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   /** 总线退订函数账本 */
@@ -86,19 +131,17 @@ export class LinkAgentWatcher {
       onDomainEvent<{ path: string }>('vault:md-created', (evt) => this.onCreated(evt.path)),
       onDomainEvent<{ path: string }>('vault:md-modified', (evt) => this.onModified(evt.path)),
       onDomainEvent<{ path: string }>('vault:md-deleted', (evt) => this.onDeleted(evt.path)),
-      // 文献笔记生成即跑（issue 298）：知识盒 converted / term-generated
-      onDomainEvent<KnowledgeNoteEvent>('knowledge:tasks', (evt) => this.onNoteGenerated(evt))
+      onDomainEvent<{ oldPath: string; newPath: string }>('vault:md-renamed', (evt) => this.onRenamed(evt.oldPath, evt.newPath))
     );
     this.sweepTimer = setInterval(() => {
       void this.runDeadLinkSweep();
     }, LINK_SWEEP_INTERVAL_MS);
-    this.maybeGuideAllowPaths();
   }
 
-  /** 关联范围内（空 = 不触发任何监听）新笔记落盘 → 入缓冲并重置防抖计时（约 60 秒聚合一批）；范围随 linkAgentScopes 实时生效 */
+  /** 三盒内新笔记落盘 → 入缓冲并重置防抖计时（约 60 秒聚合一批）；盒子目录改动即时生效（实时读设置） */
   onCreated(path: string): void {
     if (!this.enabled) return;
-    if (!matchesScope(getLinkAgentScopes(), path)) return;
+    if (!inLinkScope(path)) return;
     this.pendingCreates.add(path);
     if (this.batchTimer) clearTimeout(this.batchTimer);
     this.batchTimer = setTimeout(() => {
@@ -108,13 +151,13 @@ export class LinkAgentWatcher {
   }
 
   /**
-   * 修改事件（v1.4/ticket 119 正文大改自动重跑）：范围内已有笔记被修改 → 入缓冲防抖聚合；
+   * 修改事件（v1.4/ticket 119 正文大改自动重跑）：三盒内已有笔记被修改 → 入缓冲防抖聚合；
    * 冲刷时经 agent.filterChangedForRelink 基准哈希过滤，只重跑真正变化的笔记
    * （Obsidian 高频保存 / 自写 related 触发的 modify 被哈希挡掉，不空转裁判）。
    */
   onModified(path: string): void {
     if (!this.enabled) return;
-    if (!matchesScope(getLinkAgentScopes(), path)) return;
+    if (!inLinkScope(path)) return;
     this.pendingModifies.add(path);
     if (this.batchTimer) clearTimeout(this.batchTimer);
     this.batchTimer = setTimeout(() => {
@@ -137,50 +180,27 @@ export class LinkAgentWatcher {
   }
 
   /**
-   * 文献笔记生成即跑（issue 298）：知识盒生成视频 / 术语文献笔记后经 'knowledge:tasks' 域事件
-   * **立即**对该篇建链——不等约 60 秒批次防抖，也不受 linkAgentScopes 范围限制
-   * （生成即显式目标，语义同手动重跑）。
-   * 只认 converted / term-generated 两类且 notePath 非空的成功事件（failed 与缺路径一律忽略）；
-   * 等索引装载完成再跑，实际执行经 agent 的串行锁与批次 / 补链排队互斥。
+   * 改名事件（issue 339）：防抖批次缓冲内旧路径顺带改指新路径（冲刷存在性过滤不再丢条目）；
+   * 队列条目与基准哈希键的去抖合并 rekey 交数据层（rekeyLinkPaths，写 JSON 语义不变）——
+   * 新路径移出三盒/非 md 时数据层按删除口径清理，此处不重复判定。
    */
-  onNoteGenerated(evt: KnowledgeNoteEvent | null | undefined): void {
-    if (!this.enabled) return;
-    const kind = evt?.kind;
-    if (kind !== 'converted' && kind !== 'term-generated') return;
-    const path = typeof evt?.notePath === 'string' ? evt.notePath.trim() : '';
-    if (!path) return;
-    if (!this.app.vault.getAbstractFileByPath(path)) return;
-    this.guideIndexCoverage(path);
-    void (async () => {
-      try {
-        await this.initialLoad;
-      } catch {
-        /* 装载失败不阻断（管线内部各自兜底） */
-      }
-      await this.agent.processNoteNow(path);
-    })();
-  }
-
-  /**
-   * 生成即跑的索引覆盖引导（一次性；只提示，绝不代改用户配置）：
-   * 文献笔记所在目录不在第二大脑索引白名单（secondBrainAllowPaths）内时，
-   * 该目录既不会被向量化、检索也不会命中 → 明确告知，避免「生成了却零关联」的静默失效。
-   */
-  private guideIndexCoverage(path: string): void {
-    if (indexDirGuideShown) return;
-    let allow: string[] = [];
-    try {
-      allow = buildConfig().ALLOW_PATHS || [];
-    } catch {
-      return; // 设置不可读：静默（不误报）
+  onRenamed(oldPath: string, newPath: string): void {
+    for (const buf of [this.pendingCreates, this.pendingModifies]) {
+      if (buf.delete(oldPath) && this.enabled && newPath.endsWith('.md') && inLinkScope(newPath)) buf.add(newPath);
     }
-    if (allow.some((dir) => isUnderFolder(dir, path))) return;
-    indexDirGuideShown = true;
-    const dir = path.split('/')[0] || path;
-    notice(
-      `自动双链已开启：文献笔记目录「${dir}」不在第二大脑索引白名单目录内，候选检索不会命中该目录，可在第二大脑设置的白名单目录中补充。`,
-      'warning'
-    );
+    if (!this.enabled) return;
+    if (!oldPath || !newPath || oldPath === newPath) return;
+    // 新旧都在盒外：队列/基准不可能有该键，直接短路（避免无关改名每次空转 store 读写）
+    if (!inLinkScope(oldPath) && !inLinkScope(newPath)) return;
+    this.pendingRenames.push({ oldPath, newPath });
+    if (this.renameTimer) clearTimeout(this.renameTimer);
+    this.renameTimer = setTimeout(() => {
+      this.renameTimer = null;
+      const batch = this.pendingRenames;
+      this.pendingRenames = [];
+      if (!batch.length) return;
+      rekeyLinkPaths(batch).catch((e) => console.warn('[link-agent] 改名同步失败', e));
+    }, LINK_REKEY_DEBOUNCE_MS);
   }
 
   /** 冲刷防抖批次：只处理仍存在的文件；上一批未完成时本次跳过（下一事件重新聚合） */
@@ -221,27 +241,6 @@ export class LinkAgentWatcher {
     }
   }
 
-  /**
-   * 一次性引导提示（泛化版）：linkAgentScopes 中出现 secondBrainAllowPaths 未包含的目录时，
-   * 提示用户把目录加入第二大脑索引范围；只提示，绝不代改用户 data.json 配置。
-   */
-  maybeGuideAllowPaths(): void {
-    if (allowPathsGuideShown) return;
-    const s = tryGetSettings() as any;
-    const allow = String(s.secondBrainAllowPaths || '')
-      .split(',')
-      .map((x: string) => x.trim())
-      .filter(Boolean);
-    const missing = getLinkAgentScopes().filter((dir) => !allow.includes(dir));
-    if (missing.length > 0) {
-      allowPathsGuideShown = true;
-      notice(
-        `自动双链已开启：关联范围中的「${missing.join('」「')}」不在第二大脑白名单目录内，候选检索不会命中这些目录，可在第二大脑设置的白名单目录中补充。`,
-        'warning'
-      );
-    }
-  }
-
   /** 卸载清理（定时器/退订/缓冲） */
   destroy(): void {
     if (this.batchTimer) {
@@ -252,6 +251,11 @@ export class LinkAgentWatcher {
       clearTimeout(this.cleanTimer);
       this.cleanTimer = null;
     }
+    if (this.renameTimer) {
+      clearTimeout(this.renameTimer);
+      this.renameTimer = null;
+    }
+    this.pendingRenames = [];
     if (this.sweepTimer) {
       clearInterval(this.sweepTimer);
       this.sweepTimer = null;
@@ -291,7 +295,7 @@ export async function startQueueConsumption(
  * 启动存量补链（ticket 115：域初始化在队列消费之后调用）：
  * 等待索引装载完成后对关联范围内缺 related 的存量笔记批量建链；
  * embedding 不可达 / 无目标时静默；批次进度与完成 toast 亦全程静默（ticket 6：
- * 手动命令 bz-secondbrain-link-all 才按批次通知），串行锁保证与监听批次互斥。
+ * 手动命令 bz-knowledge-link-all 才按批次通知），串行锁保证与监听批次互斥。
  */
 export async function startStartupBackfill(
   agent: LinkAgent,
@@ -306,7 +310,7 @@ export async function startStartupBackfill(
   try {
     const result = await agent.backfillMissingLinks(opts);
     if (result.status === 'done' || result.status === 'unreachable' || result.status === 'no-targets') return;
-    console.warn('[link-agent] 启动补链跳过（自动双链已关闭）');
+    console.warn('[link-agent] 启动补链跳过（自动关联已关闭）');
   } catch (e) {
     console.warn('[link-agent] 启动补链失败', e);
   }

@@ -44,8 +44,7 @@ import {
   openSecondBrainPanel,
   openSecondBrainReference,
   openSecondBrainChat,
-  rebuildSecondBrainLinks,
-  runSecondBrainLinkAll,
+  openSecondBrainWeekly,
   rebuildSecondBrainIndex,
   unloadSecondBrain,
 } from './secondbrain';
@@ -161,11 +160,11 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-secondbrain-open', name: '第二大脑参考', icon: 'zap', callback: () => openSecondBrainReference(getApp()) },
   { id: 'bz-secondbrain-chat', name: '第二大脑对话', icon: 'message-circle', callback: () => openSecondBrainChat(getApp()) },
   // 自动双链（ticket 111）：当前笔记重跑一次关联（正文大改后的手动兜底入口）
-  { id: 'bz-secondbrain-rebuild-links', name: '重跑当前笔记关联', icon: 'link', callback: () => rebuildSecondBrainLinks(getApp()) },
   // 自动双链（ticket 115）：存量未连接笔记手动批量补链（启动自动补链的显式兜底）
-  { id: 'bz-secondbrain-link-all', name: '为未关联笔记批量补链', icon: 'link-2', callback: () => runSecondBrainLinkAll(getApp()) },
   // 重建索引（票 278，原编 276，上游 2026-09-11 首页入口菜单）：全库重建向量索引（函数早已存在，此前无命令入口；与票 173 增量指纹判定互不影响——重建是手动清空重嵌，指纹管自动增量）
   { id: 'bz-secondbrain-rebuild-index', name: '重建索引', icon: 'refresh-cw', callback: () => rebuildSecondBrainIndex(getApp()) },
+  // 本周知识动态（上游 issue 360）：周摘要弹层（聚合层只读，不触向量库）
+  { id: 'bz-secondbrain-weekly', name: '本周知识动态', icon: 'calendar-days', callback: () => openSecondBrainWeekly(getApp()) },
   // 番茄钟（ticket 26-32 新域）
   { id: 'bz-pomodoro-open', name: '番茄钟', icon: 'timer', callback: () => openPomodoro(getApp()) },
   // 首页入口菜单三支（票 288 / 上游 issue 288）：相位敏感动作——开始/停止专注、跳过休息、暂停/继续
