@@ -450,12 +450,12 @@ describe('归物本设置 schema（⚙️ 收敛设置面板，ticket 177）', (
 
   it('桌面端：显示组暴露「默认状态筛选」select（五态，直绑 belongingsDefaultStatus）', () => {
     const schema = belongingSettingsSchema();
-    expect(schema.groups).toHaveLength(3); // 显示 + 记一笔（上游 issue 294）+ 移动端（本地独有）
-    expect(schema.groups[0].name).toBe('显示');
-    const row = schema.groups[0].rows[0] as any;
+    // 批 3c 终态：外观组置顶（issue 246 范式），显示组其后；按名字定位不锁顺序
+    const show = schema.groups.find((g) => g.name === '显示');
+    expect(show).toBeTruthy();
+    const row = show!.rows.find((r) => (r as any).binding?.key === 'belongingsDefaultStatus') as any;
     expect(row.type).toBe('select');
     expect(row.name).toBe('默认状态筛选');
-    expect(row.binding).toMatchObject({ key: 'belongingsDefaultStatus' });
     expect(row.options.map((o: any) => o.value)).toEqual(['', 'using', 'idle', 'sold', 'discard']);
   });
 

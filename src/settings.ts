@@ -381,6 +381,10 @@ export default interface BzSettings {
   /** 🎨 内容首页外观占位（issue 246 同范式）：布局=活动河单卡，主题=米白单卡 */
   homeLayout: string;
   homeSkin: string;
+  /** 🎨 归物本面板布局皮肤（上游外观组范式；当前仅 poster 瑞士大字报） */
+  belSkin: string;
+  /** 🎨 归物本主题（poster ↔ warmwhite 恒定纸面） */
+  belSkinTheme: string;
   /** 🎨 收藏本面板布局皮肤（上游外观组范式；当前仅 default） */
   favoritesSkin: string;
   /** 🎨 收藏本主题（当前仅 linen 亚麻） */
@@ -772,6 +776,8 @@ export const DEFAULT_SETTINGS: BzSettings = {
   // 三类中前三类开 / 默认今天 / 显示时刻 / 预告卡开
   homeLayout: 'default',
   homeSkin: 'cream',
+  belSkin: 'poster',
+  belSkinTheme: 'warmwhite',
   favoritesSkin: 'default',
   favoritesSkinTheme: 'linen',
   favoritesOpenFilter: '',

@@ -4,15 +4,14 @@
  * 历史分类派生 + emoji 分类迁移（issue 231/ADR-0102：内置预设 1226 条退役）
  */
 import { notice } from '../core/notice';
-import { getSettings } from '../core/settings-provider';
 import { enqueueFileTask, jsonFileStore, storageFile } from '../core/storage';
 import { splitEmojiCategory } from './emoji-icon-map';
 import type { BelongingsDatabase } from './types';
 
-/** 数据文件路径（ADR-0009：storagePath 优先，旧 dataFolder 兼容兜底） */
+/** 数据文件路径（ADR-0009）——arch N2 收敛：兜底表达式不再域内复写，
+ *  直接走 core storageFile 单源（storageDir 内含 storagePath 缺省 CONFIG/STORAGE + 尾斜杠 trim） */
 export function getDataFilePath(): string {
-  const s = getSettings() as any;
-  return storageFile('belongings.json', s.storagePath || 'CONFIG/STORAGE');
+  return storageFile('belongings.json');
 }
 
 /** 空数据库结构 */
@@ -86,15 +85,24 @@ export async function loadDatabase(): Promise<BelongingsDatabase> {
 }
 
 /**
+ * belongings.json 落盘形状单源（ADR-0102：categories/categoryIcons 为读取时内存派生段，
+ * 设计上不落盘）。saveDatabase 按此收拢取值；导出供 checkup 字段漂移白名单契约锁引用，
+ * 防白名单与写侧键集漂移（深审 func P2-4 / A1）。
+ */
+export function belongingsSaveShape(database: Pick<BelongingsDatabase, 'version' | 'items'>): {
+  version: string;
+  last_updated: string;
+  items: BelongingsDatabase['items'];
+} {
+  return { version: database.version, last_updated: new Date().toISOString(), items: database.items };
+}
+
+/**
  * 保存数据库（D2 可靠写契约原语 1 收编）：写盘入 core per-path 串行队列（键 =
  * belongings.json 路径）——并发保存按序落盘，杜绝交错写导致的半截/覆盖竞态；
  * 坏文件由 jsonFileStore 留档降级（原语 3）。数据形状与 API 不变。
  */
 export async function saveDatabase(database: BelongingsDatabase): Promise<void> {
-  const saveData = {
-    version: database.version,
-    last_updated: new Date().toISOString(),
-    items: database.items,
-  };
+  const saveData = belongingsSaveShape(database);
   await enqueueFileTask(getDataFilePath(), () => jsonFileStore<any>(getDataFilePath()).write(saveData));
 }
