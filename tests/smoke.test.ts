@@ -79,11 +79,10 @@ const EXPECTED_COMMAND_IDS = [
   'bz-reading-report-open',
   'bz-cinema-open', 'bz-cinema-add', 'bz-cinema-analysis', 'bz-cinema-random-pick', 'bz-cinema-export',
   'bz-cinema-douban-refetch',
-  'bz-review-count', 'bz-review-add-current', 'bz-review-add-current-with-links',
+  'bz-review-add-current',
   // 上游线 P2/P3：复习统计报告 + 快速复制密码
   'bz-review-report', 'bz-encrypt-copy-password',
   // ticket 276：今日已复习列表（点击打开原文，强制阅读模式）
-  'bz-review-today',
   'bz-secondbrain-panel', 'bz-secondbrain-open', 'bz-secondbrain-chat', 'bz-secondbrain-rebuild-links', 'bz-secondbrain-link-all', 'bz-secondbrain-rebuild-index',
   // 游戏库（gameshelf 域，上游 issue 368 移植）：三命令
   'bz-gameshelf-open', 'bz-gameshelf-sync', 'bz-gameshelf-stats',
@@ -161,15 +160,11 @@ describe('bz 骨架冒烟', () => {
     // t2：阅读分析报告 → 阅读数据分析报告
     expect(byId('bz-reading-report-open').name).toBe('阅读分析报告'); // 上游 ADR-0091：报告内嵌书架墙，正名收短
     // ticket 168：复习域单一入口——仅「复习（按数量）」命令保留，10 个旧命令已退役
-    expect(byId('bz-review-count').name).toBe('复习（按数量）');
     // ticket 169：「加入复习计划」加回——editorCallback 注册（命令面板 + 快捷键 + 文档右键待选）
     expect(byId('bz-review-add-current').name).toBe('将当前文档加入复习计划');
     expect(typeof byId('bz-review-add-current').editorCallback).toBe('function');
     // ticket 170：「批量加入复习计划」——当前文档及一级出链一起加入
-    expect(byId('bz-review-add-current-with-links').name).toBe('批量加入复习计划');
-    expect(typeof byId('bz-review-add-current-with-links').editorCallback).toBe('function');
     // ticket 276：今日已复习——独立命令，弹窗罗列当天复习过的文档
-    expect(byId('bz-review-today').name).toBe('今日已复习');
     // f7：第二大脑面板与第二大脑参考区分（不再与功能名歧义）
     expect(byId('bz-secondbrain-panel').name).toBe('第二大脑面板');
     expect(byId('bz-secondbrain-open').name).toBe('第二大脑参考');
@@ -224,7 +219,6 @@ describe('bz 骨架冒烟', () => {
     const cmd1 = registeredCommands.find((c: any) => c.id === 'bz-belongings-add');
     expect(() => cmd1.callback()).not.toThrow();
     // 已实现域：复习（按数量）异步执行，同步调用不抛错（ticket 168：单一入口，其余复习命令已退役）
-    expect(() => registeredCommands.find((c: any) => c.id === 'bz-review-count').callback()).not.toThrow();
     expect(() => registeredCommands.find((c: any) => c.id === 'bz-reading-report-open').callback()).not.toThrow();
   }, 15000);
   it('全部命令回调冒烟：逐个调用覆盖各域懒加载入口（含日记本 init 两个命令）', async () => {

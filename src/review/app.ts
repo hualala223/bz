@@ -5,81 +5,141 @@ import type { App, TFile } from 'obsidian';
 import { notice, notify } from '../core/notice';
 import type { NoticeHandle } from '../core/notice';
 import { getApp } from '../core/app';
-import { getSettings, saveSettings } from '../core/settings-provider';
-import { escapeHtml } from '../core/utils';
-import { FSRS, FSRS_FIRST_INTERVALS, FSRS_FIRST_TEXTS, LADDER_MAX, DEFAULT_W } from './fsrs';
+import { getSettings } from '../core/settings-provider';
+import { FSRS, FSRS_FIRST_TEXTS, scheduleNext, currentR as fsrsCurrentR } from './fsrs';
 import type { Rating } from './fsrs';
 import type { ReviewItem } from './data';
-import { ReviewDataManager, getReviewFilePath, loadFittedParams, saveFittedParams } from './data';
+import { ReviewDataManager } from './data';
+import { loadFittedParams, saveFittedParams, FIT_PARAMS_VERSION, getReviewFilePath, type FittedParams } from './data';
 import { fitFromItems, mergeFittedW } from './fit';
-import { collectOutgoingLinks } from './links';
-import { collectFolderFiles, eligibleCount, selectCountReview, selectOverduePicks, type CountPick, type CountPickKind } from './count';
-import { showNotePreview } from './preview';
+import { DEFAULT_W } from './fsrs';
+import { DEFAULT_R_THRESHOLD, isDueToday, isEarlyDue, roundQueue } from './queue';
+import { computeStats } from './stats';
+import { emitDomainEvent } from '../core/domain-bus';
 
-/** 按数量复习单篇结果（汇总页数据源） */
-export interface CountSessionResult {
-  filePath: string;
-  name: string;
-  kind: CountPickKind;
-  bucket: string | null;
-  correct: number;
-  wrong: number;
-  total: number;
-  accuracy: number;
-  rating: Rating;
-  failed: boolean;
+/** item 5：普通复习离篇宽限期（ms）——持续离篇超过此时长才算中断；测试可注入 */
+export let REVIEW_AWAY_GRACE_MS = 120000;
+export function __setReviewAwayGraceMsForTests(ms: number): void {
+  REVIEW_AWAY_GRACE_MS = ms;
 }
 
-/** 已完成（有答题）篇数 */
-function doneCount(results: CountSessionResult[]): number {
-  return results.filter((r) => r.total > 0).length;
+/** 呈报#38（R3）：普通复习翻篇轮询间隔（ms）——拍板 B：从 1s 降频到 2.5s（2-3 秒档），
+ *  配合「命中才读盘」把大库空耗降下来；120 次 × 2.5s = 300s，超时绝对时长与旧 300×1s 持平 */
+export const REVIEW_POLL_INTERVAL_MS = 2500;
+
+/** A2：AI 就绪权威判据——getAIProvider 试准（同 quiz-panel aiReadyOrGuide 口径，缺配置即抛人话错误）。
+ *  ensureQuiz 无条件 createAI 不校验配置，quiz.ai 恒 truthy 使「!quiz.ai」降级分支死路；
+ *  做题链路各入口以此为准分流普通复习（非破坏式：不改写 quiz-core 单例的 ai 字段）。 */
+async function aiReady(): Promise<boolean> {
+  try {
+    const { getAIProvider } = await import('../core/ai');
+    await getAIProvider();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** F8：队列内时间门禁拒绝的特定错误（updateItem 的 fn 基于磁盘现值判定后抛出）——
+ *  外层 catch 转人话 notice，防与真实写盘错误混淆 */
+export class ReviewGateRejected extends Error {
+  constructor(public readonly waitMins: number) {
+    super(`还未到复习时间（${waitMins}分钟后）`);
+    this.name = 'ReviewGateRejected';
+  }
 }
 
 export const reviewApp = {
   checkInterval: null as ReturnType<typeof setInterval> | null,
   dataManager: null as ReviewDataManager | null,
-  /** 上游线 P1：拟合后的生效权重（无拟合产物 = null 回退 DEFAULT_W） */
-  _fittedW: null as number[] | null,
-  /** 上游线 P1：距上次拟合的评级累计（达 reviewFitEveryN 触发后台重拟合） */
-  _reviewCountSinceFit: 0,
-  _fitRunning: false,
   /** 测试注入：对齐源码 window.__quiz 语义 */
   _quizOverride: null as any | null,
+  /** 连续复习单框通知（同键合并，动态更新消息） */
+  _reviewNotice: null as NoticeHandle | null,
   /** 已通知逾期的笔记路径（ticket 100：diff 记忆集合，避免重复刷屏） */
   _notifiedOverdue: new Set<string>(),
-/** 文件树未渲染重试计数（applyReviewStyles 自愈：抽屉未开/懒渲染时 2s 重试） */
-  _stainRetries: 0,
   /** 逾期常驻通知句柄：同键合并时 notify 返回空操作，留存真句柄供逾期清零时主动收起 */
   _overdueNotice: null as NoticeHandle | null,
-  /** ADR-0116 追加：上次通知展示的逾期篇数（-1=未展示过）——数字自纠的对比基准 */
-  _lastOverdueCount: -1,
   /** ticket 48：已染色/挂徽章的文件路径（移出计划后据此回退；仅提交计划路径 + 曾染色路径，不再全库扫描） */
   _styledPaths: new Set<string>(),
+  /** ADR-0077：最近一次复习的累计计数（每 N 次触发拟合重算） */
+  _reviewCountSinceFit: 0,
+  /** ADR-0077：当前生效的拟合权重（null=用默认 DEFAULT_W） */
+  _fittedW: null as number[] | null,
+  /** issue 361：最近载入的拟合元数据（null=无拟合文件/未加载；统计弹窗展示拟合档位用） */
+  _fitMeta: null as FittedParams | null,
+  /** ADR-0077：拟合运行防重入 */
+  _fitRunning: false,
+  /** P3：reviewLoop 活动轮询句柄（卸载统一清理；插件禁用后不得继续读盘翻篇弹通知） */
+  _reviewLoops: new Set<ReturnType<typeof setInterval>>(),
+  /** item 4：普通复习悬浮迷你评级条句柄（reviewLoop 存续期间挂屏幕底部） */
+  _reviewBar: null as { close: () => void } | null,
+  /** item 5：本轮队列断点（中断/超时可恢复继续） */
+  _pendingRound: null as { items: ReviewItem[]; index: number } | null,
+  /** F9：最近一次全量读盘的条目快照（60s 轮询/染色全量刷时更新）——vault modify 高频路径复用，
+   *  不再每次保存任意 md 都全量读 review.json */
+  _lastItems: null as ReviewItem[] | null,
+
+  /** P3：终止全部 reviewLoop 轮询（unloadReview 调用；幂等） */
+  stopReviewLoops(): void {
+    for (const t of this._reviewLoops) clearInterval(t);
+    this._reviewLoops.clear();
+    this.hideReviewBar();
+    this._pendingRound = null;
+  },
+
+  /** item 4：收起悬浮评级条（幂等） */
+  hideReviewBar(): void {
+    this._reviewBar?.close();
+    this._reviewBar = null;
+  },
 
   async getQuiz(): Promise<any> {
     if (this._quizOverride) return this._quizOverride;
-    return (await import('../quiz')).quizUI;
+    return (await import('./quiz-core')).quizUI;
+  },
+
+  /** 做题家就绪兜底：已初始化但缺 AI → 幂等 ensureQuiz 补建（ensureQuiz 就地写 quizUI.ai，同一单例引用生效） */
+  async quizWithAI(): Promise<any> {
+    const quiz = await this.getQuiz();
+    if (quiz && !quiz.ai) {
+      try {
+        const { ensureQuiz } = await import('./quiz-core');
+        ensureQuiz(getApp());
+      } catch {
+        /* ignore */
+      }
+    }
+    return quiz;
   },
 
   ensure(app: App): void {
     if (!this.dataManager) this.dataManager = new ReviewDataManager(app);
-    // 上游线 P1：启动加载拟合参数（无产物回退默认；fire-and-forget）
-    void this.loadFitParams(app).catch(() => {});
   },
 
-  /** 上游线 P1：加载拟合参数到 _fittedW（无则 null 回退默认） */
+  /** ADR-0077：加载拟合参数到 _fittedW（无则 null 回退默认）；ensureReview 启动时调用。
+   *  issue 361：同时留存 _fitMeta（契约版本/样本数/档位），统计弹窗标注拟合档位用 */
   async loadFitParams(app: App): Promise<void> {
     try {
       const fit = await loadFittedParams(app);
+      this._fitMeta = fit;
       this._fittedW = fit ? mergeFittedW(fit.w) : null;
     } catch (e) {
+      this._fitMeta = null;
       this._fittedW = null;
     }
   },
 
-  /** 上游线 P1：每 N 次复习自动重拟合（全自动定期重算，样本门槛与开关在实现内）。
-   *  markReview 每次评级后调用（count+1）；达阈值且开关开 → 异步后台跑，完成后轻提示。
-   *  样本不足 → 静默保留默认（不提示）。 */
+  /** issue 361：当前拟合档位元数据（无拟合 → null；stats-ui 人话标注「按你的记录定制/简化版」） */
+  fitMeta(): FittedParams | null {
+    return this._fitMeta;
+  },
+
+  /**
+   * ADR-0077：每 N 次复习自动重拟合（全自动定期重算）。
+   * markReview 每次评级后调用（count+1）；达阈值且开关开 → 异步后台跑，完成后轻提示；
+   * 样本不足/失败静默回退默认；防重入。
+   */
   async maybeRunFit(app: App): Promise<void> {
     const s = getSettings() as any;
     if (s.reviewEnableFit === false) return;
@@ -91,17 +151,26 @@ export const reviewApp = {
     try {
       const dm = this.dataManager!;
       const items = await dm.loadItems();
-      const result = fitFromItems(items);
+      // fitFSRSParams 按迭代分片让出主线程（审查修复），await 不再长冻结；本函数仍 fire-and-forget
+      const result = await fitFromItems(items);
       if (result) {
-        await saveFittedParams(app, {
+        // issue 361：契约版本落盘（1=基础八参 / 2=全 19 参数）；
+        // full 以拟合结果档位为准（旧口径 w.length>=19 恒真，分档失真——回归修正）
+        const fitAt = new Date().toISOString();
+        const version = result.fit.full ? FIT_PARAMS_VERSION.FULL : FIT_PARAMS_VERSION.BASIC;
+        const meta: FittedParams = {
           w: result.fit.w,
-          fitAt: new Date().toISOString(),
+          fitAt,
           fitCount: result.count,
-          full: result.fit.w.length >= 19,
-        });
+          full: result.fit.full,
+          version,
+        };
+        await saveFittedParams(app, meta);
+        this._fitMeta = meta;
         this._fittedW = mergeFittedW(result.fit.w);
         notice(`已根据 ${result.count} 条复习记录拟合记忆参数`, 'success');
       }
+      // 样本不足 → 静默保留默认（不提示）
     } catch (e) {
       console.warn('复习参数拟合失败，回退默认:', e);
     } finally {
@@ -109,20 +178,30 @@ export const reviewApp = {
     }
   },
 
-  /** 上游线 P1：获取当前生效权重（拟合参数优先，回退默认） */
+  /** ADR-0077：获取当前生效权重（拟合参数优先，回退默认） */
   currentW(): number[] {
     return this._fittedW || DEFAULT_W;
   },
 
-  /** 上游线 P1：某条目当前记忆保留度 R（FSRS 相位且已复习过才可算；否则 null） */
+  /** ADR-0077：某条目当前记忆保留度 R（FSRS 相位且已复习过才可算；否则 null）——A7 单源 fsrs.currentR */
   currentR(item: ReviewItem): number | null {
-    if (item.phase !== 'fsrs' || !item.stability || !item.lastReviewed) return null;
-    const t = (new Date().getTime() - new Date(item.lastReviewed).getTime()) / 86400000;
-    if (!(t > 0)) return null;
-    return new FSRS(this.currentW()).R(t, item.stability);
+    return fsrsCurrentR(item, this.currentW());
   },
 
-  async markReview(filePath: string, selectedDifficulty: Rating, opts?: { autoPending?: boolean; force?: boolean }): Promise<void> {
+  /** ADR-0077：逾期队列排序 + 每日上限截断。
+   *  R 升序（遗忘风险最高优先，仅可算 R 的条目）→ nextReviewDate 升序。
+   *  ticket 174：移除置顶（用户拍板去掉置顶功能）。 */
+  sortOverdue(items: ReviewItem[], dailyLimit = 0): ReviewItem[] {
+    const sorted = [...items].sort((a, b) => {
+      const rA = this.currentR(a);
+      const rB = this.currentR(b);
+      if (rA !== null && rB !== null && rA !== rB) return rA - rB;
+      return new Date(a.nextReviewDate as string).getTime() - new Date(b.nextReviewDate as string).getTime();
+    });
+    return dailyLimit > 0 ? sorted.slice(0, dailyLimit) : sorted;
+  },
+
+  async markReview(filePath: string, selectedDifficulty: Rating, opts?: { autoPending?: boolean }): Promise<void> {
     const app = getApp();
     this.ensure(app);
     const dm = this.dataManager!;
@@ -138,525 +217,554 @@ export const reviewApp = {
     }
 
     const now = new Date();
-    const nextReview = item.nextReviewDate ? new Date(item.nextReviewDate) : new Date(0);
-    // 时间门仅挡手动路径；按数量复习（force）会选「今天到期/阶段采样」的未来排期文档，复习完成即合法排期
-    if (now < nextReview && !opts?.force) {
-      const diff = nextReview.getTime() - now.getTime();
-      const mins = Math.ceil(diff / 60000);
-      notice(`还未到复习时间（${mins}分钟后）`);
-      return;
-    }
-
     const rating = selectedDifficulty;
-    const currentStage = item.stage;
-    const fsrs = new FSRS(this.currentW()); // 上游线 P1：拟合权重优先（无产物=DEFAULT_W，行为等同）
+    // ADR-0077：优先用拟合权重（个人化记忆曲线），回退默认
+    // 满血 FSRS：调度决策收敛到纯函数 scheduleNext（9 级前爬阶梯、9 级后按 S/D/R 动态，
+    // 不再固定 120 天循环、不再重复 initS 重置记忆参数）
+    const decision = scheduleNext(
+      {
+        stage: item.stage,
+        phase: item.phase,
+        stability: item.stability,
+        difficulty: item.difficulty,
+        lastReviewed: item.lastReviewed,
+        reviewStart: item.reviewStart,
+      },
+      rating,
+      now,
+      this.currentW()
+    );
+    // ticket 100：复习间隔缩放（ADR-0046）——仅 FSRS 动态间隔乘系数；阶梯固定表（含进入点 120d）不受影响
+    const scaleRaw = Number((getSettings() as any).reviewIntervalScale);
+    const scale = decision.phase === 'fsrs' && !decision.enteringFsrs && scaleRaw > 0 ? scaleRaw : 1;
+    const scaledDays = Math.max(0.01, decision.intervalDays * scale);
+    const nextDate = new Date(now.getTime() + scaledDays * 86400000);
 
-    // ===== 阶段 0-9：固定阶梯 =====
-    if (currentStage <= LADDER_MAX) {
-      let targetStage: number;
-      if (rating === 'again') targetStage = Math.max(0, currentStage - 1);
-      else if (rating === 'hard') targetStage = currentStage;
-      else if (rating === 'good') targetStage = currentStage + 1;
-      else targetStage = currentStage + 2; // easy
-      targetStage = Math.max(0, Math.min(targetStage, LADDER_MAX));
-      const nextDate = new Date(now.getTime() + FSRS_FIRST_INTERVALS[targetStage] * 86400000);
-      const enteringFsrs = targetStage >= LADDER_MAX;
-
+    // F8：时间门禁移入 RMW 队列内基于磁盘现值复判——并发双评级时后写者在队内读到已刷新的
+    // 排期即拒（抛 ReviewGateRejected 由外层转人话 notice），不再双写历史。
+    // G1 放行口径不变：R 阈值提前（isEarlyDue）/ 今日到期（isDueToday）均放行，仅未来日历日才拒。
+    try {
       await dm.updateItem(filePath, (it) => {
-        it.stage = targetStage;
-        it.phase = enteringFsrs ? 'fsrs' : 'ladder';
+        const nextReview = it.nextReviewDate ? new Date(it.nextReviewDate) : new Date(0);
+        if (now < nextReview) {
+          const rThreshold = Number((getSettings() as any).reviewRThreshold) || DEFAULT_R_THRESHOLD;
+          if (!isEarlyDue(it, rThreshold, this.currentW()) && !isDueToday(it)) {
+            throw new ReviewGateRejected(Math.ceil((nextReview.getTime() - now.getTime()) / 60000));
+          }
+        }
+        it.stage = decision.stage;
+        it.phase = decision.phase;
+        if (decision.stability !== null) it.stability = decision.stability;
+        if (decision.difficulty !== null) it.difficulty = decision.difficulty;
         it.lastReviewed = now.toISOString();
         it.lastDifficulty = rating;
         it.totalReviews = (it.totalReviews || 0) + 1;
         if (!it.reviewHistory) it.reviewHistory = [];
-        it.reviewHistory.push({ timestamp: now.toISOString(), stage: targetStage + 1, rating });
-        // 进入 FSRS 阶段时，用对应评分初始化 S
-        if (enteringFsrs) {
-          it.stability = fsrs.initS(rating);
-          it.difficulty = rating === 'again' ? fsrs.w[4] : 0.3;
+        const entry: Record<string, unknown> = { timestamp: now.toISOString(), stage: decision.historyStage, rating };
+        // ADR-0077：S/D 记入历史（下游拟合配对依赖上一条含 stability/difficulty）
+        if (decision.historyStability !== null) {
+          entry.stability = decision.historyStability;
+          entry.difficulty = decision.historyDifficulty;
         }
+        if (decision.R !== null) entry.R = Math.round(decision.R * 100);
+        it.reviewHistory.push(entry as (typeof it.reviewHistory)[number]);
         it.nextReviewDate = nextDate.toISOString();
-        if (enteringFsrs) it.completed = false; // 进入 FSRS 不算完成
+        if (decision.enteringFsrs) it.completed = false; // 进入 FSRS 不算完成
 
         // ticket 098：做题会话自动评级未通过/通过联动待重做标记；其余路径 good/easy 清（ADR-0044）
         if (opts?.autoPending) it.pendingRedo = rating === 'again' || rating === 'hard';
         else if (rating === 'good' || rating === 'easy') it.pendingRedo = false;
       });
-      notice(enteringFsrs ? `进入深度复习，${FSRS_FIRST_TEXTS[targetStage]}后复习` : `${FSRS_FIRST_TEXTS[targetStage]}后复习`, 'success');
-      // 上游线 P1：评级也累计拟合计数（含阶梯阶段；样本过滤在 fit.ts 内做）。fire-and-forget 防卡评级路径
-      void this.maybeRunFit(getApp());
-      return;
+    } catch (e) {
+      if (e instanceof ReviewGateRejected) {
+        notice(e.message);
+        return;
+      }
+      throw e;
     }
 
-    // ===== 阶段 10+：满血 FSRS =====
-    const S = item.stability || 1;
-    const D = item.difficulty || 0.3;
-    const t = (now.getTime() - new Date(item.lastReviewed || item.reviewStart).getTime()) / 86400000;
-    const R = fsrs.R(t, S);
-    const result = fsrs.nextInterval(S, D, rating, R);
-    // ticket 100：复习间隔缩放（ADR-0046，用户拍板解冻）——FSRS 相位出题天数 × 系数；阶梯阶段固定表不受影响
-    const scale = (getSettings() as any).reviewIntervalScale ?? 1;
-    const scaledDays = Math.max(0.01, result.days * (Number(scale) > 0 ? Number(scale) : 1));
-    const nextDate = new Date(now.getTime() + scaledDays * 86400000);
-
-    await dm.updateItem(filePath, (it) => {
-      it.stability = Math.round(result.S * 100) / 100;
-      it.difficulty = Math.round(result.D * 100) / 100;
-      it.lastReviewed = now.toISOString();
-      it.lastDifficulty = rating;
-      it.totalReviews = (it.totalReviews || 0) + 1;
-      if (!it.reviewHistory) it.reviewHistory = [];
-      it.reviewHistory.push({ timestamp: now.toISOString(), stage: currentStage + 1, rating, stability: Math.round(result.S * 100) / 100, R: Math.round(R * 100) });
-      it.nextReviewDate = nextDate.toISOString();
-
-      // ticket 098：做题会话自动评级未通过/通过联动待重做标记；其余路径 good/easy 清（ADR-0044）
-      if (opts?.autoPending) it.pendingRedo = rating === 'again' || rating === 'hard';
-      else if (rating === 'good' || rating === 'easy') it.pendingRedo = false;
-    });
-
-    const days = Math.round(scaledDays);
-    const rPct = Math.round(R * 100);
-    notice(`R=${rPct}% → 下次复习：${days > 0 ? days + '天' : '1天'}后`, 'success');
-    // 上游线 P1：fire-and-forget 后台拟合（不 await，避免大历史时卡评级路径）
+    if (decision.enteringFsrs) {
+      notice(`进入深度复习，${FSRS_FIRST_TEXTS[decision.stage]}后复习`, 'success');
+    } else if (decision.phase === 'ladder') {
+      notice(`${FSRS_FIRST_TEXTS[decision.stage]}后复习`, 'success');
+    } else {
+      const days = Math.round(scaledDays);
+      const rPct = Math.round((decision.R || 0) * 100);
+      notice(`R=${rPct}%，下次复习：${days > 0 ? days + '天' : '1天'}后`, 'success');
+    }
+    // ADR-0077：评级也累计拟合计数（含阶梯阶段；样本过滤在 fit.ts 内做）。
+    // fire-and-forget：计数在入口同步累加，拟合自防重入；不 await 避免大历史时卡评级路径
     void this.maybeRunFit(getApp());
+    // 行为流（issue 261）：评分入小橘行为流（review:rated，域事件总线；未装小橘时订阅端静默）
+    emitDomainEvent('review', { kind: 'rated', title: item.name || filePath, rating });
   },
 
-  /** 准确率 → 难度评级 */
-  accuracyToRating(accuracy: number): Rating {
-    if (accuracy >= 90) return 'easy';
-    if (accuracy >= 70) return 'good';
-    if (accuracy >= 50) return 'hard';
-    return 'again';
+  /** 跳转逾期（bz-review-start/overdue 命令入口）：完整复习流程 = startRoundSprint */
+  async autoJumpOverdue(): Promise<void> {
+    await this.startRoundSprint();
   },
 
-  /** 重做出题（ADR-0044/Q7-②）：清空旧题 → ensureQuestions 全新生成；失败或空题回退剩余错题
-   *  ticket 099：与 batchGenerateQuestions 对齐补 notePath/_index（renderModal 需要；缺失曾致 split 崩溃） */
+  /** 待重做条目（文件存在、未完成；按进入顺序 = lastReviewed 升序 FIFO） */
+  pendingRedoItems(items: ReviewItem[]): ReviewItem[] {
+    return items
+      .filter((i) => i.pendingRedo && !i.isCompleted && i.file)
+      .sort(
+        (a, b) =>
+          new Date(a.lastReviewed || a.reviewStart).getTime() - new Date(b.lastReviewed || b.reviewStart).getTime()
+      );
+  },
+  /** 重做出题（ADR-0044/Q7-②）：清空旧题 → ensureQuestions 全新生成；失败或空题回退剩余错题。
+   *  A1：异常与空题分支统一把存量错题写回题库——旧题只换不丢（旧实现清空后异常/空题不回写，
+   *  「答错的题留在题库留给下次」的积累池会静默丢失） */
   async regenerateQuestions(filePath: string): Promise<any[]> {
     const quiz: any = await this.getQuiz();
     if (!quiz || !quiz.ai) return [];
     const leftover = (await quiz.manager.getQuestionsForNote(getApp(), filePath)) || [];
     await quiz.manager.saveQuestionsForNote(getApp(), filePath, []);
-    await quiz.ensureQuestions([filePath]);
+    try {
+      await quiz.ensureQuestions([filePath]);
+    } catch {
+      // A1/新-5：AI 失败不再让旧题停在「已清空」态——存量错题原样写回，会话走「暂无题目，已跳过」
+      if (leftover.length) await quiz.manager.saveQuestionsForNote(getApp(), filePath, leftover);
+      return [];
+    }
     const fresh = (await quiz.manager.getQuestionsForNote(getApp(), filePath)) || [];
+    if (!fresh.length && leftover.length) {
+      // 空题分支同口径：写回题库（磁盘与会话两侧都保有剩余错题）
+      await quiz.manager.saveQuestionsForNote(getApp(), filePath, leftover);
+    }
     const picked = fresh.length ? fresh : leftover;
     return picked.map((q: any, i: number) => ({ ...q, notePath: filePath, _index: i }));
   },
 
-/** 按数量复习（ticket 02）：候选统计（篇数弹窗上限与空态） */
-  async countStats(): Promise<{ folder: string; files: string[]; available: number }> {
+  /** 批量生成题目（返回 {filePath: questions[]} 映射）：先快照存量题再清库触发重出。
+   *  A1：生成成功才覆盖写新题，失败/空篇把存量题原样写回（saveQuestionsForNote 内 mutateQuiz
+   *  RMW 合并，参照 quiz-core session「生成后合并」形态）——AI 整体失败/逐篇失败均不再丢存量题 */
+  async batchGenerateQuestions(items: ReviewItem[]): Promise<Record<string, any[]>> {
+    const quiz: any = await this.getQuiz();
+    if (!quiz || !quiz.ai || !(await aiReady())) {
+      console.warn('做题家未初始化（缺少 AI）');
+      notify('做题家未初始化（缺少 AI），已改用普通复习', { type: 'warning', dedupeKey: 'review-quiz-ai' });
+      return {};
+    }
     const app = getApp();
-    this.ensure(app);
-    const settings = getSettings() as any;
-    const folder = (settings.reviewCountFolder || '卡片盒/笔记盒').trim();
-    const files = collectFolderFiles(app, folder);
-    const items = await this.dataManager!.loadItems();
-    return { folder, files, available: eligibleCount(files, items, new Date()) };
-  },
-
-  /** 按数量复习（ticket 02 骨架）：选择安排 → 逐篇做题 → 正确率；排期写入 T03 接入 */
-  async startCountSession(count: number): Promise<void> {
-    const app = getApp();
-    this.ensure(app);
-    const stats = await this.countStats();
-    if (!stats.available) {
-      notice(`「${stats.folder}」下没有可复习的笔记`, 'warning');
-      return;
+    const leftovers = new Map<string, any[]>();
+    for (const item of items) {
+      const cur = (await quiz.manager.getQuestionsForNote(app, item.filePath)) || [];
+      leftovers.set(item.filePath, cur);
+      await quiz.manager.saveQuestionsForNote(app, item.filePath, []); // 清库只为触发 ensureQuestions 重出
     }
-    const n = Math.min(Math.max(1, Math.floor(count) || 1), stats.available);
-    if (n !== count) notice(`本次共 ${n} 篇（可用 ${stats.available} 篇）`, 'info');
-    const picks = selectCountReview(stats.files, await this.dataManager!.loadItems(), n, new Date());
-    if (!picks.length) {
-      notice('没有可复习的笔记', 'warning');
-      return;
-    }
-    const s = getSettings() as any;
-    if (s && s.reviewCountLastInput !== n) {
-      s.reviewCountLastInput = n;
-      await saveSettings();
-    }
-    const quiz = await this.ensureQuizReady();
-    if (!quiz) {
-      notice('AI 服务未配置，无法按数量复习', 'warning');
-      return;
-    }
-    await this.countReviewLoop(picks, 0);
-  },
-
-  /** 做题家懒加载（统一出口，ticket 168）：设置里配了 AI 但本会话还没初始化过做题家时 quiz.ai 为 null
-   *  （ensureQuiz 幂等：AI 注入）；失败/未配置返回 null。手动按数量与「去复习」会话共用。 */
-  async ensureQuizReady(): Promise<any | null> {
-    let quiz: any = null;
     try {
-      quiz = await this.getQuiz();
-    } catch {
-      /* ignore */
+      await quiz.ensureQuestions(items.map((i) => i.filePath));
+    } catch (e) {
+      // A1：整体异常也要回收——已清空的篇目把存量题写回后再上抛（ensureBatch 兜底为 {}）
+      for (const item of items) {
+        const leftover = leftovers.get(item.filePath) || [];
+        if (leftover.length) await quiz.manager.saveQuestionsForNote(app, item.filePath, leftover);
+      }
+      throw e;
     }
-    if (quiz && !quiz.ai) {
-      try {
-        const { ensureQuiz } = await import('../quiz');
-        ensureQuiz(getApp());
-        quiz = await this.getQuiz();
-      } catch {
-        /* ignore */
+    const out: Record<string, any[]> = {};
+    for (const item of items) {
+      const qs = await quiz.manager.getQuestionsForNote(app, item.filePath);
+      if (qs && qs.length) {
+        out[item.filePath] = qs.map((q: any, i: number) => ({
+          ...q,
+          notePath: item.filePath,
+          _index: i,
+        }));
+      } else {
+        // A1：该篇生成失败/空 → 存量题写回（RMW 基于磁盘现值合并，失败篇保留现值）
+        const leftover = leftovers.get(item.filePath) || [];
+        if (leftover.length) await quiz.manager.saveQuestionsForNote(app, item.filePath, leftover);
       }
     }
-    return quiz && quiz.ai ? quiz : null;
+    return out;
   },
 
-  /** 去复习会话（ticket 168/切片 03）：逾期常驻通知「去复习」→ 直接进入按数量复习会话。
-   *  选择 = 全 vault 逾期（任意目录，见 count.ts selectOverduePicks），
-   *  篇数 = min(逾期数, 每日复习上限||∞)，超限提示剩余留到下次；复用 countReviewLoop 与汇总页。 */
-  async startOverdueCountSession(): Promise<void> {
+  /** 单条做题冲刺（点队列到期卡片）：该篇直接进入做题会话。
+   *  呈报#4（R2）拍板「提示版」：整轮复习（普通轮/做题会话）进行中 → 拦截并给一句提示，
+   *  不再无声忽略（forceQuiz 开的原路径会静默开第二个会话与普通轮并行），也不自动收旧轮。 */
+  async startSingleSprint(item: ReviewItem): Promise<void> {
+    if (this._reviewLoops.size > 0) {
+      notice('本轮复习进行中，先完成当前轮次再做单条');
+      return;
+    }
+    const { uiManager } = await import('./index');
+    if (uiManager?.inSprint) {
+      notice('本轮复习进行中，先完成当前轮次再做单条');
+      return;
+    }
     const app = getApp();
     this.ensure(app);
-    const items = await this.dataManager!.loadItems();
-    const overdueCount = items.filter((i) => i.isOverdue && !i.isCompleted && !i.isMissing).length;
-    const picks = selectOverduePicks(items, new Date(), Number((getSettings() as any).reviewDailyLimit) || 0);
-    if (!picks.length) {
+    // 行为流（issue 261）：开始复习入小橘行为流（review:started）
+    emitDomainEvent('review', { kind: 'started' });
+    const quiz: any = await this.quizWithAI();
+    if (!quiz || !quiz.ai || !(await aiReady())) {
+      // A2：做题家不可用（getAIProvider 试准——ensureQuiz 无条件 createAI 不校验配置）：
+      // 降级为普通复习（打开笔记等自评），不再进做题链路空转一圈
+      notify('做题家未初始化，改用普通复习', { type: 'warning', dedupeKey: 'review-quiz-ai' });
+      await this.reviewLoop([item], 0);
+      return;
+    }
+    // 单条：取现成题（无题则重生成）；无题 → 会话内跳过提示
+    await this.runSprintSession([item], 'single');
+  },
+
+  /** 开始本轮（队列视图「开始本轮」）：待重做优先 → 逾期队列 → 做题/普通分流。
+   *  呈报#4（R2）对称面：做题会话进行中 → 拦截并提示（否则 reviewLoop 与冲刺静默并行，
+   *  悬浮评级条与题面同屏互扰）；单条做题防抖（sprintStarting in-flight）不受影响。 */
+  async startRoundSprint(): Promise<void> {
+    const { uiManager } = await import('./index');
+    if (uiManager?.inSprint) {
+      notice('做题冲刺进行中，先结束当前会话再开始本轮');
+      return;
+    }
+    const app = getApp();
+    this.ensure(app);
+    // 行为流（issue 261）：开始本轮复习入小橘行为流（review:started）
+    emitDomainEvent('review', { kind: 'started' });
+    let items = await this.dataManager!.loadItems();
+    const pend = this.pendingRedoItems(items);
+    if (pend.length && getSettings().forceQuizForReview) {
+      const quiz: any = await this.quizWithAI();
+      if (quiz && quiz.ai && (await aiReady())) {
+        await this.runSprintSession(pend, 'redo');
+        // 重做会话结束后重新读盘：pendingRedo 已清的 = 通过集（会话内 updateItem 落盘）
+        const fresh = await this.dataManager!.loadItems();
+        const passedSet = new Set(
+          fresh.filter((i) => pend.some((p) => p.filePath === i.filePath) && !i.pendingRedo).map((i) => i.filePath)
+        );
+        if (passedSet.size) items = fresh.filter((i) => !passedSet.has(i.filePath));
+        else items = fresh; // 无通过也刷新（会话内可能写过排期）
+      } else {
+        notify('做题家未初始化，跳过待重做队列', { type: 'warning', dedupeKey: 'review-quiz-ai' });
+      }
+    }
+
+    // item 6/9：开始本轮与三区列同口径（roundQueue 纯函数）——
+    // 逾期 ∪ R 阈值提前 ∪ 今日到期（今日到期时刻未到 = 允许提前开始今天全部）
+    const rThreshold = Number((getSettings() as any).reviewRThreshold) || DEFAULT_R_THRESHOLD;
+    const round = roundQueue(items, rThreshold, this.currentW());
+    if (!round.length) {
       notice('没有逾期笔记', 'success');
       return;
     }
-    if (picks.length < overdueCount) {
-      notice(`本轮复习 ${picks.length} 篇，剩余 ${overdueCount - picks.length} 篇留到下次`, 'info');
+    // item 9：纳入了「今日到期但时刻未到」的篇目 → 明确反馈
+    const earlyToday = round.filter((i) => !i.isOverdue && !isEarlyDue(i, rThreshold, this.currentW()));
+    if (earlyToday.length) {
+      notice(`今日到期 ${earlyToday.length} 篇已提前纳入本轮`, 'info');
     }
-    const quiz = await this.ensureQuizReady();
-    if (!quiz) {
-      notice('AI 服务未配置，无法按数量复习', 'warning');
-      return;
+    const dailyLimit = Number((getSettings() as any).reviewDailyLimit) || 0;
+    const limited = this.sortOverdue(round, dailyLimit);
+    if (limited.length < round.length) {
+      notice(`本轮复习 ${limited.length} 篇，剩余 ${round.length - limited.length} 篇留到下次`, 'info');
     }
-    await this.countReviewLoop(picks, 0);
-  },
 
-  /** 按数量复习逐篇循环（ticket 02/05）：进篇逐篇出题 → 单篇做题 → 收集结果 → 末篇/结束进汇总页 */
-  async countReviewLoop(picks: CountPick[], index: number, results: CountSessionResult[] = []): Promise<void> {
-    const app = getApp();
-    this.ensure(app);
-    if (index >= picks.length) {
-      await this.showCountSummary(picks, results);
+    if (!getSettings().forceQuizForReview) {
+      await this.reviewLoop(limited, 0);
       return;
     }
-    const pick = picks[index];
-    const file = app.vault.getAbstractFileByPath(pick.filePath) as TFile | null;
-    if (!file) {
-      await this.countReviewLoop(picks, index + 1, results);
-      return;
-    }
-    // 逐篇出题：复用重做链路（清旧题 → AI 全新生成 → 补 notePath/_index）；失败跳过该篇
-    const questions = await this.regenerateQuestions(pick.filePath);
-    if (!questions.length) {
-      // 区分原因：文档内容为空（被 ensureQuestions 的 content.trim() 排除，无任何报错通知）→ 明确提示，避免误判为 AI 异常
-      let contentEmpty = false;
-      try {
-        contentEmpty = !(await app.vault.read(file)).trim();
-      } catch {
-        contentEmpty = true;
-      }
-      notice(
-        contentEmpty
-          ? `「${file.basename}」内容为空，无法出题，已跳过`
-          : `「${file.basename}」出题失败，已跳过`,
-        'warning'
-      );
-      await this.countReviewLoop(picks, index + 1, results);
-      return;
-    }
-    const isLast = index >= picks.length - 1;
-    const out = await this.runCountItem(pick, file, questions, isLast ? '查看汇总' : '下一篇');
-    if (out === null) {
-      await this.showCountSummary(picks, results); // 用户提前结束：汇总已完成部分
-      return;
-    }
-    results.push(out);
-    await this.countReviewLoop(picks, index + 1, results);
-  },
-
-  /** 单篇做题会话（ticket 05）：做题 → 排期写入 → 结果卡（查看原文档/下一篇/结束）
-   *  返回该篇结果；「结束这次复习」返回 null（不终结会话弹窗，由调用方决定收尾）。 */
-  async runCountItem(pick: CountPick, file: TFile, questions: any[], nextLabel: string, redoSemantic: boolean = false): Promise<CountSessionResult | null> {
-    const app = getApp();
-    const quiz = await this.getQuiz();
-    return new Promise((resolve) => {
-      quiz.startReviewSession({
-        questions,
-        // 按数量复习：多选徽标不提示正确选项数（hideOptionCount）
-        hideOptionCount: true,
-        onComplete: async (q: any) => {
-          const rating = this.accuracyToRating(q.accuracy);
-          await this.applyCountScheduling(pick, file.basename, rating, redoSemantic);
-          const result: CountSessionResult = {
-            filePath: pick.filePath,
-            name: file.basename,
-            kind: pick.kind,
-            bucket: pick.bucket,
-            correct: q.correct,
-            wrong: q.wrong,
-            total: q.total,
-            accuracy: q.accuracy,
-            rating,
-            failed: rating === 'again' || rating === 'hard',
-          };
-          const popup = quiz.popup;
-          if (!popup) {
-            resolve(result); // 弹窗被关闭（如 ESC 结算）：本篇已结算，继续流程
-            return;
-          }
-          popup.innerHTML = this.buildCountResultCard(pick, file.basename, q, rating, nextLabel);
-          // 查看原文档（T04）：内嵌预览弹层，不推进流程；关闭后回到结果卡
-          popup.querySelector('#quiz-view-note')!.addEventListener('click', () => {
-            void showNotePreview(app, pick.filePath, file.basename);
-          });
-          const action = await new Promise<string>((resolveAction) => {
-            popup.querySelector('#quiz-next-note')!.onclick = () => resolveAction('next');
-            popup.querySelector('#quiz-end-review')!.onclick = () => resolveAction('end');
-          });
-          if (action === 'end') {
-            resolve(null);
-            return;
-          }
-          resolve(result);
-        },
-      });
-    });
-  },
-
-  /** 排期写入（T03）：普通文档（逾期/今天到期/新文件/阶段采样）首次评级写排期 + autoPending（<70% 置待重做）；
-   *  新文件先加入 review.json 再写排期；待重做/重做语义——≥70%（一般/简单）仅清标记不写排期，<70% 保持待重做（ADR-0044）。 */
-  async applyCountScheduling(pick: CountPick, name: string, rating: Rating, redoSemantic: boolean = false): Promise<void> {
-    const app = getApp();
-    this.ensure(app);
-    const dm = this.dataManager!;
-    const items = await dm.loadItems();
-    const item = items.find((i) => i.filePath === pick.filePath);
-    const failed = rating === 'again' || rating === 'hard';
-    console.warn('[bz/sched] 进入排期写入', {
-      kind: pick.kind, filePath: pick.filePath, hasItem: !!item, redoSemantic, itemsCount: items.length,
-      reviewFile: getReviewFilePath(),
-    });
+    let quiz: any = null;
     try {
-      if (redoSemantic || pick.kind === 'redo') {
-        if (item && !failed) {
-          await dm.updateItem(pick.filePath, (it) => {
+      quiz = await this.quizWithAI();
+    } catch {
+      /* ignore */
+    }
+    if (!quiz || !quiz.ai || !(await aiReady())) {
+      // A2：AI 未配置（getAIProvider 抛）→ 走设计的普通复习降级，不做题链路空转
+      notify('做题家未初始化，已改用普通复习', { type: 'warning', dedupeKey: 'review-quiz-ai' });
+      await this.reviewLoop(limited, 0);
+      return;
+    }
+    // 直接进做题界面（题在 session 内懒批量生成：首篇 fetch 时触发整轮后台生成，
+    // 界面立即出现 + 中心 loading「正在准备题目」——不在进 session 前同步干等 AI）
+    await this.runSprintSession(limited, 'round');
+  },
+
+  /**
+   * 统一冲刺会话驱动：把队列交给 UI 层 SprintSession 渲染，本层只提供
+   * 取题/评级写盘回调。会话结束（done/quit/fail）后刷新列表与染色。
+   *  - round/single：通过 → markReview autoPending；未通过 → markReview autoPending + 开笔记
+   *  - redo：通过 → 仅清 pendingRedo（ADR-0044 不写 FSRS）；未通过 → 开笔记（保持待重做）
+   */
+  async runSprintSession(items: ReviewItem[], mode: 'round' | 'single' | 'redo'): Promise<void> {
+    const app = getApp();
+    const { uiManager } = await import('./index');
+    if (!uiManager) return;
+
+    // item 8：结算屏「连续 N 天」——进会话时算好 streak 传入
+    let streakDays = 0;
+    try {
+      streakDays = computeStats(await this.dataManager!.loadItems()).streak;
+    } catch {
+      /* ignore */
+    }
+
+    const quiz: any = await this.getQuiz();
+    // 懒批量：首篇 fetch 触发整轮后台生成；后续篇目直接读已生成结果
+    // （进 session 即出界面 + loading，不在进 session 前同步干等 AI）
+    let batchStarted = false;
+    let batchMap: Record<string, any[]> | null = null;
+    const ensureBatch = async (): Promise<void> => {
+      if (batchStarted) return;
+      batchStarted = true;
+      try {
+        batchMap = await this.batchGenerateQuestions(items);
+      } catch {
+        batchMap = {};
+      }
+    };
+    await uiManager.startSprint({
+      queue: items,
+      mode,
+      quiz,
+      streakDays,
+      fetchQuestions: async (item) => {
+        // 现成题直接读（single：现成无则重新生成；redo：重新生成）
+        const qs = await quiz?.manager?.getQuestionsForNote(app, item.filePath);
+        if (qs && qs.length) {
+          return qs.map((q: any, i: number) => ({ ...q, notePath: item.filePath, _index: i }));
+        }
+        if (!quiz?.ai) return null;
+        if (mode === 'round') {
+          // round：懒批量——首篇现场触发生成（本篇在批内），后台批完前先等本篇
+          await ensureBatch();
+          const mapped = batchMap?.[item.filePath];
+          if (mapped && mapped.length) {
+            return mapped;
+          }
+          return null; // 本篇生成失败/空 → 跳过（runNext 已有空题跳过语义）
+        }
+        const fresh = await this.regenerateQuestions(item.filePath);
+        return fresh.length ? fresh : null;
+      },
+      onPassed: async (item, rating, entry) => {
+        if (mode === 'redo') {
+          await this.dataManager!.updateItem(item.filePath, (it) => {
             it.pendingRedo = false;
           });
-          console.warn('[bz/sched] redo 清标记');
+          return undefined;
         }
-      } else if (item) {
-        await this.markReview(pick.filePath, rating, { autoPending: true, force: true });
-        console.warn('[bz/sched] 老条目 markReview 完成');
-      } else {
-        // 新文件：先入计划（首次评级 = 唯一排期来源，ADR-0044）
-        try {
-          await dm.addItem(pick.filePath, name);
-          console.warn('[bz/sched] 新文件 addItem 完成');
-        } catch (e) {
-          /* 并发已加入 → 忽略 */
-          console.warn('[bz/sched] addItem 已存在/忽略', e);
+        await this.markReview(item.filePath, rating as Rating, { autoPending: true });
+        // E3：复用本次刚读的 fresh 透传给染色（applyReviewStyles 支持可选 items，省一次全量读盘）
+        const fresh = await this.dataManager!.loadItems();
+        await this.applyReviewStyles(app, undefined, fresh);
+        // 返回写盘后的真实排期（markReview 内部 updateItem 改的是新 load 的对象，item 快照不更新）。
+        // G1：检测是否真正写盘——markReview 被拒（条目并发删除/已完成/时间门禁）时 lastReviewed
+        // 不更新，返回 undefined 让会话不展示假间隔（不落回快照旧排期）
+        const updated = fresh.find((i) => i.filePath === item.filePath);
+        if (!updated || updated.lastReviewed !== item.lastReviewed) return undefined;
+        return updated.nextReviewDate || undefined;
+      },
+      onFailed: async (item, rating, entry) => {
+        if (mode !== 'redo') {
+          await this.markReview(item.filePath, rating as Rating, { autoPending: true });
+          await this.applyReviewStyles(app);
         }
-        await this.markReview(pick.filePath, rating, { autoPending: true, force: true });
-        console.warn('[bz/sched] 新文件 markReview 完成');
-      }
-    } catch (e) {
-      console.error('[bz/sched] 排期写入异常', e);
-    }
+        // 打开原文（复习此笔记语义）
+        const file = app.vault.getAbstractFileByPath(item.filePath);
+        if (file) {
+          const leaf = app.workspace.getLeaf(false);
+          await leaf.openFile(file as TFile);
+        }
+      },
+    });
+    // 会话结束：回队列 + 染色 + 通知（done 全清）
+    await this.refreshPanel();
     await this.applyReviewStyles(app);
   },
 
-  /** 按数量复习汇总页（ticket 05）：总正确率 + 每篇一行（正确率/查看原文档/重做本篇；未通过标红） */
-  async showCountSummary(picks: CountPick[], results: CountSessionResult[]): Promise<void> {
-    const quiz = await this.getQuiz();
-    if (!quiz.popup) return;
-    const done = results.filter((r) => r.total > 0);
-    const totalCorrect = done.reduce((s, r) => s + r.correct, 0);
-    const totalQ = done.reduce((s, r) => s + r.total, 0);
-    const acc = totalQ > 0 ? Math.round((totalCorrect / totalQ) * 100) : 0;
-    quiz.popup.innerHTML = this.buildCountSummary(picks, results, acc);
-    quiz.popup.querySelectorAll('#count-summary-view').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const path = (btn as HTMLElement).dataset.path || '';
-        const name = (btn as HTMLElement).dataset.name || '';
-        void showNotePreview(getApp(), path, name);
-      });
-    });
-    quiz.popup.querySelectorAll('#count-summary-redo').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const idx = Number((btn as HTMLElement).dataset.idx);
-        const pk = picks[idx];
-        if (pk) void this.countRedoOne(pk, idx, picks, results);
-      });
-    });
-    quiz.popup.querySelector('#quiz-end-summary')!.addEventListener('click', () => {
-      quiz.endReviewSession();
-    });
-  },
 
-  /** 汇总页模板：总正确率 + 每篇一行；未完成篇显示「已跳过」 */
-  buildCountSummary(picks: CountPick[], results: CountSessionResult[], acc: number): string {
-    const byPath = new Map(results.map((r) => [r.filePath, r]));
-    const rows = picks
-      .map((p, idx) => {
-        const r = byPath.get(p.filePath);
-        const name = r ? r.name : (p.filePath.split('/').pop() || '').replace(/\.md$/, '');
-        if (!r) {
-          return `
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--background-modifier-border);">
-              <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);">${name}</div>
-              <span style="font-size:12px;color:var(--text-muted);flex-shrink:0;">已跳过</span>
-              <button id="count-summary-view" data-path="${p.filePath}" data-name="${name}" style="flex-shrink:0;padding:4px 10px;border:none;border-radius:6px;background:var(--background-secondary);color:var(--text-normal);cursor:pointer;font-size:12px;">查看原文档</button>
-            </div>`;
-        }
-        const color = r.failed ? '#ff4757' : '#2ed573';
-        const status = r.failed ? '未通过' : '通过';
-        return `
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--background-modifier-border);">
-            <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-normal);">🎯 ${name}</div>
-            <span style="font-size:13px;color:var(--text-muted);flex-shrink:0;">${r.correct}/${r.total}（${r.accuracy}%）</span>
-            <span style="font-size:12px;color:${color};flex-shrink:0;">${status}</span>
-            <button id="count-summary-view" data-path="${p.filePath}" data-name="${name}" style="flex-shrink:0;padding:4px 10px;border:none;border-radius:6px;background:var(--background-secondary);color:var(--text-normal);cursor:pointer;font-size:12px;">查看原文档</button>
-            <button id="count-summary-redo" data-idx="${idx}" style="flex-shrink:0;padding:4px 10px;border:none;border-radius:6px;background:var(--interactive-accent);color:var(--text-on-accent);cursor:pointer;font-size:12px;">重做本篇</button>
-          </div>`;
-      })
-      .join('');
-    return `
-      <div style="padding:24px;">
-        <div style="font-size:18px;font-weight:600;margin-bottom:4px;color:var(--text-normal);">📊 复习汇总</div>
-        <div style="font-size:32px;font-weight:700;margin:8px 0 16px;color:var(--text-normal);">${acc}%</div>
-        <div style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">总正确率（已完成 ${doneCount(results)}/${picks.length} 篇）</div>
-      </div>
-      <div style="padding:0 24px;">${rows || '<div style="font-size:13px;color:var(--text-muted);padding:8px 0;">未完成任何复习</div>'}</div>
-      <div style="padding:16px 24px 24px;">
-        <button id="quiz-end-summary" style="display:block;width:100%;padding:10px;border:none;border-radius:6px;background:var(--interactive-accent);color:var(--text-on-accent);cursor:pointer;font-size:13px;font-weight:500;">结束这次复习</button>
-      </div>
-    `;
-  },
-
-  /** 重做本篇（ticket 05）：重新出题单篇重做（重做语义——通过清标记不写排期、未通过保持待重做），完成后刷新汇总行 */
-  async countRedoOne(pick: CountPick, idx: number, picks: CountPick[], results: CountSessionResult[]): Promise<void> {
-    const app = getApp();
-    const quiz = await this.getQuiz();
-    const file = app.vault.getAbstractFileByPath(pick.filePath) as TFile | null;
-    if (!file) return;
-    const questions = await this.regenerateQuestions(pick.filePath);
-    if (!questions.length) {
-      notice('重做失败：无题目可用', 'warning');
-      return;
-    }
-    const out = await this.runCountItem(pick, file, questions, '返回汇总', true);
-    if (out === null) {
-      quiz.endReviewSession(); // 重做中点「结束这次复习」→ 会话结束
-      return;
-    }
-    results[idx] = out;
-    await this.showCountSummary(picks, results);
-  },
-
-  /** 按数量复习结果卡：kind 标注 + 正确率 + 查看原文档/下一篇/结束 */
-  buildCountResultCard(pick: CountPick, name: string, results: any, rating: Rating, nextLabel: string): string {
-    const ratingNames: Record<string, string> = { again: '忘了', hard: '困难', good: '一般', easy: '简单' };
-    const tagColors: Record<string, string> = { again: '#ff4757', hard: '#ff9f43', good: '#2ed573', easy: '#7bed9f' };
-    const kindTexts: Record<string, string> = { redo: '待重做', overdue: '逾期', 'due-today': '今天到期', new: '新文件', stage: '复习' };
-    return `
-      <div style="text-align:center;padding:24px;">
-        <div style="font-size:18px;font-weight:600;margin-bottom:16px;color:var(--text-normal);">🎯 ${name.replace(/^《|》$/g, '')}</div>
-        <div style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">📌 ${kindTexts[pick.kind] || ''}${pick.bucket ? ` · ${pick.bucket}` : ''}</div>
-        <div style="font-size:40px;margin-bottom:16px;">${results.correct}/${results.total}</div>
-        <div style="font-size:14px;color:var(--text-muted);margin-bottom:12px;">✅ 答对 ${results.correct} 题　❌ 答错 ${results.wrong} 题</div>
-        <div style="display:inline-block;padding:6px 16px;border-radius:16px;font-size:14px;font-weight:500;background:${tagColors[rating]}22;color:${tagColors[rating]};margin-bottom:20px;">正确率 ${results.accuracy}% · 自动标记：${ratingNames[rating]}</div>
-      </div>
-      <button id="quiz-view-note" style="display:block;width:100%;padding:10px;border:none;border-radius:6px;background:var(--background-secondary);color:var(--text-normal);cursor:pointer;font-size:13px;">查看原文档</button>
-      <button id="quiz-next-note" style="display:block;width:100%;padding:10px;border:none;border-radius:6px;background:var(--interactive-accent);color:var(--text-on-accent);cursor:pointer;font-size:13px;font-weight:500;">${nextLabel || '下一篇'}</button>
-      <button id="quiz-end-review" style="display:block;width:100%;padding:10px;margin-top:8px;border:1px solid var(--background-modifier-border);border-radius:6px;background:var(--background-secondary);color:var(--text-muted);cursor:pointer;font-size:13px;">结束这次复习</button>
-    `;
-  },
-
-  /** 加入当前笔记到复习计划（ticket 169：非 .md 拒绝；已在计划中提示且不动既有排期；参数取结构最小面） */
-  async addCurrentToReview(file: { path: string; basename: string; extension: string }): Promise<void> {
-    if (file.extension !== 'md') {
-      notice('仅支持 Markdown 笔记加入复习计划', 'error');
-      return;
-    }
-    this.ensure(getApp());
-    const dm = this.dataManager!;
-    const items = await dm.loadItems();
-    if (items.some((i) => i.filePath === file.path)) {
-      notice('已在复习计划中', 'info');
-      return;
-    }
-    await dm.addItem(file.path, file.basename);
-    notice('已加入复习计划，首次复习：1分钟后', 'success');
-  },
-
-  /** 批量加入当前笔记及其一级出链（ticket 170）：正文 + frontmatter 链接逐篇查重加入，
-   *  已在计划中的跳过不动排期；当前文档已在计划中不中止（计入跳过）、出链照常处理；
-   *  非 .md 整单拒绝；结束给一条汇总通知（有新增 success、无新增 info）。 */
-  async addCurrentWithLinksToReview(file: { path: string; basename: string; extension: string }): Promise<void> {
-    if (file.extension !== 'md') {
-      notice('仅支持 Markdown 笔记加入复习计划', 'error');
+  /** 顺序复习循环（源码 L686-709 逐字；item 4 悬浮评级条 + item 5 离篇宽限/断点可恢复）
+   *  - 屏幕底部挂迷你评级条（忘了/困难/一般/简单 + 跳过）：点评级写盘 → 轮询检测翻篇；跳过不评级直接下一篇
+   *  - 离篇持续 REVIEW_AWAY_GRACE_MS 才判中断（宽限期内回篇继续）；中断/超时保留 _pendingRound，
+   *    通知挂「继续本轮」action 断点续跑 */
+  async reviewLoop(overdueNotes: ReviewItem[], index: number): Promise<void> {
+    // F2：防重入——已有活动循环（连点「继续本轮」/复习中重开命令）→ 拒绝并提示，
+    // 防双 interval 并行翻篇竞态（悬浮条互覆、_reviewNotice/_pendingRound 单槽互覆）。
+    // 正常翻篇递归前已 clearLoop，不受此守卫影响
+    if (this._reviewLoops.size > 0) {
+      notice('本轮复习已在进行');
       return;
     }
     const app = getApp();
     this.ensure(app);
     const dm = this.dataManager!;
-    const items = await dm.loadItems();
-    const existing = new Set(items.map((i) => i.filePath));
-    const cache = app.metadataCache?.getFileCache?.(file as any) ?? null;
-    const outgoing = collectOutgoingLinks(cache as any, file.path, (lp, from) =>
-      app.metadataCache.getFirstLinkpathDest(lp, from) as any
-    );
-    // 目标集合整体按路径去重（出链指回当前文档/互相重复时不重复计数）
-    const seenTargets = new Set<string>();
-    const targets = [file, ...outgoing].filter((t) => !seenTargets.has(t.path) && seenTargets.add(t.path));
-    let added = 0;
-    let skipped = 0;
-    for (const target of targets) {
-      if (existing.has(target.path)) {
-        skipped++;
-        continue;
+    if (index >= overdueNotes.length) {
+      this._pendingRound = null;
+      this.hideReviewBar();
+      if (this._reviewNotice) {
+        this._reviewNotice.setType('success');
+        this._reviewNotice.setMessage('所有逾期笔记已复习完成');
+        this._reviewNotice = null;
+      } else {
+        notice('所有逾期笔记已复习完成', 'success');
       }
-      await dm.addItem(target.path, target.basename);
-      existing.add(target.path);
-      added++;
+      return;
     }
-    notice(
-      added > 0 ? `已加入 ${added} 篇${skipped > 0 ? `，${skipped} 篇已在计划中跳过` : ''}` : `共 ${skipped} 篇，均已在复习计划中`,
-      added > 0 ? 'success' : 'info'
-    );
+    const item = overdueNotes[index];
+    const file = app.vault.getAbstractFileByPath(item.filePath);
+    if (!file) {
+      await dm.removeItem(item.filePath);
+      await this.reviewLoop(overdueNotes, index + 1);
+      return;
+    }
+    this._pendingRound = { items: overdueNotes, index }; // item 5：断点（完成/清零时置空）
+    const leaf = app.workspace.getLeaf(false);
+    await leaf.openFile(file as TFile);
+    // 连续复习：常驻单框动态更新（同键存活时原地合并，不刷屏）
+    const reviewMsg = `复习中 (${index + 1}/${overdueNotes.length}): ${item.name}`;
+    // U9：复用前验活（对齐 _overdueNotice 先例）——progress 通知到期消失后旧句柄 setMessage
+    // 是 no-op，不验活会让后续每篇的进度提示静默失效
+    if (this._reviewNotice && this._reviewNotice.el?.isConnected) {
+      this._reviewNotice.setMessage(reviewMsg);
+    } else {
+      this._reviewNotice = notify(reviewMsg, { type: 'progress', dedupeKey: 'review-loop' });
+    }
+    // item 4：挂悬浮迷你评级条（fire-and-forget：不阻塞轮询/翻篇链路；ui 不可用时静默降级为命令评级）
+    this.hideReviewBar();
+    void (async () => {
+      try {
+        const { mountFloatingRatingBar } = await import('./ui');
+        this._reviewBar = mountFloatingRatingBar({
+          name: item.name,
+          index: index + 1,
+          total: overdueNotes.length,
+          onRate: (rating) => {
+            // 评级写盘 → 下方轮询检测 lastReviewed 更新自动翻篇（本条收起由按钮点击即收）
+            void this.markReview(item.filePath, rating);
+          },
+          onSkip: () => {
+            // 跳过：不评级不写盘，直接进下一篇
+            void advance();
+          },
+        });
+      } catch {
+        /* ignore */
+      }
+    })();
+
+    let checkCount = 0;
+    const maxChecks = 120; // 120 × 2.5s = 300s：超时绝对时长与旧 300×1s 持平（拍板「行为语义不变」）
+    let advanced = false;
+    let awaySince: number | null = null; // item 5：持续离篇起点（null=在篇上）
+    // 呈报#38（R3）「命中才读盘」：轻量探测 review.json 的 stat.mtime（getAbstractFileByPath
+    // 走 vault 内存缓存，无 IO），与上次全量读的基线对比——有变化才全量读。大库空耗从
+    // 「每 tick 一次全量 JSON 解析」降为「每 2.5s 一次内存 stat 对比」。
+    // 基线 null（首轮/探测不可用）→ 保守回退全量读，翻篇检测不劣化。
+    let lastMtime: number | null = null;
+    const storageMtime = (): number | null => {
+      try {
+        const f = app.vault.getAbstractFileByPath(getReviewFilePath()) as { stat?: { mtime?: number } } | null;
+        return f?.stat?.mtime ?? null;
+      } catch {
+        return null;
+      }
+    };
+    const advance = async (): Promise<void> => {
+      if (advanced) return;
+      advanced = true;
+      this.hideReviewBar();
+      clearLoop();
+      await this.reviewLoop(overdueNotes, index + 1);
+    };
+    const interval = setInterval(async () => {
+      checkCount++;
+      const activeFile = app.workspace.getActiveFile();
+      if (!activeFile || activeFile.path !== item.filePath) {
+        // item 5：离篇宽限——持续离篇超过阈值才算中断；宽限期内回篇自动续候
+        const nowMs = Date.now();
+        if (awaySince === null) awaySince = nowMs;
+        if (nowMs - awaySince < REVIEW_AWAY_GRACE_MS) return;
+        advanced = true;
+        this.hideReviewBar();
+        clearLoop();
+        // P1-2：本轮连续复习中断（保留 _pendingRound 供「继续本轮」断点续跑）
+        if (this._reviewNotice) {
+          this._reviewNotice.setMessage('已离开当前笔记，本轮复习中断');
+          this._reviewNotice.setType('warning');
+          this._reviewNotice = null;
+        }
+        notify('已离开当前笔记，本轮复习中断', {
+          type: 'warning',
+          dedupeKey: 'review-loop-interrupted',
+          action: { label: '继续本轮', onClick: () => void reviewApp.resumeRound() },
+        });
+        return;
+      }
+      awaySince = null; // 回到篇上：宽限计时复位
+      // 超时判定在读盘前（R3 降频后 mtime 未变的 tick 会提前 return，判定不可再挂在读盘之后）
+      if (checkCount >= maxChecks) {
+        advanced = true;
+        this.hideReviewBar();
+        clearLoop();
+        if (this._reviewNotice) {
+          this._reviewNotice.setMessage('复习超时，请手动继续');
+          this._reviewNotice.setType('warning');
+          this._reviewNotice = null;
+        } else {
+          notice('复习超时，请手动继续', 'warning');
+        }
+        notify('复习超时，可从断点继续本轮', {
+          type: 'info',
+          dedupeKey: 'review-loop-timeout',
+          action: { label: '继续本轮', onClick: () => void reviewApp.resumeRound() },
+        });
+        return;
+      }
+      const mtime = storageMtime();
+      if (lastMtime !== null && mtime !== null && mtime === lastMtime) return; // 未变：本 tick 不读盘
+      const updatedItems = await dm.loadItems();
+      lastMtime = storageMtime();
+      const updated = updatedItems.find((i) => i.filePath === item.filePath);
+      if (updated && updated.lastReviewed) {
+        const last = new Date(updated.lastReviewed);
+        if (Date.now() - last.getTime() < 30000) {
+          await advance();
+          return;
+        }
+      }
+    }, REVIEW_POLL_INTERVAL_MS);
+    // P3：句柄入账（stopReviewLoops 统一清理），防插件禁用后轮询残留
+    this._reviewLoops.add(interval);
+    const clearLoop = (): void => {
+      clearInterval(interval);
+      this._reviewLoops.delete(interval);
+    };
   },
 
-/** 文件树变更即染色：Obsidian 文件树懒渲染（折叠时节点不存在），且无展开事件可监听——
-   *  MutationObserver 观察文件树容器，节点出现/变化（如展开文件夹）节流触发染色，
-   *  根治「60s 轮询恰好错过渲染时机就不染色」的场景。
-   *  移动端（抽屉式文件树）容器选择器与桌面同源，另加入 .workspace-leaf[data-type=file-explorer]
-   *  作为移动端抽屉结构候选。 */
-  async startFileTreeWatch(app: App): Promise<void> {
-    const container =
-      (document.querySelector('.workspace-leaf-content[data-type="file-explorer"] .nav-files-container') as HTMLElement | null) ||
-      (document.querySelector('.nav-files-container') as HTMLElement | null) ||
-      (document.querySelector('.workspace-leaf-content[data-type="file-explorer"]') as HTMLElement | null) ||
-      (document.querySelector('.workspace-leaf[data-type="file-explorer"]') as HTMLElement | null);
-    // 找不到文件树容器（如 jsdom 测试环境）则不启动观察，避免对 document.body 全量 DOM 变动误触发
-    if (!container) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    new MutationObserver(() => {
-      if (timer) return;
-      timer = setTimeout(() => {
-        timer = null;
-        void this.applyReviewStyles(app);
-      }, 300);
-    }).observe(container, { childList: true, subtree: true });
+  /** item 5：从断点恢复本轮（中断/超时后「继续本轮」入口；无断点给明确反馈） */
+  resumeRound(): void {
+    const r = this._pendingRound;
+    if (!r) {
+      notice('没有进行中的本轮复习');
+      return;
+    }
+    void this.reviewLoop(r.items, r.index);
+  },
+
+  /** 加入当前笔记到复习计划 */
+  async addCurrentToReview(file: TFile): Promise<void> {
+    this.ensure(getApp());
+    const dm = this.dataManager!;
+    const items = await dm.loadItems();
+    if (items.some((i) => i.filePath === file.path)) throw new Error('该笔记已在复习计划中');
+    await dm.addItem(file.path, file.basename);
+    notice('已加入复习计划，首次复习：1分钟后', 'success');
+    // 行为流（issue 261）：加入复习计划入小橘行为流（review:added）
+    emitDomainEvent('review', { kind: 'added', title: file.basename });
   },
 
   /** 文件树染色 + 阶段徽标（源码 L719-772 逐字；ticket 100 加「文件树标记」开关；
    *   ticket 48 收敛：不再全库 getMarkdownFiles + 逐路径 querySelector——
    *   处理范围 = 复习条目路径 + 曾染色路径（移出计划后回退），树节点一次 querySelectorAll 建 Map 查找；
-   *   可选 items 参数：checkOverdueAndNotify 传本轮已加载结果，避免每轮二次读盘。
-   *   2026-08 稳健化（本地分支）：遍历 `[data-path]` 精确比对取值，目标文本层多备选退避
-   *   （tree-item-inner → nav-file-title-content → 容器本身），最大化命中已渲染的文件树节点。
-   *   自愈重试：全量轮计划里该染的文档一个都没染上（文件树未渲染 / 折叠 / 移动端抽屉未开）时，
-   *   每 2s 自动重试（最多 8 次 ≈16s；之后交 60s 轮询与 startFileTreeWatch 负责）。 */
+   *   可选 items 参数：checkOverdueAndNotify 传本轮已加载结果，避免每轮二次读盘。 */
   async applyReviewStyles(app: App, changedFile?: TFile, items?: ReviewItem[]): Promise<void> {
     if ((getSettings() as any).reviewTreeBadge === false) return; // ticket 100：关=清爽文件树（不染色不挂徽章）
     this.ensure(app);
     const allItems = items || (await this.dataManager!.loadItems());
+    this._lastItems = allItems; // F9：全量结果入快照，供 vault modify 单文件路径复用
     const itemByPath = new Map<string, ReviewItem>();
     for (const item of allItems) {
       if (item.filePath) itemByPath.set(item.filePath, item);
@@ -677,23 +785,19 @@ export const reviewApp = {
       const p = el.getAttribute('data-path');
       if (p && !els.has(p)) els.set(p, el);
     }
-    const fsrs = new FSRS(this.currentW()); // 上游线 P1：拟合权重优先（无产物=DEFAULT_W，行为等同）
-    const planPaths = new Set(allItems.map((i) => i.filePath));
-    let stainedCount = 0;
 
-for (const path of paths) {
+    // R 染色与排期同口径：读拟合权重 currentW()（ADR-0077；默认回退 DEFAULT_W）
+    const fsrs = new FSRS(this.currentW());
+
+    for (const path of paths) {
       const el = els.get(path);
       if (!el) {
         // 树节点不存在（文件删除/目录收起）：从曾染色集合剔除，防集合无限增长
         this._styledPaths.delete(path);
         continue;
       }
-      // 目标文本层多备选退避（本地分支稳健化）：.tree-item-inner（Obsidian 文件树旧结构）
-      // → .nav-file-title-content（部分主题/旧版）→ 容器本身；取能挂内联色+徽标的最内层可染文本
-      const target =
-        (el.querySelector('div.tree-item-inner') as HTMLElement | null) ||
-        (el.querySelector('.nav-file-title-content') as HTMLElement | null) ||
-        el;
+      const target = el.querySelector('div.tree-item-inner') as HTMLElement | null;
+      if (!target) continue;
       const badge = target.querySelector('.review-stage-badge');
       if (badge) badge.remove();
 
@@ -706,7 +810,6 @@ for (const path of paths) {
         }
         continue;
       }
-      stainedCount++;
       const currentStage = item.stage || 0;
       const now = new Date();
       const nextReview = item.nextReviewDate ? new Date(item.nextReviewDate) : null;
@@ -734,7 +837,8 @@ for (const path of paths) {
       target.style.color = color;
 
       let timeText = '';
-      if (status === 'complete') timeText = '✅';
+      let badgeIcon: 'check' | 'calendar' | null = null;
+      if (status === 'complete') badgeIcon = 'check'; // item 14：✅ → lucide check
       else if (nextReview) {
         const diff = nextReview.getTime() - now.getTime();
         if (diff > 0) {
@@ -744,33 +848,50 @@ for (const path of paths) {
           if (d > 0) timeText = `${d}d`;
           else if (h > 0) timeText = `${h}h`;
           else timeText = `${m}m`;
-        } else timeText = '📅';
+        } else badgeIcon = 'calendar'; // item 14：📅 → lucide calendar
       }
-      if (timeText) {
+      if (badgeIcon || timeText) {
         const badgeEl = document.createElement('span');
         badgeEl.className = 'review-stage-badge';
-        badgeEl.textContent = timeText;
+        if (badgeIcon) {
+          // item 14：徽标用 lucide（uiIcon 工厂；尺寸走域样式 .review-stage-badge svg）
+          const { uiIcon } = await import('../core/ui');
+          badgeEl.appendChild(uiIcon(badgeIcon));
+        } else {
+          badgeEl.textContent = timeText;
+        }
         badgeEl.style.cssText = `font-size:0.7em;opacity:0.8;margin-left:6px;color:${color};background:color-mix(in srgb, ${color} 10%, transparent);padding:1px 4px;border-radius:3px;border:1px solid color-mix(in srgb, ${color} 30%, transparent);font-weight:500;`;
         target.appendChild(badgeEl);
       }
       this._styledPaths.add(path);
     }
+  },
 
-    // 自愈重试：全量扫描且计划里有该染的文档，但本次一个都没染上（文件树未渲染 / 折叠 / 移动端抽屉未开）
-    if (!changedFile && paths.size > 0) {
-      const planInPaths = [...paths].filter((p) => planPaths.has(p)).length;
-      if (planInPaths > 0 && stainedCount === 0) {
-        this._stainRetries = (this._stainRetries || 0) + 1;
-        if ((this._stainRetries || 0) <= 8) {
-          setTimeout(() => {
-            this._stainRetries = (this._stainRetries || 0) - 1;
-            void this.applyReviewStyles(app);
-          }, 2000);
-        }
-      } else {
-        this._stainRetries = 0;
+  /** F9：单文件染色刷新（vault modify 高频路径）——优先复用最近快照（60s 轮询/全量刷维护，
+   *  时效与原 60s 轮询同档），无快照才全量读盘；只处理该文件路径，
+   *  不再每次保存任意 md 都全量读 review.json */
+  async applyReviewStylesForFile(app: App, file: TFile): Promise<void> {
+    this.ensure(app);
+    const items = this._lastItems || (await this.dataManager!.loadItems());
+    await this.applyReviewStyles(app, file, items);
+  },
+
+  /** A3/U3：卸载回退文件树染色与徽标（按曾染色路径逐个 revert，与 applyReviewStyles 的
+   *  缩范围回退同口径；幂等）——插件禁用后彩色节点/徽标不再残留文件树 */
+  revertReviewStyles(): void {
+    const els = new Map<string, HTMLElement>();
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>('div[data-path]'))) {
+      const p = el.getAttribute('data-path');
+      if (p && !els.has(p)) els.set(p, el);
+    }
+    for (const path of this._styledPaths) {
+      const target = els.get(path)?.querySelector('div.tree-item-inner') as HTMLElement | null;
+      if (target) {
+        target.style.color = '';
+        target.querySelector('.review-stage-badge')?.remove();
       }
     }
+    this._styledPaths.clear();
   },
 
   /**
@@ -780,64 +901,62 @@ for (const path of paths) {
    * 启动首查把存量逾期当新产生 → 汇总篇数（Q1 拍板接受）。
    * ticket 48 收敛：与本轮 loadItems 共用结果，不再二次读盘；
    * ticket 58：通知挂「去复习」action → 打开最早逾期笔记；
-   * ticket 153/168：「去复习」升级为走复习应用统一流程；ticket 168 起 = 全 vault 逾期按数量会话。
+   * ticket 153：「去复习」升级为走 autoJumpOverdue 完整流程（做题决定难度分流）。
    */
   async checkOverdueAndNotify(): Promise<void> {
     try {
       this.ensure(getApp());
       const dm = this.dataManager!;
       const items = await dm.loadItems();
-      // 诊断锚点（ADR-0116）：每轮报三个数——条目/挂起/逾期，与金丝雀、挪动兜底日志对时序
-      console.log(`[bz][review] 逾期检查: 条目 ${items.length}，挂起 ${items.filter((i) => i.isMissing).length}，逾期 ${items.filter((i) => i.isOverdue && !i.completed && !i.isMissing).length}`);
-      if ((getSettings() as any).enableAutoNotify !== false) {
-        const overdueMap = new Map<string, ReviewItem>(
-          items.filter((i) => i.isOverdue && !i.completed && !i.isMissing).map((i) => [i.filePath, i])
-        );
-        const newly = [...overdueMap.entries()].filter(([p]) => !this._notifiedOverdue.has(p));
-        // 清掉已不再逾期的（评级/完成/挂起后）
-        for (const p of this._notifiedOverdue) {
-          if (!overdueMap.has(p)) this._notifiedOverdue.delete(p);
-        }
-        // 数字自纠（ADR-0116 追加）：当前逾期数与上次展示不同也重发——首查在索引未就绪时可能拿到
-        // 偏小快照，仅靠 newly diff 触发会让常驻通知把旧数字钉死在屏上（2026-09-11「1 篇」事故）
-        const countChanged = overdueMap.size !== this._lastOverdueCount;
-        if (newly.length || (countChanged && overdueMap.size > 0)) {
-          this._lastOverdueCount = overdueMap.size;
-          for (const [p] of newly) this._notifiedOverdue.add(p);
-          // 通知只报当前逾期篇数，不列具体题目（用户拍板 2026-08-29）；duration 0 = 常驻（通知系统语义）
-          // ticket 153/168：「去复习」不再只打开单篇（旧 ticket 58/修 #1 语义），
-          // ticket 168 起走「全 vault 逾期按数量会话」（startOverdueCountSession，见该节），
-          // 通知名单仍只报 newly（diff 记忆语义保留，见上方过滤）。
-          const handle = notify(`有 ${overdueMap.size} 篇笔记逾期`, {
-            type: 'info',
-            duration: 0, // 常驻不自动消失，靠点击「去复习」/本体收起
-            dedupeKey: 'review-overdue-notice',
-            action: {
-              label: '去复习', // action 文案不带 emoji（通知规范）
-              onClick: () => {
-                // ticket 168：走统一按数量复习会话（全 vault 逾期、每日上限截断），不再裸开最早逾期笔记
-                void reviewApp.startOverdueCountSession();
-              },
-            },
-          });
-          // 同键合并返回空操作句柄：仅当旧句柄已失联（被消费）时才换存新句柄，保证清零收起有效
-          const cur = this._overdueNotice;
-          if (!cur || !cur.el.isConnected) this._overdueNotice = handle;
-        } else if (!overdueMap.size) {
-          // 逾期清零：常驻通知失去时效，主动收起（句柄已被点击消费时 hide 幂等无害）
-          this._overdueNotice?.hide();
-          this._overdueNotice = null;
-        }
+      this._lastItems = items; // F9：轮询结果入快照（染色关闭时 applyReviewStyles 不读盘，快照在此保活）
+      // 染色刷新保留（原 60s 轮询职责：逾期文件实时变红；是否染色由 reviewTreeBadge 决定）
+      await this.applyReviewStyles(getApp(), undefined, items);
+      if ((getSettings() as any).enableAutoNotify === false) return; // 通知开关关 → 不弹通知
+      const overdueMap = new Map<string, ReviewItem>(
+        items.filter((i) => i.isOverdue && !i.completed && !i.isMissing).map((i) => [i.filePath, i])
+      );
+      const newly = [...overdueMap.entries()].filter(([p]) => !this._notifiedOverdue.has(p));
+      // 清掉已不再逾期的（评级/完成/挂起后）
+      for (const p of this._notifiedOverdue) {
+        if (!overdueMap.has(p)) this._notifiedOverdue.delete(p);
       }
-      // 染色刷新保留（原 60s 轮询职责：逾期文件实时变红；是否染色由 reviewTreeBadge 决定）。
-      // ADR-0116 追加：置于通知之后 + 独立容错——染色环节任何异常不得阻断逾期通知。
-      try {
-        await this.applyReviewStyles(getApp(), undefined, items);
-      } catch (e) {
-        console.error('复习计划染色刷新出错:', e);
+      if (newly.length) {
+        for (const [p] of newly) this._notifiedOverdue.add(p);
+        // 通知只报当前逾期篇数，不列具体题目（用户拍板 2026-08-29）；duration 0 = 常驻（通知系统语义）
+        // ticket 153：「去复习」不再只打开单篇（旧 ticket 58/修 #1 语义），
+        // 而是走 autoJumpOverdue 完整复习流程（按 forceQuizForReview 分流做题/普通复习），
+        // 通知名单仍只报 newly（diff 记忆语义保留，见上方过滤）。
+        const handle = notify(`有 ${overdueMap.size} 篇笔记逾期`, {
+          type: 'info',
+          duration: 0, // 常驻不自动消失，靠点击「去复习」/本体收起
+          dedupeKey: 'review-overdue-notice',
+          action: {
+            label: '去复习', // action 文案不带 emoji（通知规范）
+            onClick: () => {
+              // ticket 153：走统一开始复习流程（autoJumpOverdue 内按 forceQuizForReview 分流：
+              // 开启 → 批量出题做题；关闭 → 普通复习跳转笔记），不再裸开最早逾期笔记
+              void reviewApp.autoJumpOverdue();
+            },
+          },
+        });
+        // 同键合并返回空操作句柄：仅当旧句柄已失联（被消费）时才换存新句柄，保证清零收起有效
+        const cur = this._overdueNotice;
+        if (!cur || !cur.el.isConnected) this._overdueNotice = handle;
+      } else if (!overdueMap.size) {
+        // 逾期清零：常驻通知失去时效，主动收起（句柄已被点击消费时 hide 幂等无害）
+        this._overdueNotice?.hide();
+        this._overdueNotice = null;
       }
     } catch (e) {
       console.error('复习计划检查出错:', e);
     }
+  },
+
+  /** 刷新面板（源码 refreshPanel） */
+  async refreshPanel(): Promise<void> {
+    const { uiManager } = await import('./index');
+    if (!uiManager) return;
+    const items = await this.dataManager!.loadItems();
+    uiManager.renderEntries(items);
   },
 };

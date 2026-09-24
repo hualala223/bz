@@ -7426,31 +7426,579 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
   transform: translateX(-140%) skewX(-18deg);
   background: linear-gradient(90deg, transparent, rgba(255,255,255,.55), transparent);
 }
-/* ==================== 复习计划域样式（src/review/styles.css） ==================== */
-/* ==================== 复习设置（ticket 168 切片 02/04/05：主面板与卡片样式随面板删除，仅剩设置弹窗内名单区） ==================== */
-      /* ticket 57：排除名单 chip（名字 + 解除标签）——⚙️ 设置弹窗 custom 行内使用 */
-      #review-excluded-list { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:4px 0; }
-      .bz-review-exclude-empty { font-size:12px; color:var(--text-faint); padding:4px 0; }
-      .bz-review-exclude-chip { display:inline-flex; align-items:center; gap:6px; padding:2px 10px; border-radius:12px; background:var(--background-secondary); border:1px solid var(--background-modifier-border); max-width:100%; }
-      .bz-review-exclude-name { font-size:12px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-      .bz-review-exclude-remove { background:none; border:none; cursor:pointer; color:var(--text-faint); font-size:11px; line-height:1; padding:2px; border-radius:50%; display:flex; align-items:center; justify-content:center; box-shadow:none !important; }
-      .bz-review-exclude-remove:hover { color:var(--text-error, #ff4757); background:var(--background-modifier-hover); }
-      /* ticket 168 切片 05：复习条目管理列表（⚙️ 设置弹窗 custom 行） */
-      .bz-review-manage-list { display:flex; flex-direction:column; gap:4px; padding:4px 0; max-height:220px; overflow-y:auto; }
-      .bz-review-manage-empty { font-size:12px; color:var(--text-faint); padding:4px 0; }
-      .bz-review-manage-item { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:4px 8px; border-radius:6px; background:var(--background-secondary); border:1px solid var(--background-modifier-border); }
-      .bz-review-manage-item.is-missing { opacity:0.55; text-decoration:line-through; }
-      .bz-review-manage-name { font-size:12px; color:var(--text-normal); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-      .bz-review-manage-remove { background:none; border:none; cursor:pointer; color:var(--text-faint); font-size:12px; padding:2px 6px; border-radius:4px; box-shadow:none !important; flex-shrink:0; }
-      .bz-review-manage-remove:hover { color:var(--text-error, #ff4757); background:var(--background-modifier-hover); }
-      /* ticket 276：今日已复习弹窗（createOverlay 共享壳 + bz-win-head，此处只管正文列表） */
-      .bz-review-today-body { display:flex; flex-direction:column; gap:6px; min-height:0; }
-      .bz-review-today-empty { font-size:13px; color:var(--text-faint); text-align:center; padding:24px 0; }
-      .bz-review-today-row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px; border-radius:8px; background:var(--background-secondary); border:1px solid var(--background-modifier-border); cursor:pointer; flex-shrink:0; }
-      .bz-review-today-row:hover { background:var(--background-modifier-hover); }
-      .bz-review-today-row.is-missing { opacity:0.55; text-decoration:line-through; cursor:not-allowed; }
-      .bz-review-today-name { font-size:13px; color:var(--text-normal); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-      .bz-review-today-meta { display:flex; align-items:center; gap:8px; flex-shrink:0; font-size:11px; color:var(--text-muted); white-space:nowrap; }
+/* ==================== 复习计划域样式（src/review/styles.css） ====================
+ * 2026-09-04 拍板形态：三区队列面板 + 整窗做题冲刺（非弹窗）。
+ * 面板容器 / 难度弹窗 / watch·exclude 设置行 / 统计·历史弹窗为既有保留块；
+ * bz-q-*（三区队列）/ bz-sprint-*（冲刺）为新增视觉，对齐 rp1x 原型评审。
+ * 配色一律消费 --bz-* token（core/ui/tokens.css 自绘明暗双态；issue 198 批 D 全面 token 化）。
+ */
+
+/* ==================== 面板容器（既有契约） ====================
+   壳骨架接组件库（ADR-0094）：遮罩挂 .bz-panel-overlay（fixed 铺满+遮罩色），
+   面板挂 .bz-panel-frame（底色/圆角/描边/阴影/纵向 flex）；域内只留 id 几何
+   （居中定位/宽高/动画）。配色走 --bz-* token。 */
+#review-popup { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 94%; max-width: 900px; max-height: 84vh; animation: slideUp var(--bz-dur-slow) ease-out; }
+@media (max-width: 768px) {
+  /* 移动端全屏（issue 254 迭代）：钉满视口，不受内容高度收缩（原 max-height:100% 短内容时缩成悬浮卡） */
+  #review-popup { animation: none !important; top: 0; left: 0; transform: none; width: 100%; max-width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
+}
+/* 内容区：队列视图与冲刺视图共用宿主（overflow:hidden 由视图内部接管滚动） */
+#review-entries-container { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+
+/* 队列/冲刺滚动条隐藏由 core 界面级单源规则接管（ADR-0122 / issue 277，
+   #review-entries-container 在册），域内不再重复定义 */
+
+/* 队列视图整体（滚动区 = 三区列；头/工具/底部行固定） */
+.bz-q-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+
+/* ==================== 三区队列 · 头行 ====================
+   头行接组件库 .bz-panel-head 族（issue 198 批 D）：.bz-panel-title + 日期副题
+   （.bz-panel-head-sub）/ .bz-panel-head-sp / .bz-panel-head-btns（见 review/ui.ts）。
+   关闭钮已退役（issue 271：弹窗统一点遮罩关闭），域内不再自绘头行样式。 */
+
+/* 开始本轮条（item 8：今日全清 → 绿点 +「今日已清空」+ 隐藏主按钮） */
+.bz-q-strip { display: flex; align-items: center; gap: var(--bz-space-sm); padding: 6px 20px 10px; flex-shrink: 0; }
+.bz-q-strip-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bz-danger); flex-shrink: 0; }
+.bz-q-strip-dot.ok { background: var(--bz-success); }
+.bz-q-strip strong { font-size: var(--bz-font-label); color: var(--bz-text-1); }
+.bz-q-strip-txt { font-size: var(--bz-font-meta); color: var(--bz-text-2); flex: 1; min-width: 0; }
+.bz-q-strip .bz-btn { height: 28px; padding: 0 14px; font-size: var(--bz-font-label); }
+
+/* ==================== 三区列 ==================== */
+.bz-q-cols { display: flex; gap: var(--bz-space-md); padding: 0 20px var(--bz-space-md); flex: 1; min-height: 0; }
+.bz-q-col { flex: 1; min-width: 0; display: flex; flex-direction: column; border-radius: 10px; background: var(--bz-surface-1); padding: var(--bz-space-sm); overflow-y: auto; min-height: 120px; }
+.bz-q-col.done { flex: 1.4; }
+.bz-q-col-head { display: flex; align-items: baseline; gap: 6px; padding: 2px 2px var(--bz-space-sm); flex-shrink: 0; }
+.bz-q-col-head .cnt { font-size: var(--bz-font-emphasis); font-weight: 700; }
+.bz-q-col.danger .cnt { color: var(--bz-danger); }
+.bz-q-col.warn .cnt { color: var(--bz-warning); }
+.bz-q-col.future .cnt { color: var(--bz-text-2); }
+.bz-q-col-head .name { font-size: var(--bz-font-label); font-weight: 600; color: var(--bz-text-1); }
+
+/* 卡片（div role=button——不用裸 button，规避 Obsidian 核心 button 默认样式干扰裂开） */
+.bz-q-card { display: block; width: 100%; text-align: left; background: var(--bz-surface-2); color: var(--bz-text-1); border: 1px solid var(--bz-border); border-radius: var(--bz-radius-sm); padding: var(--bz-space-sm) 10px; margin-bottom: 6px; cursor: pointer; transition: border-color var(--bz-dur-fast), box-shadow var(--bz-dur-fast); box-sizing: border-box; min-width: 0; }@media (hover: hover) {
+
+.bz-q-card:hover { border-color: var(--bz-brand); }
+}
+.bz-q-card:focus-visible { outline: 2px solid var(--bz-brand); outline-offset: 1px; }
+.bz-q-card.no { cursor: default; opacity: .72; }@media (hover: hover) {
+
+.bz-q-card.no:hover { border-color: var(--bz-border); }
+}
+.bz-q-card.danger { border-left: 3px solid var(--bz-danger); }
+.bz-q-card .bz-q-card-top { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
+.bz-q-card-title { font-size: var(--bz-font-label); color: var(--bz-text-1); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bz-q-card.done .bz-q-card-title s { color: var(--bz-text-3); }
+.bz-q-card-stage { font-size: var(--bz-font-caption); color: var(--bz-text-3); flex-shrink: 0; }
+.bz-q-card-meta { display: flex; align-items: center; gap: var(--bz-space-xs); margin-top: 5px; flex-wrap: wrap; min-width: 0; }
+
+/* 标签 */
+.bz-q-tag { font-size: var(--bz-font-caption); line-height: 1; padding: 2px 7px; border-radius: 10px; background: var(--bz-surface-3); color: var(--bz-text-2); white-space: nowrap; }
+.bz-q-tag.is-overdue { background: color-mix(in srgb, var(--bz-danger) 18%, transparent); color: var(--bz-danger); font-weight: 600; }
+.bz-q-tag.is-done { background: color-mix(in srgb, var(--bz-success) 18%, transparent); color: var(--bz-success); }
+.bz-q-tag.is-missing { color: var(--bz-text-3); text-decoration: line-through; }
+.bz-q-tag.is-r.r-high { background: color-mix(in srgb, var(--bz-success) 14%, transparent); color: var(--bz-success); }
+.bz-q-tag.is-r.r-mid { background: color-mix(in srgb, var(--bz-warning) 14%, transparent); color: var(--bz-warning); }
+.bz-q-tag.is-r.r-low { background: color-mix(in srgb, var(--bz-danger) 14%, transparent); color: var(--bz-danger); }
+.bz-q-tag.is-stage { color: var(--bz-text-2); }
+.bz-q-tag.is-future { color: var(--bz-text-3); }
+/* item 6：R 阈值提前复习卡（开始本轮同口径纳入） */
+.bz-q-tag.is-early { background: color-mix(in srgb, var(--bz-info) 14%, transparent); color: var(--bz-info); }
+/* issue 253（V1 原型拍板）：待重做旗标显性化——红 tag 提示该篇首次评级∈{忘了,困难} */
+.bz-q-tag.is-redo { background: color-mix(in srgb, var(--bz-danger) 18%, transparent); color: var(--bz-danger); font-weight: 600; }
+/* item 10：空态宿主（uiEmpty 组件库类不重复定义，仅限宽居中） */
+.bz-q-empty-wrap { align-items: center; justify-content: center; }
+.bz-q-hint { font-size: var(--bz-font-meta); color: var(--bz-text-3); text-align: center; padding: 18px var(--bz-space-sm); }
+/* 呈报#19-R13：列内空态统一 uiEmpty 小图标口径（markup 由 render.emptyHtmlStr 单源产出）——
+   列内空间小，图标/留白相对整面板空态收一档 */
+.bz-q-col .bz-empty { padding: 14px 8px; gap: 4px; }
+.bz-q-col .bz-empty-ic { width: 22px; height: 22px; margin-bottom: 0; }
+.bz-q-col .bz-empty-title { font-size: var(--bz-font-meta); }
+.bz-sq-list .bz-empty { padding: 16px 6px; }
+.bz-sq-list .bz-empty-ic { width: 22px; height: 22px; margin-bottom: 0; }
+.bz-sq-list .bz-empty-title { font-size: var(--bz-font-meta); }
+
+/* ==================== 底部信息行（归档/统计的非按钮落位，整行可点无引导小字） ==================== */
+.bz-q-footer { display: flex; align-items: center; gap: 10px; padding: var(--bz-space-sm) 20px var(--bz-space-md); border-top: 1px solid var(--bz-border); flex-shrink: 0; }
+.bz-q-fitem { display: inline-flex; align-items: center; gap: 5px; font-size: var(--bz-font-meta); color: var(--bz-text-3); cursor: pointer; user-select: none; }
+.bz-q-fitem .bz-q-ic { width: 12px; height: 12px; }
+.bz-q-fitem .lbl b { color: var(--bz-text-2); font-weight: 600; }@media (hover: hover) {
+
+.bz-q-fitem:hover .lbl, .bz-q-fitem:hover b { color: var(--bz-text-1); }
+}
+/* 归档态「返回队列」提醒钮（issue 254 迭代）：品牌色示意可点回跳 */
+.bz-q-fitem.is-back { color: var(--bz-brand); font-weight: 600; }@media (hover: hover) {
+
+.bz-q-fitem.is-back .lbl:hover { color: var(--bz-brand); }
+}
+/* 桌面去头行钮（issue 254 迭代拍板）：✕ 桌面隐藏（点遮罩/ESC 关，ui.ts 既有），
+   仅移动端全屏保留；⚠ 须锁 #review-popup 作用域——本文件构建后全局聚合，裸 .bz-panel-head 会误伤他域 */
+@media (min-width: 769px) {
+  #review-popup .bz-panel-head [data-act="close"] { display: none; }
+}
+.bz-q-footer .sep { width: 1px; height: 12px; background: var(--bz-border); }
+
+/* ==================== 整窗冲刺（bz-sprint-*） ==================== */
+.bz-sprint-head { display: flex; align-items: center; justify-content: space-between; gap: var(--bz-space-sm); padding: 14px 20px 6px; flex-shrink: 0; }
+.bz-sprint-head .t { display: flex; align-items: baseline; gap: var(--bz-space-sm); }
+.bz-sprint-title { font-size: var(--bz-font-title); font-weight: 700; color: var(--bz-text-1); }
+/* 呈报#57（R5）：头行模式副标题（开始本轮/待重做/单条复习），弱化形态对齐 .bz-panel-head-sub */
+.bz-sprint-sub { font-size: var(--bz-font-caption); color: var(--bz-text-3); }
+.bz-sprint-head .tools { display: flex; align-items: center; gap: 6px; }
+.bz-sprint-loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 60px 20px; color: var(--bz-text-2); font-size: var(--bz-font-label); }
+/* 加载圈：深审 A15 补 bz 前缀（bz-q-spinner）——原裸 spinner 类名是无主通用名，不进全局聚合。
+   ⚠ DOM 消费在 src/review/render.ts（冲刺加载态），同步改类名前该处样式会暂时脱落（主线程收口）。 */
+.bz-q-spinner { width: 16px; height: 16px; border: 2px solid var(--bz-border); border-top-color: var(--bz-brand); border-radius: 50%; animation: bz-spin .8s linear infinite; }
+
+/* 冲刺主体：题卡（左） + 本轮队列（右） */
+.bz-sprint-body { display: flex; gap: 14px; padding: var(--bz-space-xs) 20px 14px; flex: 1; min-height: 0; }
+.bz-sprint-main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.bz-sprint-queue { width: 210px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--bz-surface-1); border-radius: 10px; padding: 10px; overflow-y: auto; }
+
+/* 题卡 */
+.bz-sprint-qtop { display: flex; align-items: center; justify-content: space-between; gap: var(--bz-space-sm); margin-bottom: 6px; }
+.bz-sprint-progress { font-size: var(--bz-font-meta); color: var(--bz-text-3); flex-shrink: 0; }
+.bz-sprint-qcard { background: var(--bz-surface-2); border: 1px solid var(--bz-border); border-radius: var(--bz-radius-md); padding: var(--bz-space-lg) 18px; display: flex; flex-direction: column; gap: 10px; }
+.bz-sprint-qtype { font-size: var(--bz-font-caption); color: var(--bz-text-3); align-self: flex-start; padding: 2px var(--bz-space-sm); border-radius: 10px; background: var(--bz-surface-3); }
+.bz-sprint-qtext { font-size: var(--bz-font-emphasis); line-height: 1.6; color: var(--bz-text-1); font-weight: 500; }
+.bz-sprint-opts { display: flex; flex-direction: column; gap: var(--bz-space-sm); margin-top: 2px; }
+
+/* 选项（div role=button，规避核心 button 默认；禁用态走 .is-disabled） */
+.bz-sprint-opt { display: flex; align-items: center; gap: var(--bz-space-sm); width: 100%; text-align: left; background: var(--bz-surface-1); color: var(--bz-text-1); border: 1px solid var(--bz-border); border-radius: var(--bz-radius-sm); padding: 9px var(--bz-space-md); cursor: pointer; box-sizing: border-box; }@media (hover: hover) {
+
+.bz-sprint-opt:hover { border-color: var(--bz-brand); background: var(--bz-surface-hover); }
+}
+.bz-sprint-opt:focus-visible { outline: 2px solid var(--bz-brand); outline-offset: 1px; }
+.bz-sprint-opt .k { font-size: var(--bz-font-meta); font-weight: 700; color: var(--bz-text-2); flex-shrink: 0; width: 18px; }
+.bz-sprint-opt .t { font-size: var(--bz-font-label); color: var(--bz-text-1); flex: 1; }
+.bz-sprint-opt .m { flex-shrink: 0; width: 16px; text-align: center; }
+.bz-sprint-opt.is-sel { border-color: var(--bz-brand); background: color-mix(in srgb, var(--bz-brand) 12%, transparent); }
+.bz-sprint-opt.is-sel .k { color: var(--bz-brand); }
+.bz-sprint-opt.is-correct { border-color: var(--bz-success); background: color-mix(in srgb, var(--bz-success) 14%, transparent); }
+.bz-sprint-opt.is-correct .k { color: var(--bz-success); }
+.bz-sprint-opt.is-wrong { border-color: var(--bz-danger); background: color-mix(in srgb, var(--bz-danger) 14%, transparent); }
+.bz-sprint-opt.is-wrong .k { color: var(--bz-danger); }
+.bz-sprint-opt.is-disabled { cursor: default; }@media (hover: hover) {
+
+.bz-sprint-opt.is-disabled:hover { border-color: var(--bz-border); background: var(--bz-surface-1); }
+}
+
+/* 对错标记 */
+.bz-mark { font-style: normal; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.bz-mark.ok { color: var(--bz-success); }
+.bz-mark.ok.lg { font-size: 34px; }
+.bz-mark.bad { color: var(--bz-danger); }
+.bz-mark.bad.lg { font-size: 34px; }
+.bz-sprint-ic { display: inline-flex; }
+.bz-sprint-ic svg { width: 100%; height: 100%; }
+
+/* 提交 / 下一题 */
+.bz-sprint-submit { align-self: flex-end; margin-top: var(--bz-space-xs); }
+.bz-sprint-qfoot { display: flex; align-items: center; justify-content: space-between; gap: var(--bz-space-sm); margin-top: 6px; }
+
+/* item 3：答错一行解析（一句话解析+原文依据） */
+.bz-sprint-explain { font-size: 12.5px; line-height: 1.55; color: var(--bz-text-2); background: var(--bz-surface-1); border: 1px solid var(--bz-border); border-left: 3px solid var(--bz-warning); border-radius: var(--bz-radius-sm); padding: var(--bz-space-sm) var(--bz-space-md); }
+
+/* 本轮队列 */
+.bz-sq-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--bz-space-sm); }
+.bz-sq-head b { font-size: var(--bz-font-meta); color: var(--bz-text-1); }
+.bz-sq-list { flex: 1; overflow-y: auto; }
+.bz-sq-item { padding: 6px var(--bz-space-sm); border-radius: 6px; background: var(--bz-surface-2); border: 1px solid var(--bz-border); margin-bottom: 5px; }
+.bz-sq-item .nm { font-size: var(--bz-font-meta); color: var(--bz-text-1); word-break: break-word; } /* 标题不截断（issue 254 迭代）：换行完整展示 */
+.bz-sq-item.doing { border-color: var(--bz-brand); }
+.bz-sq-item.passed { opacity: .8; }
+.bz-sq-item.passed .nm s { color: var(--bz-text-3); }
+/* 深审 U7：passed/failed 的 meta 着色两行死规则已删（队列项只产 nm 节点，meta 元素不存在） */
+
+/* 结果卡 */
+.bz-result { max-width: 420px; margin: 0 auto; text-align: center; padding: 20px 10px; display: flex; flex-direction: column; align-items: center; gap: var(--bz-space-sm); }
+.bz-result-ic { font-size: 30px; line-height: 1; }
+.bz-result-name { font-size: var(--bz-font-emphasis); font-weight: 600; color: var(--bz-text-1); }
+.bz-result-score { font-size: 34px; font-weight: 700; color: var(--bz-text-1); line-height: 1.1; }
+.bz-result-score .sl { font-size: 18px; color: var(--bz-text-3); font-weight: 400; }
+.bz-result-rating { display: inline-flex; align-items: center; gap: 5px; font-size: var(--bz-font-meta); font-weight: 500; padding: 3px var(--bz-space-md); border-radius: 14px; margin: 2px 0 var(--bz-space-xs); }
+.bz-result-rating.pass { color: var(--bz-success); background: color-mix(in srgb, var(--bz-success) 14%, transparent); }
+.bz-result-rating.fail { color: var(--bz-danger); background: color-mix(in srgb, var(--bz-danger) 14%, transparent); }
+
+/* 结算 */
+.bz-summary { max-width: 420px; margin: 0 auto; text-align: center; padding: 26px 10px; display: flex; flex-direction: column; gap: var(--bz-space-sm); }
+.bz-summary-title { font-size: 19px; font-weight: 800; color: var(--bz-text-1); }
+.bz-summary-stats { display: flex; gap: var(--bz-space-sm); justify-content: center; margin-top: 10px; }
+.bz-summary-stats .st { flex: 1; max-width: 110px; background: var(--bz-surface-1); border-radius: 10px; padding: 10px var(--bz-space-xs); }
+.bz-summary-stats .st b { display: block; font-size: var(--bz-font-display); color: var(--bz-text-1); }
+.bz-summary-stats .st span { font-size: var(--bz-font-caption); color: var(--bz-text-2); }
+.bz-summary-stats .st.warn b { color: var(--bz-danger); }
+/* item 8：结算屏连续 N 天 */
+.bz-summary-streak { font-size: 12.5px; color: var(--bz-text-2); }
+.bz-summary-streak b { color: var(--bz-success); font-weight: 700; }
+
+/* 移动端（≤768px）：三区列纵排正常展开（issue 254 拍板）——不内滚、按内容自然长高，
+   .bz-q-cols 仍是唯一滚动宿主（工具行/统计条钉在上方）；空区缩成一行列头；
+   区列头吸顶（下一区列头滚上来顶走，不透明底防卡片透出）；归档「已完成」单列同规则。
+   注意 .bz-q-col.done 基线 flex:1.4 特异性更高，放开内滚须与其同提。 */
+@media (max-width: 768px) {
+  .bz-q-cols { flex-direction: column; gap: 10px; overflow-y: auto; }
+  .bz-q-col, .bz-q-col.done { flex: none; overflow-y: visible; min-height: 0; }
+  .bz-q-col-head { position: sticky; top: 0; z-index: 1; background: var(--bz-surface-1); }
+  .bz-q-strip { padding: 6px 14px 10px; }
+  .bz-q-cols { padding: 0 14px var(--bz-space-md); }
+  .bz-q-footer { padding: var(--bz-space-sm) 14px var(--bz-space-md); }
+  .bz-sprint-head { padding: var(--bz-space-md) 14px 6px; }
+  .bz-sprint-body { padding: var(--bz-space-xs) 14px var(--bz-space-md); flex-direction: column; }
+  .bz-sprint-queue { width: auto; max-height: 140px; }
+  .bz-sprint-qcard { padding: var(--bz-space-md) 14px; }
+}
+
+/* ==================== 普通复习悬浮迷你评级条（item 4，屏幕底部） ==================== */
+.bz-review-bar { position: fixed; left: 50%; bottom: max(22px, env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: var(--bz-space-sm) var(--bz-space-md); background: var(--bz-surface-2); border: 1px solid var(--bz-border); border-radius: var(--bz-radius-md); box-shadow: var(--bz-shadow-lg); max-width: min(92vw, 560px); }
+/* R8 键盘化：容器 tabindex=-1 为程序化 focus 落点，不显示焦点框（按钮各自有 hover/focus 表达） */
+.bz-review-bar:focus { outline: none; }
+.bz-review-bar-info { font-size: 12.5px; color: var(--bz-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+.bz-review-bar-info i { font-style: normal; color: var(--bz-text-3); margin-left: var(--bz-space-xs); }
+.bz-review-bar-act { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.bz-review-bar-btn { border: 1px solid var(--bz-border); background: var(--bz-surface-1); color: var(--bz-text-1); border-radius: var(--bz-radius-sm); padding: 5px var(--bz-space-md); font-size: 12.5px; cursor: pointer; }@media (hover: hover) {
+
+.bz-review-bar-btn:hover { border-color: var(--bz-brand); background: var(--bz-surface-hover); }
+}
+/* 评级四档语义色：忘了=危险 / 困难=警示 / 一般·简单=成功（简单与一般同归积极绿，档位由文字区分） */
+.bz-review-bar-btn.is-again { border-left: 3px solid var(--bz-danger); }
+.bz-review-bar-btn.is-hard { border-left: 3px solid var(--bz-warning); }
+.bz-review-bar-btn.is-good { border-left: 3px solid var(--bz-success); }
+.bz-review-bar-btn.is-easy { border-left: 3px solid var(--bz-success); }
+.bz-review-bar-btn.is-skip { color: var(--bz-text-2); }
+
+/* ==================== 既有保留块 ==================== */
+/* 难度弹窗自绘族已随批 C 迁 flow-dialog choice 删除（A4/U4/E7） */
+
+/* 监听文件夹旧 chip 渲染已退役（死规则删除；监听文件夹设置走 settings-schema） */
+
+/* 深审 U7：排除名单 chip 族死规则已删（名单已迁 settings 通用 list 行，无 DOM 产出） */
+
+/* 统计弹窗 / 复习历史弹窗（既有实现，容器保留）；遮罩三件套已收编 .bz-overlay-mask 单源（issue 365） */
+#review-stats-popup { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); background: var(--bz-surface-2); border-radius: var(--bz-radius-md); box-shadow: var(--bz-shadow-lg); width: 92%; max-width: 600px; max-height: 88vh; flex-direction: column; animation: slideUp var(--bz-dur-slow) ease-out; }
+#review-stats-body { flex: 1; overflow-y: auto; }
+.bz-review-stats-head { padding: var(--bz-space-sm) 18px 6px !important; }
+.bz-review-stats-head .bz-review-title { font-size: .92rem !important; font-weight: 600 !important; margin: 0 !important; }
+#review-history-popup { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); background: var(--bz-surface-2); border-radius: var(--bz-radius-md); box-shadow: var(--bz-shadow-lg); width: 92%; max-width: 480px; max-height: 80vh; flex-direction: column; overflow: hidden; animation: slideUp var(--bz-dur-slow) ease-out; }
+#review-history-body { flex: 1; overflow-y: auto; position: relative; }
+
+/* ==================== 统计弹窗内容件（呈报#55/R11 重刷：影院现行统计形制） ====================
+   markup 对齐 cinema/analysis.ts（stat-cards/sec/sec-title+板块 lucide/bar-row/soft-row/
+   kv-inline/top-row），静态样式 scoped 在 #review-stats-popup（构建后全局聚合，
+   cinema 同名裸类规则 scoped 在 .bz-cinema--midnight，两侧互不误伤）；cinema 侧零改动，
+   不抽公共组件（拍板：先重刷，抽公共件另议）。评级色 RATING_COLORS 为数据驱动动态色，
+   保留行内 background/color。cinema 硬编码值按 --bz-* 档对档（ink/line/chip/gold →
+   text-*/border/surface-*/warning）。 */
+#review-stats-popup .stat-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 12px 16px 0; }
+#review-stats-popup .stat-card { background: var(--bz-surface-1); border: 1px solid var(--bz-border); border-radius: 10px; padding: 11px 13px; }
+#review-stats-popup .stat-card .v { font-family: Georgia, serif; font-size: 19px; font-weight: 700; color: var(--bz-text-1); }
+#review-stats-popup .stat-card .k { font-size: var(--bz-font-caption); letter-spacing: .14em; color: var(--bz-text-3); margin-top: 3px; }
+#review-stats-popup .sec { background: var(--bz-surface-1); border: 1px solid var(--bz-border); border-radius: 11px; padding: 13px 15px; margin: 12px 16px; }
+#review-stats-popup .sec-title { display: flex; align-items: center; gap: var(--bz-space-sm); font-size: var(--bz-font-label); font-weight: 700; color: var(--bz-text-1); margin-bottom: 11px; }
+#review-stats-popup .sec-title .bz-ic { display: inline-flex; width: 13px; height: 13px; color: var(--bz-warning); }
+#review-stats-popup .sec-title .bz-ic svg { width: 100%; height: 100%; }
+#review-stats-popup .sec-title::after { content: ""; flex: 1; height: 1px; background: var(--bz-border); }
+#review-stats-popup .bar-row { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
+#review-stats-popup .bar-label { width: 76px; flex: none; font-size: var(--bz-font-caption); color: var(--bz-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+#review-stats-popup .bar-track { flex: 1; height: 12px; background: var(--bz-surface-3, var(--bz-border)); border-radius: var(--bz-radius-xs); overflow: hidden; }
+#review-stats-popup .bar-fill { display: block; height: 100%; border-radius: var(--bz-radius-xs); }
+#review-stats-popup .bar-num { width: 30px; flex: none; font-size: var(--bz-font-caption); color: var(--bz-text-3); font-variant-numeric: tabular-nums; text-align: right; }
+#review-stats-popup .soft-row { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
+#review-stats-popup .soft-track { flex: 1; height: 9px; background: var(--bz-surface-3, var(--bz-border)); border-radius: 99px; overflow: hidden; }
+#review-stats-popup .soft-fill { display: block; height: 100%; border-radius: 99px; }
+#review-stats-popup .kv-inline { display: flex; flex-wrap: wrap; gap: 6px var(--bz-space-lg); font-size: var(--bz-font-meta); color: var(--bz-text-2); margin-bottom: 9px; }
+#review-stats-popup .kv-inline b { color: var(--bz-text-1); font-weight: 700; }
+/* 排名行（cinema top-row 形制；R7：role=button 键盘可达） */
+#review-stats-popup .top-row { display: flex; align-items: center; gap: 9px; padding: 6px 4px; border-bottom: 1px dashed var(--bz-border); font-size: var(--bz-font-meta); color: var(--bz-text-1); cursor: pointer; border-radius: var(--bz-radius-sm); }
+#review-stats-popup .top-row:last-of-type { border-bottom: 0; }@media (hover: hover) {
+
+#review-stats-popup .top-row:hover { background: var(--bz-surface-hover); }
+}
+#review-stats-popup .top-row:focus-visible { outline: 2px solid var(--bz-brand); outline-offset: 1px; }
+#review-stats-popup .top-no { width: 20px; flex: none; text-align: center; font-family: Georgia, serif; font-style: italic; color: var(--bz-text-3); }
+#review-stats-popup .top-row.is-top .top-no { color: var(--bz-warning); font-weight: 700; }
+#review-stats-popup .top-name { flex: 1; min-width: 0; color: var(--bz-text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#review-stats-popup .top-sub { flex: none; font-size: var(--bz-font-caption); color: var(--bz-text-2); }
+#review-stats-popup .top-val { flex: none; font-size: var(--bz-font-caption); color: var(--bz-text-3); font-variant-numeric: tabular-nums; }
+/* 空态（形制对齐 cinema cn-empty：居中小字 + 字距） */
+.bz-stats-empty { padding: 18px 0; text-align: center; font-size: var(--bz-font-caption); color: var(--bz-text-3); letter-spacing: .1em; }
+.bz-stats-hint { font-size: var(--bz-font-caption); color: var(--bz-text-3); text-align: center; padding-top: 8px; }
+
+/* ==================== 复习历史时间线（issue 270：时间轴竖线式内联收编） ====================
+   圆点/评级字色为 RATING_COLORS 数据驱动动态色，保留行内 background/color。 */
+.bz-review-history-status { padding: 16px 18px 10px; }
+.bz-review-history-name { font-size: 15px; font-weight: 600; color: var(--bz-text-1); }
+.bz-review-history-sub { font-size: 12px; color: var(--bz-text-2); margin-top: 2px; }
+.bz-review-history-empty { padding: 30px; text-align: center; color: var(--bz-text-3); font-size: 13px; }
+.bz-review-history-tl { flex: 1; overflow-y: auto; padding: 4px 18px 20px; }
+.bz-review-history-item { position: relative; padding-left: 20px; padding-bottom: 14px; }
+.bz-review-history-item.is-last { padding-bottom: 4px; }
+.bz-review-history-line { position: absolute; left: 5px; top: 14px; bottom: -4px; width: 2px; background: var(--bz-border); }
+.bz-review-history-dot { position: absolute; left: 0; top: 4px; width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.bz-review-history-row { display: flex; align-items: baseline; gap: 10px; font-size: 13px; }
+.bz-review-history-time { color: var(--bz-text-2); font-size: 12px; min-width: 86px; flex-shrink: 0; }
+.bz-review-history-rating { font-weight: 500; min-width: 32px; }
+.bz-review-history-stage { color: var(--bz-text-3); font-size: 12px; }
+
+/* item 14：文件树徽标的 lucide 图标尺寸（统计/历史关闭钮已退役 issue 271） */
+.review-stage-badge .bz-ic { display: inline-flex; width: 1em; height: 1em; vertical-align: -0.12em; }
+.review-stage-badge .bz-ic svg { width: 100%; height: 100%; }
+
+/* ==================== 触控热区（设计手册 §8.2，触屏 pointer:coarse） ====================
+   ::after 外扩已收编 core .bz-touch-target（components.css，模板挂类）：信息行/设置 chip
+   关闭钮/历史·统计关闭钮 = --lg/--xl 档、迷你评级条 = --sm 档；此处仅保留 padding 抬档。 */
+@media (pointer: coarse) {
+  .bz-q-fitem { padding: var(--bz-space-xs) 0; }
+  .bz-review-bar-btn { padding: 10px var(--bz-space-md); }
+}
+
+/* ==================== quiz-core 会话弹窗样式恢复（issue 270） ====================
+   quiz 并入 review（9c603ed7）时 src/quiz/styles.css 96 行被删未迁入，本节恢复。
+   token 对档（core/ui/tokens.css）：--background-primary/secondary → --bz-surface-2/1、
+   --text-normal → --bz-text-1、--background-modifier-border/hover → --bz-border/--bz-surface-hover、
+   --interactive-accent/--text-on-accent → --bz-brand/--bz-on-brand；
+   对错硬编码绿/红 → --bz-success/--bz-danger（15% 透底改 color-mix 等价）；
+   遮罩用 --bz-overlay + token 毛玻璃 --bz-overlay-blur（memo item-1789106289860 推翻「明确不采用」口径）；
+   弹窗壳规格对齐组件库 modal（--bz-radius-md / --bz-shadow-lg / 82vh 限高）。
+   该入口现休眠（产品走 SprintSession），样式补齐不退役、不改 DOM。
+   原文件尾 @keyframes spin 无消费者（旧 loading 界面随普通模式删除），不迁。 */
+#quiz-mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--bz-overlay); backdrop-filter: blur(var(--bz-overlay-blur)); display: flex; align-items: center; justify-content: center; }
+#quiz-popup { background: var(--bz-surface-2); border-radius: var(--bz-radius-md); box-shadow: var(--bz-shadow-lg); padding: 24px; max-width: 600px; width: 90%; max-height: 82vh; overflow-y: auto; display: flex; flex-direction: column; position: relative; transition: none; }
+.bz-quiz-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.bz-quiz-title { font-size: 15px; font-weight: 600; }
+/* 呈报#54（R4）：题头 file-text 图标（uiIconSpan 产 .bz-ic）尺寸对齐标题行 */
+.bz-quiz-note-ic { display: inline-flex; width: 16px; height: 16px; color: var(--bz-text-2); }
+.bz-quiz-note-ic svg { width: 100%; height: 100%; }
+.bz-quiz-question { font-size: 17px; font-weight: 500; margin-bottom: 20px; color: var(--bz-text-1); }
+.bz-quiz-options { display: flex; flex-direction: column; gap: 6px; }
+.bz-quiz-option-text { flex: 1; }
+.quiz-option-btn {
+  padding:10px 14px;
+  border:1px solid var(--bz-border);
+  border-radius:6px;
+  background:var(--bz-surface-1);
+  text-align:left;
+  cursor:pointer;
+  font-size:15px;
+  transition:background 0.2s;
+  margin:4px 0;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  box-shadow: none !important;
+  /* 长文本修复：按钮可收缩不撑破弹窗；button 默认 white-space:pre 需改回 normal 才能换行 */
+  min-width:0;
+  width:100%;
+  box-sizing:border-box;
+  white-space:normal;
+}
+/* 选项文本：flex 子项允许收缩并在按钮内换行（长 URL/英文串不截断） */
+.quiz-option-btn span {
+  min-width:0;
+  word-break:break-word;
+  overflow-wrap:anywhere;
+}@media (hover: hover) {
+
+.quiz-option-btn:hover:not(.disabled) { background:var(--bz-surface-hover); }
+}
+.quiz-option-btn.correct { border-color:var(--bz-success) !important; background:color-mix(in srgb, var(--bz-success) 15%, transparent); }
+.quiz-option-btn.wrong { border-color:var(--bz-danger) !important; background:color-mix(in srgb, var(--bz-danger) 15%, transparent); }
+.quiz-option-btn.selected { border-color:var(--bz-brand); background:var(--bz-surface-hover); }
+.quiz-option-btn .check-mark { opacity:0; transition:opacity 0.2s; flex-shrink:0; }
+.quiz-option-btn.selected .check-mark { opacity:1; }
+/* R4：check-mark 的 lucide 对勾尺寸（iconSpan 占位兑现为 span.bz-ic） */
+.check-mark .bz-ic { display: inline-flex; width: 14px; height: 14px; }
+.check-mark .bz-ic svg { width: 100%; height: 100%; }
+.quiz-submit-btn {
+  margin-top:16px;
+  padding:8px 20px;
+  border:none;
+  border-radius:6px;
+  background:var(--bz-brand);
+  color:var(--bz-on-brand);
+  font-size:15px;
+  cursor:pointer;
+  align-self:center;
+  box-shadow: none !important;
+}@media (hover: hover) {
+
+.quiz-submit-btn:hover { opacity:0.9; }
+}
+.quiz-submit-btn:disabled { opacity:0.5; cursor:not-allowed; }
+.quiz-next-btn {
+  margin-top:16px;
+  padding:8px 20px;
+  border:1px solid var(--bz-border);
+  border-radius:6px;
+  background:var(--bz-surface-1);
+  color:var(--bz-text-1);
+  font-size:15px;
+  cursor:pointer;
+  align-self:center;
+  box-shadow: none !important;
+}@media (hover: hover) {
+
+.quiz-next-btn:hover { background:var(--bz-surface-hover); }
+}
+
+/* ==================== 移动端字号体系（≤768px，2026-09-12 评审） ====================
+   背景：域内字号沿桌面档取值（token 阶梯 11/12/13/14/15/17/20 + 少量硬编码小字），
+   手机上整体偏小。本段按**视觉层级**定标放大（先例 src/diary/styles.css 六档体系：
+   一层级一定值，不用一刀切倍数），档间保持单调、各层只差一档：
+
+     L1 面板/整屏题   复习计划 · 做题冲刺 · 本轮复习完成        20~22
+     L2 区块题/大数字 列头计数 · 结果篇名 · 结算大数字           18~26
+     L3 卡片题        队列卡标题 · 题面 · 选项文本               16~17.5
+     L4 正文/辅助     开始本轮条 · 解析 · 队列条目 · 底部信息行  14~15
+     L5 控件          面板内 .bz-btn（40px 高）· 评级条按钮       15
+     L6 角标          到期/阶段 tag · 阶段号 · 日期副题 · 统计小字 13
+
+   控件尺寸随同级文字抬档（设计手册 §8.2）：头行图标钮 40×44、选项行 ≥44、评级条
+   按钮 ≥44、面板内主钮 40。本段置于文件末尾——媒体查询不增特异性，靠「后写者赢」
+   压过上方基础规则（域内既有移动端块只改布局，字号单归本段）。
+   桌面 >768px 逐像素不变。 */
+@media (max-width: 768px) {
+  /* ---- L1 面板题 ---- */
+  #review-popup .bz-panel-head { height: 52px; padding: 0 14px; }
+  #review-popup .bz-panel-title { font-size: 20px; }
+  #review-popup .bz-panel-head-sub { font-size: 13px; }
+  #review-popup .bz-panel-brand { width: 28px; height: 28px; }
+  #review-popup .bz-panel-brand .bz-ic { width: 16px; height: 16px; }
+  #review-popup .bz-panel-head-pipe { height: 16px; }
+  .bz-sprint-title { font-size: 20px; }
+  .bz-sprint-sub { font-size: 13px; }
+  .bz-summary-title { font-size: 22px; }
+
+  /* ---- L5 控件：面板内主钮 + 头行图标钮（唯一关闭入口，抬到触控档） ---- */
+  #review-popup .bz-btn { height: 40px; padding: 0 18px; font-size: 15px; }
+  #review-popup .bz-icon-btn { width: 40px; height: 44px; }
+  #review-popup .bz-icon-btn .bz-ic { width: 18px; height: 18px; }
+
+  /* ---- 开始本轮条：字号抬档后一行放不下 → 信息一行、主钮独占一行（满宽 40px 靶） ---- */
+  .bz-q-strip { flex-wrap: wrap; }
+  .bz-q-strip strong { font-size: 16px; }
+  .bz-q-strip-txt { font-size: 14px; }
+  .bz-q-strip .bz-btn { flex: 1 0 100%; }
+
+  /* ---- L2/L3/L6 三区队列 ---- */
+  .bz-q-col { padding: 10px; }
+  .bz-q-col-head .cnt { font-size: 19px; }
+  .bz-q-col-head .name { font-size: 15px; }
+  .bz-q-card { padding: 10px 12px; }
+  .bz-q-card-title { font-size: 16px; }
+  .bz-q-card-stage { font-size: 13px; }
+  .bz-q-tag { font-size: 13px; padding: 3px 9px; }
+  .bz-q-hint { font-size: 14px; }
+
+  /* ---- L4 底部信息行 ---- */
+  .bz-q-fitem { font-size: 14px; }
+  .bz-q-fitem .bz-q-ic { width: 14px; height: 14px; }
+
+  /* ---- 空态（core .bz-empty 在面板内的实例，尺寸随层级抬档） ---- */
+  #review-popup .bz-empty-ic { width: 40px; height: 40px; }
+  #review-popup .bz-empty-title { font-size: 17px; }
+  #review-popup .bz-empty-desc { font-size: 14px; max-width: 300px; }
+
+  /* ---- 整窗冲刺 ---- */
+  .bz-sprint-loading { font-size: 15px; }
+  .bz-sprint-progress { font-size: 14px; }
+  .bz-sprint-qtype { font-size: 13px; }
+  .bz-sprint-qtext { font-size: 17.5px; line-height: 1.65; }
+  .bz-sprint-opt { padding: 12px 14px; gap: 10px; }
+  .bz-sprint-opt .k { font-size: 14px; width: 20px; }
+  .bz-sprint-opt .t { font-size: 16px; }
+  .bz-sprint-explain { font-size: 14px; }
+  .bz-sprint-queue { max-height: 170px; }
+  .bz-sq-head b { font-size: 14px; }
+  .bz-sq-item { padding: 8px 10px; }
+  .bz-sq-item .nm { font-size: 14px; }
+
+  /* ---- 结果卡 / 结算屏 ---- */
+  .bz-result { padding: 24px 12px; }
+  .bz-result-name { font-size: 18px; }
+  .bz-result-score { font-size: 38px; }
+  .bz-result-score .sl { font-size: 20px; }
+  .bz-result-rating { font-size: 14px; }
+  .bz-mark.ok.lg, .bz-mark.bad.lg { font-size: 38px; }
+  .bz-summary { padding: 30px 12px; }
+  .bz-summary-stats .st { padding: 14px 8px; max-width: 120px; }
+  .bz-summary-stats .st b { font-size: 26px; }
+  .bz-summary-stats .st span { font-size: 13px; }
+  .bz-summary-streak { font-size: 14.5px; }
+
+  /* ---- 悬浮迷你评级条（手机主交互）：篇名/进度一行 + 评级钮一行，钮 ≥44px 热区 ----
+     宽度须给**定值**：条是 fixed + 内容收缩宽，子项 flex-basis:100% 无定值可解会塌成窄条
+     （实测按钮被压到 42px 宽、两字竖排）；定宽后两行各占满，钮按内容宽排布。 */
+  .bz-review-bar { flex-wrap: wrap; justify-content: center; gap: 8px; padding: 10px 12px; width: min(94vw, 560px); max-width: none; }
+  .bz-review-bar-info { font-size: 14px; max-width: 100%; flex: 1 0 100%; text-align: center; }
+  .bz-review-bar-act { flex: 1 1 100%; justify-content: center; gap: 8px; flex-wrap: wrap; }
+  .bz-review-bar-btn { font-size: 14.5px; padding: 10px 12px; min-height: 44px; }
+
+  /* ---- 统计弹窗 / 复习历史弹窗（底行两条入口的落点，rem 小字同档抬升） ---- */
+  #review-stats-popup .bz-review-stats-head .bz-review-title { font-size: 1.05rem !important; }
+  #review-stats-popup .stat-cards { grid-template-columns: repeat(2, 1fr); }
+  #review-stats-popup .stat-card .v { font-size: 22px; }
+  #review-stats-popup .stat-card .k { font-size: .8rem; }
+  #review-stats-popup .sec-title { font-size: 1.05rem; }
+  #review-stats-popup .bz-stats-empty { font-size: .9rem; }
+  #review-stats-popup .bar-label { width: 64px; font-size: .85rem; }
+  #review-stats-popup .bar-track { height: 12px; }
+  #review-stats-popup .bar-num { width: 34px; font-size: .85rem; }
+  #review-stats-popup .kv-inline { font-size: .85rem; }
+  #review-stats-popup .top-row { font-size: 15px; }
+  #review-stats-popup .top-name { font-size: .95rem; }
+  #review-stats-popup .top-sub,
+  #review-stats-popup .top-val { font-size: .8rem; }
+  #review-stats-popup .bz-stats-hint { font-size: .78rem; }
+  #review-history-popup .bz-review-history-name { font-size: 18px; }
+  #review-history-popup .bz-review-history-sub { font-size: 13.5px; }
+  #review-history-popup .bz-review-history-empty { font-size: 14.5px; }
+  #review-history-popup .bz-review-history-row { font-size: 14.5px; }
+  #review-history-popup .bz-review-history-time { font-size: 13.5px; min-width: 96px; }
+  #review-history-popup .bz-review-history-stage { font-size: 13.5px; }
+}
+
+/* ==================== 做题练习独立面板（issue 362） ====================
+   壳接组件库（.bz-panel-overlay/.bz-panel-frame/.bz-panel-mtop）；域内只留 id 几何。
+   控件/配色全部消费 core/ui 组件类与 --bz-* token（.bz-segmented/.bz-input/.bz-summary），
+   滚动条由 core 界面级单源隐藏（ADR-0122，bz- id 前缀在册），域内不自造。 */
+#bz-quiz-practice-popup { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 94%; max-width: 520px; max-height: 84vh; animation: slideUp var(--bz-dur-slow) ease-out; }
+@media (max-width: 768px) {
+  #bz-quiz-practice-popup { animation: none !important; top: 0; left: 0; transform: none; width: 100%; max-width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
+}
+.bz-quiz-practice-container { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.bz-qp-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.bz-qp-body { display: flex; flex-direction: column; gap: var(--bz-space-md); padding: var(--bz-space-md) 20px var(--bz-space-lg); flex: 1; min-height: 0; overflow-y: auto; }
+.bz-qp-sec { display: flex; flex-direction: column; gap: var(--bz-space-xs); }
+.bz-qp-sec-label { font-size: var(--bz-font-caption); color: var(--bz-text-3); font-weight: 600; }
+.bz-qp-detail-wrap { display: flex; flex-direction: column; gap: var(--bz-space-xs); }
+.bz-qp-detail { font-size: var(--bz-font-meta); color: var(--bz-text-3); }
+.bz-qp-folder-row { display: flex; align-items: flex-start; gap: var(--bz-space-sm); }
+.bz-qp-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
+.bz-qp-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 3px 6px 3px 10px; border-radius: 12px; background: var(--bz-surface-3); font-size: var(--bz-font-caption); color: var(--bz-text-2); }
+.bz-qp-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bz-qp-chip-x { appearance: none; border: none; background: transparent; color: var(--bz-text-3); cursor: pointer; padding: 0 3px; font-size: var(--bz-font-caption); line-height: 1; }@media (hover: hover) {
+
+.bz-qp-chip-x:hover { color: var(--bz-danger); }
+}
+.bz-qp-note-field { position: relative; }
+.bz-qp-meta { font-size: var(--bz-font-meta); color: var(--bz-text-3); }
+.bz-qp-meta b { color: var(--bz-text-1); font-weight: 600; }
+.bz-qp-start { height: 38px; font-size: var(--bz-font-label); }
+.bz-qp-foot { font-size: var(--bz-font-caption); color: var(--bz-text-3); line-height: 1.5; }
+.bz-qp-acc { font-size: var(--bz-font-label); color: var(--bz-text-2); }
+.bz-qp-acc b { color: var(--bz-brand); font-weight: 700; font-size: var(--bz-font-emphasis); }
+
+/* ==================== 动效层注入件（2026-09-22 批，src/review/motion.ts 消费） ====================
+   绝对定位 · pointer-events:none · aria-hidden · 演完自毁——终态 UI 与无动效版完全一致。
+   朱批=批改语义（逾期卡「急」/结算「优·完成」）；红晕=失利氛围；环/扫=节奏点缀。 */
+.bz-rv-seal { position: absolute; top: 4px; right: 6px; width: 34px; height: 34px; border: 2px solid var(--bz-danger); border-radius: 50%; color: var(--bz-danger); display: flex; align-items: center; justify-content: center; font-family: Georgia, 'KaiTi', 'STKaiti', serif; font-size: 14px; font-weight: 700; line-height: 1; letter-spacing: 1px; pointer-events: none; z-index: 3; background: color-mix(in srgb, var(--bz-surface-2, #fff) 55%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--bz-danger) 32%, transparent); }
+.bz-rv-seal::before { content: ''; position: absolute; inset: 2.5px; border: 1px dashed color-mix(in srgb, var(--bz-danger) 55%, transparent); border-radius: 50%; }
+.bz-rv-seal--big { top: -8px; right: 4px; width: 78px; height: 78px; font-size: 30px; border-width: 3px; z-index: 4; }
+.bz-rv-ring { position: absolute; border: 2px solid var(--bz-brand); border-radius: 50%; pointer-events: none; transform: translate(-50%,-50%); z-index: 4; }
+.bz-rv-sweep { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; pointer-events: none; z-index: 5; }
+.bz-rv-sweep u { position: absolute; top: 0; bottom: 0; left: 0; width: 30%; background: linear-gradient(90deg, transparent, rgba(255,255,255,.16), transparent); }
+.bz-rv-failflash { position: absolute; inset: 0; pointer-events: none; z-index: 6; background: radial-gradient(ellipse at center, transparent 40%, color-mix(in srgb, var(--bz-danger) 36%, transparent) 100%); }
 /* ==================== 做题家域样式（src/quiz/styles.css） ==================== */
 /* ==================== 做题家（quiz，ticket 60 收敛：原注入样式，逐字搬运） ==================== */
 /* 票 277/S3-c（上游 issue 270「quiz 弹窗样式找回」的 token 对档剥离版）：
