@@ -22,31 +22,46 @@ var BZR_home = (() => {
   var render_exports = {};
   __export(render_exports, {
     ALL_DOMAIN_IDS: () => ALL_DOMAIN_IDS,
+    DEFAULT_TIMELINE_FILTER: () => DEFAULT_TIMELINE_FILTER,
     DOMAINS: () => DOMAINS,
     DOMAIN_DOT: () => DOMAIN_DOT,
     DOMAIN_ICONS: () => DOMAIN_ICONS,
     DOMAIN_MAP: () => DOMAIN_MAP,
+    DOMAIN_MENU: () => DOMAIN_MENU,
     EMPTY_COUNTS: () => EMPTY_COUNTS,
     EMPTY_SUMMARY: () => EMPTY_SUMMARY,
+    TIMELINE_KIND_LABEL: () => TIMELINE_KIND_LABEL,
+    applyOrder: () => applyOrder,
     buildDots: () => buildDots,
     buildNotes: () => buildNotes,
     buildPreviews: () => buildPreviews,
     collectHtml: () => collectHtml,
     dateStrOf: () => dateStrOf,
+    domainColor: () => domainColor,
     dotOf: () => dotOf,
     entriesHtml: () => entriesHtml,
     esc: () => esc,
+    eventKind: () => eventKind,
+    eventVisible: () => eventVisible,
+    filterEvents: () => filterEvents,
     flowHtml: () => flowHtml,
     headDateText: () => headDateText,
+    hiddenOf: () => hiddenOf,
     iconSpan: () => iconSpan,
     loadingEntriesHtml: () => loadingEntriesHtml,
     loadingFlowHtml: () => loadingFlowHtml,
-    memoIdOf: () => memoIdOf,
+    menuHeadHtml: () => menuHeadHtml,
     nextHtml: () => nextHtml,
     panelFrameHtml: () => panelFrameHtml,
+    pomodoroMenuAction: () => pomodoroMenuAction,
+    reorderTo: () => reorderTo,
     riverCountText: () => riverCountText,
+    sheetHeadHtml: () => sheetHeadHtml,
     tilesHtml: () => tilesHtml,
+    timelineKind: () => timelineKind,
+    timelineRangeDays: () => timelineRangeDays,
     truncateCollect: () => truncateCollect,
+    visibleDomains: () => visibleDomains,
     weekHtml: () => weekHtml
   });
 
@@ -89,33 +104,39 @@ var BZR_home = (() => {
     encrypt: "lock",
     password: "key-round",
     smartcat: "cat",
-    literature: "list-video",
+    knowledge: "list-video",
     collect: "inbox",
     // 命令专属域
     "settings-panel": "settings-2"
   };
 
   // src/home/shared.ts
-  var ICON_KEY = { wall: "diary-wall", settings: "settings-panel" };
+  var ICON_KEY = { settings: "settings-panel", wall: "diary-wall" };
   var iconOf = (id) => {
     var _a;
     return DOMAIN_ICONS[(_a = ICON_KEY[id]) != null ? _a : id];
   };
   var DOMAINS = [
     { id: "diary", commandId: "bz-diary-open", name: "日记本", sub: "写今天的闪念", icon: iconOf("diary") },
-    { id: "cinema", commandId: "bz-cinema-open", name: "影院", sub: "影视想看与在看", icon: iconOf("cinema") },
+    // 待办（todo 域，上游 memo 换血接替 ADR-0092/0117，本地命名走 ADR-0118）：上游 09-10 起补入首页入口（票 288）
+    { id: "todo", commandId: "bz-todo-open", name: "待办", sub: "随手记与待办", icon: iconOf("todo") },
+    { id: "cinema", commandId: "bz-cinema-open", name: "娱乐", sub: "电影/剧集/书籍 想看与在看", icon: iconOf("cinema") },
     { id: "review", commandId: "bz-review-open", name: "复习计划", sub: "到期卡片队列", icon: iconOf("review") },
     { id: "pomodoro", commandId: "bz-pomodoro-open", name: "番茄钟", sub: "专注计时", icon: iconOf("pomodoro") },
     { id: "favorites", commandId: "bz-favorites-open", name: "收藏本", sub: "收藏条目", icon: iconOf("favorites") },
     { id: "clipping", commandId: "bz-clipbook-open", name: "剪藏本", sub: "未读流与剪藏", icon: iconOf("clipping") },
-    // 日常收集（collect 域，issue 246）：QuickAdd 宏换血进插件，捕获入口在首页留快照位
+    // 日常收集（collect 域，issue 246）：本地独有域入口
     { id: "collect", commandId: "bz-collect-open", name: "日常收集", sub: "灵感与素材收集", icon: iconOf("collect") },
-    // 文献盒（literature 域，ADR-0072）：文献笔记列表 + 视频/术语录入（补内容域曝光位）
-    { id: "literature", commandId: "bz-literature-open", name: "文献盒", sub: "文献笔记与录入", icon: iconOf("literature") },
-    // 书库（bookshelf 域换血接替 library；内部 id 保持兼容 home.json 钉选）
+    // 知识盒（knowledge 域，ADR-0072；上游 knowledge 的本地命名 ADR-0118）
+    { id: "knowledge", commandId: "bz-knowledge-open", name: "知识盒", sub: "文献笔记与录入", icon: iconOf("knowledge") },
+    // 旧书库（library）域退役：本卡由书架墙（bookshelf）承接（id 变更后旧 home.json 里钉选的 library 自动失效，可在编辑模式重钉）
     { id: "bookshelf", commandId: "bz-bookshelf-open", name: "书库", sub: "藏书与读书笔记", icon: iconOf("bookshelf") },
+    // 第二大脑（secondbrain 域，issue 251）：主面板统一入口（检索/对话/灵感参考都从面板进；票 288 补入）
+    { id: "secondbrain", commandId: "bz-secondbrain-panel", name: "第二大脑", sub: "笔记检索与问答", icon: iconOf("secondbrain") },
+    // 回忆墙（diary-wall 域）：冻结域独立入口（ADR-0121；上游已并入日记本条目，本地不随）
     { id: "wall", commandId: "bz-diary-wall-open", name: "回忆墙", sub: "相片墙浏览日记", icon: iconOf("wall") },
     { id: "belongings", commandId: "bz-belongings-open", name: "归物本", sub: "物品登记", icon: iconOf("belongings") },
+    // 移动附件（attach 域）：上游 09-10 自入口移除，本地保留现状（可在隐藏列表配置，票 288 记录偏差）
     { id: "attach", commandId: "bz-attach-move", name: "移动附件", sub: "附件归位", icon: iconOf("attach") },
     { id: "encrypt", commandId: "bz-encrypt-open", name: "保险库", sub: "密码·加密笔记·日记", icon: iconOf("encrypt") },
     { id: "settings", commandId: "bz-settings-panel-open", name: "设置", sub: "全域设置", icon: iconOf("settings") }
@@ -123,26 +144,145 @@ var BZR_home = (() => {
   var DOMAIN_MAP = new Map(DOMAINS.map((d) => [d.id, d]));
   var DOMAIN_DOT = {
     diary: "#e67341",
+    todo: "#e8590c",
     recap: "#d64d8f",
     cinema: "#e6951d",
     review: "#7c5cd6",
     pomodoro: "#e5534b",
     favorites: "#f0b429",
     clipping: "#2f9e5f",
-    collect: "#c98a2e",
-    literature: "#c2559d",
+    knowledge: "#c2559d",
     bookshelf: "#3d7bd6",
+    secondbrain: "#a33d2a",
     "reading-report": "#3fa7a0",
-    wall: "#7c8cf8",
     belongings: "#45a35c",
     attach: "#8a8f99",
     encrypt: "#8a8f99",
     smartcat: "#e67341",
-    settings: "#8a8f99"
+    settings: "#8a8f99",
+    // 日常收集（collect 域，issue 246）：琥珀色快照卡同源
+    collect: "#c98a2e"
   };
   var ALL_DOMAIN_IDS = DOMAINS.map((d) => d.id);
+  function applyOrder(order, domains = DOMAINS) {
+    if (!order || !order.length) return domains;
+    const rank = /* @__PURE__ */ new Map();
+    order.forEach((id, i) => {
+      if (!rank.has(id)) rank.set(id, i);
+    });
+    const MISS = Number.MAX_SAFE_INTEGER;
+    return [...domains].sort((a, b) => {
+      var _a, _b;
+      return ((_a = rank.get(a.id)) != null ? _a : MISS) - ((_b = rank.get(b.id)) != null ? _b : MISS);
+    });
+  }
+  function reorderTo(order, id, toIndex, hidden = [], domains = DOMAINS) {
+    const all = applyOrder(order, domains).map((d) => d.id);
+    const off = new Set(hidden);
+    const visible = all.filter((x) => !off.has(x));
+    const from = visible.indexOf(id);
+    if (from < 0 || toIndex < 0 || toIndex >= visible.length) return all;
+    visible.splice(from, 1);
+    visible.splice(toIndex, 0, id);
+    return [...visible, ...all.filter((x) => off.has(x))];
+  }
+  function hiddenOf(order, scope) {
+    return scope === "mob" ? order.hiddenMob : order.hiddenDesk;
+  }
+  function visibleDomains(order, hidden, domains = DOMAINS) {
+    const hide = new Set(hidden != null ? hidden : []);
+    return applyOrder(order, domains.filter((d) => !hide.has(d.id)));
+  }
+  function pomodoroMenuAction(phase) {
+    if (phase === "focusing") return { label: "停止专注", commandId: "bz-pomodoro-pause", icon: "pause" };
+    if (phase === "paused") return { label: "继续专注", commandId: "bz-pomodoro-pause", icon: "play" };
+    if (phase === "break") return { label: "跳过休息", commandId: "bz-pomodoro-skip", icon: "skip-forward" };
+    return { label: "开始专注", commandId: "bz-pomodoro-focus-toggle", icon: "timer" };
+  }
+  var DOMAIN_MENU = {
+    // 日记四动作（2026-09-14 用户点名；解冻上游「日记不挂菜单」的票 288 口径——
+    // 均为既有 bz 命令直呼，不新增命令面，diary 域本身零改动）：
+    diary: [
+      { label: "写日记", commandId: "bz-diary-write", icon: "pen-line" },
+      { label: "日程规划", commandId: "bz-diary-plan", icon: "calendar-plus" },
+      { label: "每日触动点记录", commandId: "bz-diary-review", icon: "notebook-pen" },
+      { label: "日常行为记录", commandId: "bz-diary-activity-capture", icon: "footprints" }
+    ],
+    todo: [
+      { label: "写待办", commandId: "bz-todo-add", icon: "clipboard-list" }
+      // 上游「给当前笔记记一笔」（bz-memo-note-binding）本地无等价命令，不挂（票 288）
+    ],
+    cinema: [
+      { label: "加条目", commandId: "bz-cinema-add", icon: "plus" },
+      { label: "娱乐分析报告", commandId: "bz-cinema-analysis", icon: "bar-chart-3" },
+      // 从「想看」池随机抽一部并直接开详情（抽不动脑子时的入口）
+      { label: "随机抽一部", commandId: "bz-cinema-random-pick", icon: "shuffle" }
+    ],
+    review: [
+      // 上游 bz-review-start/add 本地复习命令面不同（review 域冻结），映射本地既有命令（票 288）
+      // 「今日复习」= 按数量复习（bz-review-count，count.ts 抽卡流程）；此前误挂 bz-review-today
+      //（注册名「今日已复习」，是历史查看不是开刷），2026-09-14 用户点名纠正，已复习历史保留为第二条。
+      { label: "今日复习", commandId: "bz-review-count", icon: "play" },
+      { label: "今日已复习", commandId: "bz-review-today", icon: "history" },
+      { label: "复习计划分析报告", commandId: "bz-review-report", icon: "bar-chart-3" }
+    ],
+    // 番茄钟：**相位敏感的单个动作**（见 pomodoroMenuAction）——静态项只是 idle 兜底，
+    // 挂菜单时整条按实时相位替换（文案/命令/图标），四相位互斥、一次只出一条。
+    pomodoro: [
+      { label: "开始专注", commandId: "bz-pomodoro-focus-toggle", icon: "timer", dynamic: "phase", keepHome: true }
+    ],
+    favorites: [{ label: "加收藏", commandId: "bz-favorites-add", icon: "bookmark" }],
+    // 剪藏本此前是空菜单（无域快捷动作）；这条是唯一「不开面板」的批量动作，故挂在入口上。
+    // 危险项：一次改 N 条 read 状态（面板里同款动作也是走确认框），故 kind: 'danger' + 确认框；
+    // keepHome = 确认框叠在首页上、清完当场看到「未读 N 篇」归零。
+    clipping: [
+      { label: "未读全部标为已读", commandId: "bz-clipbook-mark-all-read", icon: "check-check", kind: "danger", keepHome: true }
+    ],
+    knowledge: [
+      { label: "术语生成文献笔记", commandId: "bz-knowledge-note-term", icon: "file-text" },
+      // 视频生成文献笔记（bz-knowledge-note-video）：票 289 已补命令入口，票 290 起挂入（票 288 时的「本地无该命令」注记作废）
+      { label: "视频生成文献笔记", commandId: "bz-knowledge-note-video", icon: "list-video" }
+    ],
+    bookshelf: [
+      { label: "阅读分析报告", commandId: "bz-reading-report-open", icon: "bar-chart-3" }
+      // 上游「继续在读」（bz-bookshelf-continue）本地无该命令，不挂（票 288）
+    ],
+    secondbrain: [
+      { label: "第二大脑对话", commandId: "bz-secondbrain-chat", icon: "message-circle" },
+      { label: "参考侧栏", commandId: "bz-secondbrain-open", icon: "zap" },
+      // 全库重建向量索引（函数早已存在、此前没有命令入口）
+      { label: "重建索引", commandId: "bz-secondbrain-rebuild-index", icon: "refresh-cw", keepHome: true }
+    ],
+    belongings: [{ label: "加物品", commandId: "bz-belongings-add", icon: "archive" }],
+    // 保险库：此前是空菜单（无域快捷动作）；锁定是唯一「不开面板」的一步动作
+    // （上游 bz-encrypt-lock-vault 的本地命令名 = bz-encrypt-lock，票 288 映射）
+    encrypt: [
+      { label: "锁定保险库", commandId: "bz-encrypt-lock", icon: "lock", keepHome: true }
+    ],
+    // 密码本（vault）菜单不挂：本地密码本并入保险库统一域（ADR-0085），无独立命令面
+    // 日常收集（collect 域，issue 246）：统一收集入口与选区收集（本地独有）
+    collect: [
+      { label: "收集内容", commandId: "bz-collect-capture", icon: "pencil-line" }
+    ]
+  };
+  function domainColor(id) {
+    var _a;
+    return (_a = DOMAIN_DOT[id]) != null ? _a : "#8a8f99";
+  }
+  function menuHeadHtml(d, data) {
+    var _a;
+    const ct = (_a = riverCountText(d.id, data)) != null ? _a : "";
+    return '<span class="bz-item-menu-head-dot" style="background:' + domainColor(d.id) + '"></span><span class="bz-item-menu-head-nm">' + esc(d.name) + "</span>" + (ct ? '<span class="bz-item-menu-head-cnt">' + esc(ct) + "</span>" : "");
+  }
+  function sheetHeadHtml(d, data) {
+    var _a;
+    const ct = (_a = riverCountText(d.id, data)) != null ? _a : d.sub;
+    return '<div class="bz-home-sheet-head"><div class="bz-home-sheet-top"><span class="bz-home-sheet-ic" style="color:' + domainColor(d.id) + '">' + iconSpan(d.icon) + '</span><div class="bz-home-sheet-nm">' + esc(d.name) + '</div></div><div class="bz-home-sheet-sub">' + esc(ct) + "</div></div>";
+  }
   var EMPTY_COUNTS = {
     diaryTotal: 0,
+    todoOpen: 0,
+    todoUrgentOpen: 0,
     reviewTotal: 0,
     reviewOverdue: 0,
     reviewDueTomorrow: 0,
@@ -164,6 +304,51 @@ var BZR_home = (() => {
     pomodoros: 0,
     pomodoroMinutes: 0
   };
+  function truncateCollect(text, max = 42) {
+    const s = (text || "").replace(/\s+/g, " ").trim();
+    if (max <= 0 || s.length <= max) return s;
+    return s.slice(0, max) + "…";
+  }
+  var TIMELINE_KIND_LABEL = {
+    produce: "产出",
+    progress: "状态推进",
+    note: "点评 ✦",
+    skipped: "已跳过"
+  };
+  var DEFAULT_TIMELINE_FILTER = {
+    produce: true,
+    progress: true,
+    notes: true,
+    skipped: false
+  };
+  function timelineRangeDays(range) {
+    if (range === "3d") return 3;
+    if (range === "week") return 7;
+    return 1;
+  }
+  function timelineKind(text) {
+    if (text.startsWith("新增备忘录") || text.includes("加入片单") || text.includes("读到 ")) return "progress";
+    return "produce";
+  }
+  function eventKind(e) {
+    const k = e.kind;
+    return k != null ? k : timelineKind(e.text);
+  }
+  function eventVisible(e, filter) {
+    switch (eventKind(e)) {
+      case "skipped":
+        return filter.skipped;
+      case "note":
+        return filter.notes;
+      case "progress":
+        return filter.progress;
+      default:
+        return filter.produce;
+    }
+  }
+  function filterEvents(events, filter) {
+    return events.filter((e) => eventVisible(e, filter));
+  }
   function p2(n) {
     return String(n).padStart(2, "0");
   }
@@ -180,13 +365,17 @@ var BZR_home = (() => {
     const wd = "日一二三四五六"[d.getDay()];
     return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} 周${wd} · ${p2(d.getHours())}:${p2(d.getMinutes())}`;
   }
+  function dayOffsetMs(t) {
+    const d = new Date(t);
+    return d.getHours() * 36e5 + d.getMinutes() * 6e4 + d.getSeconds() * 1e3 + d.getMilliseconds();
+  }
   function buildNotes(data) {
     const notes = [];
     const day = data.today;
     if (!day.events.length) return notes;
     if (day.firstTs !== null) {
       if (data.yesterday.firstTs !== null) {
-        const diff = Math.round((day.firstTs - data.yesterday.firstTs) / 6e4);
+        const diff = Math.round((dayOffsetMs(day.firstTs) - dayOffsetMs(data.yesterday.firstTs)) / 6e4);
         if (diff > 0) notes.push({ index: 0, text: `动手比昨天晚了 ${diff} 分钟，不过来了就好。` });
         else if (diff < 0) notes.push({ index: 0, text: `动手比昨天早了 ${-diff} 分钟，好开头。` });
         else notes.push({ index: 0, text: "和昨天几乎同一时间动手，节奏很稳。" });
@@ -220,22 +409,27 @@ var BZR_home = (() => {
     if (!s.diaryWrittenToday && s.diaryStreak > 0) {
       out.push({ h: `日记连击 ×${s.diaryStreak} 待续`, b: "写三行也算数。今晚补上，明天它自己接着长。", go: "diary", goLabel: "去写日记 →" });
     } else if (s.diaryWrittenToday) {
-      out.push({ h: `今日日记已写 · 连击 ×${s.diaryStreak + 1}`, b: "明天同一时间回来续上，连击就是这么长起来的。", go: "diary", goLabel: "看日记本 →" });
+      out.push({ h: `今日日记已写 · 连击 ×${s.diaryStreak}`, b: "明天同一时间回来续上，连击就是这么长起来的。", go: "diary", goLabel: "看日记本 →" });
     } else {
-      out.push({ h: "给明天留一句话", b: "今晚写一篇日记，明晚它会变成回忆墙上的新格子。", go: "diary", goLabel: "去写日记 →" });
+      out.push({ h: "给明天留一句话", b: "今晚写一篇日记，明晚它会变成日记本媒体墙上的新格子。", go: "diary", goLabel: "去写日记 →" });
     }
     return out;
   }
   function buildDots(data) {
     const day = data.today;
     const hasEvent = (d) => day.events.some((e) => e.domain === d);
+    const c = data.counts;
     return {
       diary: day.summary.diary > 0 ? "ok" : data.streak.diaryStreak > 0 ? "warn" : "off",
-      review: data.counts.reviewOverdue > 0 ? "hot" : "off",
-      memo: day.summary.todoDone + day.summary.todoCreated > 0 ? "ok" : "off",
-      pomodoro: day.summary.pomodoros > 0 ? "ok" : "off",
-      cinema: hasEvent("cinema") ? "ok" : "off",
-      bookshelf: hasEvent("bookshelf") ? "ok" : "off",
+      review: c.reviewOverdue > 0 ? "hot" : "off",
+      todo: c.todoUrgentOpen > 0 ? "hot" : day.summary.todoDone + day.summary.todoCreated > 0 ? "ok" : "off",
+      pomodoro: data.pomodoroFocusing ? "warn" : day.summary.pomodoros > 0 ? "ok" : "off",
+      cinema: c.cinemaWatching > 0 ? "warn" : hasEvent("cinema") ? "ok" : "off",
+      // 书库（2026-09-11 用户要求）：**有在读 = warn**，与影院「有在看」同口径——
+      // 「在读 N 本」是进行中的事，比「今天动过书库」更该亮；没在读才看今日动静。
+      bookshelf: c.bookshelfReading > 0 ? "warn" : hasEvent("bookshelf") ? "ok" : "off",
+      clipping: c.clippingUnread > 0 ? "warn" : "off",
+      // 日常收集（collect 域，issue 246）：今天有收集 = ok
       collect: data.counts.collectToday > 0 ? "ok" : "off"
     };
   }
@@ -248,6 +442,8 @@ var BZR_home = (() => {
     switch (id) {
       case "diary":
         return `${c.diaryTotal} 篇${data.streak.diaryWrittenToday ? " · 今日已写" : ""}`;
+      case "todo":
+        return `${c.todoOpen} 条待办`;
       case "review":
         return c.reviewOverdue > 0 ? `${c.reviewTotal} 张 · 逾期 ${c.reviewOverdue}` : `${c.reviewTotal} 张在册`;
       case "cinema":
@@ -262,19 +458,9 @@ var BZR_home = (() => {
         return `登记 ${c.belongingsTotal} 件`;
       case "collect":
         return `今日 ${c.collectToday} 条`;
-      case "wall":
-        return `${c.diaryTotal} 格`;
       default:
         return null;
     }
-  }
-  function memoIdOf(domain) {
-    return domain === "todo" ? "memo" : domain;
-  }
-  function truncateCollect(text, max = 42) {
-    const s = (text || "").replace(/\s+/g, " ").trim();
-    if (max <= 0 || s.length <= max) return s;
-    return s.slice(0, max) + "…";
   }
 
   // src/home/layouts/river/render.ts
@@ -282,7 +468,6 @@ var BZR_home = (() => {
     return `
     <div class="bz-panel-frame bz-home-panel bz-panel-mtop">
       <div class="bz-home-head">
-        <h1 class="bz-home-title">首页</h1>
         <div class="bz-home-week" data-home-week></div>
         <span class="bz-home-date" data-home-date></span>
         <div role="button" tabindex="0" class="bz-home-close" data-home-close title="关闭" aria-label="关闭">${iconSpan("x")}</div>
@@ -301,7 +486,7 @@ var BZR_home = (() => {
     return '<div class="bz-home-sec-t">全 部 域</div>';
   }
   function loadingFlowHtml() {
-    return '<div class="bz-home-sec-t">时 间 线 · 今 天</div><div class="bz-home-flow-empty">正在汇入今天的痕迹…</div>';
+    return '<div class="bz-home-flow-empty">正在汇入今天的痕迹…</div>';
   }
   function weekHtml(week, todayDateStr, selDate) {
     return week.map((w) => {
@@ -309,35 +494,43 @@ var BZR_home = (() => {
       return '<div role="button" tabindex="0" class="bz-home-wk' + (w.hit ? " bz-home-wk--hit" : "") + (w.dateStr === selDate ? " bz-home-wk--sel" : "") + '" data-home-weekday="' + w.dateStr + '" aria-label="' + (isToday ? "今天" : w.label) + (w.hit ? "，有动静" : "") + '"><i></i><span class="bz-home-wk-n">' + (isToday ? "今" : w.dayOfMonth) + "</span></div>";
     }).join("");
   }
-  function entriesHtml(data) {
+  function entriesHtml(data, order, hidden) {
     const dotsMap = buildDots(data);
-    return DOMAINS.map((d) => {
-      var _a, _b;
+    return visibleDomains(order, hidden).map((d) => {
+      var _a;
       const dot = dotOf(dotsMap, d.id);
       const ct = (_a = riverCountText(d.id, data)) != null ? _a : d.sub;
-      return '<div role="button" tabindex="0" class="bz-home-erow" data-home-go="' + d.id + '"><span class="bz-home-dot bz-home-dot--' + dot + '"></span><span class="bz-home-eic" style="color:' + ((_b = DOMAIN_DOT[d.id]) != null ? _b : "#8a8f99") + '">' + iconSpan(d.icon) + '</span><span class="bz-home-enm">' + esc(d.name) + '</span><span class="bz-home-ect">' + esc(ct) + '</span><span class="bz-home-ego">→</span></div>';
+      return '<div role="button" tabindex="0" class="bz-home-erow" data-home-go="' + d.id + '"><span class="bz-home-dot bz-home-dot--' + dot + '"></span><span class="bz-home-eic" style="color:' + domainColor(d.id) + '">' + iconSpan(d.icon) + '</span><span class="bz-home-enm">' + esc(d.name) + '</span><span class="bz-home-ect">' + esc(ct) + "</span></div>";
     }).join("");
   }
-  function flowHtml(data, view) {
-    var _a;
-    const day = (_a = data.days.find((d) => d.dateStr === view)) != null ? _a : data.today;
+  function flowHtml(data, view, opts = {}) {
+    var _a, _b, _c;
+    const filter = (_a = opts.filter) != null ? _a : DEFAULT_TIMELINE_FILTER;
+    const showTime = opts.showTime !== false;
+    const size = (_b = opts.size) != null ? _b : "normal";
+    const wrap = (inner) => '<div class="bz-home-timeline" data-tl-size="' + size + '" data-tl-time="' + (showTime ? "1" : "0") + '">' + inner + "</div>";
+    const day = (_c = data.days.find((d) => d.dateStr === view)) != null ? _c : data.today;
     const isToday = day.dateStr === data.today.dateStr;
-    const notes = isToday ? buildNotes(data) : [];
-    const title = '<div class="bz-home-sec-t">时 间 线 · ' + (isToday ? "今 天" : esc(day.dateStr.slice(5))) + "</div>";
-    const body = day.events.map((e, i) => {
-      var _a2, _b, _c, _d, _e;
+    const notes = isToday && filter.notes ? buildNotes(data) : [];
+    const kept = day.events.map((e, i) => ({ e, i })).filter(({ e }) => eventVisible(e, filter));
+    const body = kept.map(({ e, i }) => {
+      var _a2, _b2, _c2, _d, _e;
       const note = notes.find((n) => n.index === i);
-      const lastDiary = i === day.events.length - 1 && note && note.text.indexOf("日记") >= 0 ? " bz-home-ev--warn" : "";
-      const memoId = memoIdOf(e.domain);
-      const dmColor = (_a2 = DOMAIN_DOT[memoId]) != null ? _a2 : "#8a8f99";
-      const dmName = (_c = (_b = DOMAIN_MAP.get(memoId)) == null ? void 0 : _b.name) != null ? _c : e.domain;
+      const lastDiary = i === ((_a2 = kept[kept.length - 1]) == null ? void 0 : _a2.i) && note && note.text.indexOf("日记") >= 0 ? " bz-home-ev--warn" : "";
+      const memoId = e.domain;
+      const dmColor = domainColor(memoId);
+      const dmName = (_c2 = (_b2 = DOMAIN_MAP.get(memoId)) == null ? void 0 : _b2.name) != null ? _c2 : e.domain;
       const dmIcon = (_e = (_d = DOMAIN_MAP.get(memoId)) == null ? void 0 : _d.icon) != null ? _e : "";
-      return '<div class="bz-home-ev' + lastDiary + '"><span class="bz-home-ev-tm">' + esc(e.timeLabel) + '</span><div class="bz-home-ev-bd"><div class="bz-home-ev-tx"><span class="bz-home-ev-dm" style="background:' + dmColor + '">' + iconSpan(dmIcon) + esc(dmName) + "</span>" + esc(e.text) + "</div>" + (note ? '<div class="bz-home-ev-note">' + esc(note.text) + "</div>" : "") + "</div></div>";
+      return '<div class="bz-home-ev' + lastDiary + '">' + (showTime ? '<span class="bz-home-ev-tm">' + esc(e.timeLabel) + "</span>" : "") + '<div class="bz-home-ev-bd"><div class="bz-home-ev-tx"><span class="bz-home-ev-dm" style="background:' + dmColor + '">' + iconSpan(dmIcon) + esc(dmName) + "</span>" + esc(e.text) + "</div>" + (note ? '<div class="bz-home-ev-note">' + esc(note.text) + "</div>" : "") + "</div></div>";
     }).join("");
-    const empty = '<div class="bz-home-flow-empty">这一天还没有留下痕迹。<br><b>写一篇日记</b>、点一轮番茄、读几页书——<br>都会出现在这条河里。</div>';
-    return title + (day.events.length ? '<div class="bz-home-timeline">' + body + "</div>" : empty);
+    if (kept.length) return wrap(body);
+    if (day.events.length) {
+      return wrap('<div class="bz-home-flow-empty">这一天有痕迹，但都被「内容过滤」挡掉了。<br>去 <b>设置 → 首页 → 内容过滤</b> 把想看的类别勾上。</div>');
+    }
+    return wrap('<div class="bz-home-flow-empty">这一天还没有留下痕迹。<br><b>写一篇日记</b>、点一轮番茄、读几页书——<br>都会出现在这条河里。</div>');
   }
-  function nextHtml(data) {
+  function nextHtml(data, enabled = true) {
+    if (!enabled) return "";
     return '<div class="bz-home-sec-t bz-home-sec-t--ai">明 天 预 告</div>' + buildPreviews(data).map(
       (pr) => '<div role="button" tabindex="0" class="bz-home-pr" data-home-go="' + pr.go + '"><div class="bz-home-pr-h">' + esc(pr.h) + "</div><div>" + esc(pr.b) + '</div><span class="bz-home-pr-go">' + esc(pr.goLabel) + "</span></div>"
     ).join("") + collectHtml(data);
@@ -351,13 +544,13 @@ var BZR_home = (() => {
     ).join("") : '<div class="bz-home-collect-empty">今天还没有收集，随手记一条灵感吧。</div>';
     return '<div role="button" tabindex="0" class="bz-home-collect" data-home-go="collect" title="打开日常收集">' + head + '<div class="bz-home-collect-bd">' + body + '</div><span class="bz-home-collect-go">去收集 →</span></div>';
   }
-  function tilesHtml(data) {
+  function tilesHtml(data, order, hidden) {
     const dotsMap = buildDots(data);
-    return '<div class="bz-home-m-tiles">' + DOMAINS.map((d) => {
-      var _a, _b;
+    return '<div class="bz-home-m-tiles">' + visibleDomains(order, hidden).map((d) => {
+      var _a;
       const dot = dotOf(dotsMap, d.id);
       const ct = (_a = riverCountText(d.id, data)) != null ? _a : d.sub;
-      return '<div role="button" tabindex="0" class="bz-home-m-tile" data-home-go="' + d.id + '"><span class="bz-home-dot bz-home-dot--' + dot + '"></span><span class="bz-home-eic" style="color:' + ((_b = DOMAIN_DOT[d.id]) != null ? _b : "#8a8f99") + '">' + iconSpan(d.icon) + '</span><span class="bz-home-enm">' + esc(d.name) + '</span><span class="bz-home-ect">' + esc(ct) + "</span></div>";
+      return '<div role="button" tabindex="0" class="bz-home-m-tile" data-home-go="' + d.id + '"><span class="bz-home-dot bz-home-dot--' + dot + '"></span><span class="bz-home-eic" style="color:' + domainColor(d.id) + '">' + iconSpan(d.icon) + '</span><span class="bz-home-enm">' + esc(d.name) + '</span><span class="bz-home-ect">' + esc(ct) + "</span></div>";
     }).join("") + "</div>";
   }
   return __toCommonJS(render_exports);

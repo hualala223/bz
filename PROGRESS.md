@@ -2,6 +2,29 @@
 
 > 进度同步总表（AGENTS.md）。每票一节，状态：计划中 → 进行中 → 门禁 → 已交付。
 
+## 打开今日日记：编辑器右键 + 命令直达（票 303）— 2026-09-24
+
+**状态：已交付**（grill-with-docs 三问一轮拍板「全部推荐」：编辑器右键 / 模板自动建档 / 注册命令）。
+
+- [x] `src/diary/daily.ts`：`todayDiaryPath`（纯函数，路径口径 `{日记目录}/{YYYY-MM-DD}.md`，目录随设置）+ `openTodayDiary`（文件已存在原样打开一个字节不写；缺失按模板建档后打开——与 `planDiary` 同链路：`readDiaryTemplate` 内置兜底 + `buildDiaryFileContent` 规整，写盘走同路径串行队列）+ `ensureDiaryEditorMenu`（`editor-menu` 挂「打开今日日记」，注册失败静默）
+- [x] `src/diary/ui/panel.ts`（Q1a 追加，用户实测面板内右键缺失后拍板）：`wireDiaryPanelHeaderMenu`——日记本面板头部桌面壳右键弹 core 跟手菜单「打开今日日记」（移动壳分流防长按叠菜单），createHeader 末尾接线
+- [x] `src/main.ts`：命令表新增 `bz-diary-open-today`「打开今日日记」（icon file-text，无 editorCallback——避免与右键项在「待选命令」区重复）；onload 挂 `ensureDiaryEditorMenu(this)`；命令数 75→76（表内 73→74），smoke `EXPECTED_COMMAND_IDS` 同步
+- [x] 冻结红线自查（ADR-0121）：本票为用户主动新增 diary 功能，非上游吸收；既有面板/条目链路/数据格式零触碰，只加不改
+- [x] 测试：`tests/diary/open-today.test.ts` 8 用例（路径口径/目录跟随/建档规整/已存在不写/兜底建档/右键挂载与同函数执行/注册失败静默/面板头部右键同函数）
+- [x] 门禁：tsc 0 错；新测试 + smoke 全绿；全量测试与 esbuild production 构建结果见当日复核（工作区含票 301/302 在制改动，基线存量失败以票 301 记录为准）
+
+## 书架豆瓣抓取 + 娱乐书籍纳入 + 重抓 + 自动上架（票 301 / ADR-0130）— 2026-09-23
+
+**状态：已交付**（grill-with-docs 全程 Q1–Q16b 逐项拍板；决策全记录见票/ADR）。
+
+- [x] 共享核心上移：`src/core/douban/fetch-core.ts` 纯函数单点（影院 re-export 零行为变化）；`FmFieldSpec.quote`（ISBN 防 YAML number 化）；`clearDoubanContent`（重抓清理）
+- [x] 图书链路：`src/bookshelf/douban-fetcher.ts`（cat=1001 搜索 → book 详情页解析 → md frontmatter 缺失才填 / EPUB sidecar `bookshelf-douban.json` + EPUB COVER 约定路径，weave-data.json 零接触）
+- [x] 书架队列：`src/bookshelf/douban-queue.ts`（复刻影院口径，无 loading UI，生产执行器成功后自动上架）
+- [x] 娱乐书籍纳入（Q14）：影院队列 kind 路由，tag=书籍（含旧小说归一）缺豆瓣链接自动走图书链路；影院影视行为零变化（回归测试兜底）
+- [x] 重抓（Q15）：`bz-cinema-douban-refetch`（影视/书籍自动分流）/ `bz-bookshelf-douban-refetch`（限书库目录）——弹框确认/改搜索词 → 清豆瓣来源字段+旧海报/封面 embed → 重抓；命令数 73→75，smoke 同步
+- [x] 自动上架（Q16b）：书库 md/EPUB 抓取成功后娱乐目录自动建书籍笔记（单向，同名跳过）
+- [x] 门禁：tsc 0 错；本票 + 影院回归 + smoke + D3 守门 90 用例全绿；全量 4825 用例仅 7 失败均为并行在制域存量（clipbook/obsidian-adapter，票 298 已记录同源）；esbuild production 构建通过并同步 vault
+
 ## 上游吸收：剪藏本自抓 + 影院自抓（票 286 / 票 287）— 2026-09-14
 
 **状态：已交付**。用户裁决「1 和 2，完整替换本地内容；ApiZero key 稍后再说」——两项各自独立成票、独立提交，均走 `git worktree` 隔离（`wt-clipbook-cinema`，主仓零接触）。
@@ -877,3 +900,12 @@
 - [x] migrate.test 补 rename 失败降级用例；data.test 补 国漫/美漫 归一断言
 - [x] 门禁：tsc 0 错；esbuild 过（vault 产物 19:08 再生）；vitest 全量 **Test Files 3 failed | 302 passed (305)，Tests 6 failed | 4801 passed (4807)**——6 失败同并行会话遗留基线（clipbook + core/obsidian-adapter），cinema 域 11 文件 186 用例全绿
 - [x] ADR-0129；issues/300-anime-merge-migrate-harden.md
+
+### 票 302 — 「每日复盘」更名「每日触动点记录」（ADR-0131）
+
+- [x] 显示名全改：命令 `bz-diary-review` name / 日记面板 🪞 tooltip / 首页快捷入口 label / 通知文案（sectionTitle 派生）→「每日触动点记录」；命令 id 不变（铁律 2）
+- [x] 落点小节改 `# 每日触动点记录`：REVIEW_HEADING 更名 + LEGACY_REVIEW_HEADING（`# 当日复盘`）别名兼容定位——daily-capture findMarkerLine/locateSection 加 aliases 参数（与「新层级优先、旧层级兜底」同轮查找，单源不漂移），不批量迁移旧文件
+- [x] 标签 复盘→触动点（REVIEW_TAG + DEFAULT_TAGS_CONFIG 键，emoji 🪞 与模板正文不动）；emojiToTagMap 读侧旧条目 🪞 归新名，纯展示
+- [x] 测试同步：add-dialog-content（两代标题 + 新增旧文件兼容用例）/ add-dialog-steps / daily-tasks / daily-flow
+- [x] 门禁：tsc --noEmit 0 错；esbuild production 过（vault 产物 + 根三件套再生，不提交）；vitest diary 域 32 文件 477 用例全绿；全量 **Test Files 3 failed | 303 passed (306)，Tests 6 failed | 4824 passed (4830)**——6 失败同票 297/299/300 记录的并行会话遗留基线（clipbook news-fetcher/ui + core/obsidian-adapter），与本票无关
+- [x] ADR-0131；CONTEXT.md 术语（分步写日记/日记内容块/日常时间记录）同步；issues/302-daily-review-rename-touchpoint.md；上游吸收豁免点 +1（ADR-0121 冻结域，用户直接裁决）

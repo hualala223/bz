@@ -74,8 +74,11 @@ const EXPECTED_COMMAND_IDS = [
   'bz-clipbook-open', 'bz-clipbook-mark-all-read', 'bz-clipbook-fetch-now',
   'bz-favorites-open', 'bz-favorites-add',
   'bz-bookshelf-open',
+  // 票 301：书架/影院豆瓣重抓（清字段 → 弹框改词 → 重抓）
+  'bz-bookshelf-douban-refetch',
   'bz-reading-report-open',
   'bz-cinema-open', 'bz-cinema-add', 'bz-cinema-analysis', 'bz-cinema-random-pick', 'bz-cinema-export',
+  'bz-cinema-douban-refetch',
   'bz-review-count', 'bz-review-add-current', 'bz-review-add-current-with-links',
   // 上游线 P2/P3：复习统计报告 + 快速复制密码
   'bz-review-report', 'bz-encrypt-copy-password',
@@ -95,6 +98,8 @@ const EXPECTED_COMMAND_IDS = [
   'bz-diary-open',
   // 日常时间记录（自 CONFIG/SCRIPTS 三个 QuickAdd 宏整合进 diary 域）
   'bz-diary-task-check', 'bz-diary-review', 'bz-diary-plan',
+  // 票 303：打开今日日记（文件缺失按模板建档；编辑器右键同函数）
+  'bz-diary-open-today',
   // issue 247：日常行为记录（QuickAdd Capture 宏换血）；当日待办事项捕获已退役（ADR-0122）
   'bz-diary-activity-capture',
 ];

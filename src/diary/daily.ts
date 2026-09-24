@@ -2,8 +2,8 @@
  * 日常时间记录（自 CONFIG/SCRIPTS/日常时间记录 三个 QuickAdd 宏整合进 diary 域）：
  * 1. runTaskCheck —— 当天任务完成情况：7 项每日任务经流程框依次打勾，
  *    状态沿用原 CONFIG/SCRIPTS/每日任务状态.json（格式不变，旧数据直接续用）；
- * 2. openReviewDialog —— 每日复盘：预填内层模板，写入 `# 当日复盘` 小节（缺失则写时新建，
- *    块首行为 `## 🪞 HH:mm`，ADR-0114）；
+ * 2. openReviewDialog —— 每日触动点记录（原「每日复盘」，票 302 更名）：预填内层模板，
+ *    写入 `# 当日触动点` 小节（缺失则写时新建，块首行为 `## 🪞 HH:mm`，ADR-0114；
  * 3. openPlanPicker —— 日程规划：先选「当日 / 明日」，再按日记模板
  *    （CONFIG/TEMPLATE/模板-日记.md，与 QuickAdd 宏同源）为该日期新建日记文件；
  *    两目标共用同一模板，只有落盘日期不同（ADR-0112）。
@@ -15,7 +15,7 @@
  *    建档（todo 域）读同一模板，投影行因此天然落进 `# 日程规划` 内的 `## 代办事项`。
  * 写盘口径分两路：任务状态走 updateFileSections 段级合并；目录/规划按原文读写（文件级原样），
  * 不走 addEntry 条目链路——条目模型整文件重写产不出「模板骨架」形态的文件。
- * 复盘/写日记的落点同上，见 daily-write.ts（ADR-0114）。
+ * 触动点记录/写日记的落点同上，见 daily-write.ts（ADR-0114）。
  */
 import { moment } from 'obsidian';
 import { notice } from '../core/notice';
@@ -146,15 +146,15 @@ export async function runTaskCheck(): Promise<void> {
   }
 }
 
-// ===== 每日复盘 =====
+// ===== 每日触动点记录 =====
 
-/** 复盘条目标签（DEFAULT_TAGS_CONFIG 内置同名标签，emoji 🪞） */
-export const REVIEW_TAG = '复盘';
+/** 触动点记录条目标签（DEFAULT_TAGS_CONFIG 内置同名标签，emoji 🪞；票 302 由「复盘」更名） */
+export const REVIEW_TAG = '触动点';
 
 /**
- * 复盘模板正文（结构沿用原 QuickAdd 宏「当日复盘」段落）。
- * 自 ADR-0114 起**不含**首行小节名：块落在 `# 当日复盘` 小节内，小节名由落点提供
- * （写时缺失才建），若模板再带一行就会在文件里出现两个「当日复盘」标题。
+ * 触动点记录模板正文（结构沿用原 QuickAdd 宏「当日复盘」段落）。
+ * 自 ADR-0114 起**不含**首行小节名：块落在 `# 当日触动点` 小节内，小节名由落点提供
+ * （写时缺失才建），若模板再带一行就会在文件里出现两个同文字标题。
  * 块首行的时间分隔标题由 daily-write 的 buildEntryTitle 生成（`## 🪞 HH:mm`）。
  */
 export const REVIEW_TEMPLATE = [
@@ -168,8 +168,8 @@ export const REVIEW_TEMPLATE = [
 ].join('\n');
 
 /**
- * 每日复盘：打开写日记弹窗，预选「复盘」标签并预填内层模板，
- * 落点指定 `# 当日复盘` 小节（缺失则写时新建）——不再走条目模型（ADR-0114）。
+ * 每日触动点记录：打开写日记弹窗，预选「触动点」标签并预填内层模板，
+ * 落点指定 `# 当日触动点` 小节（缺失则写时新建）——不再走条目模型（ADR-0114）。
  */
 export function openReviewDialog(): void {
   if (!document.getElementById('add-diary-mask')) createAddDialog();
@@ -442,4 +442,58 @@ export async function openPlanPicker(): Promise<void> {
   });
   if (chosen !== 'today' && chosen !== 'tomorrow') return;
   await planDiary(chosen);
+}
+
+// ===== 打开今日日记（票 303：编辑器右键 + 命令直达当天日记文件） =====
+
+/** 纯函数（node 可测）：now → 今日日记文件路径（{日记目录}/{YYYY-MM-DD}.md，目录随设置） */
+export function todayDiaryPath(now: ReturnType<typeof moment> = moment()): string {
+  return `${DIARY_DIRECTORY}/${now.clone().format('YYYY-MM-DD')}.md`;
+}
+
+/**
+ * 打开今日日记文件（票 303）：文件已存在 → 原样打开，一个字节不写；
+ * 不存在 → 读模板建档后打开（与 planDiary 同一条建档链路：readDiaryTemplate 内置兜底 +
+ * buildDiaryFileContent 规整；写盘走 core/storage 同路径串行队列，与 diary store writeFile 互斥）。
+ * 只加不改：不触碰既有条目链路，已存在文件内容一字不动。
+ */
+export async function openTodayDiary(): Promise<void> {
+  const app = getApp();
+  const now = moment();
+  const path = todayDiaryPath(now);
+
+  try {
+    await ensureDiaryFolder(app);
+    let created = false;
+    await enqueueFileTask(path, async () => {
+      if (app.vault.getAbstractFileByPath(path)) return;
+      const template = await readDiaryTemplate(app);
+      await app.vault.create(path, buildDiaryFileContent(template, now.format('YYYY-MM-DD')));
+      created = true;
+    });
+    await (app.workspace as any).openLinkText?.(path, '', false, { active: true });
+    if (created) notice(`已创建并打开今日日记（${path}）`, 'success');
+  } catch (e: any) {
+    console.error('打开今日日记失败', e);
+    notice('打开今日日记失败：' + (e?.message || e), 'error');
+  }
+}
+
+/**
+ * 编辑器右键菜单入口（main.ts onload 调用，plugin.registerEvent 保证卸载自动清理）：
+ * editor-menu 里挂「打开今日日记」，与命令 bz-diary-open-today 同一执行函数。
+ * 命令不带 editorCallback（避免 Obsidian「待选命令」区与本项重复），右键项由此事件单独挂。
+ */
+export function ensureDiaryEditorMenu(plugin: any): void {
+  try {
+    plugin.registerEvent(
+      (plugin.app as any).workspace.on('editor-menu', (menu: any) => {
+        menu.addItem((item: any) => {
+          item.setTitle('打开今日日记').setIcon('file-text').onClick(() => void openTodayDiary());
+        });
+      })
+    );
+  } catch (e) {
+    /* 注册失败静默（不影响命令入口） */
+  }
 }

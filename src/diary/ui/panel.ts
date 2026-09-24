@@ -9,7 +9,8 @@ import { escManager } from '../../core/esc-manager';
 import type { EscHandle } from '../../core/esc-manager';
 import { onDomainEvent } from '../../core/domain-bus';
 import { getSettings, tryGetSettings } from '../../core/settings-provider';
-import { applyMobileWindowFullscreen } from '../../core/mobile';
+import { applyMobileWindowFullscreen, isMobileEnv } from '../../core/mobile';
+import { openItemMenu, resetItemMenuClickGuard } from '../../core/item-actions';
 import { openSettingsModal } from '../../core/settings-modal';
 import { batchSizeRow, mobileFullscreenGroup } from '../../core/settings-common';
 import type { SettingsSchema } from '../../core/settings-schema';
@@ -22,7 +23,7 @@ import { applyFilter, cancelEdit, updateSticky, initScroll } from './entries';
 import { createTag, rebuildTags, refreshSubTagsBar } from './filter-shared';
 import { createTagPicker, createAddDialog, createDatePicker, showDatePicker, openAddDialog, closeAddDialog } from './dialogs';
 import { registerOpenDialogCommand } from './quote';
-import { runTaskCheck, openReviewDialog, openPlanPicker } from '../daily';
+import { runTaskCheck, openReviewDialog, openPlanPicker, openTodayDiary } from '../daily';
 // 当日待办事项/日常行为记录（issue 247：QuickAdd 两个 Capture 宏换血，同格式共写当天日记）
 import { openActivityCapture } from '../daily-capture';
 import { closePanel } from './panel-close';
@@ -149,6 +150,26 @@ function createMaskAndPopup() {
 
 // ===== 头部（原 822-864） =====
 
+/**
+ * 头部右键菜单（票 303 Q1a）：桌面壳右键弹「打开今日日记」，与命令 bz-diary-open-today /
+ * 编辑器右键同一执行函数。移动壳分流——触屏长按会同时发 contextmenu，不分流会多弹鼠标菜单；
+ * core 跟手菜单的防溢出定位 / ESC / 外部点击关闭由共享层承载。
+ */
+export function wireDiaryPanelHeaderMenu(header: HTMLElement): void {
+  header.addEventListener('contextmenu', (e) => {
+    if (isMobileEnv()) return;
+    e.preventDefault();
+    openItemMenu(
+      e.clientX,
+      e.clientY,
+      [{ icon: 'file-text', label: '打开今日日记', onClick: () => void openTodayDiary() }],
+      true,
+    );
+    // 右键时序会置位残余 click 抑制；右键无补发 click，直调后立即复位（影院域同口径）
+    resetItemMenuClickGuard();
+  });
+}
+
 function createHeader() {
   const header = document.createElement('div');
   header.className = 'diary-popup-header';
@@ -173,7 +194,7 @@ function createHeader() {
 
   const addButton = createButton('✏️', '写日记', () => openAddDialog());
   const taskCheckButton = createButton('📋', '当天任务完成情况', () => void runTaskCheck());
-  const reviewButton = createButton('🪞', '每日复盘', () => openReviewDialog());
+  const reviewButton = createButton('🪞', '每日触动点记录', () => openReviewDialog());
   const planButton = createButton('🗓️', '日程规划', () => void openPlanPicker());
   // 当日待办事项按钮已退役（ADR-0122：日记「## 代办事项」由 todo 域日记同步接管）
   const activityCaptureButton = createButton('🏃', '日常行为记录', () => openActivityCapture());
@@ -192,6 +213,7 @@ function createHeader() {
   buttonContainer.appendChild(closeButton);
   header.appendChild(titleContainer);
   header.appendChild(buttonContainer);
+  wireDiaryPanelHeaderMenu(header);
   return header;
 }
 

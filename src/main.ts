@@ -29,11 +29,11 @@ import { openClipbook, markAllUnreadRead, unloadClipbook } from './clipbook';
 import { maybeFetchNews, fetchNowNews, notifyManualFetchResult } from './clipbook/news-fetcher';
 import { openFavoritesPanel, addFavoriteItem, unloadFavorites } from './favorites';
 // 书架墙（bookshelf 域，上游并存式新域终局换血：数据同源，旧 library 退役）
-import { openBookshelf, openBookshelfReport, unloadBookshelf } from './bookshelf';
+import { openBookshelf, openBookshelfReport, unloadBookshelf, refetchBookshelfDouban } from './bookshelf';
 // 阅读数据分析报告（读书报告内嵌化 ADR-0091：独立弹窗退役，报告为书架墙面板内视图）
 import { unloadReadingReport } from './reading-report';
 // 影院（cinema 域，上游 ADR-0087 起接管影视；旧 movie 域已退役。ADR-0090：报告窗并入影院内嵌分析页）
-import { openCinema, addCinemaItem, openCinemaAnalysis, openCinemaExport, pickRandomCinema, unloadCinema } from './cinema';
+import { openCinema, addCinemaItem, openCinemaAnalysis, openCinemaExport, pickRandomCinema, unloadCinema, refetchCinemaDouban } from './cinema';
 import { migrateCinemaFolder } from './cinema/migrate';
 // 复习（ticket 168 单一入口：仅「复习（按数量）」命令；ticket 169 加回「加入复习计划」；ensureReview/unloadReview 为常驻监控与卸载所需）
 import { reviewCountStart, reviewAddCurrent, reviewAddCurrentWithLinks, openReviewReport, openTodayReviewed, ensureReview, unloadReview } from './review';
@@ -66,8 +66,8 @@ import { applyDirectories } from './diary/config';
 import { loadAll } from './diary/store';
 import { state as diaryState } from './diary/state';
 import { applyUiSettings, init as diaryInit, showDiaryPanel, unregisterEscLayer } from './diary/ui/panel';
-// 日常时间记录（自 CONFIG/SCRIPTS 三个 QuickAdd 宏整合：任务打勾/每日复盘/日程规划）
-import { runTaskCheck, openReviewDialog, openPlanPicker } from './diary/daily';
+// 日常时间记录（自 CONFIG/SCRIPTS 三个 QuickAdd 宏整合：任务打勾/每日触动点记录/日程规划）
+import { runTaskCheck, openReviewDialog, openPlanPicker, openTodayDiary, ensureDiaryEditorMenu } from './diary/daily';
 // 日常行为记录（issue 247 QuickAdd Capture 换血；当日待办事项捕获已随 ADR-0122 退役，
 // 日记「## 代办事项」由 todo 域日记同步模块接管）
 import { openActivityCapture } from './diary/daily-capture';
@@ -98,8 +98,10 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-diary-wall-open', name: '回忆墙', icon: 'images', callback: () => openDiaryWall(getApp()) },
   // 日常时间记录（diary 域 daily：任务打勾状态沿用 CONFIG/SCRIPTS/每日任务状态.json，复盘/规划走日记条目模型）
   { id: 'bz-diary-task-check', name: '当天任务完成情况', icon: 'list-checks', callback: () => void runTaskCheck() },
-  { id: 'bz-diary-review', name: '每日复盘', icon: 'notebook-pen', callback: () => void openReviewDialog() },
+  { id: 'bz-diary-review', name: '每日触动点记录', icon: 'notebook-pen', callback: () => void openReviewDialog() },
   { id: 'bz-diary-plan', name: '日程规划', icon: 'calendar-plus', callback: () => void openPlanPicker() },
+  // 打开今日日记（票 303：文件缺失按模板建档后打开；编辑器右键同函数，ensureDiaryEditorMenu）
+  { id: 'bz-diary-open-today', name: '打开今日日记', icon: 'file-text', callback: () => void openTodayDiary() },
   // 日常行为记录（issue 247 QuickAdd Capture；当日待办事项捕获退役，ADR-0122）
   { id: 'bz-diary-activity-capture', name: '日常行为记录', icon: 'footprints', callback: () => openActivityCapture() },
   // 数据体检（checkup 域，D4：全插件数据只读巡检）
@@ -125,6 +127,8 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-favorites-add', name: '加收藏', icon: 'bookmark', callback: () => addFavoriteItem(getApp()) },
   // 书架墙（bookshelf 域：书脊墙 1:1，读书笔记/阅读报告均内嵌面板内）
   { id: 'bz-bookshelf-open', name: '书库', icon: 'book-open', callback: () => openBookshelf(getApp()) },
+  // 重抓当前书籍豆瓣（票 301 Q15：清豆瓣字段 → 弹框确认搜索词 → 重抓 → 自动上架娱乐）
+  { id: 'bz-bookshelf-douban-refetch', name: '重抓当前书籍豆瓣', icon: 'refresh-cw', callback: () => void refetchBookshelfDouban(getApp()) },
   // 阅读分析报告（上游 ADR-0091 内嵌化：与书架墙面板内报告视图同一去向）
   { id: 'bz-reading-report-open', name: '阅读分析报告', icon: 'bar-chart-3', callback: () => openBookshelfReport(getApp()) },
   // 娱乐（cinema 域，上游 ADR-0087；ADR-0127 票 292 起门面正名「娱乐」，id 不变）
@@ -135,6 +139,8 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-cinema-export', name: '导出感想', icon: 'file-output', callback: () => openCinemaExport(getApp()) },
   // 随机抽一部（票 275②，上游 2026-09-11 首页入口菜单）：想看池随机 → 直开详情
   { id: 'bz-cinema-random-pick', name: '随机抽一部', icon: 'shuffle', callback: () => pickRandomCinema(getApp()) },
+  // 重抓当前条目豆瓣（票 301 Q15：影视/书籍自动分流，清豆瓣字段 → 弹框确认搜索词 → 重抓）
+  { id: 'bz-cinema-douban-refetch', name: '重抓当前条目豆瓣', icon: 'refresh-cw', callback: () => void refetchCinemaDouban(getApp()) },
   // 复习（ticket 168 单一入口：仅保留「复习（按数量）」；ticket 169 加回「加入复习计划」、ticket 170 加「批量加入」，editorCallback 进文档右键待选）
   { id: 'bz-review-count', name: '复习（按数量）', icon: 'list', callback: () => reviewCountStart(getApp()) },
   {
@@ -321,6 +327,9 @@ export default class BzPlugin extends Plugin {
     // 日记本面板命令（统一 bz- 前缀；bz-diary-write 由 quote.ts init 内注册）
     (this.app as any).commands.addCommand({ id: 'bz-diary-open', name: '日记本', icon: 'notebook', callback: () => showDiaryPanel(this) });
     this.registeredCommandIds.push('bz-diary-open');
+
+    // 编辑器右键：打开今日日记（票 303，与 bz-diary-open-today 命令同一执行函数）
+    ensureDiaryEditorMenu(this);
 
     // 设置页
     this.addSettingTab(new BzSettingTab(this.app, this));
