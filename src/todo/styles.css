@@ -1037,3 +1037,29 @@
     color: #ffffff !important;
   }
 }
+/* ===== 上游移植批 3g2：勾选待定态（呈报#12 12A 呼吸/半亮 + 倒计时环）与折叠条去向轻反馈（#13 13A） ===== */
+.bz-todo-check.bz-todo-pending { animation: bz-todo-check-pending 0.55s ease-in-out infinite alternate; }
+.bz-todo-check.bz-todo-pending .bz-todo-ring { position: absolute; inset: -3px; animation: bz-todo-ring-pend 0.3s linear forwards; }
+.bz-todo-ring circle { fill: none; stroke: var(--bz-accent, var(--bz-primary, currentColor)); stroke-width: 1.5; stroke-dasharray: 53.4; stroke-dashoffset: 53.4; }
+@keyframes bz-todo-check-pending { from { opacity: 1; } to { opacity: 0.45; } }
+@keyframes bz-todo-ring-pend { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .bz-todo-check.bz-todo-pending { animation-duration: 1.8s; } }
+.bz-todo-donebar.bz-todo-donebar-bump { animation: bz-todo-donebar-bump 0.6s ease-out; }
+@keyframes bz-todo-donebar-bump { 0% { transform: scale(1); } 30% { transform: scale(1.04); } 100% { transform: scale(1); } }
+/* ===== 上游移植批 3g2：移动端编辑弹窗键盘适配（呈报#18 18A） =====
+   公共壳 max-height:82vh + 居中不吃键盘高度——编辑弹窗三点覆盖（仅 ≤768px，桌面零影响）：
+   高度随 --bz-vvh 收缩 / 顶对齐 / 弹窗不滚、字段区自滚、动作行钉底恒可见 */
+@media (max-width: 768px) {
+  .bz-overlay-popup.bz-todo-editor-popup {
+    max-height: calc(var(--bz-vvh, 100vh) - 32px);
+    align-self: flex-start;
+    overflow: hidden;
+  }
+  .bz-overlay-popup.bz-todo-editor-popup .bz-dialog-body,
+  .bz-overlay-popup.bz-todo-editor-popup .bz-todo-editor { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  .bz-overlay-popup.bz-todo-editor-popup form { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .bz-overlay-popup.bz-todo-editor-popup .bz-todo-form-actions {
+    flex-shrink: 0;
+    padding-bottom: max(var(--bz-space-xs), env(safe-area-inset-bottom, 0px));
+  }
+}

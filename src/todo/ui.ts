@@ -829,6 +829,46 @@ function jumpToNote(it: TodoItem): void {
 
 /** 行内勾选切换（列表卡与移动抽屉头共用）：已完成 = 恢复；未完成 = 300ms 防抖后标记完成
  *  （防抖窗口内再点 = 反悔取消） */
+
+/** 勾选 300ms 防抖窗口的「待定」视觉态（上游呈报#12 12A 移植批 3g2）：窗口内勾选圈挂
+ *  bz-todo-pending（域样式呼吸/半亮）+ 倒计时环，落定/反悔即摘除。直接切 DOM 类不整卡重渲
+ *  ——列表 DOM 不动、键盘焦点不丢；列表卡与移动抽屉头两处勾选圈同锚点扫 */
+function syncPendingCheck(id: string, pending: boolean): void {
+  document
+    .querySelectorAll<HTMLElement>(
+      `[data-todo-id="${id}"] [data-todo-check]`,
+    )
+    .forEach((el) => {
+      el.classList.toggle('bz-todo-pending', pending);
+      const ring = el.querySelector<SVGSVGElement>(':scope > .bz-todo-ring');
+      if (pending && !ring) {
+        const NS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(NS, 'svg');
+        svg.setAttribute('class', 'bz-todo-ring');
+        svg.setAttribute('viewBox', '0 0 20 20');
+        svg.setAttribute('aria-hidden', 'true');
+        const c = document.createElementNS(NS, 'circle');
+        c.setAttribute('cx', '10');
+        c.setAttribute('cy', '10');
+        c.setAttribute('r', '8.5');
+        svg.appendChild(c);
+        el.appendChild(svg);
+      } else if (!pending && ring) {
+        ring.remove();
+      }
+    });
+}
+
+/** 完成去向轻反馈（上游呈报#13 13A 移植批 3g2）：条目挪进已完成折叠区后折叠条短暂
+ *  高亮 + 计数跳动；不做自动展开。reflow 抖位重启动画防连续完成粘连。 */
+function bumpDoneBar(): void {
+  const bar = M.overlay?.querySelector('[data-todo-donebar]') as HTMLElement | null;
+  if (!bar) return;
+  bar.classList.remove('bz-todo-donebar-bump');
+  void bar.offsetWidth;
+  bar.classList.add('bz-todo-donebar-bump');
+}
+
 function toggleCheck(it: TodoItem): void {
   // 已恢复路径（已完成条目勾选 = 恢复）
   if (it.completed) {
@@ -839,13 +879,16 @@ function toggleCheck(it: TodoItem): void {
   if (M.completeTimers.has(it.id)) {
     clearTimeout(M.completeTimers.get(it.id));
     M.completeTimers.delete(it.id);
+    syncPendingCheck(it.id, false); // 反悔：待定态即摘
     return;
   }
   const timer = setTimeout(() => {
     M.completeTimers.delete(it.id);
-    void completeItem(it);
+    syncPendingCheck(it.id, false); // 落定：待定态摘除
+    void completeItem(it).then(() => bumpDoneBar());
   }, 300);
   M.completeTimers.set(it.id, timer);
+  syncPendingCheck(it.id, true); // 待定：窗口内呼吸/半亮
 }
 
 async function completeItem(it: TodoItem): Promise<void> {
@@ -1358,8 +1401,10 @@ export function openEditor(
   const actionsRow = document.createElement('div');
   actionsRow.className = 'bz-todo-form-actions';
   actionsRow.appendChild(uiBtnRow([cancelBtn, saveBtn]));
-  form.appendChild(actionsRow);
+  // 上游呈报#18 18A（移植批 3g2）：动作行挂 form 外（modalBox 直子）——移动端键盘适配
+  // 把滚动移交字段区，动作行随视口收缩钉底恒可见（域 styles.css 依赖此结构）
   modalBox.appendChild(form);
+  modalBox.appendChild(actionsRow);
 
   // 保存
   saveBtn.addEventListener('click', () => {
@@ -1460,7 +1505,7 @@ export function openEditor(
     })();
   });
 
-  const { close } = uiModal({ content: modalBox, maxWidth: 420, className: skinClass() });
+  const { close } = uiModal({ content: modalBox, maxWidth: 420, className: ('bz-todo-editor-popup ' + skinClass()).trim() });
   closeModal = close;
   contentInput.focus();
   // 剪藏默认场景：打开即尝试剪贴板预填（新建限定；与切场景入口共用 tryEditorClipPrefill）
