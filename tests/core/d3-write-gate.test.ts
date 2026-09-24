@@ -87,6 +87,14 @@ const WHITELIST: Array<{ file: RegExp; reason: string; /** 防回归哨兵：预
     reason: '书评/划线 md 用户笔记写，vault.process 原子读改写（audit D 已收口，Obsidian 内建单步语义）',
   },
   {
+    file: /^src\/bookshelf\/douban-fetcher\.ts$/,
+    reason: '读书笔记 md 用户文档写（票 301/ADR-0130 书籍豆瓣抓取回填 frontmatter + 封面 embed，vault.process 原子读改写，口径同 cinema/douban-fetcher）',
+  },
+  {
+    file: /^src\/bookshelf\/douban-queue\.ts$/,
+    reason: '书籍封面图片二进制附件写（票 301 adapter.writeBinary 至 CONFIG/BOOK COVER / EPUB COVER，用户附件非插件私有数据，同 cinema/douban-queue 先例）',
+  },
+  {
     file: /^src\/auto-summary\/processor\.ts$/,
     reason: '剪藏 frontmatter md 写回：写前重读最新内容仅合并目标字段（P1-21 防盲写），md 文件操作不套 json 原语（D3 拍板保留）',
   },

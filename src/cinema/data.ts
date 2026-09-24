@@ -54,7 +54,8 @@ export function parseMovieFile(file: TFile, app: App): CinemaItem | null {
     watchDate,
     rating,
     status,
-    poster: fm['海报']?.toString() ?? null,
+    // 海报（票 301）：书籍笔记封面写 fm「封面」（无「海报」键），读侧兜底拾取
+    poster: fm['海报']?.toString() || fm['封面']?.toString() || null,
     review: fm['影评']?.toString() ?? null,
     genre: fm['类型']?.toString() ?? null,
     director: fm['导演']?.toString() ?? null,
@@ -74,6 +75,19 @@ export function parseMovieFile(file: TFile, app: App): CinemaItem | null {
     // 集数（票 295）：fm 键「总集数」「正在看集数」仅剧类写入，读侧对任意值宽容解析
     episodesTotal: parseEpisodeCount(fm['总集数']),
     episodesWatching: parseEpisodeCount(fm['正在看集数']),
+    // 章节（票 301，对齐集数口径）：fm 键「总章节数」「正在看章节」仅书籍写入
+    chaptersTotal: parseEpisodeCount(fm['总章节数']),
+    chaptersWatching: parseEpisodeCount(fm['正在看章节']),
+    // 书籍字段行（票 301）：详情卡「豆瓣信息」区书籍字段（非空才进行）
+    bookInfo: ([
+      ['作者', fm['作者']],
+      ['出版社', fm['出版社']],
+      ['出版年', fm['出版年']],
+      ['译者', fm['译者']],
+      ['ISBN', fm['ISBN']],
+      ['页数', fm['页数']],
+      ['出品方', fm['出品方']],
+    ] as [string, unknown][]).filter(([, v]) => v !== undefined && String(v) !== '').map(([k, v]) => [k, String(v)]),
   };
 }
 

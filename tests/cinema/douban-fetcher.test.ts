@@ -19,7 +19,7 @@ import { setApp } from '../../src/core/app';
 import {
   parseSearchResults, searchLooksBlocked, upgradePosterUrl, extractSid, parseCelebrities,
   extractMovieName, normalizeListValue, updateFrontmatterFields, insertPosterEmbed,
-  fetchApizeroInfo, fetchNoteDouban,
+  fetchApizeroInfo, fetchNoteDouban, fmTags, noteEpisodesEligible,
   POSTER_FOLDER, type HttpGet, type DoubanFetchDeps,
 } from '../../src/cinema/douban-fetcher';
 
@@ -388,6 +388,48 @@ describe('fetchNoteDouban 端到端（fake 注入）', () => {
     const content = vault.files.get(FILE_PATH)!;
     // 回归防复发：写入 24 会被 analysis.ts 追剧深度展示为「24 季」
     expect(content).not.toMatch(/^季集:/m);
+    // 电影条目（tag=电影）不写总集数
+    expect(content).not.toMatch(/^总集数:/m);
+  });
+
+  it('总集数（票 301 追加）：剧集类型（电视剧，含块列表 tag）写 fm 总集数、缺失才填', async () => {
+    const vault = new MockVault();
+    vault.files.set(FILE_PATH, '---\ntags:\n  - 电视剧\n评分: -1\n---');
+    const vaultDeps = makeDeps({ vault, apizeroKey: 'sk_test', posterBytes: new ArrayBuffer(1) });
+    vaultDeps.deps.httpGet = async (url) => {
+      if (url.includes('douban.com/search')) return SEARCH_HTML;
+      if (url.includes('apizero.cn')) {
+        return JSON.stringify({ code: 0, data: { score: '8.3', douban_url: 'https://movie.douban.com/subject/35267208/', is_tv: true, episodes: '24' } });
+      }
+      return null;
+    };
+    const r = await runOn(vault, vaultDeps.deps);
+    expect(r).toEqual({ ok: true });
+    const content = vault.files.get(FILE_PATH)!;
+    expect(content).toMatch(/^总集数: "?24"?$/m);
+    expect(content).not.toMatch(/^季集:/m);
+
+    // 已有总集数（用户手填）不覆盖
+    const vault2 = new MockVault();
+    vault2.files.set(FILE_PATH, '---\ntags:\n  - 电视剧\n评分: -1\n总集数: 30\n---');
+    const deps2 = makeDeps({ vault: vault2, apizeroKey: 'sk_test', posterBytes: new ArrayBuffer(1) });
+    deps2.deps.httpGet = async (url) => {
+      if (url.includes('douban.com/search')) return SEARCH_HTML;
+      if (url.includes('apizero.cn')) {
+        return JSON.stringify({ code: 0, data: { score: '8.3', douban_url: 'https://movie.douban.com/subject/35267208/', is_tv: true, episodes: '24' } });
+      }
+      return null;
+    };
+    await runOn(vault2, deps2.deps);
+    const c2 = vault2.files.get(FILE_PATH)!;
+    expect(parseFrontmatter(c2)?.['总集数']).toBe(30);
+  });
+
+  it('fmTags：块列表 / 行内数组 / 旧 tag 归一（美剧→电视剧资格）', () => {
+    expect(fmTags('---\ntags:\n  - 书籍\n封面: x\n---')).toEqual(['书籍']);
+    expect(fmTags('---\ntags: [电影]\n---')).toEqual(['电影']);
+    expect(noteEpisodesEligible('---\ntags:\n  - 美剧\n---')).toBe(true); // LEGACY_TAG_MAP 归一
+    expect(noteEpisodesEligible('---\ntags:\n  - 书籍\n---')).toBe(false);
   });
 
   it('C3：ApiZero 热门短评含换行 → 写回单行化，frontmatter 可解析、值可读回', async () => {

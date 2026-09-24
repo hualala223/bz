@@ -10,6 +10,10 @@ import { tryGetSettings } from '../core/settings-provider';
 import { onDomainEvent } from '../core/domain-bus';
 import { M, resetBookshelfState, applyDefaultView } from './state';
 import { resolveFolderPath, rebuildItems, WEAVE_DATA_FILE } from './data';
+import { shutdownBookQueue, sweepBookFetch } from './douban-queue';
+
+// 重抓命令入口（票 301 Q15；实现在 douban-refetch，经域入口转出供 main.ts）
+export { refetchBookshelfDouban } from './douban-refetch';
 import {
   createOverlay, closeOverlay, registerEscapeHandler, unregisterEscapeHandler,
   renderAll, refreshReportView, openReportView,
@@ -72,12 +76,20 @@ export function openBookshelf(app: App): void {
   }
   applyDefaultView();
   createOverlay(app);
+  // 豆瓣抓取队列（票 301 / ADR-0130）：打开即重建条目后扫未齐书籍，入队串行补抓。
+  // createOverlay 不重建（与影院不同源），sweep 前先 rebuild 保证 M.items 新鲜
+  void rebuildItems(app).then(() => sweepBookFetch(app));
 }
 
 /** 打开书架墙并切到阅读分析报告视图（命令 bz-reading-report-open；原独立报告弹窗已退役）。
  *  面板已开则只切视图（重入重算报告内容）；未开则冷开面板直落报告视图。 */
 export function openBookshelfReport(app: App): void {
   ensureBookshelf(app);
+  if (!M.currentOverlay) {
+    createOverlay(app);
+    // 冷开面板：与 openBookshelf 同口径补抓（票 301）
+    void rebuildItems(app).then(() => sweepBookFetch(app));
+  }
   openReportView(app);
 }
 
@@ -85,6 +97,7 @@ export function openBookshelfReport(app: App): void {
 export function unloadBookshelf(): void {
   initialized = false;
   autoRefreshRegistered = false;
+  shutdownBookQueue(); // 清抓取队列状态（卸载后会话语义重置，票 301）
   // B5：退订全部域事件 + vault modify
   autoRefreshOffs.forEach((off) => off());
   autoRefreshOffs = [];

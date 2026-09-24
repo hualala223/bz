@@ -79,7 +79,7 @@ describe('豆瓣抓取队列（douban-queue，ADR-0129 执行器=插件内 fetch
     expect(isFetching('我的/娱乐/《全缺》.md')).toBe(false);
   });
 
-  it('sweep gate（票 293/299）：短剧/书籍（含旧小说 tag）条目不入队，电影/电视剧照常', async () => {
+  it('sweep gate（票 293/299 + 票 301 Q14）：短剧不入队；书籍（含旧小说 tag）入队走图书链路；电影/电视剧照常', async () => {
     const vault = new MockVault();
     vault.files.set('我的/娱乐/《电影缺图》.md', '---\ntags: [电影]\n评分: 8\n---');
     vault.files.set('我的/娱乐/《短剧缺图》.md', '---\ntags: [短剧]\n评分: 8\n---');
@@ -94,11 +94,37 @@ describe('豆瓣抓取队列（douban-queue，ADR-0129 执行器=插件内 fetch
     sweepDoubanFetch(app);
     await settle();
 
-    expect(fetched).toHaveLength(2);
+    expect(fetched).toHaveLength(3);
     expect(fetched.some((p) => p.includes('《电影缺图》'))).toBe(true);
     expect(fetched.some((p) => p.includes('《旧剧缺图》'))).toBe(true);
+    expect(fetched.some((p) => p.includes('《小说缺图》'))).toBe(true); // Q14：书籍纳入
     expect(fetched.some((p) => p.includes('《短剧缺图》'))).toBe(false);
-    expect(fetched.some((p) => p.includes('《小说缺图》'))).toBe(false);
+  });
+
+  it('sweep kind 路由（票 301 Q14）：电影/电视剧 → movie，书籍（含旧小说）→ book，齐全书籍不入队', async () => {
+    const vault = new MockVault();
+    vault.files.set('我的/娱乐/《电影A》.md', '---\ntags: [电影]\n---');
+    vault.files.set('我的/娱乐/《书籍B》.md', '---\ntags: [书籍]\n---');
+    vault.files.set('我的/娱乐/《旧小说C》.md', '---\ntags: [小说]\n---');
+    vault.files.set('我的/娱乐/《书籍齐全D》.md', '---\ntags: [书籍]\n豆瓣链接: https://book.douban.com/subject/1/\n---');
+    const app = mockAppWithVault(vault);
+    M.appRef = app;
+    rebuildItems(app);
+    const kinds: Array<[string, string]> = [];
+    const fetch: FetchNote = async (file, _name, kind) => {
+      kinds.push([file.path, kind]);
+      return { ok: true };
+    };
+    configureFetchQueue({ ...TEST_HOOKS, fetch });
+
+    sweepDoubanFetch(app);
+    await settle();
+
+    expect(kinds).toHaveLength(3);
+    expect(kinds.find(([p]) => p.includes('《电影A》'))?.[1]).toBe('movie');
+    expect(kinds.find(([p]) => p.includes('《书籍B》'))?.[1]).toBe('book');
+    expect(kinds.find(([p]) => p.includes('《旧小说C》'))?.[1]).toBe('book');
+    expect(kinds.some(([p]) => p.includes('《书籍齐全D》'))).toBe(false);
   });
 
   it('会话内去重：第二次 sweep 零新抓取', async () => {
@@ -332,7 +358,7 @@ describe('豆瓣抓取队列·frontmatter 契约', () => {
       file: null, name: 'X', typeTag: '电影', group: '电影', watchDate: null, rating: null,
       status: 2, poster: null, review: null, genre: null, director: null, actors: null,
       region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null,
-      duration: null, seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null,
+      duration: null, seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, chaptersTotal: null, chaptersWatching: null, bookInfo: [],
     };
     expect(pcardHtml(it, null, true)).toContain('pw-fetch');
     expect(pcardHtml(it, null, false)).not.toContain('pw-fetch');

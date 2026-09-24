@@ -3,7 +3,8 @@
  * 插件内存队列 → 串行执行插件内 fetchNoteDouban（**不再 spawn CLI**——进程边界整类缺陷
  * 消灭：Node 探测/runAsNode fuse/绝对路径契约/退出信号丢失；完成信号 = 函数返回值，
  * 字段落盘轮询兜底退役）。15s 间隔防限流，单条 3 分钟硬超时（Promise.race）。
- * 卡片 loading / 失败聚合通知 / 队列口径（缺海报或缺豆瓣链接）/ 会话去重 / 会话首轮
+ * 卡片 loading / 失败聚合通知 / 队列口径（影视缺海报或缺豆瓣链接；书籍缺豆瓣链接走图书链路，
+ * 票 301 Q14）/ 会话去重 / 会话首轮
  * 补抓 / 删除取消（G8）全部保留。**移动端启用**（requestUrl + writeBinary 全平台可用）。
  */
 import type { App, TFile } from 'obsidian';
@@ -12,9 +13,10 @@ import { notice } from '../core/notice';
 import { sleep } from '../core/utils';
 import { tryGetSettings } from '../core/settings-provider';
 import { M } from './state';
-import { doubanEligibleTag } from './constants';
+import { doubanEligibleTag, getGroupSafe } from './constants';
 import { rebuildItems } from './data';
 import { fetchNoteDouban, type DoubanFetchDeps, type DoubanFetchOutcome } from './douban-fetcher';
+import { fetchMdBookDouban } from '../bookshelf/douban-fetcher';
 
 /** 条目间隔 ms（防豆瓣限流，对齐原守护 FETCH_INTERVAL） */
 const FETCH_GAP_MS = 15000;
@@ -23,13 +25,17 @@ export const FETCH_TIMEOUT_MS = 3 * 60 * 1000;
 /** 单请求超时 ms（requestUrl 不支持中止 → Promise.race） */
 const HTTP_TIMEOUT_MS = 15000;
 
+/** 队列条目种类（票 301 追加决策 Q14：书籍路由到图书抓取链路，影视走原链路） */
+export type DoubanQueueKind = 'movie' | 'book';
+
 interface QueueEntry {
   file: TFile;
   name: string;
+  kind: DoubanQueueKind;
 }
 
-/** 执行器抽象（测试注入点）：抓单条笔记，返回抓取结果 */
-export type FetchNote = (file: TFile, name: string) => Promise<DoubanFetchOutcome>;
+/** 执行器抽象（测试注入点）：抓单条笔记，返回抓取结果。kind 供注入方感知种类（可忽略） */
+export type FetchNote = (file: TFile, name: string, kind: DoubanQueueKind) => Promise<DoubanFetchOutcome>;
 
 const queue: QueueEntry[] = [];
 /** 卡片 loading 驱动：抓取中的笔记路径 → 入队时刻（时限兜底用，见 isFetching） */
@@ -74,8 +80,8 @@ async function downloadBinary(url: string, headers?: Record<string, string>): Pr
   return await Promise.race([req, timer]);
 }
 
-/** 从插件设置读抓取配置（ApiZero Key / 豆瓣 Cookie，随库同步移动端） */
-function fetchDepsFromSettings(app: App): DoubanFetchDeps {
+/** 从插件设置读抓取配置（ApiZero Key / 豆瓣 Cookie，随库同步移动端；重抓命令复用） */
+export function fetchDepsFromSettings(app: App): DoubanFetchDeps {
   const s = (tryGetSettings() ?? {}) as Record<string, unknown>;
   const adapter = (app.vault as unknown as { adapter?: { writeBinary?: (p: string, d: ArrayBuffer) => Promise<void>; mkdir?: (p: string) => Promise<void> } }).adapter;
   const uaHeaders = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' };
@@ -118,14 +124,14 @@ export function isFetching(path: string | null | undefined): boolean {
 }
 
 /** 入队（会话内去重）；全平台启用（ADR-0129：requestUrl 移动端可用）。返回是否真入队 */
-export function enqueueDoubanFetch(file: TFile | null, name: string): boolean {
+export function enqueueDoubanFetch(file: TFile | null, name: string, kind: DoubanQueueKind = 'movie'): boolean {
   if (!file) return false;
   const key = file.path;
   if (attempted.has(key)) return false;
   attempted.add(key);
   pending.set(key, Date.now());
   waitAhead.set(key, queue.length); // push 前长度 = 前方条目数（快照，见 isFetching C7）
-  queue.push({ file, name });
+  queue.push({ file, name, kind });
   void pump();
   return true;
 }
@@ -143,25 +149,29 @@ export function dequeueDoubanFetch(path: string | null | undefined): void {
   attempted.delete(path);
 }
 
-/** 面板打开扫描：未齐条目（缺海报或缺豆瓣链接）入队补抓；有新增即触发一次渲染（loading 首帧可见）。
- *  票 293/299：仅 电影/电视剧 参与自动抓取（短剧/书籍（含旧小说 tag 归一）不入队），类型判定走 doubanEligibleTag */
+/** 面板打开扫描：未齐条目入队补抓；有新增即触发一次渲染（loading 首帧可见）。
+ *  票 293/299：影视仅 电影/电视剧 参与自动抓取（短剧不入队，doubanEligibleTag 判定）。
+ *  票 301 追加决策 Q14：书籍（含旧小说 tag 归一）纳入自动抓取——资格 = 缺豆瓣链接
+ *  （书籍封面是「缺失才填」顺带产物不设门槛），路由 kind='book' 走图书抓取链路。 */
 export function sweepDoubanFetch(_app: App): void {
   let added = 0;
   for (const it of M.items) {
     if (!it.file) continue;
-    if ((!it.poster || !it.doubanUrl) && doubanEligibleTag(it.typeTag)) {
+    if (getGroupSafe(it.typeTag) === '书籍') {
+      if (!it.doubanUrl && enqueueDoubanFetch(it.file, it.name, 'book')) added++;
+    } else if ((!it.poster || !it.doubanUrl) && doubanEligibleTag(it.typeTag)) {
       if (enqueueDoubanFetch(it.file, it.name)) added++;
     }
   }
   if (added > 0 && M.currentOverlay) M.renderFn?.();
 }
 
-/** 执行单条：注入执行器优先；默认 = 插件内 fetchNoteDouban + 3 分钟硬超时 */
+/** 执行单条：注入执行器优先；默认 = 按种类跑插件内 fetcher + 3 分钟硬超时 */
 async function runOne(entry: QueueEntry): Promise<DoubanFetchOutcome> {
   const fn = fetchFn ?? defaultFetchNote;
   try {
     return await Promise.race([
-      fn(entry.file, entry.name),
+      fn(entry.file, entry.name, entry.kind),
       new Promise<DoubanFetchOutcome>((resolve) => setTimeout(() => resolve({ ok: false, reason: 'network' }), FETCH_TIMEOUT_MS)),
     ]);
   } catch {
@@ -169,11 +179,17 @@ async function runOne(entry: QueueEntry): Promise<DoubanFetchOutcome> {
   }
 }
 
-/** 默认执行器：组装设置依赖跑插件内抓取 */
-async function defaultFetchNote(file: TFile, _name: string): Promise<DoubanFetchOutcome> {
+/** 默认执行器：组装设置依赖跑插件内抓取（书籍 → 图书链路，Q14） */
+async function defaultFetchNote(file: TFile, _name: string, kind: DoubanQueueKind): Promise<DoubanFetchOutcome> {
   const app = M.appRef;
   if (!app) return { ok: false, reason: 'network' };
-  return fetchNoteDouban(app, file, fetchDepsFromSettings(app));
+  const deps = fetchDepsFromSettings(app);
+  if (kind === 'book') {
+    // DoubanFetchDeps 结构覆盖 BookFetchDeps（多 apizeroKey 无害），Cookie 同源共用；
+    // BookFetchOutcome 与 DoubanFetchOutcome 结构同构
+    return fetchMdBookDouban(app, file, deps);
+  }
+  return fetchNoteDouban(app, file, deps);
 }
 
 async function pump(): Promise<void> {

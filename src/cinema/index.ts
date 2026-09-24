@@ -10,6 +10,9 @@ import { rebuildItems } from './data';
 import { createOverlay, closeOverlay, registerEscapeHandler, renderAll, openAddModalDirect, openRandomMovie } from './ui';
 import { shutdownDoubanQueue, sweepDoubanFetch } from './douban-queue';
 
+// 重抓命令入口（票 301 Q15；实现在 douban-refetch，经域入口转出供 main.ts）
+export { refetchCinemaDouban } from './douban-refetch';
+
 let initialized = false;
 let autoRefreshRegistered = false;
 

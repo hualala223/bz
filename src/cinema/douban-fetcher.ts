@@ -7,8 +7,24 @@
  * 写回口径（审查 C8/C9 拍板）：除豆瓣链接（修正脏值）外一律「缺失才填」——已有值
  * （含用户手工修正）不覆盖；ApiZero 逗号列表值写入前归一化为消费端的 ` / ` 切分口径（C2）。
  * 纯逻辑 + 依赖注入（httpGet / downloadBinary），node 环境可测。
+ * 票 301 / ADR-0130：共享纯函数上沉 src/core/douban/fetch-core.ts 单点维护（书架书籍抓取
+ * 共用「缺失才填」写入口径），此处 re-export 兼容既有引用与测试；HTTP/写盘等副作用与
+ * 影视专用字段链（ApiZero/rexxar）仍由本文件持有。
  */
 import type { App, TFile } from 'obsidian';
+import { episodesEligibleTag } from './constants';
+import {
+  parseSearchResults, searchLooksBlocked, upgradePosterUrl, normalizeListValue, extractSid,
+  updateFrontmatterFields, insertPosterEmbed, fmFieldValue, clearDoubanContent,
+  type HttpGet, type DownloadBinary, type FmFieldSpec,
+} from '../core/douban/fetch-core';
+
+// 共享纯函数 re-export（票 301：单点在 core，本域与测试的既有 import 路径不变）
+export {
+  parseSearchResults, searchLooksBlocked, upgradePosterUrl, normalizeListValue, extractSid,
+  updateFrontmatterFields, insertPosterEmbed, fmFieldValue, safeFileName,
+  type HttpGet, type DownloadBinary, type DoubanSearchResult, type FmFieldSpec,
+} from '../core/douban/fetch-core';
 
 /** 海报目录（对齐 CLI config 默认值） */
 export const POSTER_FOLDER = 'CONFIG/MOVIE POSTER';
@@ -19,9 +35,6 @@ const BILIBILI_NONE = ''; // 占位防误用（无实际引用）
 void BILIBILI_NONE;
 
 // ---------- 依赖注入 ----------
-
-export type HttpGet = (url: string, headers?: Record<string, string>) => Promise<string | null>;
-export type DownloadBinary = (url: string, headers?: Record<string, string>) => Promise<ArrayBuffer | null>;
 
 export interface DoubanFetchDeps {
   httpGet: HttpGet;
@@ -37,7 +50,7 @@ export interface DoubanFetchDeps {
   now?: () => number;
 }
 
-// ---------- 纯函数（照搬 douban-client.js 正则口径） ----------
+// ---------- 影视专用纯函数（通用纯函数已上沉 core/douban/fetch-core，见顶部 re-export） ----------
 
 /** 从文件名提取影视名称（《名称》.md 与 名称.md 两种格式，照搬 note-processor） */
 export function extractMovieName(filename: string): string {
@@ -46,53 +59,29 @@ export function extractMovieName(filename: string): string {
   return m ? m[1] : basename;
 }
 
-export interface DoubanSearchResult {
-  title: string;
-  detailUrl: string;
-  posterUrl: string;
-}
-
-/** 纯函数：解析豆瓣搜索页 HTML（照搬 parseSearchResults）：result 块 → title/detailUrl/posterUrl */
-export function parseSearchResults(html: string): DoubanSearchResult[] {
-  const results: DoubanSearchResult[] = [];
-  const itemRegex = /class="result"[\s\S]*?<div class="pic">[\s\S]*?<a[^>]*href="([^"]*)"[^>]*>[\s\S]*?<img[^>]*src="([^"]*)"[^>]*>[\s\S]*?<div class="title">[\s\S]*?<a[^>]*>([^<]+)<\/a>/g;
-  let match: RegExpExecArray | null;
-  while ((match = itemRegex.exec(html)) !== null) {
-    const rawUrl = match[1];
-    const posterUrl = match[2];
-    const title = match[3].trim();
-    // 搜索结果链接是 link2 跳转包装，url= 参数里才是真实 subject 地址
-    const urlMatch = rawUrl.match(/url=([^&]+)/);
-    const detailUrl = urlMatch ? decodeURIComponent(urlMatch[1]) : rawUrl;
-    results.push({ title, detailUrl, posterUrl });
+/** 纯函数：fm tags 块提取类型 tag 列表（抓取器内判定剧集资格；sweep 侧 item.typeTag 同源口径）。
+ *  兼容两种形态：块列表（tags:\n- 电影 / 缩进 - 电视剧）与行内数组（tags: [电影]） */
+export function fmTags(content: string): string[] {
+  const out: string[] = [];
+  const inline = /^tags:\s*\[(.+)\]\s*$/m.exec(content);
+  if (inline) return inline[1].split(',').map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+  let inTags = false;
+  for (const line of content.split(/\r?\n/)) {
+    if (/^tags:\s*(#.*)?$/.test(line)) { inTags = true; continue; }
+    if (!inTags) continue;
+    if (/^\s+-\s/.test(line)) {
+      const v = line.replace(/^\s+-\s*/, '').trim().replace(/^["']|["']$/g, '');
+      if (v) out.push(v);
+    } else {
+      break; // 列表结束（空行继续容忍由下一行非列表项触发 break）
+    }
   }
-  return results;
+  return out;
 }
 
-/** 纯函数：搜索响应是否为风控拦截页——响应过短或无搜索结果结构（正常搜索页 >20KB 且含 result 块） */
-export function searchLooksBlocked(html: string | null): boolean {
-  if (!html) return true;
-  if (html.length < 8000) return true;
-  // 正常搜索页必然存在结果块或「没有找到」的空态结构；风控拦截页两者皆无
-  return !html.includes('class="result"') && !html.includes('没有找到') && !html.includes('没有相关的搜索结果');
-}
-
-/** 纯函数：s_ratio_poster → l_ratio_poster（高清） */
-export function upgradePosterUrl(url: string): string {
-  return url.replace('s_ratio_poster', 'l_ratio_poster');
-}
-
-/** 纯函数：列表值归一化（审查 C2）——ApiZero 的 actor/genre/director/area 是逗号分隔，
- *  消费端（analysis.ts splitAdd、recommend.ts topBy）按 ` / ` 切分：全/半角逗号及其后空格
- *  统一改写为 ` / `；已含 ` / ` 的值不受影响（无逗号则原样返回，不重复替换） */
-export function normalizeListValue(val: string): string {
-  return val.replace(/[,，]\s*/g, ' / ');
-}
-
-/** 从详情页 URL 提取 subject ID */
-export function extractSid(detailUrl: string): string | null {
-  const m = detailUrl.match(/subject\/(\d+)/);
-  return m ? m[1] : null;
+/** 纯函数：该笔记是否剧集类型（任一 tag 归一后命中 电视剧/短剧）——总集数写入门槛 */
+export function noteEpisodesEligible(content: string): boolean {
+  return fmTags(content).some((t) => episodesEligibleTag(t));
 }
 
 export interface CelebritiesInfo {
@@ -191,96 +180,8 @@ export type DoubanFetchOutcome =
   | { ok: true; skipped?: boolean }
   | { ok: false; reason: 'blocked' | 'notfound' | 'network' | 'write' };
 
-/** 字段值形态：string = 已有则原地更新；{ value, ifMissing } = 仅当字段缺失时写入（审查
- *  C8/C9 拍板口径：防重抓覆盖用户手工修正，缺失才填） */
-export type FmFieldSpec = string | { value: string; ifMissing: boolean };
-
-/** frontmatter 更新（纯函数，照搬 note-processor updateFrontmatterFields 的行级口径）：
- *  string 字段已有则原地更新、新字段插到 tags 列表后；ifMissing 字段已有则跳过；空值跳过。
- *  「已有」判断基于本函数收到的 content——调用方传入 process 回调的 fresh 内容即天然完成
- *  「写回前基于最新内容复核」（C8） */
-export function updateFrontmatterFields(content: string, fields: Record<string, FmFieldSpec>): string {
-  const fmMatch = content.match(/^(---\r?\n)([\s\S]*?)(\r?\n---)/);
-  if (!fmMatch) {
-    const fmLines = ['---'];
-    for (const [k, spec] of Object.entries(fields)) {
-      const v = typeof spec === 'string' ? spec : spec.value;
-      if (v) fmLines.push(`${k}: ${formatYamlValue(v)}`);
-    }
-    fmLines.push('---');
-    return fmLines.join('\n') + '\n' + content;
-  }
-  const header = fmMatch[1];
-  const footer = fmMatch[3];
-  const rest = content.slice(fmMatch[0].length);
-  const lines = fmMatch[2].split(/\r?\n/);
-
-  let insertIdx = lines.length;
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].match(/^\s+- /)) insertIdx = i + 1;
-  }
-  const existingKeys = new Set<string>();
-  for (const line of lines) {
-    const m = line.match(/^([^:]+):/);
-    if (m) existingKeys.add(m[1].trim());
-  }
-  const newLines: string[] = [];
-  for (const [key, spec] of Object.entries(fields)) {
-    const val = typeof spec === 'string' ? spec : spec.value;
-    if (!val || val === '') continue;
-    if (existingKeys.has(key)) {
-      // 缺失才填（C8/C9）：已有值不动，保留用户手改与存量
-      if (typeof spec !== 'string' && spec.ifMissing) continue;
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].match(new RegExp(`^${key}:`))) {
-          lines[i] = `${key}: ${formatYamlValue(val)}`;
-          break;
-        }
-      }
-    } else {
-      newLines.push(`${key}: ${formatYamlValue(val)}`);
-    }
-  }
-  if (newLines.length > 0) lines.splice(insertIdx, 0, ...newLines);
-  return header + lines.join('\n') + footer + rest;
-}
-
-/** YAML 值序列化（照搬 formatYamlValue）：含特殊字符/空格双引号包裹并转义。
- *  换行先行单行化（审查 C3）：裸 \n/\r 进 frontmatter 会破坏 YAML 解析、影片从面板消失 */
-function formatYamlValue(val: string): string {
-  let s = String(val);
-  if (/[\r\n]/.test(s)) s = s.replace(/[ \t]*[\r\n]+[ \t]*/g, ' ');
-  if (/[:"\-#[\]{}|>'?]/.test(s) || s.includes(' ')) {
-    return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
-  }
-  return s;
-}
-
-/** 正文 frontmatter 后插入海报 embed（纯函数，照搬 insertPosterEmbed；已存在跳过）。
- *  兼容 FM 闭合 --- 恰为文件末行（无尾换行）形态（审查 C4）：补换行后 embed 仍插在
- *  frontmatter 之后，frontmatter 保持居首有效 */
-export function insertPosterEmbed(content: string, posterPath: string): string {
-  const embedLink = `![[${posterPath}]]`;
-  if (content.includes(embedLink)) return content;
-  const fmMatch = content.match(/^(---\r?\n[\s\S]*?\r?\n---)(\r?\n)?/);
-  if (fmMatch) {
-    if (fmMatch[2]) {
-      // FM 后已有换行：embed 紧跟 FM 闭合行
-      return fmMatch[0] + embedLink + '\n' + content.slice(fmMatch[0].length);
-    }
-    // FM 即文件末尾（无尾换行）：先补换行再插 embed，结果首字符仍是 `---`
-    return fmMatch[1] + '\n' + embedLink + '\n' + content.slice(fmMatch[1].length);
-  }
-  return embedLink + '\n' + content;
-}
-
-/** frontmatter 行级字段读取（剥引号；空值 null——队列 fetchComplete 同口径） */
-function fieldValue(content: string, key: string): string | null {
-  const m = content.match(new RegExp(`^${key}:[ \\t]*(.*)$`, 'm'));
-  if (!m) return null;
-  const v = m[1].trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1').trim();
-  return v || null;
-}
+/** frontmatter 行级字段读取（共享 fmFieldValue 的域内别名，调用点语义不变） */
+const fieldValue = fmFieldValue;
 
 /**
  * 单条笔记抓取（队列执行器注入点；成功 = 海报与豆瓣链接都写齐或本已齐全）。
@@ -289,7 +190,7 @@ function fieldValue(content: string, key: string): string | null {
  * 写回经 vault.process：字段一律「缺失才填」并基于回调内 fresh 内容复核（C8），
  * 抓取期间用户手改不会被覆盖。
  */
-export async function fetchNoteDouban(app: App, file: TFile, deps: DoubanFetchDeps): Promise<DoubanFetchOutcome> {
+export async function fetchNoteDouban(app: App, file: TFile, deps: DoubanFetchDeps, opts?: { query?: string }): Promise<DoubanFetchOutcome> {
   const name = extractMovieName(file.name);
   let content: string;
   try {
@@ -302,12 +203,13 @@ export async function fetchNoteDouban(app: App, file: TFile, deps: DoubanFetchDe
   const hasDoubanInfo = !!doubanUrlRaw && /^https?:\/\//.test(doubanUrlRaw);
   if (hasPoster && hasDoubanInfo) return { ok: true, skipped: true };
 
-  // 1. 搜索（豆瓣搜索页；Cookie 注入）。网络异常上抛接住归 network（C6：不与风控混淆）
+  // 1. 搜索（豆瓣搜索页；Cookie 注入）。网络异常上抛接住归 network（C6：不与风控混淆）。
+  //  query 覆盖（票 301 Q15 重抓）：重抓命令允许用户改搜索词（默认 = 笔记名）
   const searchHeaders: Record<string, string> = { Referer: 'https://movie.douban.com/', 'Accept-Language': 'zh-CN,zh;q=0.9' };
   if (deps.doubanCookie) searchHeaders.Cookie = deps.doubanCookie;
   let html: string | null;
   try {
-    html = await deps.httpGet(`https://www.douban.com/search?cat=1002&q=${encodeURIComponent(name)}`, searchHeaders);
+    html = await deps.httpGet(`https://www.douban.com/search?cat=1002&q=${encodeURIComponent(opts?.query || name)}`, searchHeaders);
   } catch {
     return { ok: false, reason: 'network' };
   }
@@ -358,9 +260,12 @@ export async function fetchNoteDouban(app: App, file: TFile, deps: DoubanFetchDe
       if (az.area) fields['制片国家/地区'] = { value: normalizeListValue(az.area), ifMissing: true };
       if (az.duration) fields['片长'] = { value: az.duration, ifMissing: true };
       // issue 303 字段扩展（ADR-0129 修订）：上映日期降级年份、热门短评，均缺失才填。
-      // 季集←episodes 已撤回（C1）：episodes 是总集数非季数，勿写入
+      // 季集←episodes 已撤回（C1）：episodes 是总集数非季数，勿写入「季集」。
+      // 总集数（票 301 追加）：episodes 即总集数口径，落 fm「总集数」正确落点——仅剧集类型
+      // （电视剧/短剧，含旧 tag 归一）且缺失才填；电影不写。
       if (az.year) fields['上映日期'] = { value: az.year, ifMissing: true };
       if (az.shortComment) fields['热门短评'] = { value: az.shortComment, ifMissing: true };
+      if (az.episodes && noteEpisodesEligible(content)) fields['总集数'] = { value: az.episodes, ifMissing: true };
     }
   }
   const needCelebrities = !az || !az.director || !az.actor;
@@ -386,4 +291,14 @@ export async function fetchNoteDouban(app: App, file: TFile, deps: DoubanFetchDe
     return { ok: false, reason: 'write' };
   }
   return { ok: true };
+}
+
+// ---------- 重抓前置清理（票 301 追加决策 Q15） ----------
+
+/** 影视重抓清除的 frontmatter 键（豆瓣来源全套 + 海报；用户自有字段——评分/状态/感想——不动） */
+export const MOVIE_REFETCH_FM_KEYS = ['海报', '豆瓣链接', '豆瓣评分', '导演', '主演', '编剧', '类型', '制片国家/地区', '片长', '上映日期', '热门短评'];
+
+/** 影视重抓前置清理：vault.process 原子清豆瓣字段 + 旧海报 embed（D3：写盘走域 fetcher 单点） */
+export async function clearMovieDoubanFields(app: App, file: TFile): Promise<void> {
+  await app.vault.process(file, (c) => clearDoubanContent(c, MOVIE_REFETCH_FM_KEYS, [POSTER_FOLDER]));
 }

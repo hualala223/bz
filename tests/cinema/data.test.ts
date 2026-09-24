@@ -9,7 +9,7 @@ import { resetObsidianMocks } from '../mock-obsidian-entry';
 import { M, resetCinemaState, type CinemaItem } from '../../src/cinema/state';
 import { rebuildItems, getDisplayItems, sortByDateDesc, sortByCreatedDesc, dateVal, parseEpisodeCount } from '../../src/cinema/data';
 import { getStarString, getGroupForTag, getGroupSafe, doubanEligibleTag, episodesEligibleTag, STATUS_WATCHING, STATUS_WATCHED } from '../../src/cinema/constants';
-import { pcardHtml } from '../../src/cinema/shared';
+import { pcardHtml, detailModalHtml } from '../../src/cinema/shared';
 import { unloadCinema } from '../../src/cinema';
 
 
@@ -117,7 +117,7 @@ tags:
     const handItem: CinemaItem = {
       file: tfile, name: '缓存未就绪', typeTag: '电影', group: '电影', watchDate: null, rating: null,
       status: 2, poster: null, review: null, genre: null, director: null, actors: null,
-      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null,
+      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, chaptersTotal: null, chaptersWatching: null, bookInfo: [],
     };
     M.items.push(handItem);
     const items = rebuildItems(app);
@@ -133,7 +133,7 @@ tags:
     M.items.push({
       file: tfile, name: '无效', typeTag: '电影', group: '电影', watchDate: null, rating: null,
       status: 2, poster: null, review: null, genre: null, director: null, actors: null,
-      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null,
+      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, chaptersTotal: null, chaptersWatching: null, bookInfo: [],
     });
     rebuildItems(app);
     expect(M.items).toHaveLength(0);
@@ -192,7 +192,7 @@ describe('cinema 排序与筛选', () => {
       name, typeTag: '电影', group: '电影',
       watchDate: null, rating: null, status: 2, poster: null, review: null,
       genre: null, director: null, actors: null, region: null, year: null,
-      doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null,
+      doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, chaptersTotal: null, chaptersWatching: null, bookInfo: [],
     });
     const t0 = 1000;
     const old = mk('旧片', t0, 9000); // 先创建，后被编辑 → mtime 最大
@@ -301,17 +301,49 @@ describe('集数落盘与角标（票 295）', () => {
     expect(film.episodesWatching).toBeNull();
   });
 
-  it('在看剧类卡片角标：`12/40` 右上角标；非在看/非剧类/缺数据不显示', () => {
-    const mk = (over: Partial<CinemaItem>): CinemaItem => ({
+  it('书籍条目（票 301）：封面兜底 poster；章节两键读取；bookInfo 行非空项', () => {
+    const vault = new MockVault();
+    vault.files.set('我的/娱乐/《某书》.md', '---\ntags: [书籍]\n评分: 0\n封面: "CONFIG/BOOK COVER/x.jpg"\n总章节数: 36\n正在看章节: 12\n作者: 张三\nISBN: "9787508684031"\n---');
+    vault.files.set('我的/娱乐/《某影》.md', '---\ntags: [电影]\n评分: 8\n---');
+    const app = makeApp(vault);
+    const items = rebuildItems(app);
+    const book = items.find((i) => i.name === '某书')!;
+    expect(book.poster).toBe('CONFIG/BOOK COVER/x.jpg'); // 封面兜底（书籍无海报键）
+    expect(book.chaptersTotal).toBe(36);
+    expect(book.chaptersWatching).toBe(12);
+    expect(book.bookInfo).toContainEqual(['作者', '张三']);
+    expect(book.bookInfo).toContainEqual(['ISBN', '9787508684031']);
+    expect(book.bookInfo.some(([k]) => k === '出版社')).toBe(false); // 空键不进行
+    const film = items.find((i) => i.name === '某影')!;
+    expect(film.chaptersTotal).toBeNull();
+    expect(film.bookInfo).toEqual([]);
+  });
+
+  it('在看剧类卡片角标：`12/40` 右上角标；非在看/非剧类/缺数据不显示', () => {    const mk = (over: Partial<CinemaItem>): CinemaItem => ({
       file: null, name: 'X', typeTag: '电视剧', group: '电视剧', watchDate: null, rating: 0,
       status: STATUS_WATCHING, poster: null, review: null, genre: null, director: null, actors: null,
       region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null,
-      seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, ...over,
+      seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, chaptersTotal: null, chaptersWatching: null, bookInfo: [], ...over,
     });
     expect(pcardHtml(mk({ name: 'A', episodesTotal: 40, episodesWatching: 12 }), null)).toContain('badge-eps">12/40</span>');
     expect(pcardHtml(mk({ name: 'B', status: STATUS_WATCHED, episodesTotal: 40, episodesWatching: 40 }), null)).not.toContain('badge-eps');
     expect(pcardHtml(mk({ name: 'C', typeTag: '电影', episodesTotal: 40, episodesWatching: 12 }), null)).not.toContain('badge-eps');
     expect(pcardHtml(mk({ name: 'D', episodesTotal: 40, episodesWatching: null }), null)).not.toContain('badge-eps');
     expect(pcardHtml(mk({ name: 'E', episodesTotal: null, episodesWatching: 12 }), null)).not.toContain('badge-eps');
+  });
+
+  it('详情卡（Q17c）：有笔记文件的条目渲染「重抓豆瓣」按钮，无文件不渲染；集数行/章节行形态', () => {
+    const mk = (over: Partial<CinemaItem>): CinemaItem => ({
+      file: null, name: 'X', typeTag: '电视剧', group: '电视剧', watchDate: null, rating: 0,
+      status: STATUS_WATCHING, poster: null, review: null, genre: null, director: null, actors: null,
+      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null,
+      seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, chaptersTotal: null, chaptersWatching: null, bookInfo: [], ...over,
+    });
+    expect(detailModalHtml(mk({ name: 'A', file: { path: '我的/娱乐/《A》.md' } as CinemaItem['file'] }), null)).toContain('j-refetch');
+    expect(detailModalHtml(mk({ name: 'B', file: null }), null)).not.toContain('j-refetch');
+    // 集数行：有总集数显示（有在看进度给 X / Y，否则 共 X 集）；书籍章节行同款
+    expect(detailModalHtml(mk({ name: 'C', episodesTotal: 24, episodesWatching: 12 }), null)).toContain('>集数</span><span class="dm-kv-v">12 / 24<');
+    expect(detailModalHtml(mk({ name: 'D', episodesTotal: 24, episodesWatching: null }), null)).toContain('共 24 集');
+    expect(detailModalHtml(mk({ name: 'E', typeTag: '书籍', chaptersTotal: 47 }), null)).toContain('共 47 章');
   });
 });

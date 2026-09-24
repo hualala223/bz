@@ -53,6 +53,12 @@ export interface CinemaItem {
   episodesTotal: number | null;
   /** 正在看集数（frontmatter「正在看集数」；仅电视剧/短剧写入，票 295） */
   episodesWatching: number | null;
+  /** 总章节数（frontmatter「总章节数」；仅书籍写入/豆瓣目录抓取，票 301） */
+  chaptersTotal: number | null;
+  /** 正在看章节（frontmatter「正在看章节」；仅书籍写入，票 301） */
+  chaptersWatching: number | null;
+  /** 书籍字段行（作者/出版社/出版年/译者/ISBN/页数/出品方 非空项；详情卡「豆瓣信息」区渲染，票 301） */
+  bookInfo: [string, string][];
 }
 
 /** 排序模式：date=最近观看（默认）/ created=按创建 / rating=按评分 */

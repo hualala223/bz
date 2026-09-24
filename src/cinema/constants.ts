@@ -114,6 +114,18 @@ export function episodesEligibleTag(tag: string | null | undefined): boolean {
   return EPISODE_TYPES.includes(normalized);
 }
 
+// ======================= 章节进度适用类型（票 301，对齐票 295 集数口径） =======================
+
+/** 章节（总章节数/正在看章节）仅对 书籍 生效；fm 两键也仅书籍写入 */
+export const CHAPTER_TYPES: string[] = ['书籍'];
+
+/** 类型 tag 是否支持章节进度（旧「小说」tag 归一后判定） */
+export function chaptersEligibleTag(tag: string | null | undefined): boolean {
+  if (!tag) return false;
+  const normalized = LEGACY_TAG_MAP[tag] ?? tag;
+  return CHAPTER_TYPES.includes(normalized);
+}
+
 // ======================= 风格框架（issue 236 / ADR-0103） =======================
 
 // 当前仅午夜场上岸（gazette/booth 为 styles.css 预留段，设置项见 settings.ts）；

@@ -22,7 +22,7 @@ import { tryGetSettings } from '../core/settings-provider';
 import { mountIcons } from '../core/ui';
 import {
   STATUS_WANT, STATUS_WATCHING, STATUS_WATCHED, DEFAULT_RATING,
-  getGroupForTag, getGroupSafe, doubanEligibleTag, episodesEligibleTag,
+  getGroupForTag, getGroupSafe, doubanEligibleTag, episodesEligibleTag, chaptersEligibleTag,
 } from './constants';
 import { M, type CinemaItem, type CinemaSortMode } from './state';
 import { rebuildItems, getDisplayItems, parseEpisodeCount } from './data';
@@ -31,6 +31,7 @@ import { getCountryOptions, getGenreOptions, addCountryOption, addGenreOption } 
 import { runAIRecommend, runSimilarRecommend, buildTasteProfile, quickAddWant } from './recommend';
 import { buildAnalysisHTML } from './analysis';
 import { enqueueDoubanFetch, dequeueDoubanFetch, isFetching } from './douban-queue';
+import { refetchCinemaDouban } from './douban-refetch';
 import {
   ICON, statusText, itemByKey, itemKey, doubanSearchUrl,
   detailModalHtml, confirmModalHtml, formModalHtml, optionChipsHtml, genreLabel,
@@ -140,7 +141,10 @@ async function persistItem(item: CinemaItem, app: App, edit?: { prevName: string
     const filePath = `${folder}/《${item.name}》.md`;
     const drama = episodesEligibleTag(item.typeTag);
     const epsLines = drama && item.episodesTotal !== null ? `总集数: ${item.episodesTotal}\n${item.episodesWatching !== null ? `正在看集数: ${item.episodesWatching}\n` : ''}` : '';
-    const content = `---\ntags:\n- ${item.typeTag}\n${item.country ? `国家: ${item.country}\n` : ''}${item.genres.length ? `类型: ${item.genres.join('、')}\n` : ''}${epsLines}观影日期: ${item.watchDate || localNow()}\n评分: ${item.rating ?? 0}\n${item.review ? `影评: ${item.review}\n` : ''}海报: \n---\n`;
+    // 票 301：书籍新增时章节两键同口径落新笔记
+    const isBook = chaptersEligibleTag(item.typeTag);
+    const chLines = isBook && item.chaptersTotal !== null ? `总章节数: ${item.chaptersTotal}\n${item.chaptersWatching !== null ? `正在看章节: ${item.chaptersWatching}\n` : ''}` : '';
+    const content = `---\ntags:\n- ${item.typeTag}\n${item.country ? `国家: ${item.country}\n` : ''}${item.genres.length ? `类型: ${item.genres.join('、')}\n` : ''}${epsLines}${chLines}观影日期: ${item.watchDate || localNow()}\n评分: ${item.rating ?? 0}\n${item.review ? `影评: ${item.review}\n` : ''}海报: \n---\n`;
     const f = await app.vault.create(filePath, content);
     item.file = f;
     return;
@@ -181,6 +185,16 @@ async function persistItem(item: CinemaItem, app: App, edit?: { prevName: string
       } else {
         delete fm['总集数'];
         delete fm['正在看集数'];
+      }
+      // 票 301：章节两键仅书籍写入，其余类型不残留（总章节数豆瓣抓取值，编辑时手工覆盖）
+      if (chaptersEligibleTag(item.typeTag)) {
+        if (item.chaptersTotal !== null) fm['总章节数'] = item.chaptersTotal;
+        else delete fm['总章节数'];
+        if (item.chaptersWatching !== null) fm['正在看章节'] = item.chaptersWatching;
+        else delete fm['正在看章节'];
+      } else {
+        delete fm['总章节数'];
+        delete fm['正在看章节'];
       }
     }
   });
@@ -312,6 +326,20 @@ function openDetail(sec: HTMLElement, it: CinemaItem, app: App): void {
   el.querySelector('.j-edit')?.addEventListener('click', () => { close(); openForm(sec, it, app); });
   el.querySelector('.j-del')?.addEventListener('click', () => { close(); openConfirm(sec, it, app); });
   el.querySelector('.j-similar')?.addEventListener('click', () => { close(); void runSimilarRecommend(it, app); });
+  el.querySelector('.j-refetch')?.addEventListener('click', () => { close(); void refetchFromDetail(sec, it, app); });
+}
+
+/** 详情卡「重抓豆瓣」（Q17c）：重抓（弹框改搜索词）→ 重建条目 → 原样重开详情卡看新数据 */
+async function refetchFromDetail(sec: HTMLElement, it: CinemaItem, app: App): Promise<void> {
+  if (!it.file) {
+    notice('该条目没有对应的笔记文件，无法重抓', 'error');
+    return;
+  }
+  await refetchCinemaDouban(app, it.file);
+  rebuildItems(app);
+  M.renderFn?.();
+  const fresh = itemByKey(M.items, itemKey(it));
+  if (fresh) openDetail(sec, fresh, app);
 }
 
 /**
@@ -365,6 +393,7 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
     country: item?.country ?? null, genres: item?.genres ?? [],
     countryOptions: countryPool, genreOptions: genrePool,
     epsTotal: item?.episodesTotal ?? null, epsWatching: item?.episodesWatching ?? null,
+    chTotal: item?.chaptersTotal ?? null, chWatching: item?.chaptersWatching ?? null,
   }));
   mountIcons(el);
   const cur = { tag: initTag, st: initSt, country: item?.country ?? null, genres: [...(item?.genres ?? [])] };
@@ -381,11 +410,18 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
     const eps = el.querySelector('.j-eps') as HTMLElement | null;
     if (eps) eps.style.display = epsVisible() ? '' : 'none';
   };
+  // 票 301：章节行仅书籍且「在看」时可见（对齐集数口径）
+  const chaptersVisible = () => chaptersEligibleTag(cur.tag) && cur.st === '在看';
+  const syncChapters = () => {
+    const ch = el.querySelector('.j-chapters') as HTMLElement | null;
+    if (ch) ch.style.display = chaptersVisible() ? '' : 'none';
+  };
   el.querySelectorAll<HTMLElement>('[data-f-tag]').forEach((b) => b.addEventListener('click', () => {
     cur.tag = b.dataset.fTag ?? cur.tag;
     el.querySelectorAll('[data-f-tag]').forEach((x) => x.classList.toggle('is-on', x === b));
     syncGenrePool(cur.tag);
     syncEps();
+    syncChapters();
   }));
   // 票 294：国家（单选，再点取消）与题材（多选）chips——委托绑在容器上，自定义添加后重绘行不丢事件
   const syncCountries = () => {
@@ -440,6 +476,7 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
     (el.querySelector('.j-rating') as HTMLElement).style.display = show ? '' : 'none';
     (el.querySelector('.j-review') as HTMLElement).style.display = show ? '' : 'none';
     syncEps();
+    syncChapters();
   }));
   el.querySelector('.j-save')?.addEventListener('click', () => {
     const name = (el.querySelector('.j-name') as HTMLInputElement).value.trim();
@@ -453,10 +490,13 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
     // 票 295：集数仅剧类+在看时读取；不可见时置 null（非剧类落盘时删键，不残留）
     const epsW = epsVisible() ? parseEpisodeCount((el.querySelector('.j-eps-watching') as HTMLInputElement).value) : null;
     const epsT = epsVisible() ? parseEpisodeCount((el.querySelector('.j-eps-total') as HTMLInputElement).value) : null;
+    // 票 301：章节同口径（书籍+在读）
+    const chW = chaptersVisible() ? parseEpisodeCount((el.querySelector('.j-ch-watching') as HTMLInputElement).value) : null;
+    const chT = chaptersVisible() ? parseEpisodeCount((el.querySelector('.j-ch-total') as HTMLInputElement).value) : null;
     if (editing && item) {
-      void saveEdit(sec, item, { name, tag: cur.tag, st: cur.st, rating, date, review, country: cur.country, genres: [...cur.genres], epsTotal: epsT, epsWatching: epsW }, app, close);
+      void saveEdit(sec, item, { name, tag: cur.tag, st: cur.st, rating, date, review, country: cur.country, genres: [...cur.genres], epsTotal: epsT, epsWatching: epsW, chTotal: chT, chWatching: chW }, app, close);
     } else {
-      void saveNew(sec, { name, tag: cur.tag, st: cur.st, rating, date, review, country: cur.country, genres: [...cur.genres], epsTotal: epsT, epsWatching: epsW }, app, close);
+      void saveNew(sec, { name, tag: cur.tag, st: cur.st, rating, date, review, country: cur.country, genres: [...cur.genres], epsTotal: epsT, epsWatching: epsW, chTotal: chT, chWatching: chW }, app, close);
     }
   });
   syncEps();
@@ -478,19 +518,19 @@ function promptOptionValue(sec: HTMLElement, title: string, onSubmit: (v: string
   el.querySelector('.j-ok')?.addEventListener('click', ok);
 }
 
-interface FormPayload { name: string; tag: string; st: string; rating: number | null; date: string; review: string; country: string | null; genres: string[]; epsTotal: number | null; epsWatching: number | null }
+interface FormPayload { name: string; tag: string; st: string; rating: number | null; date: string; review: string; country: string | null; genres: string[]; epsTotal: number | null; epsWatching: number | null; chTotal: number | null; chWatching: number | null }
 
-/** 追剧追平提示（票 295）：正在看集数 ≥ 总集数时随保存 toast 提醒，不自动改状态 */
-function catchUpSuffix(epsWatching: number | null, epsTotal: number | null): string {
-  return epsWatching !== null && epsTotal !== null && epsTotal > 0 && epsWatching >= epsTotal
-    ? ` · 已追平 ${epsTotal} 集，可标记已看` : '';
+/** 追剧/追书进度提示（票 295/301）：正在看进度 ≥ 总量时随保存 toast 提醒，不自动改状态 */
+function catchUpSuffix(watching: number | null, total: number | null, unit: '集' | '章'): string {
+  return watching !== null && total !== null && total > 0 && watching >= total
+    ? ` · 已追平 ${total} ${unit}，可标记已看` : '';
 }
 
 /** 新增落盘（CM2：重名/落盘失败回退；created 域事件 + 抓取队列接管） */
 async function saveNew(sec: HTMLElement, p: FormPayload, app: App, close: () => void): Promise<void> {
   const group = getGroupForTag(p.tag) ?? '其他';
   const st = p.st === '想看' ? STATUS_WANT : p.st === '在看' ? STATUS_WATCHING : STATUS_WATCHED;
-  const it: CinemaItem = { file: null, name: p.name, typeTag: p.tag, group, status: st, rating: p.rating, watchDate: p.date, review: p.review, poster: null, genre: null, director: null, actors: null, region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: p.country, genres: p.genres, episodesTotal: episodesEligibleTag(p.tag) ? p.epsTotal : null, episodesWatching: episodesEligibleTag(p.tag) ? p.epsWatching : null };
+  const it: CinemaItem = { file: null, name: p.name, typeTag: p.tag, group, status: st, rating: p.rating, watchDate: p.date, review: p.review, poster: null, genre: null, director: null, actors: null, region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: p.country, genres: p.genres, episodesTotal: episodesEligibleTag(p.tag) ? p.epsTotal : null, episodesWatching: episodesEligibleTag(p.tag) ? p.epsWatching : null, chaptersTotal: chaptersEligibleTag(p.tag) ? p.chTotal : null, chaptersWatching: chaptersEligibleTag(p.tag) ? p.chWatching : null, bookInfo: [] };
   try {
     if (app.vault.getAbstractFileByPath(`${M.folderPath}/《${p.name}》.md`)) {
       panelToast(sec, '已存在同名条目，请换个名称');
@@ -501,7 +541,7 @@ async function saveNew(sec: HTMLElement, p: FormPayload, app: App, close: () => 
     emitDomainEvent('movie', { kind: 'created', name: p.name, status: st === STATUS_WANT ? 'want' : st === STATUS_WATCHING ? 'watching' : 'watched', rating: p.rating, review: p.review || null });
     if (it.file && doubanEligibleTag(it.typeTag)) enqueueDoubanFetch(it.file, it.name);
     close();
-    panelToast(sec, `已添加「${p.name}」${catchUpSuffix(it.episodesWatching, it.episodesTotal)}`);
+    panelToast(sec, `已添加「${p.name}」${it.episodesWatching !== null || it.episodesTotal !== null ? catchUpSuffix(it.episodesWatching, it.episodesTotal, '集') : catchUpSuffix(it.chaptersWatching, it.chaptersTotal, '章')}`);
     renderAll(app);
   } catch (e) {
     if (!it.file) {
@@ -534,6 +574,8 @@ async function saveEdit(sec: HTMLElement, item: CinemaItem, p: FormPayload, app:
   item.country = p.country; item.genres = p.genres;
   item.episodesTotal = episodesEligibleTag(p.tag) ? p.epsTotal : null;
   item.episodesWatching = episodesEligibleTag(p.tag) ? p.epsWatching : null;
+  item.chaptersTotal = chaptersEligibleTag(p.tag) ? p.chTotal : null;
+  item.chaptersWatching = chaptersEligibleTag(p.tag) ? p.chWatching : null;
   try {
     await persistItem(item, app, { prevName: prev.name, prevTag: prev.typeTag });
     // 域事件补发（与快速标记 markStatus 同口径）：状态流转 + 评分变化 → 小橘行为流；
@@ -548,7 +590,7 @@ async function saveEdit(sec: HTMLElement, item: CinemaItem, p: FormPayload, app:
       emitDomainEvent('movie', { kind: 'rated', name: item.name, fromRating: prevRating, toRating: item.rating });
     }
     close();
-    panelToast(sec, `已保存「${p.name}」${catchUpSuffix(item.episodesWatching, item.episodesTotal)}`);
+    panelToast(sec, `已保存「${p.name}」${item.episodesWatching !== null || item.episodesTotal !== null ? catchUpSuffix(item.episodesWatching, item.episodesTotal, '集') : catchUpSuffix(item.chaptersWatching, item.chaptersTotal, '章')}`);
     renderAll(app);
   } catch (e) {
     Object.assign(item, prev);

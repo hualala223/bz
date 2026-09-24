@@ -17,7 +17,7 @@
 import { esc, iconSpan } from '../core/ui/str';
 import {
   STATUS_WANT, STATUS_WATCHING, STATUS_WATCHED,
-  GROUP_ORDER, TYPE_COLORS, getGroupForTag, getStarString, episodesEligibleTag,
+  GROUP_ORDER, TYPE_COLORS, getGroupForTag, getStarString, episodesEligibleTag, chaptersEligibleTag,
 } from './constants';
 import type { CinemaItem } from './state';
 
@@ -38,6 +38,7 @@ export const ICON = {
   eye: 'eye',
   play: 'play',
   globe: 'globe',
+  refresh: 'refresh-cw',
 } as const;
 
 // ---------- 格式化/口径 ----------
@@ -97,8 +98,12 @@ export function pcardHtml(it: CinemaItem, posterUrl: string | null, fetching = f
   const epsBadge = it.status === STATUS_WATCHING && episodesEligibleTag(it.typeTag)
     && it.episodesWatching !== null && it.episodesTotal !== null
     ? `<span class="badge badge-eps">${it.episodesWatching}/${it.episodesTotal}</span>` : '';
+  // 票 301：书籍在看时章节进度角标同口径（右下错开沿用 badge-eps 样式）
+  const chBadge = it.status === STATUS_WATCHING && chaptersEligibleTag(it.typeTag)
+    && it.chaptersWatching !== null && it.chaptersTotal !== null
+    ? `<span class="badge badge-eps">${it.chaptersWatching}/${it.chaptersTotal}章</span>` : '';
   return `<div class="pcard${picked ? ' is-picked' : ''}" data-cinema-key="${esc(itemKey(it))}"><div class="pw">${posterInner(it, posterUrl)}${fetching ? '<div class="pw-fetch"><span class="pw-spin"></span></div>' : ''}
-    ${(() => { const st = statusNum(it.status); return st !== STATUS_WATCHED ? `<span class="badge" style="background:${statusColor(st)}">${statusText(st)}</span>` : ''; })()}${epsBadge}</div>
+    ${(() => { const st = statusNum(it.status); return st !== STATUS_WATCHED ? `<span class="badge" style="background:${statusColor(st)}">${statusText(st)}</span>` : ''; })()}${epsBadge}${chBadge}</div>
     <div class="pname">${esc(it.name)}</div>
     <div class="pmeta">${esc(it.year || '')}${it.year && it.director ? ' · ' : ''}${esc(it.director || '')}</div>
     <div class="pstars">${r && r > 0 ? getStarString(r) + `<span class="num">${Number(r).toFixed(1)}</span>` : '<span style="opacity:.35">未评分</span>'}</div></div>`;
@@ -146,8 +151,17 @@ export function detailModalHtml(it: CinemaItem, posterUrl: string | null): strin
     ['主演', it.actors ?? ''],
     ['制片国家/地区', it.region ?? ''],
     ['上映日期', it.year ?? ''],
+    ...it.bookInfo,
     ['豆瓣评分', it.doubanRating ?? ''],
   ] as [string, string][]).filter(([, v]) => v !== '');
+  // 章节进度行（票 301）：书籍条目有章节数据时显示（对齐集数在编辑表单的口径，卡片直读）
+  const chapterRow = it.chaptersTotal !== null
+    ? `<div class="dm-kv"><span class="dm-kv-k">章节</span><span class="dm-kv-v">${it.chaptersWatching !== null ? `${it.chaptersWatching} / ${it.chaptersTotal}` : `共 ${it.chaptersTotal} 章`}</span></div>`
+    : '';
+  // 集数进度行（票 301 追加）：剧集条目有总集数时显示，形态同章节行
+  const epsRow = it.episodesTotal !== null
+    ? `<div class="dm-kv"><span class="dm-kv-k">集数</span><span class="dm-kv-v">${it.episodesWatching !== null ? `${it.episodesWatching} / ${it.episodesTotal}` : `共 ${it.episodesTotal} 集`}</span></div>`
+    : '';
   return `<div class="cn-modal" style="max-width:400px;width:100%">
     <div class="dm-head"><div class="dm-poster">${posterUrl ? `<img src="${esc(posterUrl)}" onerror="this.remove()">` : ''}</div>
       <div style="flex:1;min-width:0"><div class="dm-title">${esc(it.name)}</div>
@@ -157,9 +171,11 @@ export function detailModalHtml(it: CinemaItem, posterUrl: string | null): strin
           ${it.watchDate ? `<span class="dm-date">${esc((it.watchDate || '').slice(0, 10))}</span>` : ''}</div>
         ${it.review ? `<div class="dm-review">${esc(it.review)}</div>` : ''}</div></div>
     ${rows.length ? '<div class="dm-sec">豆 瓣 信 息</div>' + rows.map(([k, v]) => `<div class="dm-kv"><span class="dm-kv-k">${k}</span><span class="dm-kv-v">${esc(v)}</span></div>`).join('') : ''}
+    ${epsRow}
+    ${chapterRow}
     ${it.doubanUrl ? `<div class="dm-kv"><span class="dm-kv-k">豆瓣链接</span><span class="dm-kv-v"><a href="${esc(it.doubanUrl)}" target="_blank" rel="noopener">${esc(it.doubanUrl)}</a></span></div>` : ''}
     ${it.synopsis ? `<div class="dm-sec">简 介</div><div style="font-size:12px;line-height:1.8;color:var(--ink-2);text-align:justify">${esc(it.synopsis)}</div>` : ''}
-    <div class="dm-actions"><button class="dm-btn j-similar">${iconSpan(ICON.ai)}找同类</button><button class="dm-btn j-edit">${iconSpan(ICON.edit)}编辑</button><button class="dm-btn danger j-del">${iconSpan(ICON.del)}删除</button></div>
+    <div class="dm-actions">${it.file ? `<button class="dm-btn j-refetch">${iconSpan(ICON.refresh)}重抓豆瓣</button>` : ''}<button class="dm-btn j-similar">${iconSpan(ICON.ai)}找同类</button><button class="dm-btn j-edit">${iconSpan(ICON.edit)}编辑</button><button class="dm-btn danger j-del">${iconSpan(ICON.del)}删除</button></div>
   </div>`;
 }
 
@@ -204,7 +220,7 @@ export function optionChipsHtml(options: string[], selected: string[], attr: str
 /** 添加/编辑表单弹窗内容（保存/切状态等接线留各端行为层；国家/题材选项池行，票 294；
  *  分类行标签按组动态：书籍=体裁、其余=题材（票 299）；j-genre-label 供行为层切类型时改写；
  *  集数行仅剧类+在看时由行为层显隐，票 295） */
-export function formModalHtml(opts: { editing: boolean; name: string; typeTag: string; stText: string; rating: number; review: string; country: string | null; genres: string[]; countryOptions: string[]; genreOptions: string[]; epsTotal: number | null; epsWatching: number | null }): string {
+export function formModalHtml(opts: { editing: boolean; name: string; typeTag: string; stText: string; rating: number; review: string; country: string | null; genres: string[]; countryOptions: string[]; genreOptions: string[]; epsTotal: number | null; epsWatching: number | null; chTotal: number | null; chWatching: number | null }): string {
   const { editing } = opts;
   const initSt = opts.stText;
   const ratingVal = opts.rating;
@@ -219,6 +235,8 @@ export function formModalHtml(opts: { editing: boolean; name: string; typeTag: s
     <div class="f-field"><span class="f-label">状 态</span><div class="f-choice j-sts">${formChoicesHtml(['想看', '在看', '已看'], initSt, 'f-st')}</div></div>
     <div class="f-field j-eps" style="display:none"><span class="f-label">集 数</span>
       <div class="f-eps-row"><label>正在看 <input type="number" min="0" class="f-input j-eps-watching" value="${opts.epsWatching ?? ''}"></label><label>总集数 <input type="number" min="0" class="f-input j-eps-total" value="${opts.epsTotal ?? ''}"></label></div></div>
+    <div class="f-field j-chapters" style="display:none"><span class="f-label">章 节</span>
+      <div class="f-eps-row"><label>正在看 <input type="number" min="0" class="f-input j-ch-watching" value="${opts.chWatching ?? ''}"></label><label>总章节数 <input type="number" min="0" class="f-input j-ch-total" value="${opts.chTotal ?? ''}"></label></div></div>
     <div class="f-field j-rating" style="display:${initSt === '已看' ? '' : 'none'}"><span class="f-label">评 分</span>
       <div class="f-range-row"><input type="range" class="f-range j-range" min="1" max="10" step="0.1" value="${ratingVal}"><span class="f-range-val j-rval">${Number(ratingVal).toFixed(1)}</span></div></div>
     <div class="f-field j-review" style="display:${initSt === '已看' ? '' : 'none'}"><span class="f-label">感 想</span><textarea class="f-input j-review-t" placeholder="写点什么…">${esc(opts.review)}</textarea></div>
