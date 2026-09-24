@@ -38,7 +38,7 @@ import { unloadReadingReport } from './reading-report';
 import { openCinema, addCinemaItem, openCinemaAnalysis, openCinemaExport, pickRandomCinema, unloadCinema, refetchCinemaDouban } from './cinema';
 import { migrateCinemaFolder } from './cinema/migrate';
 // 复习（ticket 168 单一入口：仅「复习（按数量）」命令；ticket 169 加回「加入复习计划」；ensureReview/unloadReview 为常驻监控与卸载所需）
-import { reviewAddCurrent, openReviewReport, ensureReview, unloadReview } from './review';
+import { reviewCountStart, reviewAddCurrent, reviewAddCurrentWithLinks, openReviewReport, openTodayReviewed, ensureReview, unloadReview } from './review';
 // 第二大脑（ticket 103 起原闪念正名接管，ADR-0051——flash 域已删除）
 import {
   openSecondBrainPanel,
@@ -144,7 +144,7 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   {
     id: 'bz-review-add-current', name: '将当前文档加入复习计划', icon: 'list-plus',
     callback: () => reviewAddCurrent(getApp()),
-    editorCallback: () => reviewAddCurrent(getApp()),
+    editorCallback: (_editor, ctx) => reviewAddCurrent(getApp(), ctx.file),
   },
   // 复习计划分析报告（上游线 P2 移植：统计弹窗——streak/负载热力图/单条时间线，只读 review.json）
   { id: 'bz-review-report', name: '复习计划分析报告', icon: 'calendar-check', callback: () => openReviewReport(getApp()) },
@@ -165,6 +165,15 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-secondbrain-rebuild-index', name: '重建索引', icon: 'refresh-cw', callback: () => rebuildSecondBrainIndex(getApp()) },
   // 本周知识动态（上游 issue 360）：周摘要弹层（聚合层只读，不触向量库）
   { id: 'bz-secondbrain-weekly', name: '本周知识动态', icon: 'calendar-days', callback: () => openSecondBrainWeekly(getApp()) },
+  // 复习（ticket 168/169/170）：按数量复习 + 批量加入（本地命令面，3g1 回滚恢复）
+  { id: 'bz-review-count', name: '复习（按数量）', icon: 'list', callback: () => reviewCountStart(getApp()) },
+  {
+    id: 'bz-review-add-current-with-links', name: '批量加入复习计划', icon: 'list-tree',
+    callback: () => reviewAddCurrentWithLinks(getApp()),
+    editorCallback: (_editor, ctx) => reviewAddCurrentWithLinks(getApp(), ctx.file),
+  },
+  // 今日已复习（ticket 276）：弹窗罗列当天复习过的文档，点击新标签页打开原文（强制阅读模式）
+  { id: 'bz-review-today', name: '今日已复习', icon: 'history', callback: () => openTodayReviewed(getApp()) },
   // 番茄钟（ticket 26-32 新域）
   { id: 'bz-pomodoro-open', name: '番茄钟', icon: 'timer', callback: () => openPomodoro(getApp()) },
   // 首页入口菜单三支（票 288 / 上游 issue 288）：相位敏感动作——开始/停止专注、跳过休息、暂停/继续

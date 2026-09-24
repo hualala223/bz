@@ -209,13 +209,6 @@ export default interface BzSettings {
   reviewExcludedNotes: string[];
   /** 🆕 按数量复习（ticket 01）：候选文件夹（目录内全部 .md 为候选池，含未入计划=新文件） */
   reviewCountFolder: string;
-  /** 做题家强制判定（上游 issue 346 终态键） */
-  forceQuizForReview: boolean;
-  /** 🎨 复习面板皮肤（上游外观组范式） */
-  reviewSkin: string;
-  reviewSkinTheme: string;
-  /** 复习 R 阈值（上游 FSRS 终态键） */
-  reviewRThreshold: number;
   /** 🆕 按数量复习：默认篇数 */
   reviewCountDefault: number;
   /** 🆕 按数量复习：历史:新配比（历史占百分比，默认 70＝历史 70%；一侧不足另一侧补齐） */
@@ -714,10 +707,6 @@ export const DEFAULT_SETTINGS: BzSettings = {
   reviewWatchedFolders: [],
   reviewExcludedNotes: [],
   reviewCountFolder: '卡片盒/笔记盒',
-  forceQuizForReview: false,
-  reviewSkin: 'default',
-  reviewSkinTheme: 'manila',
-  reviewRThreshold: 0.9,
   reviewCountDefault: 5,
   reviewCountHistoryRatio: 70,
   reviewCountLastInput: 0,

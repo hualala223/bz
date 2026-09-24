@@ -1,0 +1,310 @@
+/**
+ * 复习入口测试（ticket 168：命令分支随 10 个旧命令退役删除）：
+ * ensureReview 幂等/事件监听/卸载清理/监听文件夹总线事件。
+ */
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { MockVault, mockAppWithVault } from '../mock-vault';
+import { resetObsidianMocks, getNoticeMessages, hasNotice, clearNotices } from '../mock-obsidian-entry';
+import { emitDomainEvent, clearDomainEvents } from '../../src/core/domain-bus';
+import {
+  ensureReview, unloadReview, dataManager, uiManager, reviewWatcher,
+} from '../../src/review/index';
+import { REVIEW_FILE_PATH, ReviewDataManager } from '../../src/review/data';
+import { reviewApp } from '../../src/review/app';
+import { setApp } from '../../src/core/app';
+import { setSettingsProvider } from '../../src/core/settings-provider';
+
+function seed(vault: MockVault) {
+  const now = new Date();
+  vault.files.set('A.md', '正文');
+  vault.files.set(REVIEW_FILE_PATH, JSON.stringify([
+    {
+      id: '1', filePath: 'A.md', name: 'A', reviewStart: now.toISOString(), stage: 1, phase: 'ladder',
+      stability: 1, difficulty: 0.3, reviewHistory: [], totalReviews: 0, averageConfidence: 0,
+      nextReviewDate: new Date(now.getTime() - 1000).toISOString(), lastReviewed: null, lastDifficulty: null, completed: false,
+    },
+  ]));
+}
+
+/** 事件收集型 app（metadataCache/vault/workspace 均可注册与触发；ref 携带 event/cb 以支持 offref 注销） */
+function makeApp(vault: MockVault) {
+  const app: any = mockAppWithVault(vault);
+  setApp(app);
+  const meta: Record<string, Function[]> = {};
+  const ws: Record<string, Function[]> = {};
+  app.metadataCache.on = (ev: string, cb: any) => { (meta[ev] ||= []).push(cb); return { event: ev, cb }; };
+  app.metadataCache.offref = (ref: any) => {
+    if (!ref || !ref.event) return;
+    const arr = meta[ref.event] || [];
+    const idx = arr.indexOf(ref.cb);
+    if (idx >= 0) arr.splice(idx, 1);
+  };
+  app.workspace.on = (ev: string, cb: any) => { (ws[ev] ||= []).push(cb); return { event: ev, cb }; };
+  app.workspace.offref = (ref: any) => {
+    if (!ref || !ref.event) return;
+    const arr = ws[ref.event] || [];
+    const idx = arr.indexOf(ref.cb);
+    if (idx >= 0) arr.splice(idx, 1);
+  };
+  app.metaListeners = meta;
+  app.wsListeners = ws;
+  app.emitMeta = (ev: string, ...args: any[]) => { for (const cb of meta[ev] || []) void cb(...args); };
+  app.emitWs = (ev: string, ...args: any[]) => { for (const cb of ws[ev] || []) void cb(...args); };
+  return app;
+}
+
+beforeEach(() => {
+  vi.restoreAllMocks(); // reviewApp 是模块级单例：不清 mock 会让上个用例的 spy 调用历史泄进下个用例
+  resetObsidianMocks();
+  document.body.innerHTML = '';
+  unloadReview();
+  clearDomainEvents(); // 总线为模块级单例：清掉跨测试残留订阅
+});
+
+describe('ensureReview', () => {
+  it('幂等初始化 + resolved/15s 兜底后首次逾期检查 + 60s 周期（ADR-0116：首查等索引就绪）', async () => {
+    const vault = new MockVault();
+    seed(vault);
+    const app = makeApp(vault);
+    const spy = vi.spyOn(reviewApp, 'checkOverdueAndNotify').mockResolvedValue(undefined);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
+    try {
+      ensureReview(app);
+      ensureReview(app); // 幂等：不重复初始化
+      await vi.advanceTimersByTimeAsync(15100); // 15s 兜底超时触发首查
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      unloadReview();
+    }
+  }, 10000);
+
+  it('ADR-0116：metadataCache resolved 先到 → 立即首查（不等 15s 兜底），且只触发一次', async () => {
+    const vault = new MockVault();
+    seed(vault);
+    const app = makeApp(vault);
+    const spy = vi.spyOn(reviewApp, 'checkOverdueAndNotify').mockResolvedValue(undefined);
+    // 同步 mock 染色：resolved 监听器会跑真实 applyReviewStyles → getSettings（本组未注入 provider 会抛未处理 rejection）
+    vi.spyOn(reviewApp, 'applyReviewStyles').mockResolvedValue(undefined);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
+    try {
+      ensureReview(app);
+      app.emitMeta('resolved');
+      await vi.advanceTimersByTimeAsync(20);
+      expect(spy).toHaveBeenCalledTimes(1); // resolved 触发
+      app.emitMeta('resolved'); // 二次 resolved 不重复首查
+      await vi.advanceTimersByTimeAsync(15100); // 兜底超时也不再触发
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      // 断言失败也必须还原真实定时器：假定时器泄漏会让后续用例的真实 setTimeout 永不解析（级联超时）
+      vi.useRealTimers();
+      unloadReview();
+    }
+  }, 10000);
+
+  it('metadataCache resolved → applyReviewStyles', async () => {
+    const vault = new MockVault();
+    seed(vault);
+    const app = makeApp(vault);
+    const spy = vi.spyOn(reviewApp, 'applyReviewStyles').mockResolvedValue(undefined);
+    ensureReview(app);
+    app.emitMeta('resolved');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it('文件树变更监听：展开文件夹（nav-files-container 子节点变化）→ 节流触发染色（根治懒渲染错过轮询）', async () => {
+    const vault = new MockVault();
+    seed(vault);
+    const app = makeApp(vault);
+    // 造一个 Obsidian 文件树容器（保障 startFileTreeWatch 能找到容器并挂 MutationObserver）
+    const container = document.createElement('div');
+    container.className = 'nav-files-container';
+    document.body.appendChild(container);
+    const spy = vi.spyOn(reviewApp, 'applyReviewStyles').mockResolvedValue(undefined);
+    ensureReview(app);
+    spy.mockClear();
+    // 模拟用户展开文件夹：容器新增一个文档节点（带 data-path）
+    const item = document.createElement('div');
+    item.setAttribute('data-path', 'A.md');
+    container.appendChild(item);
+    // watcher 300ms 节流触发染色
+    await new Promise((r) => setTimeout(r, 400));
+    expect(spy).toHaveBeenCalledTimes(1);
+    container.remove();
+  });
+
+  it('vault modify（md 文件）→ applyReviewStyles', async () => {
+    const vault = new MockVault();
+    seed(vault);
+    const app = makeApp(vault);
+    const spy = vi.spyOn(reviewApp, 'applyReviewStyles').mockResolvedValue(undefined);
+    ensureReview(app);
+    vault.emit('modify', vault.file('A.md'));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it('总线 vault:md-renamed：同路径忽略；命中计划 → 自动更新路径（ticket 099：无确认弹窗）', async () => {
+    const vault = new MockVault();
+    seed(vault);
+    const app = makeApp(vault);
+    ensureReview(app);
+    const updSpy = vi.spyOn(dataManager!, 'updateFilePath').mockResolvedValue(true);
+    const styleSpy = vi.spyOn(reviewApp, 'applyReviewStyles').mockResolvedValue(undefined);
+    // 同路径（总线载荷 oldPath === newPath）
+    emitDomainEvent('vault:md-renamed', { oldPath: 'A.md', newPath: 'A.md' });
+    expect(updSpy).not.toHaveBeenCalled();
+    // 命中计划 → 直接自动更新 + refresh（无确认弹窗）
+    emitDomainEvent('vault:md-renamed', { oldPath: 'A.md', newPath: 'A-new.md' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(document.getElementById('__shared_confirm_popup__')).toBeNull();
+    expect(updSpy).toHaveBeenCalledWith('A.md', 'A-new.md', 'A-new');
+    expect(styleSpy).toHaveBeenCalled();
+  });
+
+  it('workspace quit → 清理周期定时器', async () => {
+    const vault = new MockVault();
+    seed(vault);
+    const app = makeApp(vault);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
+    const clearSpy = vi.spyOn(globalThis, 'clearInterval');
+    ensureReview(app);
+    try {
+      await vi.advanceTimersByTimeAsync(15100); // 让 setInterval 注册（15s 兜底超时后）
+      app.emitWs('quit');
+      expect(clearSpy).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      unloadReview();
+    }
+  }, 10000);
+});
+
+describe('unloadReview', () => {
+  it('清理引用与定时器', async () => {
+    const vault = new MockVault();
+    seed(vault);
+    const app = makeApp(vault);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
+    ensureReview(app);
+    try {
+      await vi.advanceTimersByTimeAsync(15100);
+    } finally {
+      vi.useRealTimers();
+    }
+    unloadReview();
+    expect(dataManager).toBeNull();
+    expect(uiManager).toBeNull();
+  }, 10000);
+
+  it('P2 回归：unload 全量退订（原生 ref + 总线订阅）；再 ensure 无旧监听残留（事件不双触发）', async () => {
+    const vault = new MockVault();
+    seed(vault);
+    const app = makeApp(vault);
+    ensureReview(app);
+    expect(vault.listeners.modify!.length).toBe(1); // modify 仍走原生 vault 订阅
+    expect(app.metaListeners.resolved!.length).toBe(2); // 染色刷新 + ADR-0116 首查就绪门（各一份）
+    expect(app.wsListeners.quit!.length).toBe(1);
+    // created/deleted/renamed 已迁总线：不再占用原生 vault 订阅位
+    expect(vault.listeners.create ?? []).toHaveLength(0);
+    expect(vault.listeners.delete ?? []).toHaveLength(0);
+    expect(vault.listeners.rename ?? []).toHaveLength(0);
+    // 总线通道各订一份：单次派发恰好一次响应
+    const w1 = reviewWatcher!;
+    const cSpy = vi.spyOn(w1, 'onVaultCreate').mockResolvedValue(undefined);
+    const dSpy = vi.spyOn(w1, 'onVaultDelete').mockImplementation(() => {});
+    const rSpy = vi.spyOn(w1, 'onVaultRename').mockImplementation(() => {});
+    emitDomainEvent('vault:md-created', { path: 'X.md' });
+    emitDomainEvent('vault:md-deleted', { path: 'X.md' });
+    emitDomainEvent('vault:md-renamed', { oldPath: 'A.md', newPath: 'B.md' });
+    expect(cSpy).toHaveBeenCalledTimes(1);
+    expect(dSpy).toHaveBeenCalledTimes(1);
+    expect(rSpy).toHaveBeenCalledTimes(1);
+    unloadReview();
+    // 卸载后旧监听全量退订：再派发不触发旧实例
+    emitDomainEvent('vault:md-created', { path: 'Y.md' });
+    emitDomainEvent('vault:md-renamed', { oldPath: 'A.md', newPath: 'C.md' });
+    expect(cSpy).toHaveBeenCalledTimes(1);
+    expect(dSpy).toHaveBeenCalledTimes(1);
+    expect(rSpy).toHaveBeenCalledTimes(1);
+    // 再 ensure：同一事件只触发一次（新实例无历史残留双触发）
+    const styleSpy = vi.spyOn(reviewApp, 'applyReviewStyles').mockResolvedValue(undefined);
+    vi.spyOn(reviewApp, 'checkOverdueAndNotify').mockResolvedValue(undefined); // 屏蔽陈旧首查兜底定时器
+    ensureReview(app);
+    const c2Spy = vi.spyOn(reviewWatcher!, 'onVaultCreate').mockResolvedValue(undefined);
+    app.emitMeta('resolved');
+    await new Promise((r) => setTimeout(r, 20));
+    styleSpy.mockClear(); // 清掉可能的跨测试陈旧定时器污染，改为增量断言
+    app.emitMeta('resolved');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(styleSpy).toHaveBeenCalledTimes(1);
+    styleSpy.mockClear();
+    vault.emit('modify', vault.file('A.md'));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(styleSpy).toHaveBeenCalledTimes(1);
+    emitDomainEvent('vault:md-created', { path: 'Z.md' });
+    expect(c2Spy).toHaveBeenCalledTimes(1);
+    unloadReview();
+  });
+});
+describe('ticket 098：监听文件夹事件（总线 vault:md-created/deleted）', () => {
+  beforeEach(() => {
+    resetObsidianMocks();
+    document.body.innerHTML = '';
+    unloadReview();
+    clearDomainEvents();
+    setSettingsProvider(() => ({} as any));
+  });
+
+  it('总线 created：非监听跳过；监听目录内新建自动加入；已排除/已在计划跳过', async () => {
+    const vault = new MockVault();
+    seed(vault); // A.md 在计划
+    const app = makeApp(vault);
+    ensureReview(app);
+    // 非监听目录
+    emitDomainEvent('vault:md-created', { path: 'X.md' });
+    await new Promise((r) => setTimeout(r, 30));
+    let items = await new ReviewDataManager(app).loadItems();
+    expect(items.map((i) => i.filePath)).not.toContain('X.md');
+    // 监听目录内新建 → 自动加入
+    const settings = { reviewWatchedFolders: ['我的/复习'], reviewExcludedNotes: [] as string[] };
+    setSettingsProvider(() => settings as any);
+    emitDomainEvent('vault:md-created', { path: '我的/复习/Y.md' });
+    await new Promise((r) => setTimeout(r, 30));
+    items = await new ReviewDataManager(app).loadItems();
+    expect(items.map((i) => i.filePath)).toContain('我的/复习/Y.md');
+    // 已排除 → 不加入
+    settings.reviewExcludedNotes = ['我的/复习/Z.md'];
+    emitDomainEvent('vault:md-created', { path: '我的/复习/Z.md' });
+    await new Promise((r) => setTimeout(r, 30));
+    items = await new ReviewDataManager(app).loadItems();
+    expect(items.map((i) => i.filePath)).not.toContain('我的/复习/Z.md');
+    unloadReview();
+  });
+
+  it('总线 deleted：计划内文件删除 → 确认弹窗；点「移除」→ 记录删除；点「保留」→ 挂起保留', async () => {
+    const vault = new MockVault();
+    seed(vault);
+    const app = makeApp(vault);
+    ensureReview(app);
+    emitDomainEvent('vault:md-deleted', { path: 'A.md' });
+    await new Promise((r) => setTimeout(r, 350)); // 防抖 300ms
+    const popup = document.getElementById('__shared_confirm_popup__')!;
+    expect(popup).not.toBeNull();
+    expect(popup.textContent).toContain('删除');
+    // 保留
+    (document.getElementById('__shared_confirm_cancel__') as HTMLElement).click();
+    await new Promise((r) => setTimeout(r, 30));
+    let items = await new ReviewDataManager(app).loadItems();
+    expect(items.some((i) => i.filePath === 'A.md')).toBe(true);
+    // 再次删除 → 移除
+    emitDomainEvent('vault:md-deleted', { path: 'A.md' });
+    await new Promise((r) => setTimeout(r, 350));
+    (document.getElementById('__shared_confirm_ok__') as HTMLElement).click();
+    await new Promise((r) => setTimeout(r, 30));
+    items = await new ReviewDataManager(app).loadItems();
+    expect(items.some((i) => i.filePath === 'A.md')).toBe(false);
+    unloadReview();
+  }, 10000);
+});
