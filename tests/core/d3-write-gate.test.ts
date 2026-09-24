@@ -30,6 +30,10 @@ const WHITELIST: Array<{ file: RegExp; reason: string; /** 防回归哨兵：预
     reason: '契约本体：三原语（串行队列/段写/留档）的原始 vault IO 实现集中于此，是豁免的定义基准',
   },
   {
+    file: /^src\/knowledge\/source-retire\.ts$/,
+    reason: 'knowledge 域（上游 issue 344 移植批 3f）：旧来源伴生文件退役时的内容改写为用户文档写',
+  },
+  {
     file: /^src\/clipbook\/image-save\.ts$/,
     reason: 'clipbook 域（上游 issue 329 移植批 3e）：剪藏图片/正文图片本地化写——二进制落 vault 与覆盖前回写为用户文档写，非 JSON 状态写',
   },

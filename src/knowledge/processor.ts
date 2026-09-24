@@ -1,5 +1,5 @@
 /**
- * 知识盒批量处理器（视频转文献，knowledge 域；ADR-0071：AI 回迁插件侧）
+ * 文献盒批量处理器（视频转文献，literature 域；ADR-0071：AI 回迁插件侧）
  * 串行逐部：对「待处理/失败」任务按列表顺序 spawn 工具无头批处理命令
  * （全局 bili-dl --batch '<json>'，.cmd shim 以 shell:true 启动；P2-2 移除修复期本机 CLI 指针探测），
  * _runOne 返回「子进程终结」Promise，循环内 await —— 严格一次一部。
@@ -18,6 +18,7 @@
  * 「笔记落盘中」（ui.ts STEP_DONE_MAP 完成态文案按此精确匹配）。
  */
 import { notice } from '../core/notice';
+import { localNow } from '../core/ui/str';
 import { emitDomainEvent } from '../core/domain-bus';
 import { tryGetSettings } from '../core/settings-provider';
 import { getApp } from '../core/app';
@@ -114,9 +115,7 @@ function tailStderr(chunks: Buffer[]): string {
 }
 
 function nowTs(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  return localNow(); // issue 365 收编：原手写与 core/ui/str localNow 逐字等价
 }
 
 /** 单部终态回调（内部：ok + reason + 笔记/视频路径；resolve 于落库完成后） */
@@ -148,7 +147,7 @@ export const BatchRunner = {
     const cp = getChildProcess();
     this._cp = cp;
     if (!cp) {
-      notice('仅桌面端可用：知识盒处理需要 Node.js 外部进程', 'error');
+      notice('仅桌面端可用：文献盒处理需要 Node.js 外部进程', 'error');
       this.running = false;
       return;
     }
@@ -180,7 +179,7 @@ export const BatchRunner = {
   /** 单部执行：spawn → 解析步骤/进度/信息/结果行 → CLI 终态 → 插件侧 AI 阶段 → 落库；Promise 在终态落库后 resolve */
   _runOne(cp: any, task: KnowledgeTask, events: BatchEvents, onEnd: (ok: boolean) => void): Promise<void> {
     return new Promise((resolve) => {
-      // 知识盒设置项全量下发（ADR-0071）：CLI 不再读插件配置，taskJson 一次性带全；
+      // 文献盒设置项全量下发（ADR-0071）：CLI 不再读插件配置，taskJson 一次性带全；
       // 分P 序号（task.page，1 起）随任务 JSON 下发；vaultPath 供 CLI 计算视频相对路径。
       // ticket 149：留空 = 跟随工具默认配置（rc/DEFAULTS）的键（pythonPath/outputDir/ffmpegPath/
       // ffprobePath/whisperModel/cacheDir）在留空时**不下发**（undefined 被 JSON.stringify 省略）——

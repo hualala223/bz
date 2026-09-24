@@ -328,6 +328,21 @@ export default interface BzSettings {
   clipbookSkinTheme: string;
   /** 📎 剪藏图片本地化落地目录（上游 issue 329；空 = 关闭本地化） */
   clipbookImageFolder: string;
+  /** 🗂 知识盒卡片盒目录 */
+  knowledgeCardboxDirectory: string;
+  /** 🗂 知识盒主题盒目录 */
+  knowledgeTopicDirectory: string;
+  /** 🔗 挂载/关联候选相似度下限（原始余弦；0=不过滤；批 4 补换算迁移） */
+  linkAgentMinScore: number;
+  /** 🔗 挂载建议自动弹出（上游 issue 318） */
+  knowledgeMountAutoSuggest: boolean;
+  /** B 站 Cookie（上游 ADR-0133：知识盒视频档位查询；数据源凭据组） */
+  bilibiliCookie: string;
+  /** 🎨 知识盒面板皮肤（上游外观组范式） */
+  knowledgeSkin: string;
+  knowledgeSkinTheme: string;
+  /** 🖼 知识盒影像本地化目录 */
+  knowledgeImageFolder: string;
 
   // ===== 📥 日常收集（collect 域，issue 246：QuickAdd「日常收集」宏换血）=====
   /** 📂 目标文件夹（收集 md 统一存放目录，vault 根相对） */
@@ -789,6 +804,14 @@ export const DEFAULT_SETTINGS: BzSettings = {
   favoritesLastFilter: '',
   favoritesDefaultSort: 'new',
   clipbookImageFolder: '',
+  knowledgeCardboxDirectory: '卡片盒',
+  knowledgeTopicDirectory: '主题盒',
+  linkAgentMinScore: 0.3,
+  knowledgeMountAutoSuggest: false,
+  bilibiliCookie: '',
+  knowledgeSkin: 'default',
+  knowledgeSkinTheme: 'manila',
+  knowledgeImageFolder: '',
 
   // 游戏库（gameshelf，上游 issue 368；目录缺省「我的/游戏」）
   gameshelfFolderPath: '我的/游戏',

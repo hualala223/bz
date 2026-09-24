@@ -36,21 +36,6 @@ export function cleanUrlText(text: string): string {
   return String(text ?? '').trim().replace(/[，。！？；、,;.!?…'"’”\])}>】」』]+$/, '');
 }
 
-/**
- * 自由文本里的首个 http(s) 链接（ticket 284）：手机 App「复制链接」给的是
- * `【标题】 https://b23.tv/xxx` 这种整段分享文本，直接交给 normalizeSourceUrl 会因
- * 「整串须以 http(s) 开头」而原样放过（净化变空操作）→ 落库/送 CLI 的是带标题前缀的整段。
- * 命中即返回该链接；无链接（含裸 BV 号、纯文本）返回原串 trim，保证既有输入零变化。
- * 字符类显式排除中日韩标点与引号尖括号：中文说明常紧跟链接且无空格，靠 cleanUrlText 只剥
- * 尾随标点救不回来（会把「，然后」并进路径）。
- */
-const INLINE_URL_RE = /https?:\/\/[^\s<>"'`，。！？；、（）【】「」『』《》]+/i;
-export function extractUrlFromText(text: string): string {
-  const s = String(text ?? '').trim();
-  const m = s.match(INLINE_URL_RE);
-  return m ? m[0] : s;
-}
-
 /** 通用追踪参数黑名单（B 站 vd_source/seid、分享 share_*、通用 refer/scene 等；utm_-/spm- 前缀另剥） */
 const TRACK_KEYS = new Set([
   'vd_source', 'vd_src', 'seid', 'unique_k', 'from', 'share_source', 'share_medium',
@@ -81,6 +66,15 @@ export function normalizeSourceUrl(input: string): string {
     return !k.startsWith('utm_') && !k.startsWith('spm_') && !TRACK_KEYS.has(k);
   });
   return scheme + host + path + (kept.length ? '?' + kept.join('&') : '') + (hash ?? '');
+}
+
+/**
+ * 规范视频链接（ADR-0134）：短链（b23.tv）解析出 bvid 后，弹窗写回与落库都用它——
+ * 下载器只认链接里的 BV 号（tools/bili-downloader extractBv），短链进队列会在下载阶段报「无法识别 BV 号」。
+ * 幂等：喂回来的规范链接与 normalizeSourceUrl 的输出同形。
+ */
+export function canonicalVideoUrl(bvid: string): string {
+  return `https://www.bilibili.com/video/${String(bvid ?? '').trim()}/`;
 }
 
 /** 实体最小解码（fetchPageTitle 取的是原始 <title> 文本） */
@@ -122,4 +116,104 @@ export function serializeTermSource(src: TermSource | null | undefined): { sourc
   if (!path) return null;
   const name = noteSourceName(path, src.name);
   return { source: `[[${path}|${name}]]` };
+}
+
+/** frontmatter 引号包裹（对齐 auto-summary YAML 风格，防冒号/引号破坏结构；note-gen 落盘与 source 升级共用同一范式） */
+export function quoteYaml(s: unknown): string {
+  return '"' + String(s ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+}
+
+/** source 键值是否已是内部双链形态（`[[路径|名]]`；与 openPreview 的 `!startsWith('[[')` 判据同源） */
+export function isInternalSourceValue(v: string): boolean {
+  return /^\[\[/.test(String(v ?? '').trim());
+}
+
+/** 内部双链值 → 目标路径半边（`[[路径|名]]` 取路径；非闭合内链形态返回 null） */
+function internalLinkPathOf(value: string): string | null {
+  const m = /^\[\[([^\]]+?)\]\]$/.exec(String(value ?? '').trim());
+  if (!m) return null;
+  return m[1].split('|')[0].trim() || null;
+}
+
+/** 链接路径归一（命中判据共用）：反斜杠转正斜杠 + 剥 .md 后缀，与落库形态解耦 */
+function normalizeLinkPath(p: string): string {
+  const s = String(p ?? '').trim().replace(/\\/g, '/');
+  return s ? stripMdExt(s) : '';
+}
+
+/**
+ * source 值是否为内部双链且指向 retiredPath（issue 336 / ADR-0149 退役命中判据）：
+ * 摘除/降级编排的 metadataCache 预筛与 retireSourceLine 的内容级复核共用同一口径。
+ * 两侧路径都归一（反斜杠转正斜杠、剥 .md 后缀）后比对。
+ */
+export function sourcePointsAt(value: unknown, retiredPath: string): boolean {
+  const linkPath = normalizeLinkPath(internalLinkPathOf(String(value ?? '')) ?? '');
+  if (!linkPath) return false;
+  const target = normalizeLinkPath(retiredPath);
+  return !!target && linkPath === target;
+}
+
+/**
+ * source 退役（issue 336 / ADR-0149「删除/改名时的回退与摘除」）：frontmatter source 为
+ * 内部双链且指向 retiredPath 时行级退役——fallbackUrl 非空 → 改写回外链形态
+ * `quoteYaml(fallbackUrl)`（降级，出处零丢失，ADR-0144 的逆向）；fallbackUrl 空 →
+ * 整行摘除（sourceTitle 保留，卡片回到「无来源」合法初始态而非悬挂）。
+ * 手术边界同 upgradeSourceLine：只动 source 一行、换行符保真、不整体重序列化；
+ * source 非内部 / 不指向 retiredPath / 已是目标形态 → 原样返回（幂等，ADR-0144 降级后
+ * md-deleted 消费者天然跳过）；无 frontmatter / 无 source 行 → null（调用方不得写盘）。
+ */
+export function retireSourceLine(content: string, retiredPath: string, fallbackUrl?: string | null): string | null {
+  const target = normalizeLinkPath(retiredPath);
+  if (!target) return null;
+  const lines = String(content ?? '').split(/\r?\n/);
+  if (lines[0]?.trim() !== '---') return null;
+  let close = -1;
+  let srcAt = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === '---') { close = i; break; }
+    if (/^source:/.test(lines[i])) srcAt = i; // 只认 frontmatter 内的顶层 source 行（正文不扫）
+  }
+  if (close === -1 || srcAt === -1) return null;
+  const raw = lines[srcAt].slice('source:'.length).trim();
+  const quoted = (raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"));
+  // 剥一层引号后还原 quoteYaml 的转义（\" → "、\\ → \），路径比对才不会因转义错位
+  const value = (quoted ? raw.slice(1, -1) : raw).replace(/\\(["\\])/g, '$1');
+  if (!sourcePointsAt(value, retiredPath)) return content; // 非内部 / 不指向 → 无可退役，零扰动
+  if (fallbackUrl && String(fallbackUrl).trim()) {
+    lines[srcAt] = `source: ${quoteYaml(String(fallbackUrl).trim())}`;
+  } else {
+    lines.splice(srcAt, 1); // 摘除：sourceTitle 与其余行零扰动
+  }
+  // 换行符保真：CRLF 文件整体回写时不悄悄改行尾（其余行原样回填）
+  return lines.join(content.includes('\r\n') ? '\r\n' : '\n');
+}
+
+/**
+ * source 升级（issue 329 / ADR-0144 §5「保存物化回写」的纯文本半边）：把 frontmatter 里的
+ * 外链 URL 形态 source 改写为内部双链 `[[剪藏路径|标题]]`。未保存剪藏发起录入时 source 落的
+ * 就是外链 URL（即 pendingSource 场景），物化时命中同一分支。
+ * 手术边界：**只动 source 一行**——sourceTitle 与其余键、正文零扰动（行级替换，不做整体重序列化）；
+ * 已是内部形态 → 幂等原样返回；无 frontmatter / 无 source 行 / source 既非外链也非内部 →
+ * 返回 null（无可升级，调用方不得写盘）。写值走 quoteYaml 引号包裹，与 generate* 落盘同范式。
+ */
+export function upgradeSourceLine(content: string, internalLink: string): string | null {
+  const link = String(internalLink ?? '').trim();
+  if (!link) return null;
+  const lines = String(content ?? '').split(/\r?\n/);
+  if (lines[0]?.trim() !== '---') return null;
+  let close = -1;
+  let srcAt = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === '---') { close = i; break; }
+    if (/^source:/.test(lines[i])) srcAt = i; // 只认 frontmatter 内的顶层 source 行（遇 --- 即止，正文不扫）
+  }
+  if (close === -1 || srcAt === -1) return null;
+  const raw = lines[srcAt].slice('source:'.length).trim();
+  const quoted = (raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"));
+  const value = quoted ? raw.slice(1, -1) : raw;
+  if (isInternalSourceValue(value)) return content; // 幂等：已是内部双链，一个字节都不动
+  if (!isUrlLikeSourceText(value)) return null; // 既非内部也非外链 URL（手写文字等）→ 不动
+  lines[srcAt] = `source: ${quoteYaml(link)}`;
+  // 换行符保真：CRLF 文件整体回写时不悄悄改行尾（其余行原样回填）
+  return lines.join(content.includes('\r\n') ? '\r\n' : '\n');
 }
