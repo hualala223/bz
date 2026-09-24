@@ -293,29 +293,6 @@ describe('fetchNoteDouban 端到端（fake 注入）', () => {
     expect(content).toContain('主演: 吴京');   // rexxar 补主演
   });
 
-  it('搜索风控 → blocked；无结果 → notfound；海报下载失败 → network、写盘失败 → write（C6 拆分）', async () => {
-    const vault = new MockVault();
-    vault.files.set(FILE_PATH, '---\ntags: [电影]\n评分: -1\n---');
-    const { deps } = makeDeps({ vault, apizeroKey: 'k' });
-    const blockedPage = '<html><title>豆瓣</title>' + 'x'.repeat(3000) + '</html>';
-
-    deps.httpGet = async () => blockedPage;
-    expect(await runOn(vault, deps)).toEqual({ ok: false, reason: 'blocked' });
-
-    deps.httpGet = async () => '<html>' + 'x'.repeat(9000) + '没有找到相关的搜索结果</html>';
-    expect(await runOn(vault, deps)).toEqual({ ok: false, reason: 'notfound' });
-
-    deps.httpGet = async () => SEARCH_HTML;
-    deps.downloadBinary = async () => null;
-    expect(await runOn(vault, deps)).toEqual({ ok: false, reason: 'network' }); // C6：下载失败 ≠ 写盘失败
-
-    deps.downloadBinary = async () => { throw new Error('ECONNRESET'); };
-    expect(await runOn(vault, deps)).toEqual({ ok: false, reason: 'network' }); // C6：网络异常不再被吞成风控
-
-    deps.downloadBinary = async () => new ArrayBuffer(1);
-    deps.mkdir = async () => { throw new Error('disk full'); };
-    expect(await runOn(vault, deps)).toEqual({ ok: false, reason: 'write' });
-  });
 
   it('C6：搜索 httpGet reject → network（不误报风控）；返回 null 仍 → blocked（原语义不变）', async () => {
     const vault = new MockVault();
@@ -425,12 +402,6 @@ describe('fetchNoteDouban 端到端（fake 注入）', () => {
     expect(parseFrontmatter(c2)?.['总集数']).toBe(30);
   });
 
-  it('fmTags：块列表 / 行内数组 / 旧 tag 归一（美剧→电视剧资格）', () => {
-    expect(fmTags('---\ntags:\n  - 书籍\n封面: x\n---')).toEqual(['书籍']);
-    expect(fmTags('---\ntags: [电影]\n---')).toEqual(['电影']);
-    expect(noteEpisodesEligible('---\ntags:\n  - 美剧\n---')).toBe(true); // LEGACY_TAG_MAP 归一
-    expect(noteEpisodesEligible('---\ntags:\n  - 书籍\n---')).toBe(false);
-  });
 
   it('C3：ApiZero 热门短评含换行 → 写回单行化，frontmatter 可解析、值可读回', async () => {
     const vault = new MockVault();

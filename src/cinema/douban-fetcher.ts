@@ -550,6 +550,8 @@ export async function fetchNoteDouban(app: App, file: TFile, deps: DoubanFetchDe
     // issue 303 字段扩展（ADR-0129 修订）：上映日期降级年份、热门短评，均缺失才填。
     // 季集←episodes 已撤回（C1）：episodes 是总集数非季数，勿写入
     if (az.year) fields['上映日期'] = { value: az.year, ifMissing: true };
+    // 总集数（票 301/295 本地保留）：episodes 即总集数口径，仅剧集类型且缺失才填
+    if (az.episodes && noteEpisodesEligible(content)) fields['总集数'] = { value: az.episodes, ifMissing: true };
     if (az.shortComment) fields['热门短评'] = { value: az.shortComment, ifMissing: true };
   }
   if (cel) {
@@ -573,3 +575,27 @@ export async function fetchNoteDouban(app: App, file: TFile, deps: DoubanFetchDe
   return { ok: true };
 }
 
+import { episodesEligibleTag } from './constants';
+// ===== 本地票 295/301 保留件 =====
+
+export function fmTags(content: string): string[] {
+  const out: string[] = [];
+  const inline = /^tags:\s*\[(.+)\]\s*$/m.exec(content);
+  if (inline) return inline[1].split(',').map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+  let inTags = false;
+  for (const line of content.split(/\r?\n/)) {
+    if (/^tags:\s*(#.*)?$/.test(line)) { inTags = true; continue; }
+    if (!inTags) continue;
+    if (/^\s+-\s/.test(line)) {
+      const v = line.replace(/^\s+-\s*/, '').trim().replace(/^["']|["']$/g, '');
+      if (v) out.push(v);
+    } else {
+      break; // 列表结束（空行继续容忍由下一行非列表项触发 break）
+    }
+  }
+  return out;
+}
+
+export function noteEpisodesEligible(content: string): boolean {
+  return fmTags(content).some((t) => episodesEligibleTag(t));
+}

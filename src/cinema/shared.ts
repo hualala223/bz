@@ -184,8 +184,15 @@ export function cardHtml(e: CardEntry, posterUrl: string | null, fetching = fals
   // 深审批 B #4：卡片键盘可达——裸 div 补 tabindex/role/aria-label（片名+状态），
   // Enter/Space 开详情由 ui.ts 委托层承接（对齐 review 域不可达卡整改范式）
   const label = `${e.kind === 'series' ? e.name : it.name}，${statusText(st)}`;
+  // 票 295/301（本地片段嫁接）：在看剧/书籍的集数与章节进度角标
+  const epsBadge = st === STATUS_WATCHING && episodesEligibleTag(it.typeTag)
+    && it.episodesWatching !== null && it.episodesTotal !== null
+    ? `<span class="badge badge-eps">${it.episodesWatching}/${it.episodesTotal}</span>` : '';
+  const chBadge = st === STATUS_WATCHING && chaptersEligibleTag(it.typeTag)
+    && it.chaptersWatching !== null && it.chaptersTotal !== null
+    ? `<span class="badge badge-eps">${it.chaptersWatching}/${it.chaptersTotal}章</span>` : '';
   return `<div class="pcard${e.kind === 'series' ? ' pcard-series' : ''}" data-cinema-key="${esc(e.kind === 'series' ? e.key : itemKey(it))}" tabindex="0" role="button" aria-label="${esc(label)}"><div class="pw"><div class="pw-face">${p.poster}</div>${fetching ? '<div class="pw-fetch"><span class="pw-spin"></span></div>' : ''}
-    ${st !== STATUS_WATCHED ? `<span class="badge" style="background:${statusColor(st)}">${statusText(st)}</span>` : ''}${e.kind === 'series' ? seasonDotsHtml(e.seasons) : ''}</div>
+    ${st !== STATUS_WATCHED ? `<span class="badge" style="background:${statusColor(st)}">${statusText(st)}</span>` : ''}${epsBadge}${chBadge}${e.kind === 'series' ? seasonDotsHtml(e.seasons) : ''}</div>
     <div class="pname">${p.name}</div>
     <div class="pmeta">${p.meta}</div>
     <div class="pstars">${p.stars}</div></div>`;
@@ -256,12 +263,12 @@ export function detailModalHtml(it: CinemaItem, posterUrl: string | null): strin
           ${it.watchDate ? `<span class="dm-date">${esc((it.watchDate || '').slice(0, 10))}</span>` : ''}</div>
         ${it.review ? `<div class="dm-review">${esc(it.review)}</div>` : ''}</div></div>
     ${rows.length ? '<div class="dm-sec">豆 瓣 信 息</div>' + rows.map(([k, v]) => `<div class="dm-kv"><span class="dm-kv-k">${k}</span><span class="dm-kv-v">${esc(v)}</span></div>`).join('') : ''}
-    ${it.episodesWatching != null || it.episodesTotal != null ? `<div class="dm-kv"><span class="dm-kv-k">集 数</span><span class="dm-kv-v">${it.episodesWatching ?? '—'} / ${it.episodesTotal ?? '—'}</span></div>` : ''}
-    ${it.chaptersWatching != null || it.chaptersTotal != null ? `<div class="dm-kv"><span class="dm-kv-k">章 节</span><span class="dm-kv-v">${it.chaptersWatching ?? '—'} / ${it.chaptersTotal ?? '—'}</span></div>` : ''}
+    ${it.episodesWatching !== null && it.episodesTotal !== null ? `<div class="dm-kv"><span class="dm-kv-k">集数</span><span class="dm-kv-v">${it.episodesWatching} / ${it.episodesTotal}</span></div>` : it.episodesTotal != null ? `<div class="dm-kv"><span class="dm-kv-k">集数</span><span class="dm-kv-v">共 ${it.episodesTotal} 集</span></div>` : ''}
+    ${it.chaptersWatching !== null && it.chaptersTotal !== null ? `<div class="dm-kv"><span class="dm-kv-k">章节</span><span class="dm-kv-v">${it.chaptersWatching} / ${it.chaptersTotal}</span></div>` : it.chaptersTotal != null ? `<div class="dm-kv"><span class="dm-kv-k">章节</span><span class="dm-kv-v">共 ${it.chaptersTotal} 章</span></div>` : ''}
     ${it.doubanUrl ? `<div class="dm-kv"><span class="dm-kv-k">豆瓣链接</span><span class="dm-kv-v"><a href="${esc(it.doubanUrl)}" target="_blank" rel="noopener">${esc(it.doubanUrl)}</a></span></div>` : ''}
     ${hot ? `<div class="dm-sec">热 门 短 评</div><div class="dm-quote${hotFold ? ' is-fold' : ''}" data-dm-quote>${esc(hot)}</div>${hotFold ? `<button type="button" class="dm-fold j-quote-fold" data-dm-fold>展开全文（${hot.length} 字）</button>` : ''}` : ''}
     ${it.synopsis ? `<div class="dm-sec">简 介</div><div class="dm-synopsis">${esc(it.synopsis)}</div>` : ''}
-    <div class="dm-actions"><button class="dm-btn j-similar">${iconSpan(ICON.ai)}找同类</button><button class="dm-btn j-edit">${iconSpan(ICON.edit)}编辑</button><button class="dm-btn danger j-del">${iconSpan(ICON.del)}删除</button></div>
+    <div class="dm-actions">${it.file ? `<button class="dm-btn j-refetch">${iconSpan(ICON.refresh)}重抓豆瓣</button>` : ''}<button class="dm-btn j-similar">${iconSpan(ICON.ai)}找同类</button><button class="dm-btn j-edit">${iconSpan(ICON.edit)}编辑</button><button class="dm-btn danger j-del">${iconSpan(ICON.del)}删除</button></div>
   </div>`;
 }
 
