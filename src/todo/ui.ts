@@ -669,13 +669,26 @@ function renderContent(): void {
   if (!content) return;
   const items = getVisibleItems();
   if (items.length === 0) {
-    // 空态三件套（组件库 .bz-empty：图标 + 一句话 + 「新建待办」动作按钮）
+    // 空态三件套（呈报#16 16A，上游移植批 3g2）：搜索态保持既有口径；「今日」「重要」伪场景各说各话
+    // ——别处可能有几百条，只是今天没到期/没标重要，通用「还没有待办」是误导
+    const emptyCopy = M.search
+      ? { title: '没有匹配的待办', desc: '试试其他关键词，或清除搜索' }
+      : M.activeScene === '今日'
+        ? { title: '今日没有待办', desc: '今天到期或已完成的待办会显示在这里' }
+        : M.activeScene === '重要'
+          ? { title: '还没有标为重要的待办', desc: '在条目菜单选「转为重要」，它就会出现在这里' }
+          : { title: '这里还没有待办', desc: '随手记一条，别让它溜走' };
+    // 呈报#5 5A：搜索空态补「清除搜索」按钮——兑现 desc 里「或清除搜索」的承诺
+    const newBtn = uiBtn({ label: '新建待办', icon: ICON.add, tone: 'primary', onClick: () => openEditor(null) });
+    const emptyActions = M.search
+      ? [newBtn, uiBtn({ label: '清除搜索', icon: ICON.close, onClick: () => { M.search = ''; renderAll(); } })]
+      : [newBtn];
     content.innerHTML = '';
     content.appendChild(uiEmpty({
       icon: ICON.empty,
-      title: M.search ? '没有匹配的待办' : '这里还没有待办',
-      desc: M.search ? '试试其他关键词，或清除搜索' : '随手记一条，别让它溜走',
-      actions: uiBtnRow([uiBtn({ label: '新建待办', icon: ICON.add, tone: 'primary', onClick: () => openEditor(null) })], { center: true }),
+      title: emptyCopy.title,
+      desc: emptyCopy.desc,
+      actions: uiBtnRow(emptyActions, { center: true }),
     }));
     return;
   }
