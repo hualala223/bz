@@ -97,6 +97,8 @@ export const ROUTING_RULES: Record<string, RoutingRule> = {
   // === 知识盒（knowledge，ADR-0066 用户拍板仅行为流、不向量化；ADR-0072 迁出为 knowledge 域） ===
   'knowledge:converted':      { stream: 'behavior' },
   'knowledge:term-generated': { stream: 'behavior' },
+  'knowledge:passage-generated': { stream: 'behavior' },   // issue 309 段落录入（与术语同族）
+  'knowledge:image-generated': { stream: 'behavior' },     // issue 312 图版录入（与术语同族）
 
   // === 反思 ===
   'reflection:insight': { stream: 'memory', importance: 0.90, defaultEmotion: 'calm', credibility: 0.9 },

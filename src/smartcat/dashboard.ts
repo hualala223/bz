@@ -40,14 +40,17 @@ async function loadDashboardData(app: App): Promise<SmartCatData> {
   return data;
 }
 import { MOOD_MAP, moodLevelFromPad } from './mood';
-import { TRAIT_GROUPS } from './character';
+import { EMOTION_ZH } from './cognitive';
+import { TRAIT_GROUPS, EVOLVING_TRAITS } from './character';
 import { sourceLabel, formatRelativeTime, emotionDensityStats } from './memory';
 import { noteMemoryDiaryDate } from './note-memory';
 // ticket 163：来源分布按「记忆目录」的追查目录分行（标签随设置走）
 import { normalizeMemoryDirectories } from './config';
-import { parseFile } from '../diary/parser';
+import { parseDiaryEntryFile, resolveDiaryEntryMeta } from '../core/diary-format';
 import { buildInsightShortIndex, isSupersededInsight, MANUAL_SUPERSEDED_BY, sanitizeInsightTheme } from './insight-version';
 import { lazyAttachment, buildAbsenceCard } from './absence'; // ticket 093：读侧依恋视图 + 缺席状态卡
+// ADR-0172：关系阶段派生（面板展示「我们现在算什么」，派生不选择）
+import { relationshipStage, stageProgress, daysKnownFrom, RELATIONSHIP_STAGES } from './relationship';
 import { readQuietMode } from './quiet-gate'; // ticket 095：安静陪伴期状态（097 A2 chip 只读消费）
 import {
   analyzeEmotionTrend,
@@ -65,6 +68,7 @@ import {
 } from './dossier';
 import type { SmartCatData, MemoryStreamEntry, CharacterTraits, OceanProfile, BehaviorItem } from './types';
 import { buildBehaviorWording, behaviorActionWord } from './behavior-wording';
+import { motionDashIn, motionDashOut, motionDashRendered, motionDashTab, motionDashBatch, motionDashFilter } from './motion';
 
 // ---------------- 中文标签表 ----------------
 
@@ -103,12 +107,6 @@ export const TRAIT_LABELS: Record<keyof CharacterTraits, string> = {
   exist_depth: '存在深度', familiarity: '熟悉感', concern: '关怀',
 };
 
-/** 记忆流词法情绪中文（detectEmotion 词表 8 类；LLM 打分可能给出表外词，回显原值） */
-const EMOTION_LABELS: Record<string, string> = {
-  happy: '开心', sad: '难过', curious: '好奇', sleepy: '困倦',
-  playful: '玩心', focused: '专注', calm: '平静', upset: '烦躁',
-};
-
 /** 成长轨迹来源中文（PersonalityGrowth.growthHistory.source 三路驱动） */
 const GROWTH_SOURCE_LABELS: Record<string, string> = {
   interaction: '互动微移',
@@ -116,9 +114,9 @@ const GROWTH_SOURCE_LABELS: Record<string, string> = {
   reflection: '反思成长',
 };
 
-/** 情绪中文标签（未知词回显原值） */
+/** 情绪中文标签（单源 EMOTION_ZH，与趋势描述同一张表；未知词回显原值） */
 export function emotionLabel(emotion: string): string {
-  return EMOTION_LABELS[emotion] || emotion;
+  return EMOTION_ZH[emotion] || emotion;
 }
 
 // ---------------- 纯函数（统计/序列构建，可测） ----------------
@@ -608,13 +606,26 @@ function renderPersonality(pane: HTMLElement, data: SmartCatData): void {
 
   // 感情（关系张量）——口径统一（097 B1）：依恋改走与总览 computeDashboardStats 相同的
   // lazyAttachment 读侧分离衰减视图（trust 无衰减语义仍直读基线）；只影响展示，绝不写盘
+  // ADR-0172：升格为**派生阶段**展示——两个小数没人读得出「我们现在算什么」，
+  // 阶段名 + 阶段进度 + 相处方式才是用户能感知的东西（阶段由数据派生，无任何用户可调项）
   const relTrust = g?.relationship?.trust ?? 0.5;
   const relAttachmentView = lazyAttachment(
     g?.relationship?.attachment ?? 0.5,
     data.editingData?.lastPresenceAt,
     Date.now(),
   );
-  const relCard = card('感情（关系张量）');
+  const relInput = {
+    trust: relTrust,
+    attachment: relAttachmentView,
+    interactions: g?.behaviorStats?.interactionCount ?? 0,
+    daysKnown: daysKnownFrom((data.memory?.memoryStream ?? []).map((m) => m.created), Date.now()),
+  };
+  const relStage = relationshipStage(relInput);
+  const relStageIdx = RELATIONSHIP_STAGES.findIndex((s) => s.id === relStage.id);
+  const relNext = RELATIONSHIP_STAGES[relStageIdx + 1];
+  const relCard = card(`感情（关系阶段：${relStage.name}）`);
+  relCard.body.appendChild(barRow(relNext ? `阶段进度 → ${relNext.name}` : '阶段进度（已到顶）', stageProgress(relInput), 'warm'));
+  relCard.body.appendChild(el('div', 'bz-sc-dash-hint', relStage.manner));
   relCard.body.appendChild(barRow('信任', relTrust, 'warm'));
   relCard.body.appendChild(barRow('依恋', relAttachmentView, 'warm'));
   const tone = g?.behaviorStats?.emotionalTone || 0;
@@ -622,7 +633,7 @@ function renderPersonality(pane: HTMLElement, data: SmartCatData): void {
   relCard.body.appendChild(el(
     'div',
     'bz-sc-dash-hint',
-    `情绪基调 ${tone >= 0 ? '+' : ''}${tone.toFixed(2)}（-1 冷淡 ~ +1 温暖）；信任/依恋随相处缓慢生长；依恋已按缺席分离衰减（读侧视图，不写盘）。`,
+    `相处 ${relInput.daysKnown} 天 / 互动 ${relInput.interactions} 次；阶段由信任、依恋、互动量与相处时长共同派生（没有可调项）；依恋已按缺席分离衰减（读侧视图，不写盘）。`,
   ));
   pane.appendChild(relCard.root);
 
@@ -638,14 +649,17 @@ function renderPersonality(pane: HTMLElement, data: SmartCatData): void {
   }
   pane.appendChild(oceanCard.root);
 
-  // 30 特质九群组
+  // 特质成长（2026-09-19 审计 M9）：只展示真正会演化的 13 项——原先 32 项全列，
+  // 其中 19 项出生后再不变（11 项恒 0.5），用户看到的「人格」大半是永不动的横线。
   const traits = g?.traits;
-  const traitCard = card('特质成长（30 特质 · 随相处与反思演化）');
+  const traitCard = card(`特质成长（${EVOLVING_TRAITS.length} 项随相处与反思演化）`);
   if (traits) {
     for (const [group, keys] of Object.entries(TRAIT_GROUPS)) {
+      const evolving = (keys as readonly (keyof CharacterTraits)[]).filter((k) => EVOLVING_TRAITS.includes(k));
+      if (!evolving.length) continue; // 该群组无演化特质 → 不渲染组标题
       traitCard.body.appendChild(el('div', 'bz-sc-dash-group-title', TRAIT_GROUP_LABELS[group] || group));
-      for (const key of keys as readonly (keyof CharacterTraits)[]) {
-        traitCard.body.appendChild(barRow(TRAIT_LABELS[key] || key, (traits as any)[key] ?? 0));
+      for (const key of evolving) {
+        traitCard.body.appendChild(barRow(TRAIT_LABELS[key] || key, traits[key] ?? 0));
       }
     }
   } else {
@@ -675,7 +689,7 @@ function renderPersonality(pane: HTMLElement, data: SmartCatData): void {
   pane.appendChild(trailCard.root);
 }
 
-/** 引用型条目 → 笔记正文（日记带定位符按 diary parser 拆回该时间段；null = 文件失效）。
+/** 引用型条目 → 笔记正文（日记带定位符按 ADR-0130 契约对时间取条目正文；null = 文件失效）。
  *  路径按首个 # 截断：旧 sidecar 的 ref.path 曾带定位符尾巴（#时:分），容错兼容。 */
 async function resolveMemoryDetail(app: App, ref: { path: string; locator?: string }): Promise<string | null> {
   try {
@@ -684,10 +698,10 @@ async function resolveMemoryDetail(app: App, ref: { path: string; locator?: stri
     if (!f) return null;
     const content = await (app.vault.read as (f: any) => Promise<string>)(f);
     if (!ref.locator) return content;
-    const date = noteMemoryDiaryDate(filePath);
-    if (!date) return content;
-    const seg = parseFile(content, date).find((e) => e.time === ref.locator);
-    return seg && seg.content.trim() ? seg.content : null;
+    if (!noteMemoryDiaryDate(filePath)) return content;
+    const parsed = parseDiaryEntryFile(content);
+    const meta = resolveDiaryEntryMeta(filePath, parsed); // 属性损坏按题目降级（与记忆链同口径）
+    return meta && meta.time === ref.locator && parsed.body.trim() ? parsed.body.trim() : null;
   } catch { return null; }
 }
 
@@ -808,6 +822,9 @@ function renderMemory(pane: HTMLElement, data: SmartCatData): void {
       if (src) meta.appendChild(el('span', '', src));
       if (m.created) meta.appendChild(el('span', '', formatDetailedDate(m.created)));
       meta.appendChild(el('span', '', `重要度 ${Math.round((m.importance ?? 0) * 100)}`));
+      // M8（2026-09-19 审计）：关联条数徽标——让「自动关联」开关的生效对用户可见
+      const relCount = m.relatedIds?.length ?? 0;
+      if (relCount > 0) meta.appendChild(el('span', 'bz-sc-dash-badge', `关联 ${relCount}`));
       // 092 设计第 7 条 + P1-29：Dashboard「固定/废弃」人工修正（经常驻实例通道写点）
       if (m.type === 'insight' && m.id && dashState?.app) meta.appendChild(buildInsightActions(m));
       item.appendChild(meta);
@@ -999,6 +1016,8 @@ function applyBehaviorFilter(source: string): void {
   st.behaviorFilter = st.behaviorFilter === normalized ? null : normalized;
   st.behaviorShown = BEHAVIOR_BATCH_SIZE;
   renderBehavior(st.panes.behavior, st.lastData);
+  // 筛选重渲后的列表轻接力（时间线小橘重走一程）
+  motionDashFilter(st.panes.behavior.querySelector('.bz-sc-dash-behavior-tl'));
 }
 
 /** 追加下一批行为条目（触底滚动 / 加载更多按钮共用；直接 append 不整页重排，保持滚动位置） */
@@ -1015,6 +1034,7 @@ function appendBehaviorBatch(): void {
   for (let i = shown; i < next; i++) frag.appendChild(buildBehaviorItemEl(filtered[i]));
   list.appendChild(frag);
   st.behaviorShown = next;
+  motionDashBatch(Array.from(frag.children)); // 新批沿时间线踏入
   if (st.behaviorLoadMoreBtn) st.behaviorLoadMoreBtn.style.display = next < filtered.length ? '' : 'none';
 }
 
@@ -1129,6 +1149,7 @@ function activateTab(key: PaneKey): void {
     dashState.tabs[k]?.classList.toggle('active', k === key);
     if (dashState.panes[k]) dashState.panes[k]!.style.display = k === key ? 'block' : 'none';
   }
+  motionDashTab(dashState.panes[key] ?? null); // 新 pane 轻揭 + 英雄呼吸随总览进出挂/收
 }
 
 /** 重渲染全部页签（打开/刷新共用；数据现读现渲染；不触碰页签显隐 → 刷新保持当前页签） */
@@ -1261,6 +1282,10 @@ export async function openSmartcatDashboard(app: App): Promise<void> {
 
   mask.style.display = 'block';
   popup.style.display = 'flex';
+  motionDashIn(mask, popup); // 档案台揭示 + 页签接力
+
+  // 首屏编排（boot）：卡片接力 + PAD 潮汐条生长 + 爪账数字滚动 + 作息柱拔节 + 英雄呼吸
+  motionDashRendered(dashState?.panes[dashState.activeTab] ?? null, true);
 
   closeBtn.addEventListener('click', () => closeSmartcatDashboard());
 
@@ -1288,11 +1313,15 @@ export async function openSmartcatDashboard(app: App): Promise<void> {
 /** 关闭面板并解除 ESC + 全量清理自动刷新监听与防抖计时器（unloadSmartCat 全量清理时调用） */
 export function closeSmartcatDashboard(): void {
   if (!dashState) return;
+  const st = dashState;
   teardownAutoRefresh();
-  dashState.mask.remove();
-  dashState.popup.remove();
   try {
-    dashState.escHandle?.unregister();
+    st.escHandle?.unregister();
   } catch (e) { /* 句柄可能已失效 */ }
   dashState = null;
+  // 档案台折回后交还 remove（done 收口；无动效宿主同步收口，时序与今天一致）
+  motionDashOut(st.mask, st.popup, () => {
+    st.mask.remove();
+    st.popup.remove();
+  });
 }

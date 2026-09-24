@@ -16,6 +16,7 @@ import { buildRetrieveQuery, USER_CONTENT_BOUNDARY } from './memory';
 import { buildCompanionContext } from './companion-context';
 import { hasBookTag, getCursorContext, getViewportContent, getCurrentNoteContext, getVisibleContent } from './content';
 import { CAT_CONTAINER_ID } from './ui';
+import { motionCatLift, motionPetBurst } from './motion';
 import type { BubbleManager } from './bubble';
 import type { MoodSystem } from './mood';
 import type { SmartCatConfig } from './types';
@@ -42,6 +43,12 @@ export interface InteractionDeps {
   retrieveMemories?: (query: string, lexicalQuery?: string) => Promise<string>;
   /** 性格数据（ADR-0023：prompt 状态向量用；index 注入 data.personalityGrowth） */
   characterData?: () => any;
+  /** 自发行为总闸（2026-09-19 审计 A8）：安静期 / 深夜 / 非活跃时段 → true。
+   *  由 index 注入（综合 quiet-gate 与 rhythm 判断），避免 interaction 顶层互访这两个模块。 */
+  shouldStayQuiet?: () => boolean;
+  /** 上下文构建完成钩子（ADR-0172）：此时的 openThreads 已实际进了 prompt，
+   *  由 index 记「已提供」冷却起点，防同一条线每轮复读。失败不影响主流程。 */
+  onCompanionContextBuilt?: () => void;
 }
 
 export class InteractionManager {
@@ -80,12 +87,20 @@ export class InteractionManager {
   /** 懂你上下文块（ADR-0025）：作息/情绪趋势/关系/相关记忆统一注入各 AI 通道 */
   private getCompanionContext(memoriesText = ''): string {
     const d = this.deps.characterData?.() ?? null;
-    return buildCompanionContext({
+    const ctx = buildCompanionContext({
       memoryStream: d?.memory?.memoryStream ?? [],
       relationship: d?.personalityGrowth?.relationship ?? null,
       emotion: d?.mood?.currentEmotion ?? null,
       memoriesText,
+      editingData: d?.editingData, // A4：缺席状态进对话；ADR-0172：openThreads 从同一处读
+      // ADR-0172：关系阶段 + 自我披露的数据源
+      interactionCount: d?.personalityGrowth?.behaviorStats?.interactionCount ?? 0,
+      pad: this.deps.mood.pad,
+      traits: d?.personalityGrowth?.traits ?? null,
     });
+    // ADR-0172：此刻这些未完成线已真的进了 prompt → 通知 index 记冷却（防复读）
+    try { this.deps.onCompanionContextBuilt?.(); } catch { /* 钩子失败不影响主流程 */ }
+    return ctx;
   }
 
   /** 检索相关记忆（词法降级用 query——失败返回空串，不阻断主流程） */
@@ -204,6 +219,8 @@ export class InteractionManager {
     const maxTop = window.innerHeight - DRAG_PEEK;
     this.catContainer.style.left = Math.max(minLeft, Math.min(newLeft, maxLeft)) + 'px';
     this.catContainer.style.top = Math.max(minTop, Math.min(newTop, maxTop)) + 'px';
+    // 首次拖动 = 被拎住：耳朵后贴、尾巴绷住（挂起态入池，松手必收）
+    if (!this.isDragging) motionCatLift(this.catContainer, true);
     this.isDragging = true;
     eventSystem.emit(EVENTS.CAT_DRAGGED, { x: newLeft, y: newTop });
   }
@@ -215,6 +232,8 @@ export class InteractionManager {
   springBackIntoViewport(): void {
     const c = this.catContainer;
     if (!c) return;
+    // 放下：若真拎过（耳朵后贴挂起态），撤挂起 + 落地抖毛；纯点击不触发
+    motionCatLift(c, false);
     const curLeft = parseFloat(c.style.left);
     const curTop = parseFloat(c.style.top);
     if (Number.isNaN(curLeft) || Number.isNaN(curTop)) return; // 未拖拽过（无内联位置）无须修正
@@ -356,6 +375,7 @@ export class InteractionManager {
         catBody.style.animation = '';
       }, 500);
     }
+    motionPetBurst(this.catContainer); // 抚摸演出：爪印三连在猫身上绽开
     eventSystem.emit(EVENTS.PET_INTERACTION);
     // 2026-08-23 用户拍板：抚摸=纯互动信号，不持久影响信任/心情/人格（原 ADR-0023 性格微移已移除）
   }
@@ -389,6 +409,9 @@ export class InteractionManager {
   /** 自动陪伴消息（原 generateAutoCompanionMessage：选中文本/无上下文/有上下文三分支；无 key 回落硬编码） */
   async generateAutoCompanionMessage(): Promise<void> {
     const cfg = this.deps.config();
+    // A8（2026-09-19 审计）：这条定时器原先完全不过门控（quiet / 作息 / 深夜全不查），
+    // 深夜照发。安静期与深夜一律静默——「要么刷屏要么几天不吭声」的直接来源就是它。
+    if (this.deps.shouldStayQuiet?.()) return;
     if (this.generateAutoCompanionMessageLock) {
       this.deps.bubble.showBubble(getSmartCatMessage('THINKING_IN_PROGRESS_MESSAGES'));
       return;

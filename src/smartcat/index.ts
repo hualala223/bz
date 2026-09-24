@@ -13,7 +13,8 @@ import { getSettings, saveSettings } from '../core/settings-provider';
 import { closeSettingsModal } from '../core/settings-modal';
 import { loadSmartCatData, saveSmartCatData, getSmartcatFilePath, smartcatStorageDir, defaultPersonalityGrowth, touchPresence, applyInsightPatch } from './data';
 import { eventSystem, setSmartcatApp, setupVisibilityCheck, __resetVisibilityForTests } from './state';
-import { mountCatContainer, unmountCatContainer, applyAppearance, createChatPanel, showChatPanel, hideChatPanel, openSmartcatSettings } from './ui';
+import { mountCatContainer, unmountCatContainer, applyAppearance, createChatPanel, showChatPanel, hideChatPanel, openSmartcatSettings, CAT_CONTAINER_ID } from './ui';
+import { motionMarkBoot, motionCatArrival, motionCatRecall, motionCatSlink, motionCatRecoat, motionChatMessage, motionTeardown } from './motion';
 import { BubbleManager } from './bubble';
 import { MoodSystem, PersonalityGrowth } from './mood';
 import { MemorySystem, USER_CONTENT_BOUNDARY, PROMPT_SLOTS, migrateSmartcatSidecars, slimSmartCatData } from './memory';
@@ -31,8 +32,9 @@ import { onDomainEvent } from '../core/domain-bus';
 import type { MovieActionEvent } from './movie-source';
 import { buildMemoStructured, buildMemoDueScanStructured, type MemoActionEvent, type MemoDueLike } from './memo-source';
 import { generateDescription } from './description-generators';
-import { parseDiaryFile, decideDiarySettle, diaryDeleteText, diaryDeleteFileText, DIARY_SETTLE_MS, buildDiaryTagsStructured, type DiaryEntryLike, type DiaryTagsEvent } from './diary-source';
-import { noteFirstText, noteDeleteText, noteFileName, noteBodyText, parseNoteDate, letterReadonly, decideNoteSettle, NOTE_SETTLE_MS, type NoteKind } from './note-source';
+import { parseDiaryEntry, decideDiarySettle, DIARY_SETTLE_MS, buildDiaryTagsStructured, type DiaryEntryLike, type DiaryTagsEvent } from './diary-source';
+import { diaryDateFromEntryPath } from '../core/diary-format';
+import { noteFirstText, noteFileName, noteBodyText, parseNoteDate, letterReadonly, decideNoteSettle, NOTE_SETTLE_MS, type NoteKind } from './note-source';
 import { DIARY_DIRECTORY } from '../diary/config';
 
 import { buildBelongingsStructured, type BelongingsActionEvent } from './belongings-source';
@@ -48,6 +50,8 @@ import { buildRhythmProfile, isActiveNow, describeRhythm, periodText, isoWeekKey
 import { buildWeeklyReportData, generateWeeklyReport } from './report';
 import { appendDossierEvent, getDossierEvents, shouldScanDossierNarrative, buildNarrativeInput, generateDossierNarrative, advanceDossierScanKey } from './dossier';
 import { buildCompanionContext } from './companion-context';
+// ADR-0172：追问线（未聊完的话题）——抽取/去重/了结/召回，纯本地零 AI
+import { extractOpenThreads, mergeThreads, resolveThreads, pruneThreads, pendingThreads, markThreadsOffered, type OpenThread } from './open-threads';
 import { analyzeEmotionTrend, buildEmotionSnapshots, describeEmotionTrend, checkContradiction, extractStoredFacts, initBanditArm, sampleThompson, updateBandit } from './cognitive';
 import { openSmartcatDashboard, closeSmartcatDashboard, registerInsightPatchChannel } from './dashboard';
 import { AbsenceSystem } from './absence';
@@ -317,6 +321,11 @@ export async function ensureSmartCat(app: App, opts?: { startHidden?: boolean })
   if (!startHidden) {
     greetTimer = setTimeout(() => animation?.greet(), 100);
   }
+  // 100ms 后问候（原 SmartCatAnimation module.exports greet；定时器挂模块级供 unload 清理）
+  greetTimer = setTimeout(() => animation?.greet(), 100);
+  // 动效层：boot 标志置位 + 登场演出（首个渲染消费即熄；卸载重装才重播完整版）
+  motionMarkBoot();
+  motionCatArrival(container);
 
   // 交互（2026-08-23 用户拍板：删语音模块）
   interaction = new InteractionManager({
@@ -325,6 +334,20 @@ export async function ensureSmartCat(app: App, opts?: { startHidden?: boolean })
     mood: moodSystem,
     openChat: () => openChat(),
     openSettings: () => openSettings(),
+    // A8（2026-09-19 审计）：自发行为总闸——原先自言自语定时器完全不过门控
+    //（quiet / 作息 / 深夜全不查），是「忽冷忽热」的机制来源之一
+    shouldStayQuiet: () => {
+      try {
+        if (quietGateSystem?.isQuiet()) return true; // 安静陪伴期（情绪门控）
+        const h = new Date().getHours();
+        if (h >= 23 || h < 7) return true;           // 深夜 / 凌晨一律不出声
+        const profile = buildRhythmProfile(dataProvider().memory.memoryStream, 30, Date.now());
+        if (profile.total >= 3 && !isActiveNow(profile)) return true; // 明显不在你的活跃时段
+      } catch { /* 门控失败 → 不阻断（保持原行为） */ }
+      return false;
+    },
+    // ADR-0172：上下文构建完成 → 记未完成线的「已提供」冷却起点
+    onCompanionContextBuilt: () => { void markOpenThreadsOffered(); },
     // ADR-0021：记忆流检索注入聊天上下文（格式化后返回；失败返回空串）
     // ADR-0025：第二参 lexicalQuery 供词法降级模式（纯用户消息，免「情绪/时段」噪音）
     // 096 方向一：retrieve topN=10 冻结不动，≤6 收缩只落 formatMemoriesForPrompt 的 maxEntries（槽位保留制，ADR-0043）
@@ -556,6 +579,35 @@ function dispatchResidentTick(): void {
   }
 }
 
+// ---------------- 追问线（ADR-0172：接住没聊完的话） ----------------
+
+/**
+ * 用户消息 → 更新未完成话题池（抽取新线 + 了结旧线 + 过期清理）。
+ * 纯本地确定性，零 AI 调用：判定与抽取都在 open-threads.ts 的纯函数里。
+ * 存 editingData.openThreads（同 proactiveCare 先例，不新增顶层字段 → 零迁移）。
+ */
+export async function updateOpenThreads(userMessage: string, now = Date.now()): Promise<void> {
+  const d = dataProvider();
+  try {
+    const current: OpenThread[] = Array.isArray(d.editingData?.openThreads) ? d.editingData.openThreads : [];
+    const next = mergeThreads(pruneThreads(resolveThreads(current, userMessage, now), now), extractOpenThreads(userMessage, { now }), now);
+    d.editingData = { ...(d.editingData || {}), openThreads: next };
+    await dataSaver(d);
+  } catch { /* 追问线失败不影响聊天主流程 */ }
+}
+
+/** 上下文已构建 = 这些线已被提供给模型 → 记冷却起点（防同一条每轮复读） */
+export async function markOpenThreadsOffered(now = Date.now()): Promise<void> {
+  const d = dataProvider();
+  try {
+    const current: OpenThread[] = Array.isArray(d.editingData?.openThreads) ? d.editingData.openThreads : [];
+    const offered = pendingThreads(current, now);
+    if (!offered.length) return;
+    d.editingData = { ...(d.editingData || {}), openThreads: markThreadsOffered(current, offered, now) };
+    await dataSaver(d);
+  } catch { /* 忽略 */ }
+}
+
 // ---------------- 主动关心（作息模型判定时机，2026-08-23 用户拍板） ----------------
 
 /** 读取主动关心状态（editingData 可空/旧数据无 → 默认） */
@@ -607,8 +659,35 @@ function markProactiveArm(armId: string): void {
   void dataSaver(d);
 }
 
-/** 用户回应（聊天消息）时：回填上次主动关心的 reward（10 分钟内回应 = 1，超时 = 0） */
-async function rewardProactiveArm(): Promise<void> {
+/** 情绪正向回应特征（A6 多信号 reward 用） */
+const POSITIVE_REPLY_RE = /开心|高兴|好耶|谢谢|喜欢|不错|有用|哈哈|嘿嘿|😊|😄|😆|❤|👍/;
+/** 浅附和特征（A6 防刷分：短、纯情绪、无信息量） */
+const SHALLOW_REPLY_RE = /^(嗯+|哦+|好|行|知道了|谢谢|哈哈+|呵呵+|想你|爱你|抱抱|么么|喵)[!！。~～\s]*$/;
+
+/**
+ * 主动关心的多信号 reward（2026-09-19 审计 A6）。
+ * 原先 reward 是二值 `responded ? 1 : 0`，判据只有「10 分钟内发过任意聊天消息」——
+ * 一句「嗯」和一段长回复同分，Bandit 学到的只是「哪句话最容易让你回一个字」。
+ * Meta 的 RLUF（arXiv:2505.14946）警告的正是这一类：过度优化单一信号会长出刷分话术
+ * （Replika 被骂「黏人」的机制来源）。改为多信号标量：
+ *   0.4 有回应 · +0.3 有实质长度（≥8 字）· +0.2 带反问 · +0.1 情绪正向
+ *   浅附和（「嗯」「哈哈」「想你」这类）封顶 0.3——防「刷一句甜话换回应」被强化
+ * userMessage 缺省时退化为原二值口径（1），兼容既有调用方与测试。
+ */
+export function proactiveRewardOf(responded: boolean, userMessage?: string): number {
+  if (!responded) return 0;
+  const text = (userMessage ?? '').trim();
+  if (!text) return 1;
+  let score = 0.4;
+  if (text.length >= 8) score += 0.3;
+  if (/[?？]/.test(text)) score += 0.2;
+  if (POSITIVE_REPLY_RE.test(text)) score += 0.1;
+  if (SHALLOW_REPLY_RE.test(text)) score = Math.min(score, 0.3);
+  return Math.min(1, Number(score.toFixed(2)));
+}
+
+/** 用户回应（聊天消息）时：回填上次主动关心的 reward（A6：多信号；10 分钟窗口，超时 = 0） */
+async function rewardProactiveArm(userMessage?: string): Promise<void> {
   const d = dataProvider();
   const s = (d.editingData?.ceBandit || {}) as Record<string, any>;
   const armId = s.pendingArm as string | undefined;
@@ -617,7 +696,7 @@ async function rewardProactiveArm(): Promise<void> {
   const responded = Date.now() - at < 10 * 60 * 1000;
   const arm = getBanditArms().find((a) => a.actionId === armId);
   if (arm) {
-    const updated = updateBandit(arm, banditContext(), responded ? 1 : 0);
+    const updated = updateBandit(arm, banditContext(), proactiveRewardOf(responded, userMessage));
     await saveBanditArm(updated);
   }
   d.editingData = { ...(d.editingData || {}), ceBandit: { ...(d.editingData?.ceBandit || {}), pendingArm: undefined, pendingAt: undefined } };
@@ -711,6 +790,11 @@ export async function maybeProactiveCare(): Promise<void> {
         relationship: data.personalityGrowth?.relationship ?? null,
         emotion: moodSystem.getCurrentEmotion(),
         memoriesText,
+        editingData: data.editingData, // A4：缺席状态进对话
+        // ADR-0172：关系阶段 / 自我披露 / 追问线一并生效于欢迎回来通道
+        interactionCount: data.personalityGrowth?.behaviorStats?.interactionCount ?? 0,
+        pad: moodSystem.pad,
+        traits: data.personalityGrowth?.traits ?? null,
       });
       const prompt = generatePrompt('auto_companion', '', {
         pad: moodSystem.pad,
@@ -721,7 +805,7 @@ export async function maybeProactiveCare(): Promise<void> {
       });
       const response = await callChat([
         { role: 'system', content: prompt + '\n\n' + USER_CONTENT_BOUNDARY },
-        { role: 'user', content: `你主动关心用户一次（温和、简短、像老朋友）。本次侧重：${styleHint}。最近记忆有：${recent}。\n\n你了解到的背景：\n${companionContext}` },
+        { role: 'user', content: `你主动找用户说句话（像老朋友自然搭话，不要像系统通知）。本次侧重：${styleHint}。最近记忆有：${recent}。\n\n你了解到的背景：\n${companionContext}` },
       ]);
       if (response) bubbleManager.showBubble(response);
       else bubbleManager.showBubble('喵~ 我注意到你最近常在深夜写东西，记得照顾好自己。');
@@ -863,6 +947,11 @@ async function generateBookReview(): Promise<void> {
       memoryStream: data.memory.memoryStream,
       relationship: data.personalityGrowth?.relationship ?? null,
       emotion: moodSystem.getCurrentEmotion(),
+      editingData: data.editingData, // A4：缺席状态进对话
+      // ADR-0172：书评通道同样带上阶段与她的状态
+      interactionCount: data.personalityGrowth?.behaviorStats?.interactionCount ?? 0,
+      pad: moodSystem.pad,
+      traits: data.personalityGrowth?.traits ?? null,
     });
     const prompt = generatePrompt('book_review', `请基于以下书籍数据给出简短评价：${bookDescription}`, {
       pad: moodSystem.pad,
@@ -914,7 +1003,10 @@ export async function openSmartCat(app: App): Promise<void> {
   // 已初始化时幂等 remount（mountCatContainer 存在即复用）+ 重刷皮肤 + 推进气泡队列
   // （容器缺失期入队的消息此刻消费；打字锁已在 showBubbleInternal 早退分支复位）。
   if (initialized) {
-    remountVisibleCat();
+    const container = mountCatContainer();
+    if (container && data) applyAppearance(container, data.config.appearance);
+    motionCatRecall(container); // 召回演出：探头弹出 + 双耳抖（轻版，不重播 boot 登场）
+    bubbleManager?.processBubbleQueue();
     return;
   }
   await ensureSmartCat(app);
@@ -962,7 +1054,14 @@ export function hideSmartCat(): void {
   if (!initialized) return;
   closeChat();
   closeSettings();
-  unmountCatContainer();
+  // 猫走缓台（压低身子溜下屏幕缘）再自证身份摘除——收口只摘动画里的那只，
+  // 防与召回竞态误摘新容器；无动效宿主同步收口（时序与今天一致）
+  const cat = document.getElementById(CAT_CONTAINER_ID);
+  if (cat) motionCatSlink(cat, () => { if (cat.isConnected) cat.parentNode?.removeChild(cat); });
+  for (const id of ['settings-panel', 'chat-panel', 'panel-mask']) {
+    const p = document.getElementById(id);
+    if (p && p.parentNode) p.parentNode.removeChild(p);
+  }
 }
 
 /** 打开聊天面板（挂猫容器 + 建面板 + 显示） */
@@ -1010,7 +1109,10 @@ function openSettings(): void {
     // 平铺色块换肤即时生效
     onAppearanceChanged: (appearance) => {
       const c = mountCatContainer();
-      if (c) applyAppearance(c, appearance);
+      if (c) {
+        applyAppearance(c, appearance);
+        motionCatRecoat(c); // 换毛演出：一道高光从头扫到尾 + 抖毛
+      }
     },
     setMobileFullscreen: async (v) => {
       (getSettings() as any).smartcatMobileDefaultFullscreen = v;
@@ -1075,13 +1177,16 @@ async function sendChatMessage(message: string): Promise<void> {
   touchPresence(data);
   // ticket 093：在场信号 → 缺席状态机（重逢判定 = 在场 + phase ≠ normal）
   void absenceSystem?.onPresenceSignal();
-  // Bandit reward 回填（ticket 035）：用户主动发消息 = 对上次主动关心的回应
-  void rewardProactiveArm();
+  // Bandit reward 回填（ticket 035；A6：带用户回应内容 → 多信号 reward）
+  void rewardProactiveArm(message);
+  // ADR-0172：追问线——抽取用户话里「留了尾巴」的事，并判定旧线是否已了结
+  void updateOpenThreads(message);
 
   const userMessageEl = document.createElement('div');
   userMessageEl.className = 'message user-message';
   userMessageEl.textContent = message;
   chatMessages.appendChild(userMessageEl);
+  motionChatMessage(userMessageEl, 'user'); // 用户消息右入
   chatInput.value = '';
   chatMessages.scrollTop = chatMessages.scrollHeight;
 
@@ -1090,6 +1195,7 @@ async function sendChatMessage(message: string): Promise<void> {
   typingIndicator.textContent = '小橘正在思考...';
   typingIndicator.id = 'typing-indicator';
   chatMessages.appendChild(typingIndicator);
+  motionChatMessage(typingIndicator, 'typing'); // 打字占位轻浮
   chatMessages.scrollTop = chatMessages.scrollHeight;
 
   try {
@@ -1114,6 +1220,7 @@ async function sendChatMessage(message: string): Promise<void> {
     const catMessageEl = document.createElement('div');
     catMessageEl.className = 'message cat-message';
     chatMessages.appendChild(catMessageEl);
+    motionChatMessage(catMessageEl, 'cat'); // 小橘回复左入踱步
     await typewriterEffect(catMessageEl, response, 30);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 
@@ -1141,6 +1248,7 @@ async function sendChatMessage(message: string): Promise<void> {
     const errorMessageEl = document.createElement('div');
     errorMessageEl.className = 'message cat-message';
     chatMessages.appendChild(errorMessageEl);
+    motionChatMessage(errorMessageEl, 'cat');
     const errorText = '抱歉，我现在无法回复。请检查API密钥设置或网络连接。';
     await typewriterEffect(errorMessageEl, errorText, 30);
     chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -1234,6 +1342,7 @@ export function unloadSmartCat(): void {
     greetTimer = null;
   }
   animation?.dispose();
+  motionTeardown(); // 动效层清场：编排/循环/注入件残渣/boot 与拎起标记全收
   // ADR-0069：卸载前尽力冲刷脏 sidecar（防抖窗口内的记忆/行为条目不丢）。
   // 审查 P1：传卸载前的 data 快照——冲刷内部不再经 dataProvider()（函数尾部 data 会被置 null，
   // 原实现记忆分支必然抛错且 fire-and-forget 被吞，未落盘条目确定丢失）
@@ -1402,9 +1511,12 @@ function notifyKnowledgeAction(evt: KnowledgeActionEvent): void {
   void memorySystem.addObservation('knowledge', { structured });
 }
 
-/** 知识盒事件防重键：converted=url+notePath（重试/重复转换不重复计）；term-generated=term（同词连点一次算一次） */
+/** 知识盒事件防重键：converted=url+notePath（重试/重复转换不重复计）；term-generated=term（同词连点一次算一次）；
+ *  passage / image-generated=标题（同名一次算一次，issue 309/312） */
 function knowledgeActionKey(evt: KnowledgeActionEvent): string {
-  return evt.kind === 'converted' ? `${evt.url}|${evt.notePath ?? ''}` : String(evt.term || '');
+  if (evt.kind === 'converted') return `${evt.url}|${evt.notePath ?? ''}`;
+  if (evt.kind === 'term-generated') return String(evt.term || '');
+  return String(evt.title || evt.notePath || '');
 }
 
 // ------------- ADR-0069 行为流全量盘点补齐（日记分类调整 / 剪藏删除） -------------
@@ -1698,11 +1810,9 @@ function diaryEntryKey(filePath: string, date: string, time: string): string {
   return filePath + DIARY_KEY_SEP + date + DIARY_KEY_SEP + time;
 }
 
-/** 从日记文件路径取日期（`YYYY-MM-DD.md` 文件名 → 'YYYY-MM-DD'；非日期命名返回 null——不跟踪） */
+/** 从条目文件路径取日期（ADR-0131 契约；非条目命名返回 null——不跟踪） */
 function diaryFileDate(filePath: string): string | null {
-  const base = (filePath || '').replace(/\\/g, '/').split('/').pop() || '';
-  const m = base.match(/^(\d{4}-\d{2}-\d{2})\.md$/);
-  return m ? m[1] : null;
+  return diaryDateFromEntryPath(filePath);
 }
 
 /** 距今 offset 天日期（YYYY-MM-DD，本地时区；对齐 memoTodayStr 语义） */
@@ -1713,31 +1823,31 @@ function diaryDateStr(offset: number, now: Date = new Date()): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-/** 重启基线（ticket 077 + 084d B3）：ensure 时对日记目录「当日 + 前 1 天 + 前 2 天」文件建快照
- * （不产出观察，防重启后旧条目被当首次——补写昨日/前日场景防整文件假首落重复入流）；
+/** 重启基线（ticket 077 + 084d B3）：ensure 时对日记目录「当日 + 前 1 天 + 前 2 天」条目文件建快照
+ * （不产出观察，防重启后旧条目被当首次——补写昨日/前日场景防假首落重复入流）；
  * 更久远文件仍不基线（防启动扫描开销；ADR-0030 已知边界已记）；
- * 有字条目记「已见」（generated=true，后续改动走更新分支）；无字（标题即存）待首落；不装计时器（事件才起动）。 */
+ * 有字条目记「已见」（generated=true，后续改动走更新分支）；无字待首落；不装计时器（事件才起动）。 */
 async function buildDiaryBaseline(): Promise<void> {
   if (!appRef) return;
   const app = appRef;
-  const dir = (DIARY_DIRECTORY || '我的/日记').replace(/\/+$/, '');
   // B3（ticket 084d）：基线窗口 当日 → 当日 + 前 1 天 + 前 2 天（改动最小方案，不再评估 mtime 方案）
   for (let offset = 0; offset <= 2; offset++) {
     const date = diaryDateStr(offset);
-    const filePath = `${dir}/${date}.md`;
-    const file = app.vault.getAbstractFileByPath(filePath);
-    if (!file) continue;
-    let content = '';
-    try { content = await app.vault.read(file as any); } catch { continue; }
-    const tracked = new Map<string, { body: string; tags: string[] }>();
-    for (const e of parseDiaryFile(content)) {
+    for (const f of app.vault.getMarkdownFiles?.() || []) {
+      if (diaryDateFromEntryPath(f.path || '') !== date) continue;
+      const filePath = f.path;
+      let content = '';
+      try { content = await app.vault.read(f as any); } catch { continue; }
+      const e = parseDiaryEntry(content, filePath);
+      if (!e) continue;
+      const tracked = diaryTracked.get(filePath) || new Map<string, { body: string; tags: string[] }>();
       tracked.set(`${date}${DIARY_KEY_SEP}${e.time}`, { body: e.body, tags: e.tags });
+      diaryTracked.set(filePath, tracked);
       const key = diaryEntryKey(filePath, date, e.time);
       if (!diaryTimers.has(key)) {
         diaryTimers.set(key, { timer: null, generated: e.body.length > 0, baseline: e.body, baselineTags: e.tags, accum: 0, lastGeneratedAt: 0 });
       }
     }
-    diaryTracked.set(filePath, tracked);
   }
 }
 
@@ -1781,10 +1891,11 @@ async function settleDiaryEntry(filePath: string, date: string, time: string): P
   }
   let entry: DiaryEntryLike | null = null;
   try {
-    entry = parseDiaryFile(await appRef.vault.read(file as any)).find((e) => e.time === time) || null;
+    entry = parseDiaryEntry(await appRef.vault.read(file as any), filePath);
   } catch {
     return; // 瞬态读失败：保留计时/状态（下轮结算或 modify 事件再推进）
   }
+  if (entry && entry.time !== time) entry = null; // 时间错位（文件被换成另一时刻的条目）按消失处理
   // 竞态守卫：结算读文件期间该条被重置（st.timer 非空 → 新计时已接棒）或 unload（表已清）→ 放弃本次结算
   if (diaryTimers.get(key) !== st || st.timer !== null) return;
   if (!entry) {
@@ -1836,21 +1947,20 @@ function appendDiaryDeleteObservation(date: string, time: string): void {
   });
 }
 
-/** 日记 create/modify 新链路（ticket 077）：diff 出变化的条目重置其独立计时；
- *  上次快照存在、这次消失的条目 → 追加删除观察 + 清该条计时（条目级删除感知的最小可靠方案：以每次
- *  modify 的全量解析快照 diff 实现，比正文子串匹配更稳——条目按 (日期, 时间) key 唯一标识）。 */
+/** 日记 create/modify 新链路（ticket 077；ADR-0130 单文件单条目）：解析条目与上次快照 diff，
+ *  变化 → 重置其独立计时；上次有、这次消失 → 追加删除观察 + 清该条计时。 */
 async function handleDiaryVaultActivity(file: any): Promise<void> {
   if (!appRef || !memorySystem || !data?.config?.noteSource) return;
   const filePath = file?.path;
   if (!filePath) return;
   const date = diaryFileDate(filePath);
-  if (!date) return; // 非日期命名文件不跟踪（观察文案需要日期）
+  if (!date) return; // 非条目命名文件不跟踪（观察文案需要日期）
   let content = '';
   try { content = await appRef.vault.read(file as any); } catch { return; }
-  const entries = parseDiaryFile(content);
+  const entry = parseDiaryEntry(content, filePath);
   const prev = diaryTracked.get(filePath) || new Map<string, { body: string; tags: string[] }>();
   const cur = new Map<string, { body: string; tags: string[] }>();
-  for (const e of entries) cur.set(`${date}${DIARY_KEY_SEP}${e.time}`, { body: e.body, tags: e.tags });
+  if (entry) cur.set(`${date}${DIARY_KEY_SEP}${entry.time}`, { body: entry.body, tags: entry.tags });
   // 条目级删除：上次快照有、现在消失 → 追加删除观察 + 清该条计时
   for (const key of prev.keys()) {
     if (!cur.has(key)) {

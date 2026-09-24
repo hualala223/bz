@@ -530,6 +530,20 @@ export class MemorySystem {
       structured: newOpts.structured,
     };
     this.stream.push(memory);
+    // ADR-0172：自动冲突检测——新说法若推翻了旧记忆，旧条目当场失效（全程无用户介入）。
+    // 放在自动关联之前：失效标记会影响后续检索/prompt，越早落越好。
+    try {
+      const revises = applyRevisionInvalidation(this.stream, memory.id, description);
+      if (revises.length) memory.revisesIds = revises;
+    } catch { /* 冲突检测失败不影响写入 */ }
+    // M8（2026-09-19 审计）：自动关联接线——原先 enableAutoLinking / linkWindowDays 是「用户可见的假开关」
+    //（有 UI 项、有默认值，却零消费）。这里给新签名路径接上真实实现（legacy 路径无 structured，天然不参与）。
+    try {
+      const s = tryGetSettings();
+      if (s?.enableAutoLinking !== false) {
+        linkRelatedMemories(this.stream, memory, { windowDays: Number(s?.linkWindowDays) || 7 });
+      }
+    } catch { /* 设置不可用 → 不关联，不阻断写入 */ }
     this.markMemoryDirty();
     await this.dataSaver(this.dataProvider());
     await this.appendVector(memory);
@@ -637,6 +651,11 @@ export class MemorySystem {
       suspicious: detectInjection(description) || undefined,
     };
     this.stream.push(memory);
+    // ADR-0172：旧签名路径同样跑自动冲突检测（domain: 观测走这条，不能漏）
+    try {
+      const revises = applyRevisionInvalidation(this.stream, memory.id, description);
+      if (revises.length) memory.revisesIds = revises;
+    } catch { /* 冲突检测失败不影响写入 */ }
     this.markMemoryDirty();
     await this.dataSaver(this.dataProvider());
     await this.appendVector(memory);
@@ -653,6 +672,11 @@ export class MemorySystem {
   async addInsight(description: string, evidenceIds: string[], importance = 0.75, emotion?: string, source = 'reflection', theme?: string): Promise<MemoryStreamEntry> {
     const memory = this.makeInsightMemory(description, evidenceIds, importance, emotion, source, theme);
     this.stream.push(memory);
+    // ADR-0172：自动冲突检测（洞察走 supersede 通道，见 applyRevisionInvalidation）
+    try {
+      const revises = applyRevisionInvalidation(this.stream, memory.id, description);
+      if (revises.length) memory.revisesIds = revises;
+    } catch { /* 冲突检测失败不影响写入 */ }
     // ticket 160：insight 不计反思素材（反思只吃观察，防自指素材污染）
     this.markMemoryDirty();
     await this.dataSaver(this.dataProvider());
@@ -741,7 +765,7 @@ export class MemorySystem {
               USER_CONTENT_BOUNDARY,
           },
           { role: 'user', content: `记忆：${description}` },
-        ], 150);
+        ]);
         const s = Number(r?.score);
         // H4（087）：emotion 白名单——仅接受 EMOTION_VAD 键集枚举；未知 → 回退 detectEmotion 词法兜底
         const emotion = sanitizeEmotion(r?.emotion);
@@ -830,7 +854,8 @@ export class MemorySystem {
     // 情绪/时间两路只作为 prompt 子集的槽位修饰（formatMemoriesForPrompt 层），不进本公式。
     // 092 方向二（ADR-0039）：已废弃洞察（supersededBy 有值）**排序前剔除**——不进 GA 加法分空间，
     // 也不挤占 topN 名额；topN=10 与三处调用点是冻结契约，剔除只发生在排序管线内部
-    const pool = this.stream.filter((m) => !isSupersededInsight(m));
+    // ADR-0172：事实失效条目（invalidatedAt 有值）同样前置剔除——被后来的说法推翻了就别再想起来
+    const pool = this.stream.filter((m) => !isSupersededInsight(m) && !isInvalidatedMemory(m));
     const scored = pool.map((m) => {
       const hours = (now - new Date(m.lastAccessed || m.created).getTime()) / 3.6e6;
       const recency = Math.pow(MEMORY_CONFIG.decay, Math.max(0, hours));
@@ -1118,7 +1143,7 @@ export class MemorySystem {
             '{"emotions":[{"index":1,"emotion":"calm"}]}。\n\n' +
             numbered,
         },
-      ], 400);
+      ]);
       const list = Array.isArray(r?.emotions) ? r.emotions : [];
       let written = 0;
       for (const item of list) {
@@ -1296,7 +1321,7 @@ export class MemorySystem {
         const r = await callChatJson([
           { role: 'system', content: '你是辅助归纳记忆的助手，只输出合法 JSON。\n\n' + USER_CONTENT_BOUNDARY },
           { role: 'user', content: prompt },
-        ], 800);
+        ]);
         if (Array.isArray(r?.insights)) {
           // ticket 163：洞察条数上限钳制——LLM 输出按序截断（prompt 已声明「最多 N 条」，此处硬截断兜底）
           insights = r.insights
@@ -1344,6 +1369,14 @@ export class MemorySystem {
     // 092：supersede 写点——本批次第一条新洞察作为后继；目标校验失败静默（异常裁剪不整轮失败）
     if (supersedeRef !== null && firstNewInsightId) {
       try { applySupersede(this.stream, supersedeRef, firstNewInsightId, candidates.indexMap); } catch { /* 非法引用忽略 */ }
+    }
+    // ADR-0172：本批洞察若带修正语气（不再/改成/其实不是…），自动让被它推翻的旧条目失效。
+    // 洞察走既有 supersede 通道（092 的语义就是「旧洞察被新洞察推翻」），观察走 invalidatedAt。
+    for (const m of entries) {
+      try {
+        const revises = applyRevisionInvalidation(this.stream, m.id, m.description);
+        if (revises.length) m.revisesIds = revises;
+      } catch { /* 冲突检测失败不影响反思主流程 */ }
     }
     data.memory.reflection.lastReflectAt = now;
     data.memory.reflection.count = (data.memory.reflection.count || 0) + 1;
@@ -1400,7 +1433,7 @@ export class MemorySystem {
         const r = await callChatJson([
           { role: 'system', content: '你是辅助归纳记忆的助手，只输出合法 JSON。\n\n' + USER_CONTENT_BOUNDARY },
           { role: 'user', content: prompt },
-        ], 800);
+        ]);
         if (Array.isArray(r?.digests)) {
           digests = r.digests
             .filter((x: any) => x && typeof x.text === 'string' && x.text.trim())
@@ -1443,7 +1476,7 @@ export class MemorySystem {
    * 「星期几 / 周年」两类强锚点。不传 maxEntries 保持既有全量行为（向后兼容）。
    */
   formatMemoriesForPrompt(memories: MemoryStreamEntry[], maxEntries?: number): string {
-    const alive = memories.filter((memory) => !isSupersededInsight(memory));
+    const alive = memories.filter((memory) => !isSupersededInsight(memory) && !isInvalidatedMemory(memory));
     const picked = maxEntries !== undefined && alive.length > maxEntries
       ? selectSlotMemories(alive, {
           maxEntries,
@@ -1459,7 +1492,9 @@ export class MemorySystem {
         const label = sourceLabel(memory.source);
         const time = memory.created ? formatRelativeTime(memory.created) : '';
         const meta = [label, time].filter(Boolean).join('·');
-        return `${index + 1}. [${memory.type}${meta ? `（${meta}）` : ''}] ${content.substring(0, 200)}...`;
+        // 2026-09-20 ADR-0172：不确定语感——人会记不清，全知全能的回显反而不像回忆
+        const hedge = memoryHedge(memory);
+        return `${index + 1}. [${memory.type}${meta ? `（${meta}）` : ''}]${hedge ? ` ${hedge}` : ''} ${content.substring(0, 200)}...`;
       })
       .join('\n');
   }
@@ -1623,7 +1658,11 @@ export class MemorySystem {
         else content = replaceUserReference(body);
       }
       index++;
-      lines.push(`${index}. [${memory.type}${meta ? `（${meta}）` : ''}] ${content.substring(0, 200)}...`);
+      let line = `${index}. [${memory.type}${meta ? `（${meta}）` : ''}] ${content.substring(0, 200)}...`;
+      // M8（2026-09-19 审计）：带出关联记忆（1 跳）——让「想起」有上下文，而不是孤立的一句
+      const relatedSnippet = linkedSnippetOf(this.stream, memory, 1);
+      if (relatedSnippet) line += `\n   与其相关：${relatedSnippet}`;
+      lines.push(line);
     }
     return { text: lines.join('\n'), staleRefs };
   }
@@ -1715,50 +1754,44 @@ export function formatRelativeTime(iso: string, now = Date.now()): string {
   if (h < 24) return `${h}小时前`;
   const d = Math.floor(h / 24);
   if (d < 7) return `${d}天前`;
-  const dt = new Date(t);
-  return `${dt.getMonth() + 1} 月 ${dt.getDate()} 日`;
-}
-
-/** 检索 query 组装：用户消息 + 当前情绪 + 当前时段（缺省项自动省略；供聊天 RAG 用，mock 友好） */
-export function buildRetrieveQuery(userMessage: string, emotion?: string | null, hour = new Date().getHours()): string {
-  const parts: string[] = [userMessage.trim()];
-  if (emotion && emotion.trim()) parts.push(`当前情绪：${emotion.trim()}`);
-  const period = hour >= 5 && hour < 12 ? '早晨' : hour >= 12 && hour < 18 ? '下午' : hour >= 18 && hour < 23 ? '晚上' : '深夜';
-  parts.push(`时段：${period}`);
-  return parts.filter(Boolean).join(' ');
+  // 2026-09-19 审计 A10：长程分档——原 >7 天一律落「3 月 5 日」，
+  // 模型（与人）读不出这是陈年旧事还是上个月；改成语感分档（人会说「大概三个月前」）。
+  if (d < 14) return '上周';
+  if (d < 31) return `${Math.floor(d / 7)} 周前`;
+  if (d < 60) return '上个月';
+  if (d < 365) return `${Math.floor(d / 30)} 个月前`;
+  return `${new Date(t).getFullYear()} 年`;
 }
 
 /**
- * 记忆流情绪密度统计（H3/096 前置检查，纯函数）：观察条目的情绪字段覆盖率与非 calm 占比。
- * v4 裁决「未达标不宣称三路」——本指标只作数值输出汇报（汇报/诊断用），不做门槛阻断。
+ * 记忆回显的不确定语感（2026-09-20 ADR-0172）。
+ * 人类回忆从不「全知全能」：细节会糊、随口的事不敢打包票。此前的回显把每条记忆斩钉截铁地
+ * 甩给模型，模型自然也就说得斩钉截铁——这是「不像回忆」最直接的一处。
+ * 只加前缀，不改内容、不改排序、不动检索公式（GA 冻结契约）。
+ *  - credibility < 0.45（低可信来源/被杀过信）→ （记不太清）
+ *  - suspicious（H4/087 注入特征命中）→ （你当时随口一提，我没核实）
+ *  - 入库 240 天以上且从未被检索过 → （模模糊糊记得）
  */
-export function emotionDensityStats(stream: MemoryStreamEntry[]): {
-  observations: number; annotated: number; nonCalm: number; coverage: number; nonCalmShare: number;
-} {
-  const list = Array.isArray(stream) ? stream : [];
-  const observations = list.filter((m) => m.type === 'observation').length;
-  const annotated = list.filter((m) => m.type === 'observation' && m.emotion).length;
-  const nonCalm = list.filter((m) => m.type === 'observation' && m.emotion && m.emotion !== 'calm').length;
-  const r = (x: number) => Math.round(x * 10000) / 10000;
-  return {
-    observations,
-    annotated,
-    nonCalm,
-    coverage: observations ? r(annotated / observations) : 0,
-    nonCalmShare: observations ? r(nonCalm / observations) : 0,
-  };
+export function memoryHedge(m: MemoryStreamEntry, now = Date.now()): string {
+  if (!m) return '';
+  const cred = typeof m.credibility === 'number' && Number.isFinite(m.credibility) ? m.credibility : 0.5;
+  if (cred < 0.45) return '（记不太清）';
+  if (m.suspicious) return '（你当时随口一提，我没核实）';
+  const created = m.created ? new Date(m.created).getTime() : NaN;
+  const accessed = m.lastAccessed ? new Date(m.lastAccessed).getTime() : NaN;
+  const neverRecalled = Number.isFinite(created) && Number.isFinite(accessed) && Math.abs(accessed - created) < 1000;
+  if (neverRecalled && Number.isFinite(created) && now - created > 240 * 86400000) return '（模模糊糊记得）';
+  return '';
 }
 
-// ==================== P3 用户体验层：行为流查询/管理/关联 ====================
+/** 关联条数上限（单侧；与旧 linkRelatedMemories 口径一致） */
+export const AUTO_LINK_CAP = 20;
+
+// ---------------- ADR-0172：事实失效（自动冲突检测，全程无用户介入） ----------------
 
 /**
- * 将行为流条目提升为记忆流条目（P3 ticket 123）
- * 从 behaviorStream 找条目 → 构造 MemoryStreamEntry → 入 memoryStream + 从 behaviorStream 移除 + 落盘。
- *
- * @param data 智能猫数据
- * @param behaviorId 行为条目 id
- * @param importance 重要度（默认 0.5）
- * @returns 新记忆条目，未找到返回 null
+ * 修正/推翻语句标记。人推翻自己先前说法时，句子通常带这些词。
+ * **只在命中标记时**才做冲突检测——否则「今天又去跑步了」这种正常重复会被误判成推翻。
  */
 export function promoteToMemory(
   data: SmartCatData,
@@ -1799,222 +1832,233 @@ export function promoteToMemory(
     structured,
     credibility: 0.5,
   };
-
-  // 入记忆流
-  data.memory.memoryStream.push(memory);
-  // 从行为流移除
-  const idx = data.memory.behaviorStream.findIndex((b) => b.id === behaviorId);
-  if (idx >= 0) data.memory.behaviorStream.splice(idx, 1);
-  data.memory.lastUpdated = new Date().toISOString();
-
   return memory;
 }
+export const REVISION_MARKERS = /不再|不再是|不吃了|戒了|改成|改为|换成|其实不是|并不是|已经?不|取消了|退回了|撤回了|搬走|搬去|离职|辞职|分手|搬家|转学|换了(?:工作|公司|城市|专业)|以前.{0,10}(?:现在|如今|后来)/;
+
+/** 高频虚词二元组（不参与重叠判定；中文无空格，二元组是最省事且不引入词典的分词近似） */
+const CONTENT_STOP_BIGRAMS = new Set([
+  '这个', '那个', '什么', '怎么', '因为', '所以', '但是', '如果', '还是', '就是', '可以', '应该',
+  '我们', '你们', '他们', '自己', '现在', '今天', '明天', '以后', '最近', '然后', '有点', '一下',
+  '一个', '不是', '没有', '可能', '觉得', '知道', '记得', '事情', '东西', '时候', '问题', '已经',
+  '用户', '他的', '她的', '你的', '我的', '正在', '比较', '不过', '一些', '这样', '那样',
+]);
 
 /**
- * 行为流查询（P3 ticket 123）
- * 基础过滤：source / type / since / limit。
- *
- * @param data 智能猫数据
- * @param opts 过滤选项
- * @returns 过滤后的行为流条目（时间倒序）
+ * 内容二元组（中文按相邻两字切 + 西文按词）。中文没有空格，用整段连续汉字当 token
+ * 会让「我不再喜欢跑步」与「用户喜欢跑步」重叠为 0——所以退一步用 bigram 近似分词，
+ * 这是不引入词典/分词库时最稳的做法（关键词重叠本来就是粗判，不需要真分词）。
  */
-export function queryBehavior(
-  data: SmartCatData,
-  opts: { source?: string; type?: string; since?: string; limit?: number } = {},
-): BehaviorItem[] {
-  let items = data.memory.behaviorStream || [];
+export function contentBigrams(text: string): string[] {
+  const s = String(text || '');
+  if (!s) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (t: string) => {
+    if (!t || CONTENT_STOP_BIGRAMS.has(t) || seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+  for (const run of s.matchAll(/[\u4e00-\u9fa5]+/g)) {
+    const r = run[0];
+    if (r.length === 1) continue;
+    for (let i = 0; i + 1 < r.length; i++) push(r.slice(i, i + 2));
+  }
+  for (const m of s.matchAll(/[A-Za-z][A-Za-z0-9_-]{2,}/g)) push(m[0].toLowerCase());
+  return out;
+}
 
-  if (opts.source) {
-    items = items.filter((b) => b.source === opts.source);
-  }
-  if (opts.type) {
-    items = items.filter((b) => b.type === opts.type);
-  }
-  if (opts.since) {
-    const sinceMs = new Date(opts.since).getTime();
-    if (Number.isFinite(sinceMs)) {
-      items = items.filter((b) => {
-        const t = new Date(b.timestamp).getTime();
-        return Number.isFinite(t) && t >= sinceMs;
-      });
+/** 最长公共子串长度（截断到 LCS_MAX_LEN 字符、命中 cap 即早退——只用于「≥3 即强信号」判定） */
+const LCS_MAX_LEN = 120;
+export function commonSubstringLen(a: string, b: string, cap = 3): number {
+  const s1 = String(a || '').slice(0, LCS_MAX_LEN);
+  const s2 = String(b || '').slice(0, LCS_MAX_LEN);
+  if (!s1 || !s2) return 0;
+  let best = 0;
+  const prev = new Array(s2.length + 1).fill(0);
+  for (let i = 1; i <= s1.length; i++) {
+    let diag = 0;
+    for (let j = 1; j <= s2.length; j++) {
+      const tmp = prev[j];
+      prev[j] = s1[i - 1] === s2[j - 1] ? diag + 1 : 0;
+      if (prev[j] > best) best = prev[j];
+      diag = tmp;
+      if (best >= cap) return best;
     }
   }
-
-  // 时间倒序
-  items = [...items].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
-  if (opts.limit && opts.limit > 0) {
-    items = items.slice(0, opts.limit);
-  }
-
-  return items;
+  return best;
 }
 
+/** 事实已失效（陈述不再为真）。与 isSupersededInsight 并列：前者是事实过期，后者是洞察被取代。 */
+export function isInvalidatedMemory(m: MemoryStreamEntry | null | undefined): boolean {
+  return !!m && typeof m.invalidatedAt === 'string' && m.invalidatedAt.length > 0;
+}
+
+/** 冲突检测扫描上限（倒序扫描，命中窗口即停——正常路径只有命中原语句才触发） */
+const REVISION_SCAN_LIMIT = 400;
+
 /**
- * 行为流聚合摘要（P3 ticket 123）
- * 按天/按来源计数 + 最近活跃时段分布（纯数据层，供未来小橘参考行为流用）。
- *
- * @param data 智能猫数据
- * @param opts 聚合选项（sinceDays 限制时间窗口）
- * @returns 行为流聚合摘要
+ * 检测新说法推翻了哪些旧记忆（纯函数，零 AI）。
+ * 判据 = ①新描述含修正标记 ②与旧条目**说的是同一件事** ③旧条目在 windowDays 内且未失效。
+ * 「同一件事」用双重近似：内容 bigram 重叠 ≥2，**或**共有 ≥3 字连续子串（后者兜住
+ * 「不再喜欢跑步」vs「喜欢跑步」这类因虚词差异导致 bigram 重叠不足的情况）。
+ * 用户不想手工纠错（黑匣子硬约束），所以错误记忆只能靠这条自动通道兜住。
+ * @returns 被判为「被推翻」的旧条目 id（按时间升序）
  */
-export function summarizeBehavior(
-  data: SmartCatData,
-  opts: { sinceDays?: number } = {},
-): BehaviorSummary {
-  const items = data.memory.behaviorStream || [];
-  const now = Date.now();
-  const sinceMs = opts.sinceDays
-    ? now - opts.sinceDays * 24 * 60 * 60 * 1000
-    : -Infinity;
-
-  const filtered = items.filter((b) => {
-    const t = new Date(b.timestamp).getTime();
-    return Number.isFinite(t) && t >= sinceMs;
-  });
-
-  const byDay: Record<string, number> = {};
-  const bySource: Record<string, number> = {};
-  const hourlyDistribution = new Array(24).fill(0) as number[];
-
-  for (const item of filtered) {
-    const t = new Date(item.timestamp);
-    if (!Number.isFinite(t.getTime())) continue;
-
-    // 按天
-    const dayKey = t.toISOString().slice(0, 10);
-    byDay[dayKey] = (byDay[dayKey] || 0) + 1;
-
-    // 按来源
-    bySource[item.source] = (bySource[item.source] || 0) + 1;
-
-    // 按小时
-    const hour = t.getHours();
-    hourlyDistribution[hour] = (hourlyDistribution[hour] || 0) + 1;
+export function detectRevisions(
+  stream: MemoryStreamEntry[],
+  candidate: { id?: string; description: string },
+  opts: { now?: number; windowDays?: number; minOverlap?: number } = {},
+): string[] {
+  const desc = String(candidate?.description || '');
+  if (!desc || !REVISION_MARKERS.test(desc)) return [];
+  const keys = contentBigrams(desc);
+  if (keys.length < 2) return [];
+  const keySet = new Set(keys);
+  const now = opts.now ?? Date.now();
+  const windowDays = Math.max(1, opts.windowDays ?? 180);
+  const minOverlap = Math.max(1, opts.minOverlap ?? 2);
+  const since = now - windowDays * 86400000;
+  const list = Array.isArray(stream) ? stream : [];
+  const hits: { id: string; t: number }[] = [];
+  const floor = Math.max(0, list.length - REVISION_SCAN_LIMIT);
+  for (let i = list.length - 1; i >= floor; i--) {
+    const m = list[i];
+    if (!m?.id || m.id === candidate.id || !m.description) continue;
+    if (isInvalidatedMemory(m)) continue;
+    const t = m.created ? new Date(m.created).getTime() : NaN;
+    if (!Number.isFinite(t) || t > now) continue;
+    if (t < since) break; // 流按时间追加，越往前越旧 → 可提前收敛
+    let shared = 0;
+    for (const k of contentBigrams(m.description)) if (keySet.has(k)) shared++;
+    if (shared >= minOverlap || commonSubstringLen(desc, m.description, 3) >= 3) hits.push({ id: m.id, t });
   }
-
-  return {
-    totalCount: filtered.length,
-    byDay,
-    bySource,
-    hourlyDistribution,
-  };
+  return hits.sort((a, b) => a.t - b.t).map((h) => h.id);
 }
 
 /**
- * 关联记忆自动发现（P3 ticket 123）
- * 扫描 memoryStream，同一 entityType + 同一 name 的多条记忆在时间窗口内自动互相写 relatedIds。
- * 幂等（已关联的不重复加）；上限防爆（单条 relatedIds ≤ 20）。
+ * 执行失效标记（就地改写 stream 中命中条目）。**不删除任何数据**（085 拍板：记忆流不裁剪）。
  *
- * @param data 智能猫数据
- * @param linkWindowDays 关联发现窗口天数（默认从 settings 取 linkWindowDays，fallback 7）
- * @returns 新建的关联数（幂等：已存在的不计入）
+ * 两条通道，按被命中条目的类型分流——不另起第二套语义：
+ *  - **洞察** → 复用 ADR-0039 既有的 `supersededBy`（洞察被新洞察推翻就是它的定义），
+ *    前提是新条目本身也是洞察并且有 id；否则退回 invalidatedAt。
+ *  - **观察** → `invalidatedAt`（事实过期；观察没有 supersede 语义，不该硬套）。
+ * 观察额外把 credibility 折半（不归零：万一判错，痕迹还在，面板可核对）。
+ * @returns 被失效的条目 id（回填到新条目的 revisesIds）
+ */
+export function applyRevisionInvalidation(
+  stream: MemoryStreamEntry[],
+  entryId: string | undefined,
+  description: string,
+  opts: { now?: number; windowDays?: number; minOverlap?: number } = {},
+): string[] {
+  const ids = detectRevisions(stream, { id: entryId, description }, opts);
+  if (!ids.length) return [];
+  const iso = new Date(opts.now ?? Date.now()).toISOString();
+  const hit = new Set(ids);
+  for (const m of stream) {
+    if (!m?.id || !hit.has(m.id)) continue;
+    if (m.type === 'insight' && entryId) {
+      // 洞察：走既有 supersede 通道（检索/prompt 的前置剔除已覆盖它）
+      m.supersededBy = entryId;
+    } else {
+      m.invalidatedAt = iso;
+      m.invalidReason = 'revision';
+      const base = typeof m.credibility === 'number' && Number.isFinite(m.credibility) ? m.credibility : 0.5;
+      m.credibility = Math.max(0.05, Number((base * 0.5).toFixed(3)));
+    }
+  }
+  return ids;
+}
+
+/**
+ * 自动关联（2026-09-19 机制审计 M8 接线）。
+ * 背景：`enableAutoLinking` / `linkWindowDays` 两个设置项此前是**用户可见的假开关**——
+ * 唯一实现 zero 调用点，拨了什么都不发生。这里给它接上真实实现。
+ * 思路取自 A-MEM（arXiv:2502.12110）「新记忆与相似记忆建链并互相更新」，
+ * 但落到本地确定性、零 AI 成本的版本：同实体（structured.entityType + name 均非空且相等）。
+ *  - 窗口 windowDays 天内、单侧上限 cap 条（取最近的）；
+ *  - 双向：新条目记旧条目，旧条目也补上新条目；
+ *  - 幂等：已存在的关联不重复写。
+ * @returns 本次新建立的关联 id（供测试与调试）
  */
 export function linkRelatedMemories(
-  data: SmartCatData,
-  linkWindowDays?: number,
-): number {
-  const settings = tryGetSettings() as any;
-  // P2-1: 自动关联发现开关关闭时直接返回
-  if (settings?.enableAutoLinking === false) return 0;
-  const windowDays = linkWindowDays ?? settings?.linkWindowDays ?? 7;
-  const maxRelated = 20;
-  const stream = data.memory.memoryStream || [];
-  let newLinks = 0;
-
-  // 按 entityType+name 分组
-  const groups = new Map<string, MemoryStreamEntry[]>();
+  stream: MemoryStreamEntry[],
+  entry: MemoryStreamEntry,
+  opts: { windowDays: number; cap?: number; now?: number },
+): string[] {
+  const et = entry.structured?.entityType;
+  const name = entry.structured?.name;
+  if (!et || !name) return [];
+  const cap = Math.max(1, opts.cap ?? AUTO_LINK_CAP);
+  const now = opts.now ?? Date.now();
+  const since = now - Math.max(1, opts.windowDays) * 86400000;
+  const candidates: { id: string; t: number }[] = [];
   for (const m of stream) {
-    const et = m.structured?.entityType;
-    const name = m.structured?.name;
-    if (!et || !name) continue;
-    const key = `${et}:${name}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(m);
+    if (!m || m.id === entry.id) continue;
+    if (m.structured?.entityType !== et || m.structured?.name !== name) continue;
+    const t = m.created ? new Date(m.created).getTime() : NaN;
+    const ts = Number.isFinite(t) ? t : 0;
+    if (ts > 0 && ts < since) continue;
+    candidates.push({ id: m.id, t: ts });
   }
-
-  for (const group of groups.values()) {
-    if (group.length < 2) continue;
-
-    for (const m of group) {
-      if (!m.structured) continue;
-      if (!m.structured.relatedIds) m.structured.relatedIds = [];
-
-      for (const other of group) {
-        if (other.id === m.id) continue;
-        // 时间窗口检查
-        const tM = new Date(m.created).getTime();
-        const tO = new Date(other.created).getTime();
-        if (Number.isFinite(tM) && Number.isFinite(tO)) {
-          const diffDays = Math.abs(tM - tO) / (24 * 60 * 60 * 1000);
-          if (diffDays > windowDays) continue;
-        }
-        // 幂等检查
-        if (m.structured.relatedIds.includes(other.id!)) continue;
-        // 上限防爆
-        if (m.structured.relatedIds.length >= maxRelated) break;
-        m.structured.relatedIds.push(other.id!);
-        newLinks++;
-      }
-    }
+  candidates.sort((a, b) => b.t - a.t); // 最近优先（不能按 stream 顺序——它会随裁剪/重排漂移）
+  const related = candidates.slice(0, cap).map((c) => c.id);
+  if (!related.length) return [];
+  entry.relatedIds = Array.from(new Set([...(entry.relatedIds ?? []), ...related])).slice(-cap);
+  const seen = new Set(related);
+  for (const m of stream) {
+    if (!seen.has(m.id)) continue;
+    m.relatedIds = Array.from(new Set([...(m.relatedIds ?? []), entry.id])).slice(-cap);
   }
+  return related;
+}
 
-  return newLinks;
+/** 取关联记忆的简述（1 跳、最多 limit 条），供 prompt 回显「想起的上下文」，避免孤立的一句 */
+export function linkedSnippetOf(stream: MemoryStreamEntry[], memory: MemoryStreamEntry, limit = 1): string {
+  const ids = memory.relatedIds;
+  if (!ids?.length) return '';
+  const byId = new Map(stream.map((m) => [m.id, m]));
+  const parts: string[] = [];
+  for (let i = ids.length - 1; i >= 0 && parts.length < limit; i--) {
+    const m = byId.get(ids[i]);
+    if (!m || m.id === memory.id) continue;
+    const raw = typeof m.description === 'string' ? m.description : '';
+    if (!raw) continue;
+    const t = m.created ? formatRelativeTime(m.created) : '';
+    parts.push(replaceUserReference(raw.slice(0, 60)) + (t ? `（${t}）` : ''));
+  }
+  return parts.join('；');
+}
+
+/** 检索 query 组装：用户消息 + 当前情绪 + 当前时段（缺省项自动省略；供聊天 RAG 用，mock 友好） */
+export function buildRetrieveQuery(userMessage: string, emotion?: string | null, hour = new Date().getHours()): string {
+  const parts: string[] = [userMessage.trim()];
+  if (emotion && emotion.trim()) parts.push(`当前情绪：${emotion.trim()}`);
+  const period = hour >= 5 && hour < 12 ? '早晨' : hour >= 12 && hour < 18 ? '下午' : hour >= 18 && hour < 23 ? '晚上' : '深夜';
+  parts.push(`时段：${period}`);
+  return parts.filter(Boolean).join(' ');
 }
 
 /**
- * 构建故事线（P3 ticket 123）
- * 按 relatedIds / 同实体回溯出「故事线」——返回直接关联的记忆数组。
- *
- * @param data 智能猫数据
- * @param memoryId 起始记忆 id
- * @returns 关联记忆列表（含自身，按时间排序）
+ * 记忆流情绪密度统计（H3/096 前置检查，纯函数）：观察条目的情绪字段覆盖率与非 calm 占比。
+ * v4 裁决「未达标不宣称三路」——本指标只作数值输出汇报（汇报/诊断用），不做门槛阻断。
  */
-export function buildStoryline(
-  data: SmartCatData,
-  memoryId: string,
-): MemoryStreamEntry[] {
-  const stream = data.memory.memoryStream || [];
-  const start = stream.find((m) => m.id === memoryId);
-  if (!start) return [];
-
-  const visited = new Set<string>();
-  const result: MemoryStreamEntry[] = [];
-
-  // BFS 遍历 relatedIds
-  const queue: string[] = [memoryId];
-  while (queue.length > 0) {
-    const id = queue.shift()!;
-    if (visited.has(id)) continue;
-    visited.add(id);
-
-    const m = stream.find((s) => s.id === id);
-    if (!m) continue;
-    result.push(m);
-
-    // 加入 relatedIds
-    if (m.structured?.relatedIds) {
-      for (const rid of m.structured.relatedIds) {
-        if (!visited.has(rid)) queue.push(rid);
-      }
-    }
-
-    // 加入同实体记忆（同一 entityType+name）
-    const et = m.structured?.entityType;
-    const name = m.structured?.name;
-    if (et && name) {
-      for (const s of stream) {
-        if (s.id === id || visited.has(s.id!)) continue;
-        if (s.structured?.entityType === et && s.structured?.name === name) {
-          queue.push(s.id!);
-        }
-      }
-    }
-  }
-
-  // 按时间排序
-  result.sort((a, b) => new Date(a.created).getTime() - new Date(b.created).getTime());
-  return result;
+export function emotionDensityStats(stream: MemoryStreamEntry[]): {
+  observations: number; annotated: number; nonCalm: number; coverage: number; nonCalmShare: number;
+} {
+  const list = Array.isArray(stream) ? stream : [];
+  const observations = list.filter((m) => m.type === 'observation').length;
+  const annotated = list.filter((m) => m.type === 'observation' && m.emotion).length;
+  const nonCalm = list.filter((m) => m.type === 'observation' && m.emotion && m.emotion !== 'calm').length;
+  const r = (x: number) => Math.round(x * 10000) / 10000;
+  return {
+    observations,
+    annotated,
+    nonCalm,
+    coverage: observations ? r(annotated / observations) : 0,
+    nonCalmShare: observations ? r(nonCalm / observations) : 0,
+  };
 }
 
 // ==================== ADR-0069：存储 sidecar（smartcat-memory.json / smartcat-behavior.json） ====================

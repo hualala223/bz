@@ -304,7 +304,7 @@ export class AIService {
   /** 通用 AI 请求（fetch 流式，失败自动 fallback requestUrl 非流式）；
    *  options.signal（取消）/ options.onDelta（流式增量回调）为调用方选项（ticket 141），不进请求体，
    *  既有调用（不传这两项）行为零变化 */
-  async prompt(promptText: string | { text: string; images?: string[] }, model: string = this.defaultModel, options: AIOptions = {}): Promise<string> {
+  async prompt(promptText: string | { text: string; images?: string[] } | { messages: AIMessage[] }, model: string = this.defaultModel, options: AIOptions = {}): Promise<string> {
     const mergedOptions = this._mergeOptions(options);
     const provider = await getAIProvider(mergedOptions.provider);
     // 调用方未显式指定模型时，用 provider 配置的默认模型（如 OpenCode Go 设置里的模型）
@@ -312,7 +312,9 @@ export class AIService {
     const mo = mergedOptions.modelOptions || {};
     const body: Record<string, any> = {
       model: effModel,
-      messages: [{ role: 'user', content: buildUserContent(promptText) }],
+      messages: typeof promptText === 'object' && 'messages' in promptText
+        ? promptText.messages
+        : [{ role: 'user', content: buildUserContent(promptText) }],
       max_tokens: mo.max_tokens || aiMaxTokensOf(effModel),
       stream: true,
     };
@@ -451,8 +453,11 @@ export type AIContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } };
 
-/** 多模态输入：纯文本，或 文本+图片 URL/数据 URL 数组 */
-export type AIInput = string | { text: string; images?: string[] };
+/** 多轮对话消息（上游更智能批：小橘多轮对话走 core AI） */
+export type AIMessage = { role: 'system' | 'user' | 'assistant'; content: string };
+
+/** 多模态/多轮输入：纯文本，或 文本+图片 URL/数据 URL 数组，或 多轮 messages 数组 */
+export type AIInput = string | { text: string; images?: string[] } | { messages: AIMessage[] };
 
 /** DeepSeek Vision 接受的格式（其余如 svg/avif 需先转码）→ MIME */
 const AI_IMAGE_MIME: Record<string, string> = {
