@@ -389,8 +389,7 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
   let genrePool = mergePool(getGenreOptions(getGroupSafe(initTag)), item?.genres ?? []);
   const { el, close } = ovl(sec, formModalHtml({
     editing, name: item ? item.name : '', typeTag: initTag, stText: initSt,
-    rating: ratingVal, review: item ? item.review ?? '' : '',
-    country: item?.country ?? null, genres: item?.genres ?? [],
+    rating: ratingVal, review: item ? item.review ?? '' : '', genres: item?.genres ?? [],
     countryOptions: countryPool, genreOptions: genrePool,
     epsTotal: item?.episodesTotal ?? null, epsWatching: item?.episodesWatching ?? null,
     chTotal: item?.chaptersTotal ?? null, chWatching: item?.chaptersWatching ?? null,
@@ -530,7 +529,7 @@ function catchUpSuffix(watching: number | null, total: number | null, unit: '集
 async function saveNew(sec: HTMLElement, p: FormPayload, app: App, close: () => void): Promise<void> {
   const group = getGroupForTag(p.tag) ?? '其他';
   const st = p.st === '想看' ? STATUS_WANT : p.st === '在看' ? STATUS_WATCHING : STATUS_WATCHED;
-  const it: CinemaItem = { file: null, name: p.name, typeTag: p.tag, group, status: st, rating: p.rating, watchDate: p.date, review: p.review, poster: null, genre: null, director: null, actors: null, region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: p.country, genres: p.genres, episodesTotal: episodesEligibleTag(p.tag) ? p.epsTotal : null, episodesWatching: episodesEligibleTag(p.tag) ? p.epsWatching : null, chaptersTotal: chaptersEligibleTag(p.tag) ? p.chTotal : null, chaptersWatching: chaptersEligibleTag(p.tag) ? p.chWatching : null, bookInfo: [] };
+  const it: CinemaItem = { file: null, name: p.name, typeTag: p.tag, group, status: st, rating: p.rating, watchDate: p.date, review: p.review, poster: null, genre: null, director: null, actors: null, region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: p.country, genres: p.genres, episodesTotal: episodesEligibleTag(p.tag) ? p.epsTotal : null, episodesWatching: episodesEligibleTag(p.tag) ? p.epsWatching : null, chaptersTotal: chaptersEligibleTag(p.tag) ? p.chTotal : null, chaptersWatching: chaptersEligibleTag(p.tag) ? p.chWatching : null, bookInfo: [], releaseDate: null, hotComment: null };
   try {
     if (app.vault.getAbstractFileByPath(`${M.folderPath}/《${p.name}》.md`)) {
       panelToast(sec, '已存在同名条目，请换个名称');

@@ -368,7 +368,7 @@ export function formChoicesHtml(values: string[], cur: string, attr: string): st
  *  点「解析」拉豆瓣 → 翻到背面看全部信息。评分/影评收在正面状态下方（2026-09-21 用户拍板：
  *  点已看就要当场能填，不必等解析翻面；背面是豆瓣形制信息，不放记录段）。
  *  编辑态 = 单面到底：已有笔记不必重新解析，全字段直出 + 保存。 */
-export function formModalHtml(opts: { editing: boolean; name: string; typeTag: string; stText: string; rating: number; review: string }): string {
+export function formModalHtml(opts: { [k: string]: unknown; editing: boolean; name: string; typeTag: string; stText: string; rating: number; review: string }): string {
   const { editing } = opts;
   const initSt = opts.stText;
   const nameField = `<div class="f-field"><span class="f-label">名 称</span><input class="f-input j-name" value="${esc(opts.name)}" placeholder="影视名称"></div>`;

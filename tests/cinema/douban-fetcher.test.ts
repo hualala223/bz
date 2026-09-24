@@ -17,9 +17,9 @@ import { MockVault, mockAppWithVault, parseFrontmatter } from '../mock-vault';
 import { resetObsidianMocks } from '../mock-obsidian-entry';
 import { setApp } from '../../src/core/app';
 import {
-  parseSearchResults, searchLooksBlocked, upgradePosterUrl, extractSid, parseCelebrities,
+  parseSearchResults, searchPageLooksBlocked, upgradePosterUrl, extractSid, parseCelebrities,
   extractMovieName, normalizeListValue, updateFrontmatterFields, insertPosterEmbed,
-  fetchApizeroInfo, fetchNoteDouban, fmTags, noteEpisodesEligible,
+  fetchApizeroInfo, fetchNoteDouban,
   POSTER_FOLDER, type HttpGet, type DoubanFetchDeps,
 } from '../../src/cinema/douban-fetcher';
 
@@ -48,16 +48,16 @@ describe('parseSearchResults（照搬守护正则）', () => {
   });
 });
 
-describe('searchLooksBlocked（风控页检测）', () => {
+describe('searchPageLooksBlocked（风控页检测）', () => {
   it('短响应/无结构判风控；正常搜索页与空态页放行', () => {
     // 实测拦截页形态：约 3KB、title 只有「豆瓣」、无 result 结构
     const blocked = '<!DOCTYPE html><html><head><title>豆瓣</title><style type="t' + 'x'.repeat(2500) + '</style></head><body></body></html>';
-    expect(searchLooksBlocked(blocked)).toBe(true);
-    expect(searchLooksBlocked(null)).toBe(true);
-    expect(searchLooksBlocked(SEARCH_HTML)).toBe(false);
+    expect(searchPageLooksBlocked(blocked)).toBe(true);
+    expect(searchPageLooksBlocked(null)).toBe(true);
+    expect(searchPageLooksBlocked(SEARCH_HTML)).toBe(false);
     // 正常「无结果」空态页（>8KB、含空态文案）不放行为风控
     const empty = '<html>' + 'x'.repeat(9000) + '没有找到相关的搜索结果</html>';
-    expect(searchLooksBlocked(empty)).toBe(false);
+    expect(searchPageLooksBlocked(empty)).toBe(false);
   });
 });
 

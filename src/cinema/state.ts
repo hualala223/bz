@@ -40,7 +40,7 @@ export interface CinemaItem {
   year: string | null;
   /** 完整上映日期原文（frontmatter「上映日期」，如 2013-01-08）。year 只留前 4 位
    *  （卡片副行 / 分析页片龄统计按年聚合），详情弹窗要的是完整日期，故另存一份（687/687 有值） */
-  releaseDate: string | null;
+  releaseDate?: string | null;
   doubanRating: string | null;
   doubanUrl: string | null;
   synopsis: string | null;
@@ -63,7 +63,7 @@ export interface CinemaItem {
   /** 书籍字段行（作者/出版社/出版年/译者/ISBN/页数/出品方 非空项；详情卡「豆瓣信息」区渲染，票 301） */
   bookInfo: [string, string][];
   /** 豆瓣热门短评原文（frontmatter「热门短评」；451/687 抓到，中位 39 字、最长 465） */
-  hotComment: string | null;
+  hotComment?: string | null;
 }
 
 /** 排序模式：date=最近观看（默认）/ created=按创建 / rating=按评分 */

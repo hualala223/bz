@@ -13,27 +13,6 @@ import { fetchDepsFromSettings } from './douban-queue';
 import { LEGACY_TAG_MAP } from './constants';
 import { refetchBookDoubanWithPrompt } from '../bookshelf/douban-refetch';
 
-/** 本地票 301（就地实现）：重抓前清豆瓣字段（fm 键剥除，正文字段不动） */
-const REFETCH_FM_KEYS = ['海报','豆瓣链接','评分','观影日期','导演','主演','类型','制片国家/地区','简介','片长','季集','热门短评'];
-async function clearMovieDoubanFields(app: App, file: TFile): Promise<void> {
-  const f = app.vault.getAbstractFileByPath(file.path);
-  if (!f) return;
-  let content = '';
-  try { content = await app.vault.read(f as any); } catch { return; }
-  const lines = content.split('
-');
-  let inFm = lines[0] === '---';
-  let cleared = inFm;
-  const kept = lines.filter((l) => {
-    if (inFm && l === '---') { inFm = false; return true; }
-    if (inFm && REFETCH_FM_KEYS.some((k) => l.startsWith(k + ':'))) return false;
-    return true;
-  });
-  if (cleared) await app.vault.modify(f as any, kept.join('
-'));
-}
-
-
 /** fm tags 判书籍（旧「小说」tag 归一；与队列 getGroupSafe 同口径的轻量版） */
 function isBookNote(app: App, file: TFile): boolean {
   const fm = app.metadataCache.getFileCache(file)?.frontmatter as { tags?: unknown } | undefined;
@@ -72,7 +51,7 @@ export async function refetchCinemaDouban(app: App, target?: TFile): Promise<voi
     return;
   }
   try {
-    await clearMovieDoubanFields(app, file);
+    // （上游 fetchNoteDouban 为字段 upsert，重抓直接覆盖；旧字段预清理暂缺，见 PROGRESS）
   } catch {
     notice('旧豆瓣数据清理失败，已取消重抓', 'error');
     return;
