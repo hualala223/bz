@@ -203,6 +203,9 @@ var BZR_home = (() => {
     // 日记四动作（2026-09-14 用户点名；解冻上游「日记不挂菜单」的票 288 口径——
     // 均为既有 bz 命令直呼，不新增命令面，diary 域本身零改动）：
     diary: [
+      // 打开今日日记（票 303 追加）：文件在就直接开，不在按模板建档后开（bz-diary-open-today）。
+      // 特例打破「不放打开 X」惯例——磁贴本体开的是日记本面板，这条要的是**日记文件**，语义不同（用户实测点名补挂）。
+      { label: "打开今日日记", commandId: "bz-diary-open-today", icon: "file-text" },
       { label: "写日记", commandId: "bz-diary-write", icon: "pen-line" },
       { label: "日程规划", commandId: "bz-diary-plan", icon: "calendar-plus" },
       { label: "每日触动点记录", commandId: "bz-diary-review", icon: "notebook-pen" },

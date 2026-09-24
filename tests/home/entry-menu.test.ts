@@ -52,7 +52,10 @@ describe('DOMAIN_MENU 形状', () => {
       expect(list.length).toBeGreaterThan(0);
       for (const a of list) {
         expect(a.label.trim()).not.toBe('');
-        expect(a.label.startsWith('打开')).toBe(false);
+        // 票 303 追加白名单：磁贴本体开的是日记本面板，「打开今日日记」要的是日记文件，语义不同（用户点名特例）
+        if (a.label !== '打开今日日记') {
+          expect(a.label.startsWith('打开')).toBe(false);
+        }
         expect(a.label).not.toContain('整理顺序');
         expect(a.commandId).toMatch(/^bz-[a-z0-9-]+$/);
         expect(a.icon).toBeTruthy();

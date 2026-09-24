@@ -33,3 +33,11 @@
 ## 门禁
 
 tsc 0 错；新测试 + smoke 全绿；全量 + 构建复核见 PROGRESS 当日记录。
+
+## 追补 — 首页「日记本」磁贴右键（2026-09-24，用户实测第三处点名）
+
+用户重启后右键**内容首页的日记本磁贴**仍无此项——Q1 的「日记功能上」真正指的是这个入口（前两处编辑器右键、面板头部都不贴）。追补一行：
+
+- `src/home/shared.ts` `DOMAIN_MENU.diary` 首位插入 `{ label: '打开今日日记', commandId: 'bz-diary-open-today', icon: 'file-text' }`——首页菜单按 commandId 直呼既有命令（`home/ui.ts:233` executeCommandById），零新增命令面；图标 file-text 首页菜单已在用（知识盒），不补原型图标表。
+- **打破惯例有据**：DOMAIN_MENU 注释与 `tests/home/entry-menu.test.ts` 均守「不放打开 X」（入口本身就是打开）——本条特例成立：磁贴本体开的是日记本**面板**，这条要的是日记**文件**，语义不同。测试改为白名单放行并注明理由。
+- 产物：`node scripts/build-preview.mjs` 重出 `src/home/prototype-render.js`；esbuild production 重出根 main.js。门禁复跑全绿（entry-menu 12 + open-today 8 + smoke 16）。

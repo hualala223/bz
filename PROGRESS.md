@@ -12,6 +12,7 @@
 - [x] 冻结红线自查（ADR-0121）：本票为用户主动新增 diary 功能，非上游吸收；既有面板/条目链路/数据格式零触碰，只加不改
 - [x] 测试：`tests/diary/open-today.test.ts` 8 用例（路径口径/目录跟随/建档规整/已存在不写/兜底建档/右键挂载与同函数执行/注册失败静默/面板头部右键同函数）
 - [x] 门禁：tsc 0 错；新测试 + smoke 全绿；全量测试与 esbuild production 构建结果见当日复核（工作区含票 301/302 在制改动，基线存量失败以票 301 记录为准）
+- [x] 追补（用户实测第三处点名——真正要的是**内容首页日记本磁贴**右键）：`src/home/shared.ts` `DOMAIN_MENU.diary` 首位加「打开今日日记」（commandId 直呼 bz-diary-open-today，零新增命令面）；打破「不放打开 X」惯例有据（磁贴开的是面板，这条要的是文件），`tests/home/entry-menu.test.ts` 白名单放行；`build-preview.mjs` 重出 home 原型，esbuild 重出根 main.js；entry-menu 12 + open-today 8 + smoke 16 复跑全绿
 
 ## 书架豆瓣抓取 + 娱乐书籍纳入 + 重抓 + 自动上架（票 301 / ADR-0130）— 2026-09-23
 
@@ -904,8 +905,8 @@
 ### 票 302 — 「每日复盘」更名「每日触动点记录」（ADR-0131）
 
 - [x] 显示名全改：命令 `bz-diary-review` name / 日记面板 🪞 tooltip / 首页快捷入口 label / 通知文案（sectionTitle 派生）→「每日触动点记录」；命令 id 不变（铁律 2）
-- [x] 落点小节改 `# 每日触动点记录`：REVIEW_HEADING 更名 + LEGACY_REVIEW_HEADING（`# 当日复盘`）别名兼容定位——daily-capture findMarkerLine/locateSection 加 aliases 参数（与「新层级优先、旧层级兜底」同轮查找，单源不漂移），不批量迁移旧文件
+- [x] 落点小节定 `# 当日触动点`（票 302 二次裁定，用户实测后：**旧落点 `# 当日复盘` 不兼容**——不往旧小节追加、不迁移，写入固定文末新建/节内按时间顺序追加；初版 LEGACY_REVIEW_HEADING 别名兼容方案被推翻，daily-capture 的 aliases 参数整体回收）
 - [x] 标签 复盘→触动点（REVIEW_TAG + DEFAULT_TAGS_CONFIG 键，emoji 🪞 与模板正文不动）；emojiToTagMap 读侧旧条目 🪞 归新名，纯展示
-- [x] 测试同步：add-dialog-content（两代标题 + 新增旧文件兼容用例）/ add-dialog-steps / daily-tasks / daily-flow
-- [x] 门禁：tsc --noEmit 0 错；esbuild production 过（vault 产物 + 根三件套再生，不提交）；vitest diary 域 32 文件 477 用例全绿；全量 **Test Files 3 failed | 303 passed (306)，Tests 6 failed | 4824 passed (4830)**——6 失败同票 297/299/300 记录的并行会话遗留基线（clipbook news-fetcher/ui + core/obsidian-adapter），与本票无关
+- [x] 测试同步：add-dialog-content（新建 / 按顺序追加 / 旧落点不兼容三用例）/ add-dialog-steps / daily-tasks / daily-flow
+- [x] 门禁：tsc --noEmit 0 错；esbuild production 过（vault 产物 + 根三件套再生，不提交）；vitest diary 域 33 文件 485 用例全绿；全量 6 失败同票 297/299/300 记录的并行会话遗留基线（clipbook news-fetcher/ui + core/obsidian-adapter），与本票无关
 - [x] ADR-0131；CONTEXT.md 术语（分步写日记/日记内容块/日常时间记录）同步；issues/302-daily-review-rename-touchpoint.md；上游吸收豁免点 +1（ADR-0121 冻结域，用户直接裁决）
