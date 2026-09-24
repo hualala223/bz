@@ -51,7 +51,7 @@ function openForNote(app: App, path: string): void {
 async function autoPopupOnStart(app: App): Promise<void> {
   const items = await TodoData.loadItems();
   M.items = items;
-  if (!hasPendingUrgent(items)) return;
+  if (!hasPendingUrgent(M.items)) return;
   startPopupTimer = setTimeout(() => {
     startPopupTimer = null;
     if (!M.overlay) openTodoPanel(app);
@@ -72,6 +72,9 @@ export function ensureTodoReminders(app: App): void {
       if (tryGetSettings()?.openNoteReminder === false) return;
       const path = file.path as string;
       if (!path || remindedFiles.has(path)) return;
+      // 上游 memo2-efficiency 新-2（移植）：file-open 高频事件——先以内存 M.items 预判，
+      // 命中才重读确认；miss 直接返回，绝大多数切换零 IO
+      if (M.items.length && !hasPendingUrgent(M.items, path)) return;
       const items = await TodoData.loadItems();
       M.items = items;
       if (hasPendingUrgent(items, path)) {

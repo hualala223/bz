@@ -43,9 +43,12 @@ function hasCourseTag(cache: any): boolean {
 
 /** 条目字段归一（缺省补默认值，旧数据零迁移）——与旧 memo loadItems 逐字段等价 */
 export function normalizeItem(item: any): TodoItem {
+  // 上游 memo2-func #4 融合：iOS 延后落盘的 'NaN-…' 脏串清洗——getDueStatus 对其字符串比较
+  // 行为不定，到期标记永久失真，清掉回归「无截止」
+  const dueClean = item.due == null ? null : /^NaN/.test(String(item.due)) ? null : String(item.due);
   return {
     id: item.id,
-    title: item.title,
+    title: item.title == null ? '' : String(item.title),
     scene: item.scene,
     priority: item.priority || 'minor',
     // 票 298：类别（必须/想要）与紧急度（紧急/不紧急），缺省 必须+不紧急（ADR-0128）
@@ -53,7 +56,7 @@ export function normalizeItem(item: any): TodoItem {
     urgency: item.urgency === 'urgent' ? 'urgent' : 'not',
     created: item.created,
     completed: item.completed || null,
-    due: item.due || null,
+    due: dueClean || null,
     notePath: item.notePath || null,
     notePosition: item.notePosition || null,
     scriptName: item.scriptName || null,

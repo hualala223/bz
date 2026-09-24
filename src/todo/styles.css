@@ -1063,3 +1063,11 @@
     padding-bottom: max(var(--bz-space-xs), env(safe-area-inset-bottom, 0px));
   }
 }
+
+/* ===== 上游呈报#6 6A（移植）：搜索命中词高亮 ===== */
+mark.bz-todo-hit {
+  background: color-mix(in srgb, var(--bz-accent, #eab308) 32%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}

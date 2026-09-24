@@ -161,33 +161,55 @@ export function panelShellHtml(): string {
 export type MetaDue = { status: 'overdue' | 'today' | 'future'; text: string } | null;
 
 /** 卡片 meta 行（顺序对齐 memo buildMeta：课程→脚本→链接→位置→场景→截止→时间） */
-export function metaTagsHtml(it: TodoItem, due: MetaDue, relTime: string): string {
+
+/** 搜索命中词高亮（上游呈报#6 6A 融合批）：text 中全部命中片段包 `<mark class="bz-todo-hit">`；
+ *  小写归一 indexOf、不做动态 regex；无命中原样 esc。 */
+export function hitTextHtml(text: string, kw: string): string {
+	const t = text ?? '';
+	const needle = kw.trim().toLowerCase();
+	if (!t || !needle) return esc(t);
+	const lower = t.toLowerCase();
+	let out = '';
+	let cursor = 0;
+	for (;;) {
+		const at = lower.indexOf(needle, cursor);
+		if (at < 0) break;
+		out += esc(t.slice(cursor, at));
+		out += `<mark class="bz-todo-hit">${esc(t.slice(at, at + needle.length))}</mark>`;
+		cursor = at + needle.length;
+	}
+	return out + esc(t.slice(cursor));
+}
+
+export function metaTagsHtml(it: TodoItem, due: MetaDue, relTime: string, kw = ''): string {
+	const hit = (t: string): string => hitTextHtml(t, kw);
+
 	const tags: string[] = [];
 	// 1. 课程（公开课）
 	if (it.scene === '公开课' && it.courseName) {
-		tags.push(`<span class="bz-todo-tag bz-todo-tag-course">${iconSpan(TODO_ICONS.course)} ${esc(it.courseName.replace(/^《|》$/g, ''))}</span>`);
+		tags.push(`<span class="bz-todo-tag bz-todo-tag-course">${iconSpan(TODO_ICONS.course)} ${hit(it.courseName.replace(/^《|》$/g, ''))}</span>`);
 	}
 	// 2. 脚本（代码）
 	if (it.scene === '代码' && it.scriptName) {
-		tags.push(`<span class="bz-todo-tag bz-todo-tag-script">${iconSpan(TODO_ICONS.script)} ${esc(it.scriptName)}</span>`);
+		tags.push(`<span class="bz-todo-tag bz-todo-tag-script">${iconSpan(TODO_ICONS.script)} ${hit(it.scriptName)}</span>`);
 	}
 	// 3. 链接
 	if (it.url) {
 		let host = '链接';
 		try { host = new URL(it.url).hostname.replace(/^www\./, ''); } catch (e) { /* 保持默认 */ }
-		tags.push(`<span class="bz-todo-tag bz-todo-tag-url" title="${esc(it.url)}">${iconSpan(TODO_ICONS.url)} ${esc(host)}</span>`);
+		tags.push(`<span class="bz-todo-tag bz-todo-tag-url" title="${esc(it.url)}">${iconSpan(TODO_ICONS.url)} ${hit(host)}</span>`);
 	}
 	// 4. 位置（绑定笔记才显示；公开课课程同名文件不重复）
 	if (it.notePath) {
 		const name = it.notePath.split('/').pop()!.replace(/\.md$/i, '');
 		const isCourseSame = it.scene === '公开课' && it.courseName && it.courseName.replace(/^《|》$/g, '') === name;
 		if (!isCourseSame) {
-			tags.push(`<span class="bz-todo-tag bz-todo-tag-pos" data-todo-pos="${esc(it.id)}">${iconSpan(TODO_ICONS.pos)} ${esc(name)}</span>`);
+			tags.push(`<span class="bz-todo-tag bz-todo-tag-pos" data-todo-pos="${esc(it.id)}">${iconSpan(TODO_ICONS.pos)} ${hit(name)}</span>`);
 		}
 	}
 	// 5. 场景（重要红底）
 	const imp = it.priority === 'important' ? ' bz-todo-tag-important' : '';
-	tags.push(`<span class="bz-todo-tag bz-todo-tag-scene${imp}">#${esc(it.scene)}</span>`);
+	tags.push(`<span class="bz-todo-tag bz-todo-tag-scene${imp}">#${hit(it.scene)}</span>`);
 	// 6. 截止（未完成；due 包由调用方注入）
 	if (due) {
 		tags.push(`<span class="bz-todo-tag ${dueTagClass(due.status)}">${iconSpan(dueIconName(due.status))} ${esc(due.text)}</span>`);
@@ -206,17 +228,17 @@ export function checkHtml(it: TodoItem): string {
 }
 
 /** 条目卡（勾选/标题/meta；标题带 linkedNote/url 时为可点链接，点击行为接线在 ui.ts） */
-export function cardHtml(it: TodoItem, due: MetaDue, relTime: string): string {
+export function cardHtml(it: TodoItem, due: MetaDue, relTime: string, kw = ''): string {
 	const titleCls = it.completed ? ' bz-todo-done' : '';
 	const clickable = !!(it.linkedNote || it.url);
 	const titleHtml = clickable
-		? `<a href="javascript:void(0)" data-todo-openitem="${esc(it.id)}">${esc(it.title)}</a>`
-		: esc(it.title);
+		? `<a href="javascript:void(0)" data-todo-openitem="${esc(it.id)}">${hitTextHtml(it.title, kw)}</a>`
+		: hitTextHtml(it.title, kw);
 	return `<div class="bz-todo-card${titleCls}" data-todo-id="${esc(it.id)}">
       ${checkHtml(it)}
       <div class="bz-todo-body-text">
         <div class="bz-todo-card-title">${titleHtml}</div>
-        <div class="bz-todo-meta">${metaTagsHtml(it, due, relTime)}</div>
+        <div class="bz-todo-meta">${metaTagsHtml(it, due, relTime, kw)}</div>
       </div>
     </div>`;
 }

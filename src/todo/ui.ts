@@ -661,7 +661,8 @@ function metaDueOf(it: TodoItem): MetaDue {
 
 /** 卡片 meta 行（纯层 metaTagsHtml 的行为侧封装：注入 due 包与相对时间） */
 function metaTags(it: TodoItem): string {
-  return metaTagsHtml(it, metaDueOf(it), it.created ? formatRelativeTime(it.created) : '');
+  const kw = M.search.trim().toLowerCase();
+  return metaTagsHtml(it, metaDueOf(it), it.created ? formatRelativeTime(it.created) : '', kw);
 }
 
 function renderContent(): void {
@@ -698,7 +699,7 @@ function renderContent(): void {
   const urgent = active.filter((i) => dueRank(i) <= 1);
   const normal = active.filter((i) => dueRank(i) > 1);
 
-  const cardHtml = (it: TodoItem) => renderCard(it, metaDueOf(it), it.created ? formatRelativeTime(it.created) : '');
+  const cardHtml = (it: TodoItem) => renderCard(it, metaDueOf(it), it.created ? formatRelativeTime(it.created) : '', M.search.trim().toLowerCase());
 
   const sections: string[] = [];
   if (urgent.length) {
