@@ -10,8 +10,6 @@
  * 取值基准 = 当前实际注册（enh-sweep-a 全仓核对；批 B 补缺两项）：
  * - 与内容首页磁贴/ribbon 对齐：diary=notebook-pen（ribbon「日记本」同款）、
  *   cinema=clapperboard（磁贴同款，命令旧 film 漂移由此收敛）、review=repeat-2（磁贴同款）；
- * - recap=calendar-heart（今日回顾，方向一 R2 新域；lucide 日历语义，未与其他命令重复）；
- * - diary-wall=images（回忆墙媒体语义，命令/磁贴同款，批 B 入表）；
  * - settings-panel=settings-2（设置面板命令/磁贴同款，批 B 入表）；
  * - 历史重复图标错开：diary 不再与 bookshelf 同用 book-open（bookshelf 独占）；
  *   复习报告命令 bz-review-report 弃 bar-chart-3（阅读分析报告独占）改 calendar-check；
@@ -20,20 +18,29 @@
 export const DOMAIN_ICONS: Readonly<Record<string, string>> = {
   // 面板专属域（无对应命令）
   global: 'settings',
-  appearance: 'palette',
+  // 通知（2026-09-12）：自「通用」域拆出的独立面板页；「设置」页并入通用后 appearance 键退役
+  notice: 'bell',
   ai: 'sparkles',
   // 域入口命令与面板导航共用
   home: 'layout-grid',
-  recap: 'calendar-heart',
-  memo: 'sticky-note',
-  todo: 'check-square',
+  memo: 'check-square',
   belongings: 'package',
   clipping: 'scissors',
   favorites: 'star',
   diary: 'notebook-pen',
-  'diary-wall': 'images',
   'reading-report': 'bar-chart-3',
   cinema: 'clapperboard',
+  gameshelf: 'gamepad-2',
+  // 本地独有域（上游无此二域/已退役 recap）：批 5 结构批随 recap 摘除一并复审
+  recap: 'calendar-heart',
+  'diary-wall': 'images',
+  collect: 'inbox',
+  launcher: 'app-window',
+  // 本地暂存键：appearance（本地保留原生设置页至批 5）、plan（票 304 计划卡）、
+  // todo（本地待办独立组，上游已并入 memo 图标）
+  appearance: 'palette',
+  plan: 'target',
+  todo: 'check-square',
   bookshelf: 'book-open',
   review: 'repeat-2',
   secondbrain: 'brain',
@@ -41,12 +48,9 @@ export const DOMAIN_ICONS: Readonly<Record<string, string>> = {
   pomodoro: 'timer',
   attach: 'folder-down',
   encrypt: 'lock',
-  password: 'key-round',
+  'password-vault': 'key',
   smartcat: 'cat',
   knowledge: 'list-video',
-  collect: 'inbox',
-  // 外部插件卡（无 bz 命令）：plan = PlanFlow 首页卡（ADR-0132，目标语义）
-  plan: 'target',
   // 命令专属域
   'settings-panel': 'settings-2',
 };
