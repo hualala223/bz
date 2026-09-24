@@ -49,7 +49,6 @@ const SOURCES = [
   // 类名前缀各自独立（bz-home-/bz-recap-/bz-checkup-/bz-diary-wall-/bz-sp-/bz-rr-），
   // 与既有节无选择器冲突；域间次序不影响其它域。
   "src/home/styles.css",
-  "src/recap/styles.css",
   "src/checkup/styles.css",
   "src/diary-wall/styles.css",
   "src/settings-panel/styles.css",

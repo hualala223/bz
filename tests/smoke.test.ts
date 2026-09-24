@@ -68,7 +68,7 @@ const registeredCommands: any[] = [];
 const EXPECTED_COMMAND_IDS = [
   'bz-home',
   // 上游线并入新域（第一档）：内容首页/今日回顾/回忆墙/数据体检/设置面板
-  'bz-home-open', 'bz-recap-today', 'bz-diary-wall-open', 'bz-data-checkup-open', 'bz-settings-panel-open',
+  'bz-home-open', 'bz-diary-wall-open', 'bz-data-checkup-open', 'bz-settings-panel-open',
   'bz-todo-open', 'bz-todo-add',
   'bz-belongings-add', 'bz-belongings-open',
   'bz-clipbook-open', 'bz-clipbook-mark-all-read', 'bz-clipbook-fetch-now',

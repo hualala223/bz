@@ -31,8 +31,7 @@ export const DOMAIN_ICONS: Readonly<Record<string, string>> = {
   'reading-report': 'bar-chart-3',
   cinema: 'clapperboard',
   gameshelf: 'gamepad-2',
-  // 本地独有域（上游无此二域/已退役 recap）：批 5 结构批随 recap 摘除一并复审
-  recap: 'calendar-heart',
+  // 本地独有域（上游无）：diary-wall/collect/launcher；recap 已批 5a 摘除
   'diary-wall': 'images',
   collect: 'inbox',
   launcher: 'app-window',

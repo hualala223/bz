@@ -77,7 +77,6 @@ import { openActivityCapture } from './diary/daily-capture';
 import { ensureSmartCat, unloadSmartCat, openSmartCat, openSmartCatChat, hideSmartCat, openSmartcatDashboard, normalizeSmartcatOffMode, applySmartcatPowerState, smartcatMainSettingsSchema } from './smartcat';
 // 上游线（yeshimei/bz）并入新域（第一档加法）：内容首页/今日回顾/回忆墙/数据体检/设置面板
 import { openHome, unloadHome } from './home';
-import { openRecap, unloadRecap } from './recap';
 import { openDiaryWall, unloadDiaryWall } from './diary-wall';
 import { applyDirectories as applyWallDirectories } from './diary-wall/config';
 import { openSettingsPanel, unloadSettingsPanel } from './settings-panel';
@@ -95,7 +94,6 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-home', name: '入口页', icon: 'home', callback: () => openLauncherPanel(getApp()) },
   // 上游线并入新域（第一档加法，均为只读聚合或聚合入口）
   { id: 'bz-home-open', name: '内容首页', icon: 'layout-grid', callback: () => openHome(getApp()) },
-  { id: 'bz-recap-today', name: '今日回顾', icon: 'calendar-heart', callback: () => openRecap(getApp()) },
   // 回忆墙（diary-wall 域，ADR-0081：日记的媒体优先只读视图）
   { id: 'bz-diary-wall-open', name: '回忆墙', icon: 'images', callback: () => openDiaryWall(getApp()) },
   // 日常时间记录（diary 域 daily：任务打勾状态沿用 CONFIG/SCRIPTS/每日任务状态.json，复盘/规划走日记条目模型）
@@ -410,7 +408,6 @@ export default class BzPlugin extends Plugin {
     unloadKnowledge();
     // 上游线并入新域卸载（均幂等空清理，未初始化时不引起无谓装载）
     unloadHome();
-    unloadRecap();
     unloadDiaryWall();
     unloadSettingsPanel();
     unloadDataCheckup();
