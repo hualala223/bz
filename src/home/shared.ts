@@ -228,7 +228,7 @@ export const DOMAIN_MENU: Record<string, DomainMenuAction[]> = {
   diary: [
     { label: '写日记', commandId: 'bz-diary-write', icon: 'pen-line' },
     { label: '日程规划', commandId: 'bz-diary-plan', icon: 'calendar-plus' },
-    { label: '每日复盘', commandId: 'bz-diary-review', icon: 'notebook-pen' },
+    { label: '每日触动点记录', commandId: 'bz-diary-review', icon: 'notebook-pen' },
     { label: '日常行为记录', commandId: 'bz-diary-activity-capture', icon: 'footprints' },
   ],
   todo: [

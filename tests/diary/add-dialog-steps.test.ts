@@ -3,7 +3,7 @@
  * 第一步「类型 + 时间」→ 第二步「正文」。移动端正文框不再被软键盘吞掉。
  * - 未选类型点「下一步」被拦（冻结文案「请至少选择一个类型」）；
  * - 上一步保留草稿、遮罩取消丢弃草稿；
- * - preset 带分类（每日复盘）直接进第二步；
+ * - preset 带分类（每日触动点记录）直接进第二步；
  * - 保存后两步都收起，数据仍以第一步的 datetime/类型为源。
  */
 import { describe, expect, it, beforeEach, vi } from 'vitest';
@@ -130,13 +130,13 @@ describe('写日记弹窗两步化', () => {
     expect(contentInput().value).toBe('');
   });
 
-  it('preset 带分类（每日复盘）跳过第一步，正文预填内层模板', () => {
+  it('preset 带分类（每日触动点记录）跳过第一步，正文预填内层模板', () => {
     setup();
-    openAddDialog({ tags: ['复盘'], content: REVIEW_TEMPLATE, section: REVIEW_HEADING });
+    openAddDialog({ tags: ['触动点'], content: REVIEW_TEMPLATE, section: REVIEW_HEADING });
     expect(visible(step1())).toBe(false);
     expect(visible(step2())).toBe(true);
     expect(contentInput().value).toBe(REVIEW_TEMPLATE);
-    // 复盘内层模板不再自带小节名（ADR-0114：小节名由落点提供，避免文件里出现两个「当日复盘」）
+    // 触动点记录内层模板不再自带小节名（ADR-0114：小节名由落点提供，避免文件里出现两个同名标题）
     expect(REVIEW_TEMPLATE).not.toContain('当日复盘');
   });
 

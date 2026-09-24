@@ -613,8 +613,8 @@ export function createAddDialog() {
 let addDialogDraft = '';
 
 /**
- * 本次打开弹窗的落点小节（ADR-0114）：默认 `# 随笔`；每日复盘入口经 preset.section
- * 指到 `# 当日复盘`。与草稿同生命周期（openAddDialog 重置、closeAddDialog 归位），
+ * 本次打开弹窗的落点小节（ADR-0114）：默认 `# 随笔`；每日触动点记录入口经 preset.section
+ * 指到 `# 当日触动点`（票 302 前为 `# 当日复盘`）。与草稿同生命周期（openAddDialog 重置、closeAddDialog 归位），
  * 且不经由「上一步/下一步」发生改变，故跨步保存仍取到入口决定的那一个。
  */
 let addDialogSection: string = ESSAY_HEADING;
@@ -696,11 +696,11 @@ export interface AddDialogPreset {
   content?: string;
   date?: string;
   time?: string;
-  /** 落点小节标题（默认 `# 随笔`；每日复盘传 `# 当日复盘`，见 daily-write / ADR-0114） */
+  /** 落点小节标题（默认 `# 随笔`；每日触动点记录传 `# 当日触动点`，见 daily-write / ADR-0114） */
   section?: string;
 }
 
-/** 打开添加日记弹窗（原 3348-3426；preset 供复盘等预填入口，无参行为不变） */
+/** 打开添加日记弹窗（原 3348-3426；preset 供触动点记录等预填入口，无参行为不变） */
 export function openAddDialog(preset?: AddDialogPreset) {
   const mask = document.getElementById('add-diary-mask');
   const popup = document.getElementById('add-diary-popup');
@@ -768,7 +768,7 @@ export function openAddDialog(preset?: AddDialogPreset) {
     contentInput.value = preset?.content ?? '';
   }
 
-  // 两步（ADR-0109）：preset 已带分类（如每日复盘预选「复盘」）→ 跳第一步直接进正文；
+  // 两步（ADR-0109）：preset 已带分类（如每日触动点记录预选「触动点」）→ 跳第一步直接进正文；
   // 否则从类型页起步。第一步的 datetime / 类型容器始终保留在 DOM 里，是保存时的数据源。
   const presetTags = readSelectedAddTags();
   showAddStep(presetTags.length > 0 ? 2 : 1);
@@ -782,7 +782,7 @@ export function openAddDialog(preset?: AddDialogPreset) {
 
 /**
  * 保存：把弹窗正文按本次落点写进日记小节，不建条目。
- * - 落点 = `addDialogSection`（写日记 `# 随笔` / 每日复盘 `# 当日复盘`），块形态与建节规则见 daily-write；
+ * - 落点 = `addDialogSection`（写日记 `# 随笔` / 每日触动点记录 `# 当日触动点`），块形态与建节规则见 daily-write；
  * - 通知文案随落点走（命中小节 / 现场新建 / 追加文末）由 daily-write 统一给出，这里不再自己拼；
  * - 面板列表不插卡：新内容不是条目，标签筛选 / 日期筛选 / 索引 / 回忆墙 / 智能猫都看不到它（用户裁定）；
  * - 「保存后进入编辑」降级为**打开该日期日记文件**（设置项名与开关保留，块模型下无条目可跳）。

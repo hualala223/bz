@@ -1,19 +1,23 @@
 /**
- * 写日记 / 每日复盘的「按小节落盘」层（issue 252，ADR-0114）。
+ * 写日记 / 每日触动点记录（原「每日复盘」，票 302 更名）的「按小节落盘」层（issue 252，ADR-0114）。
  *
  * 落点（用户裁定）：
  *  - 写日记 → `# 随笔`：骨架自带（模板-日记.md / FALLBACK_DIARY_TEMPLATE），
  *    **缺失不建**——追加文末并在通知里说明，存量文件一字不改（ADR-0113 决策 3）；
- *  - 每日复盘 → `# 当日复盘`：**不在骨架里**，缺失则在文末现场新建小节
- *    （用户原话「在日记文件最下面添加『当日复盘』」）。
+ *  - 每日触动点记录 → `# 当日触动点`：**不在骨架里**，缺失则在文末现场新建小节，
+ *    已有则追加在该小节末尾（多条按时间顺序往下排）——用户原话「在日记文件最下面
+ *    添加『# 当日触动点』标题，然后将添加的触动点按顺序放在该标题下面」。
+ *    旧落点 `# 当日复盘`（票 302 前写入的历史小节）**不再兼容命中**：不往里追加、
+ *    不迁移，存量历史小节一字不动。
  *
  * 块形态（同样由用户裁定）：
  *  - 写日记：`**✍️ 20:30**` + 空行 + 正文。加粗行**不是标题**，故 `HEADING_RE`
  *    （`^#\s*emoji HH:mm`）及仓库里另外三份同源正则在日记面板 / 标签筛选 / 回忆墙 /
  *    智能猫一律命中不到——这正是用户要的「不要让这些内容出现在那些地方」；
  *    多类型 emoji 连写（选「随笔 + 梦」→ `**✍️🌙 20:30**`），与条目模型记号同源。
- *  - 每日复盘：`## 🪞 21:40` + 空行 + 内层模板。时间分隔标题为 h2，落在骨架级 `# 当日复盘`
- *    之下（ADR-0113「复盘只提首行」的延伸：小节名占 `#`，时间行占 `##`）。
+ *  - 每日触动点记录：`## 🪞 21:40` + 空行 + 内层模板。时间分隔标题为 h2，落在骨架级
+ *    `# 当日触动点`之下
+ *    （ADR-0113「复盘只提首行」的延伸：小节名占 `#`，时间行占 `##`）。
  *
  * 为什么不复用 addEntry：条目模型整文件重写产不出「骨架 + 小节」形态，且条目标题
  * `# emoji HH:mm` 会被上述四个消费方解析成条目。写盘走 core/storage 同路径串行队列
@@ -27,28 +31,28 @@ import { writeBlockToDiarySection, type DiaryCaptureResult } from './daily-captu
 /** 写日记落点小节（骨架自带；缺失不建，见文件头） */
 export const ESSAY_HEADING = '# 随笔';
 
-/** 每日复盘落点小节（不在骨架里；缺失则写时新建） */
-export const REVIEW_HEADING = '# 当日复盘';
+/** 每日触动点记录落点小节（不在骨架里；缺失则写时新建，已有则按顺序追加；票 302 更名，原 `# 当日复盘`） */
+export const REVIEW_HEADING = '# 当日触动点';
 
 /** 复盘块的时间分隔标题层级：h2（小节名占 h1，故差一级） */
 const REVIEW_TIME_PREFIX = '## ';
 /** 写日记块的标题形态：加粗行（非标题，任何标题正则都不命中） */
 const ESSAY_TIME_WRAP = (emojis: string, time: string): string => `**${emojis} ${time}**`;
 
-/** 小节标题的文字部分（通知文案用；`# 当日复盘` → `当日复盘`） */
+/** 小节标题的文字部分（通知文案用；`# 当日触动点` → `当日触动点`） */
 export function sectionTitle(section: string): string {
   return section.replace(/^#{1,6}[ \t]*/, '');
 }
 
 /**
  * 该小节的写入是否允许现场建节。
- * 只有复盘允许：它不在骨架里；随笔在骨架里，缺失说明是存量文件 → 遵「存量不动」追加文末。
+ * 只有触动点记录允许：它不在骨架里；随笔在骨架里，缺失说明是存量文件 → 遵「存量不动」追加文末。
  */
 export function sectionCreatesIfMissing(section: string): boolean {
   return section === REVIEW_HEADING;
 }
 
-/** 块首行（纯函数）：写日记 = 加粗行；复盘 = h2 时间分隔标题 */
+/** 块首行（纯函数）：写日记 = 加粗行；触动点记录 = h2 时间分隔标题 */
 export function buildEntryTitle(section: string, tags: string[], time: string): string {
   const emojis = tags.map((tag) => getTagEmoji(tag)).join('');
   return section === REVIEW_HEADING ? `${REVIEW_TIME_PREFIX}${emojis} ${time}` : ESSAY_TIME_WRAP(emojis, time);
@@ -75,8 +79,10 @@ export function writeNoticeText(res: DiaryCaptureResult, dateStr: string, sectio
 }
 
 /**
- * 写入一条日记内容到指定小节（写日记 / 每日复盘共用）。
+ * 写入一条日记内容到指定小节（写日记 / 每日触动点记录共用）。
  * 落点是否建节由 `sectionCreatesIfMissing(section)` 决定；成功/警告由落点决定。
+ * 触动点记录不带旧标题别名（票 302 二次裁定）：旧文件的 `# 当日复盘` 不再命中追加，
+ * 写入一律落 `# 当日触动点`（缺失文末新建，已有按顺序追加）。
  */
 export async function writeDiaryEntry(
   dateStr: string,

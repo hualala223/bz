@@ -90,13 +90,13 @@ describe('任务定义', () => {
 
 describe('模板', () => {
   it('复盘模板：内层三问（小节名由落点提供，ADR-0114）', () => {
-    // 自 ADR-0114 起模板不含小节名：块落在 `# 当日复盘` 小节内，模板再带一行就会出现两个同名标题
+    // 自 ADR-0114 起模板不含小节名：块落在 `# 当日触动点` 小节内，模板再带一行就会出现两个同名标题
     expect(REVIEW_TEMPLATE.startsWith('### 触动点')).toBe(true);
     expect(REVIEW_TEMPLATE).not.toContain('当日复盘');
     expect(REVIEW_TEMPLATE).toContain('#### 描述经过（具体场景）');
     expect(REVIEW_TEMPLATE).toContain('#### 分析原因（why→启发）');
     expect(REVIEW_TEMPLATE).toContain('#### 改进措施（提炼认知点或行动点）');
-    expect(REVIEW_TAG).toBe('复盘');
+    expect(REVIEW_TAG).toBe('触动点');
   });
 
   it('日程模板：代办事项/完成情况跟踪/备注 三段齐全（二级标题，ADR-0113）', () => {

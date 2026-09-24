@@ -141,8 +141,8 @@ describe('写日记落点：`# 随笔` 小节（ADR-0114）', () => {
   });
 });
 
-describe('每日复盘的落点（ADR-0114）', () => {
-  it('复盘入口的落点 = `# 当日复盘`：文件里没有该小节时现场新建，块首行为 h2 时间标题', async () => {
+describe('每日触动点记录的落点（ADR-0114；票 302 更名）', () => {
+  it('触动点记录入口的落点 = `# 当日触动点`：文件里没有该小节时现场新建，块首行为 h2 时间标题', async () => {
     makeVault({ '我的/日记/2024-01-05.md': '# 随笔\n\n# 日程规划\n' });
     applyUiSettings({ diaryJumpToEditAfterSave: false });
     createAddDialog();
@@ -153,7 +153,7 @@ describe('每日复盘的落点（ADR-0114）', () => {
     await saveNewEntry();
 
     const saved = vault.files.get('我的/日记/2024-01-05.md')!;
-    expect(saved).toContain('# 当日复盘');
+    expect(saved).toContain('# 当日触动点');
     expect(saved).toMatch(/## 🪞 21:40/);
     expect(saved).toContain('### 触动点');
     // 随笔小节与日程规划小节一字不动
@@ -161,8 +161,8 @@ describe('每日复盘的落点（ADR-0114）', () => {
     expect(saved).toContain('# 日程规划');
   });
 
-  it('复盘写第二次：追加在 `# 当日复盘` 小节末尾，不重复小节标题', async () => {
-    const first = ['# 随笔', '', '# 当日复盘', '', '## 🪞 09:00', '', '### 触动点', '- ', ''].join('\n');
+  it('触动点记录写第二次：追加在 `# 当日触动点` 小节末尾，不重复小节标题，按时间顺序排列', async () => {
+    const first = ['# 随笔', '', '# 当日触动点', '', '## 🪞 09:00', '', '### 触动点', '- ', ''].join('\n');
     makeVault({ '我的/日记/2024-01-05.md': first });
     applyUiSettings({ diaryJumpToEditAfterSave: false });
     createAddDialog();
@@ -173,8 +173,28 @@ describe('每日复盘的落点（ADR-0114）', () => {
     await saveNewEntry();
 
     const saved = vault.files.get('我的/日记/2024-01-05.md')!;
-    expect(saved.match(/^# 当日复盘$/gm)).toHaveLength(1);
+    expect(saved.match(/^# 当日触动点$/gm)).toHaveLength(1);
     expect(saved.match(/^## 🪞 /gm)).toHaveLength(2);
     expect(saved.indexOf('## 🪞 09:00')).toBeLessThan(saved.indexOf('## 🪞 22:10'));
+  });
+
+  it('旧落点不兼容（票 302 二次裁定）：只有旧标题 `# 当日复盘` 时另建 `# 当日触动点` 在文末，旧小节一字不动', async () => {
+    const legacy = ['# 随笔', '', '# 当日复盘', '', '## 🪞 09:00', '', '### 触动点', '- ', ''].join('\n');
+    makeVault({ '我的/日记/2024-01-05.md': legacy });
+    applyUiSettings({ diaryJumpToEditAfterSave: false });
+    createAddDialog();
+    openReviewDialog();
+
+    const dt = document.getElementById('add-diary-datetime') as HTMLInputElement;
+    dt.value = '2024-01-05 22:10';
+    await saveNewEntry();
+
+    const saved = vault.files.get('我的/日记/2024-01-05.md')!;
+    // 旧标题原样保留，新标题在文末新建，新块落在新标题下
+    expect(saved.match(/^# 当日复盘$/gm)).toHaveLength(1);
+    expect(saved.match(/^# 当日触动点$/gm)).toHaveLength(1);
+    expect(saved.indexOf('# 当日触动点')).toBeGreaterThan(saved.indexOf('# 当日复盘'));
+    expect(saved.indexOf('## 🪞 22:10')).toBeGreaterThan(saved.indexOf('# 当日触动点'));
+    expect(saved.match(/^## 🪞 /gm)).toHaveLength(2);
   });
 });

@@ -347,7 +347,7 @@ describe('planDiary / openPlanPicker', () => {
 });
 
 describe('openReviewDialog', () => {
-  it('预选「复盘」标签并预填复盘模板', async () => {
+  it('预选「触动点」标签并预填触动点记录模板', async () => {
     setupVault();
     createAddDialog();
     const { openReviewDialog, REVIEW_TEMPLATE } = await import('../../src/diary/daily');
@@ -355,7 +355,7 @@ describe('openReviewDialog', () => {
     const active = Array.from(document.querySelectorAll('#add-diary-type-container .diary-active')).map(
       (el) => el.textContent || ''
     );
-    expect(active.some((t) => t.includes('复盘'))).toBe(true);
+    expect(active.some((t) => t.includes('触动点'))).toBe(true);
     const ta = document.getElementById('add-diary-content') as HTMLTextAreaElement;
     expect(ta.value).toBe(REVIEW_TEMPLATE);
   });
