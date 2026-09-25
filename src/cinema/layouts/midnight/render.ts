@@ -33,6 +33,7 @@ export function midnightDeskHtml(): string {
         <div class="rail-foot">
           <button class="rail-item j-tool" data-tool="ai">${iconSpan(ICON.ai)}AI 荐片</button>
           <button class="rail-item j-tool" data-tool="stat">${iconSpan(ICON.stat)}观影分析</button>
+          <button class="rail-item" data-film-open>${iconSpan(ICON.eye)}观影志</button>
         </div>
       </aside>
       <div class="d-main j-view"></div>
@@ -47,6 +48,7 @@ export function midnightMobHtml(): string {
       <span class="m-acts">
         <button class="add j-madd" data-cinema-add title="添加条目">${iconSpan(ICON.add)}</button>
         <button class="m-tool j-mai" title="AI 荐片">${iconSpan(ICON.ai)}</button>
+        <button class="m-tool j-yb" data-film-open title="观影志">${iconSpan(ICON.eye)}</button>
         <button class="m-tool j-mstat" title="观影分析">${iconSpan(ICON.stat)}</button>
         <button class="m-tool j-mclose" title="关闭">${iconSpan(ICON.close)}</button>
       </span>

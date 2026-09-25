@@ -26,12 +26,14 @@ import {
 } from './constants';
 import { M, type CinemaItem, type CinemaSortMode } from './state';
 import { rebuildItems, getDisplayItems, parseEpisodeCount } from './data';
-import { localNow, esc } from '../core/ui/str';
+import { localNow, esc, iconSpan } from '../core/ui/str';
 import { getCountryOptions, getGenreOptions, addCountryOption, addGenreOption } from './options';
 import { runAIRecommend, runSimilarRecommend, buildTasteProfile, quickAddWant } from './recommend';
 import { buildAnalysisHTML } from './analysis';
 import { enqueueDoubanFetch, dequeueDoubanFetch, isFetching } from './douban-queue';
 import { refetchCinemaDouban } from './douban-refetch';
+import { fitRotatedBox } from '../core/landscape';
+import { bindYearbook, deriveYb, yearbookHtml, yearbookOpenHtml, yearbookFixedHtml, type YbHandle } from './yearbook';
 import {
   ICON, statusText, itemByKey, itemKey, doubanSearchUrl,
   detailModalHtml, confirmModalHtml, formModalHtml, optionChipsHtml, genreLabel,
@@ -745,6 +747,90 @@ function refreshDeskList(app: App, sec: HTMLElement): void {
   mountIcons(sec);
 }
 
+
+// ---------- 观影志（yearbook）：覆盖影院面板的一层（上游 ADR-0175；25 幕长片见 yearbook/） ----------
+
+let ybOvl: HTMLElement | null = null;
+let ybHandle: YbHandle | null = null;
+let ybSync: (() => void) | null = null; // 层框跟随面板矩形（窗 resize / 面板 resize）
+let ybRo: ResizeObserver | null = null;
+
+/** 层框 = 面板矩形（上游 ADR-0175）：几何与软横屏转置单源在 core/landscape（review/clipbook 同款）。
+ *  基字号随层框派生（不再 vmin）——面板是固定尺寸，跟窗口跑会让真机与原型排成两个密度。 */
+function fitYbBox(box: HTMLElement, panel: HTMLElement | null): void {
+  const fit = fitRotatedBox(box, panel, isMobileEnv());
+  if (!fit || !panel) return; // 面板没几何（测试环境）：保持 CSS 兜底
+  const base = Math.max(12, Math.min(19, 12 * Math.min(fit.w / 900, fit.h / 620)));
+  box.style.fontSize = `${base.toFixed(2)}px`;
+  box.style.borderRadius = getComputedStyle(panel).borderTopLeftRadius || '';
+}
+
+/** 打开观影志：覆盖影院面板的一层（上游 2026-09-21 定版形态；批 5cine 收尾补票接线）。
+ *  点框外（遮罩）＝关、ESC 同义；桌面不给关闭按钮，移动端面板满屏没有遮罩可点、按钮即出口。
+ *  内容 = 25 幕长片（yearbook/），全部数据来自笔记 frontmatter 里的真实字段；
+ *  一条影视都没有时给空态（带「添加影视」入口）。明暗跟随 Obsidian（styles.css 的 --yb-* 变量层）。
+ *  翻幕：滚轮/方向键一滚一幕，翻到的那幕从头演一遍。
+ *  本地并存：入口名「观影志」，本地既有「观影分析」统计页（票 294/296）原样保留，两入口并列。 */
+export function openYearbookOverlay(app: App): void {
+  if (ybOvl?.isConnected) { // 已开：不叠第二层，晃一下提示还在
+    const box = ybOvl.querySelector<HTMLElement>('.bz-yb-box');
+    if (box) { box.classList.remove('is-nudge'); void box.offsetWidth; box.classList.add('is-nudge'); }
+    return;
+  }
+  rebuildItems(app);
+  const data = deriveYb(M.items);
+  const panel = M.currentOverlay?.querySelector<HTMLElement>('[data-cinema-root]') ?? null;
+  const ovl = document.createElement('div');
+  ovl.className = 'bz-yb';
+  // 层根只当遮罩（透明、接「点框外」）；纸面与内容全在 .bz-yb-box 里，框即面板矩形。
+  // 固定层（导航点/遮片）放 .bz-yb-scroll 的兄弟位：box 不滚，翻到哪幕都常驻
+  ovl.innerHTML = `
+    <div class="bz-yb-box">
+      ${isMobileEnv() ? `<button class="bz-yb-close" data-yb-close title="关闭观影志" aria-label="关闭观影志">${iconSpan(ICON.close)}</button>` : ''}
+      ${data.total ? yearbookOpenHtml() : ''}
+      <div class="bz-yb-scroll">${data.total
+        ? yearbookHtml(data, (it) => posterUrl(it, app))
+        : `<div class="bz-yb-blank"><p>影院还是空的——先添一部，这一页才有得放。</p><button class="bz-btn" data-cinema-analysis-add type="button">添加影视</button></div>`}</div>
+      ${data.total ? yearbookFixedHtml() : ''}
+    </div>`;
+  document.body.appendChild(ovl);
+  mountIcons(ovl);
+  topifyZ(ovl); // 显示即发号（ADR-0067）：叠在影院面板/其它浮层之上，关掉即销号
+  ybOvl = ovl;
+  const box = ovl.querySelector<HTMLElement>('.bz-yb-box');
+  if (box) {
+    fitYbBox(box, panel);
+    ybSync = () => fitYbBox(box, panel);
+    window.addEventListener('resize', ybSync);
+    // 面板自身也会 resize（Obsidian 窗口变化 / 移动端旋屏）：跟它同步，别只在窗 resize 时对一次
+    if (typeof ResizeObserver === 'function' && panel) {
+      ybRo = new ResizeObserver(ybSync);
+      ybRo.observe(panel);
+    }
+  }
+  ovl.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    // 空态里的「添加影视」：先收观影志再开表单（表单在面板层，留着会把它盖住）
+    if (t.closest('[data-cinema-analysis-add]')) { closeYearbookOverlay(); openAddModalDirect(app); return; }
+    if (t.closest('[data-yb-close]')) { closeYearbookOverlay(); return; }
+    if (!t.closest('.bz-yb-box')) closeYearbookOverlay(); // 点框外 = 遮罩，关掉露出影院面板
+  });
+  registerPanelEsc('cinema-yearbook', () => !!ybOvl?.isConnected, closeYearbookOverlay);
+  if (data.total) ybHandle = bindYearbook(ovl, data);
+}
+
+/** 关闭观影志：引擎先停（rAF/监听/观察者自灭），再摘层与几何跟随。幂等。 */
+export function closeYearbookOverlay(): void {
+  ybHandle?.stop();
+  ybHandle = null;
+  if (ybSync) { window.removeEventListener('resize', ybSync); ybSync = null; }
+  ybRo?.disconnect();
+  ybRo = null;
+  unregisterPanelEsc('cinema-yearbook');
+  ybOvl?.remove();
+  ybOvl = null;
+}
+
 // ---------- 事件绑定（sec 级委托一次；重渲染内容全覆盖） ----------
 
 function bindMidnight(sec: HTMLElement, app: App): void {
@@ -787,6 +873,8 @@ function bindMidnight(sec: HTMLElement, app: App): void {
     }
     const mexp = t.closest('[data-cinema-export]') as HTMLElement | null;
     if (mexp) { void exportReviews(sec, app); return; }
+    // 观影志：桌面 rail / 移动 bar 的 data-film-open 按钮（与「观影分析」统计页并存）
+    if (t.closest('[data-film-open]')) { openYearbookOverlay(app); return; }
     const tool = t.closest('.j-tool') as HTMLElement | null;
     if (tool && tool.dataset.tool) {
       // 进 ai/stat 不动筛选状态：rail 高亮由渲染层按视图熄灭（render.ts listOn 门控），

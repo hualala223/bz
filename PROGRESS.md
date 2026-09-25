@@ -921,3 +921,12 @@
 - [x] 测试同步：add-dialog-content（新建 / 按顺序追加 / 旧落点不兼容三用例）/ add-dialog-steps / daily-tasks / daily-flow
 - [x] 门禁：tsc --noEmit 0 错；esbuild production 过（vault 产物 + 根三件套再生，不提交）；vitest diary 域 33 文件 485 用例全绿；全量 6 失败同票 297/299/300 记录的并行会话遗留基线（clipbook news-fetcher/ui + core/obsidian-adapter），与本票无关
 - [x] ADR-0131；CONTEXT.md 术语（分步写日记/日记内容块/日常时间记录）同步；issues/302-daily-review-rename-touchpoint.md；上游吸收豁免点 +1（ADR-0121 冻结域，用户直接裁决）
+
+### 批 5cine 收尾补票 — 观影志（yearbook）接线落位（源 yeshimei/bz@42c00d1d）
+
+- [x] 缺口盘点：批 5cine 收官（09619825）只并了 yearbook/ 六件源码，UI 入口与样式源漏接——域外零引用、构建产物无内容（2026-09-25 盘点定案，.scratch/upstream-diff-report-2026-09-25.md）
+- [x] ui.ts：上游 ADR-0175 行为块整段嫁接（openYearbookOverlay/closeYearbookOverlay/fitYbBox；层框=面板矩形、ESC 名 cinema-yearbook、空态「添加影视」直开表单）+ 分发器 data-film-open 分支（j-tool 之前）
+- [x] layouts/midnight/render.ts：桌面 rail-foot 与移动 bar 各加「观影志」data-film-open 按钮（ICON.eye）；本地「观影分析」统计页（票 294/296）原样保留并存
+- [x] styles.css：上游 .bz-yb 段 678 行整段落位；动效令牌上游共组（.bz-cinema--midnight,.bz-yb,.cn-skin）本地不存在，收窄为 .bz-yb 单独成组；空态排版两条本地补齐（上游靠全局 .bz-btn 兜底）
+- [x] tests/cinema/yearbook.test.ts：11 例（deriveYb 口径锚 / 覆盖层装配 / 幂等开合 / 入口 markup）
+- [x] 门禁：tsc --noEmit 0；vitest 全量 3870 全绿（secondbrain 3 处 unhandled error 为 master 既有噪声，主仓单跑复现）；合并后统一构建部署
