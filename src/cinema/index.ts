@@ -7,7 +7,7 @@ import { tryGetSettings } from '../core/settings-provider';
 import { onDomainEvent } from '../core/domain-bus';
 import { M, resetCinemaState, resolveCinemaFolderPath, DEFAULT_FOLDER } from './state';
 import { rebuildItems } from './data';
-import { createOverlay, closeOverlay, registerEscapeHandler, renderAll, openAddModalDirect, openRandomMovie } from './ui';
+import { createOverlay, closeOverlay, registerEscapeHandler, renderAll, openAddModalDirect, openRandomMovie, runCinemaDedupe } from './ui';
 import { shutdownDoubanQueue, sweepDoubanFetch } from './douban-queue';
 
 // 重抓命令入口（票 301 Q15；实现在 douban-refetch，经域入口转出供 main.ts）
@@ -113,6 +113,22 @@ export function openCinemaExport(app: App): void {
     createOverlay(app);
     sweepDoubanFetch(app);
   }
+}
+
+/**
+ * 查重/去重（命令 bz-cinema-dedupe，票 306）：面板未开则冷开列表页，已开就地弹裁决窗。
+ * 判定/裁决/删除语义见 dedupe.ts 与 ui.ts openDedupeDialog（回收站可恢复）。
+ */
+export function openCinemaDedupe(app: App): void {
+  ensureCinema(app);
+  M.view = 'list';
+  if (M.currentOverlay) renderAll(app);
+  else {
+    applyDefaultView();
+    createOverlay(app);
+    sweepDoubanFetch(app);
+  }
+  runCinemaDedupe(app);
 }
 
 /**

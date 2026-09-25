@@ -171,7 +171,7 @@ export function listToolsHtml(view: CinemaView): string {
   if (view.multiSelect) return multiBarHtml(view);
   return `<div class="d-tools"><label class="d-search">${iconSpan(ICON.search)}<input class="j-q" placeholder="搜索条目（名称、类型、感想）..." value="${esc(view.searchKeyword)}"></label>
     <div class="seg j-sort">${([['date', '最近观看'], ['created', '加入先后'], ['rating', '按评分']] as const).map(([k, l]) => `<button data-k="${k}" class="${view.sortMode === k ? 'is-on' : ''}">${l}</button>`).join('')}</div>
-    <button class="dm-btn j-multi" data-cinema-multiselect>多选</button></div>`;
+    <button class="dm-btn j-multi" data-cinema-multiselect>多选</button><button class="dm-btn j-dd" data-cinema-dedupe>查重复</button></div>`;
 }
 
 // ---------- 渲染胶水（desk/mob 各自回填挂点；两侧同构执行） ----------

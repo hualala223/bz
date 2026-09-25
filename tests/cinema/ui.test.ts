@@ -354,6 +354,41 @@ describe('cinema 风格化面板（issue 236）', () => {
     expect(M.items.find((i) => i.name === '手动片B')!.typeTag).toBe('电影'); // 手动默认
   });
 
+  it('票306 查重：sid 确认组弹裁决窗，确认后删除走回收站、用户数据搬补保留条', async () => {
+    const { app, vault } = seedVault();
+    // 同 sid 双条：B 信息全（评分+观影日期）为推荐保留；A 只有影评可搬补
+    vault.files.set('我的/娱乐/《重复A》.md', md(`---\ntags: [电影]\n评分: -1\n影评: 来自重复条的短评\n豆瓣链接: https://movie.douban.com/subject/999/\n---`));
+    vault.files.set('我的/娱乐/《重复B》.md', md(`---\ntags: [电影]\n评分: 8.5\n观影日期: 2026-08-08\n豆瓣链接: https://movie.douban.com/subject/999/\n---`));
+    rebuildItems(app);
+    createOverlay(app);
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    clickEl(root.querySelector('[data-cinema-dedupe]'));
+    const form = root.querySelector('.cn-dedupe') as HTMLElement;
+    expect(form).toBeTruthy();
+    expect(form.querySelectorAll('.dd-group')).toHaveLength(1);
+    expect(form.querySelector('.dd-kind')?.textContent).toContain('确认重复');
+    // 推荐保留 = 信息最全的重复B（首位默认勾选）
+    expect((form.querySelector('input[name="dd-0"]:checked') as HTMLInputElement).value).toBe('0');
+    expect(form.querySelector('.dd-item .dd-name')?.textContent).toBe('重复B');
+    clickEl(form.querySelector('.j-dd-run'));
+    await vi.waitFor(() => expect(hasNotice('已去重：删 1 条（移入回收站，可恢复）')).toBe(true));
+    expect(vault.files.has('我的/娱乐/《重复B》.md')).toBe(true); // 保留条在
+    expect(vault.files.has('我的/娱乐/《重复A》.md')).toBe(false); // 被删条出库
+    expect(vault.trashed.map((t) => t.path)).toContain('我的/娱乐/《重复A》.md');
+    expect(vault.trashed[0].system).toBe(true); // 回收站语义
+    expect(vault.files.get('我的/娱乐/《重复B》.md')).toContain('影评: 来自重复条的短评'); // 搬补落盘
+    expect(M.items.find((i) => i.name === '重复A')).toBeUndefined();
+  });
+
+  it('票306 查重：库内无重复 → 只提示不出弹窗', () => {
+    const { app } = seedVault();
+    createOverlay(app);
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    clickEl(root.querySelector('[data-cinema-dedupe]'));
+    expect(root.querySelector('.cn-dedupe')).toBeNull();
+    expect(hasNotice('未发现重复条目（豆瓣指纹 + 归一名称双口径都查过）')).toBe(true);
+  });
+
   it('CM2：新增重名拦截（不落盘不留幽灵条目）', async () => {
     const { app, vault } = seedVault();
     createOverlay(app);

@@ -34,12 +34,14 @@ import { enqueueDoubanFetch, dequeueDoubanFetch, isFetching, fetchDepsFromSettin
 import { refetchCinemaDouban } from './douban-refetch';
 import { queryDoubanByName, type DoubanQuery } from './douban-fetcher';
 import { decideCinemaType } from './type-decide';
+import { extractDoubanSid, findDuplicateGroups, mergeUserData } from './dedupe';
 import { fitRotatedBox } from '../core/landscape';
 import { bindYearbook, deriveYb, yearbookHtml, yearbookOpenHtml, yearbookFixedHtml, type YbHandle } from './yearbook';
 import {
   ICON, statusText, itemByKey, itemKey, doubanSearchUrl,
   detailModalHtml, confirmModalHtml, formModalHtml, optionChipsHtml, genreLabel,
   formBackHtml, formTagChipHtml, formStChipHtml, type FormPreviewData,
+  dedupeModalHtml,
   aiPageHtml, sheetHeadHtml, pcardHtml, type AiPageInput,
   midnightDeskHtml, midnightMobHtml, renderMidnightDesk, renderMidnightMob,
   type MidnightRenderInput,
@@ -533,6 +535,15 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
           notice('解析失败（网络异常）', 'error');
         }
         if (q) {
+          // 添加防重（票 306）：解析命中的豆瓣条目 sid 已在库 → 收场提示，不重复入库
+          // （同名的硬拦截 saveNew 本就有，这里兜「同名不同译/加过没记住」的情形）
+          const sid = extractDoubanSid(q.apizero?.doubanUrl || q.detailUrl);
+          const dup = sid ? M.items.find((x) => extractDoubanSid(x.doubanUrl) === sid) : undefined;
+          if (dup) {
+            close();
+            notice(`该条目已在库中：《${dup.name}》，不再重复添加`);
+            return;
+          }
           const a = q.apizero;
           const preview: FormPreviewData = {
             posterUrl: q.posterUrl, title: q.title, typeTag: cur.tag,
@@ -806,6 +817,83 @@ async function exportReviews(sec: HTMLElement, app: App): Promise<void> {
   renderAll(app);
 }
 
+// ---------- 查重/去重（票 306） ----------
+
+/** 查重裁决弹窗：findDuplicateGroups 出组 → 用户逐组单选保留项（默认=信息最全）→ 确认后
+ *  逐条删除（vault.trash 回收站语义，与删除确认同款；G8 同款出队豆瓣抓取）。保留条缺失的
+ *  评分/影评/观影日期自被删条搬补（mergeUserData 只补不覆盖）并 persistItem 落盘 */
+function openDedupeDialog(sec: HTMLElement, app: App): void {
+  rebuildItems(app);
+  const groups = findDuplicateGroups(M.items);
+  if (!groups.length) {
+    notice('未发现重复条目（豆瓣指纹 + 归一名称双口径都查过）');
+    return;
+  }
+  const vm = groups.map((g) => ({
+    kind: g.kind,
+    members: g.members.map((it) => ({
+      name: it.name,
+      meta: [
+        it.typeTag,
+        statusText(it.status),
+        it.rating !== null && it.rating > 0 ? `评分 ${it.rating}` : null,
+        it.review && it.review.trim() ? '有影评' : null,
+        extractDoubanSid(it.doubanUrl) ? '有豆瓣指纹' : null,
+      ].filter(Boolean).join(' · '),
+    })),
+  }));
+  const dropCount = groups.reduce((acc, g) => acc + g.members.length - 1, 0);
+  const { el, close } = ovl(sec, dedupeModalHtml(groups.length, dropCount, vm), { sticky: true });
+  el.querySelector('.j-cancel')?.addEventListener('click', close);
+  el.querySelector('.j-dd-run')?.addEventListener('click', () => {
+    void (async () => {
+      let deleted = 0;
+      for (let gi = 0; gi < groups.length; gi++) {
+        const checked = (el.querySelector(`input[name="dd-${gi}"]:checked`) as HTMLInputElement | null)?.value;
+        const keepIdx = checked !== undefined ? Number(checked) : groups[gi].keepIndex;
+        const keep = groups[gi].members[keepIdx];
+        let merged = 0;
+        for (let mi = 0; mi < groups[gi].members.length; mi++) {
+          if (mi === keepIdx) continue;
+          const drop = groups[gi].members[mi];
+          if (drop.file) {
+            try {
+              await app.vault.trash(drop.file, true);
+            } catch (e) {
+              console.error('去重删除失败:', e);
+              notice(`「${drop.name}」删除失败，已跳过`, 'error');
+              continue;
+            }
+            dequeueDoubanFetch(drop.file.path);
+          }
+          merged += mergeUserData(keep, drop);
+          const idx = M.items.indexOf(drop);
+          if (idx > -1) M.items.splice(idx, 1);
+          emitDomainEvent('movie', { kind: 'deleted', name: drop.name });
+          deleted++;
+        }
+        if (merged > 0) await persistItem(keep, app); // 搬补了用户数据才落盘
+      }
+      close();
+      renderAll(app);
+      notice(`已去重：删 ${deleted} 条（移入回收站，可恢复）`);
+    })();
+  });
+}
+
+/** 查重入口（命令 bz-cinema-dedupe；工具行走 openDedupeDialog 直达）：面板已开就地弹裁决窗，
+ *  未开则冷开列表页再弹（样板同 openRandomMovie 的冷开口径） */
+export function runCinemaDedupe(app: App): void {
+  rebuildItems(app);
+  if (!M.currentOverlay) {
+    M.view = 'list';
+    createOverlay(app);
+  }
+  const sec = M.currentOverlay?.querySelector<HTMLElement>('[data-cinema-root]');
+  if (!sec) return;
+  openDedupeDialog(sec, app);
+}
+
 // ---------- 搜索（防抖；desk 部分刷新保焦点 / mob 全刷+回焦） ----------
 
 function onSearchInput(app: App, sec: HTMLElement, isMob: boolean, raw: string): void {
@@ -955,6 +1043,8 @@ function bindMidnight(sec: HTMLElement, app: App): void {
       renderAll(app);
       return;
     }
+    // 票 306：查重/去重（工具行「查重复」按钮）
+    if (t.closest('[data-cinema-dedupe]')) { openDedupeDialog(sec, app); return; }
     const mexit = t.closest('[data-cinema-multiselect-exit]') as HTMLElement | null;
     if (mexit) {
       M.multiSelect = false;

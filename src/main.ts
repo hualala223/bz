@@ -35,7 +35,7 @@ import { openGameshelf, openGameshelfStats, syncGameshelf, unloadGameshelf } fro
 // 阅读数据分析报告（读书报告内嵌化 ADR-0091：独立弹窗退役，报告为书架墙面板内视图）
 import { unloadReadingReport } from './reading-report';
 // 影院（cinema 域，上游 ADR-0087 起接管影视；旧 movie 域已退役。ADR-0090：报告窗并入影院内嵌分析页）
-import { openCinema, addCinemaItem, openCinemaAnalysis, openCinemaExport, pickRandomCinema, unloadCinema, refetchCinemaDouban } from './cinema';
+import { openCinema, addCinemaItem, openCinemaAnalysis, openCinemaExport, pickRandomCinema, unloadCinema, refetchCinemaDouban, openCinemaDedupe } from './cinema';
 import { migrateCinemaFolder } from './cinema/migrate';
 // 复习（ticket 168 单一入口：仅「复习（按数量）」命令；ticket 169 加回「加入复习计划」；ensureReview/unloadReview 为常驻监控与卸载所需）
 import { reviewCountStart, reviewAddCurrent, reviewAddCurrentWithLinks, openReviewReport, openTodayReviewed, ensureReview, unloadReview } from './review';
@@ -140,6 +140,8 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-cinema-random-pick', name: '随机抽一部', icon: 'shuffle', callback: () => pickRandomCinema(getApp()) },
   // 重抓当前条目豆瓣（票 301 Q15：影视/书籍自动分流，清豆瓣字段 → 弹框确认搜索词 → 重抓）
   { id: 'bz-cinema-douban-refetch', name: '重抓当前条目豆瓣', icon: 'refresh-cw', callback: () => void refetchCinemaDouban(getApp()) },
+  // 查重/去重（票 306：双口径判定——豆瓣 sid 确认重复 + 归一名称疑似重复；分组裁决，删除走回收站）
+  { id: 'bz-cinema-dedupe', name: '娱乐条目查重', icon: 'copy', callback: () => openCinemaDedupe(getApp()) },
   // 复习（ticket 168 单一入口：仅保留「复习（按数量）」；ticket 169 加回「加入复习计划」、ticket 170 加「批量加入」，editorCallback 进文档右键待选）
   {
     id: 'bz-review-add-current', name: '将当前文档加入复习计划', icon: 'list-plus',

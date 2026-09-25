@@ -606,3 +606,25 @@ export function confirmModalHtml(item: CinemaItem): string {
     <div class="dm-actions"><button class="dm-btn j-cancel">取消</button><button class="dm-btn danger j-del">${iconSpan(ICON.del)}删除</button></div>
   </div>`;
 }
+
+// ===== 票 306 查重/去重 =====
+/** 查重裁决弹窗的组视图（行为层组装好展示串，本层只管 markup 单源） */
+export interface DedupeModalGroup {
+  kind: 'sid' | 'name';
+  members: { name: string; meta: string }[];
+}
+
+/** 查重裁决弹窗：每组单选保留项（首位=推荐保留，信息最全），删除动作留行为层（回收站语义） */
+export function dedupeModalHtml(groupCount: number, dropCount: number, groups: DedupeModalGroup[]): string {
+  return `<div class="cn-modal cn-dedupe" style="max-width:540px;width:100%">
+    <div class="cn-modal-title">查重复（${groupCount} 组 · 建议删除 ${dropCount} 条）</div>
+    <div class="dd-list">${groups.map((g, gi) => `
+      <div class="dd-group"><div class="dd-kind${g.kind === 'sid' ? ' is-sid' : ''}">${g.kind === 'sid' ? '确认重复（豆瓣同一条目）' : '疑似重复（归一同名，注意甄别）'}</div>
+        ${g.members.map((m, mi) => `
+        <label class="dd-item"><input type="radio" name="dd-${gi}" value="${mi}"${mi === 0 ? ' checked' : ''}>
+          <span class="dd-name">${esc(m.name)}</span><span class="dd-meta">${esc(m.meta)}</span></label>`).join('')}
+      </div>`).join('')}
+    </div>
+    <div class="dm-actions"><button class="dm-btn j-cancel">取消</button><button class="dm-btn gold j-dd-run">去重（删 ${dropCount} 条）</button></div>
+  </div>`;
+}
