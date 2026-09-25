@@ -177,7 +177,7 @@ export function starsLit(rating: number): number {
  * 不额外占卡片高度；正脸 = 最近观看的一季，评分取最新已评季（读作「你最近在追的那一季」）。
  * `.pw-face` 是海报内芯的独立包裹层：悬浮季圆点时行为层只换它，抓取遮罩/角标/圆点原地不动。
  */
-export function cardHtml(e: CardEntry, posterUrl: string | null, fetching = false): string {
+export function cardHtml(e: CardEntry, posterUrl: string | null, fetching = false, picked = false): string {
   const it = e.kind === 'series' ? e.face : e.item;
   const st = cardStatus(e);
   const p = facePiecesHtml(it, posterUrl, e.kind === 'series' ? { name: e.name, rating: e.rating } : {});
@@ -191,16 +191,17 @@ export function cardHtml(e: CardEntry, posterUrl: string | null, fetching = fals
   const chBadge = st === STATUS_WATCHING && chaptersEligibleTag(it.typeTag)
     && it.chaptersWatching !== null && it.chaptersTotal !== null
     ? `<span class="badge badge-eps">${it.chaptersWatching}/${it.chaptersTotal}章</span>` : '';
-  return `<div class="pcard${e.kind === 'series' ? ' pcard-series' : ''}" data-cinema-key="${esc(e.kind === 'series' ? e.key : itemKey(it))}" tabindex="0" role="button" aria-label="${esc(label)}"><div class="pw"><div class="pw-face">${p.poster}</div>${fetching ? '<div class="pw-fetch"><span class="pw-spin"></span></div>' : ''}
+  return `<div class="pcard${e.kind === 'series' ? ' pcard-series' : ''}${picked ? ' is-picked' : ''}" data-cinema-key="${esc(e.kind === 'series' ? e.key : itemKey(it))}" tabindex="0" role="button" aria-label="${esc(label)}"><div class="pw"><div class="pw-face">${p.poster}</div>${fetching ? '<div class="pw-fetch"><span class="pw-spin"></span></div>' : ''}
     ${st !== STATUS_WATCHED ? `<span class="badge" style="background:${statusColor(st)}">${statusText(st)}</span>` : ''}${epsBadge}${chBadge}${e.kind === 'series' ? seasonDotsHtml(e.seasons) : ''}</div>
     <div class="pname">${p.name}</div>
     <div class="pmeta">${p.meta}</div>
     <div class="pstars">${p.stars}</div></div>`;
 }
 
-/** 单条目片卡（pcardHtml 调用点先于合并卡存在：douban-queue 测试与语义单条入口仍用此名） */
-export function pcardHtml(it: CinemaItem, posterUrl: string | null, fetching = false): string {
-  return cardHtml({ kind: 'single', item: it }, posterUrl, fetching);
+/** 单条目片卡（pcardHtml 调用点先于合并卡存在：douban-queue 测试与语义单条入口仍用此名）；
+ *  picked=多选导出模式勾选高亮（票 296） */
+export function pcardHtml(it: CinemaItem, posterUrl: string | null, fetching = false, picked = false): string {
+  return cardHtml({ kind: 'single', item: it }, posterUrl, fetching, picked);
 }
 
 /** 多选导出工具条（票 296；desk 工具行与 mob 列表顶部共用；动作接线留行为层） */
@@ -341,9 +342,11 @@ export function seriesDetailModalHtml(card: SeriesCard, posterOf: (it: CinemaIte
   </div>`;
 }
 
-/** 组 → 细分 tag 映射（表单 choices 用；与原型 GROUP_SUBS 同序） */
+/** 组 → 细分 tag 映射（表单 choices 用；与原型 GROUP_SUBS 同序）。
+ *  键集合必须覆盖 GROUP_ORDER 全部顶级类型（票 293 七项 + 其他；其他不入表单不查此表）——
+ *  批 5cine 曾被上游版覆盖成「剧集」口径，formAllTags 查到 undefined 当场崩（编辑/添加表单全灭），勿再回退 */
 export const GROUP_SUBS_OF: Record<string, string[]> = {
-  电影: [], 剧集: ['国产剧', '美剧', '英剧', '德剧', '日剧', '韩剧', '哥伦比亚剧'], 动漫: ['日漫', '国漫', '美漫'], 纪录片: [], 公开课: ['公开课'],
+  电影: [], 电视剧: [], 短剧: [], 书籍: [], 动漫: [], 纪录片: [], 公开课: ['公开课', 'TED'],
 };
 
 /** 分类行标签：书籍组叫「体裁」（图书馆口径，票 299），其余组「题材」；spaced=表单标签带空格风格。fm 键「类型」不变，纯显示层 */
@@ -374,21 +377,32 @@ export function formChoicesHtml(values: string[], cur: string, attr: string): st
  *  新增态 = **双面卡片**（issue 395）：正面 = 名称 + 状态 +（已看点开）评分/影评 + 解析按钮；
  *  点「解析」拉豆瓣 → 翻到背面看全部信息。评分/影评收在正面状态下方（2026-09-21 用户拍板：
  *  点已看就要当场能填，不必等解析翻面；背面是豆瓣形制信息，不放记录段）。
- *  编辑态 = 单面到底：已有笔记不必重新解析，全字段直出 + 保存。 */
-export function formModalHtml(opts: { [k: string]: unknown; editing: boolean; name: string; typeTag: string; stText: string; rating: number; review: string }): string {
+ *  编辑态 = 单面到底：已有笔记不必重新解析，全字段直出 + 保存——
+ *  国家/题材（票 294，j-genre-label 票 299 动态标签）、集数/章节（票 295/301）
+ *  为本地保留件，批 5cine 曾被上游签名整批砍掉（字段落进索引签名静默丢弃），勿再回退。 */
+export function formModalHtml(opts: { editing: boolean; name: string; typeTag: string; stText: string; rating: number; review: string; country: string | null; genres: string[]; countryOptions: string[]; genreOptions: string[]; epsTotal: number | null; epsWatching: number | null; chTotal: number | null; chWatching: number | null }): string {
   const { editing } = opts;
   const initSt = opts.stText;
-  const nameField = `<div class="f-field"><span class="f-label">名 称</span><input class="f-input j-name" value="${esc(opts.name)}" placeholder="影视名称"></div>`;
+  const country = opts.country ?? '';
+  const genreLabelText = genreLabel(getGroupForTag(opts.typeTag) ?? '其他', true);
+  const nameField = `<div class="f-field"><span class="f-label">名 称</span><input class="f-input j-name" value="${esc(opts.name)}" placeholder="条目名称"></div>`;
   const stField = `<div class="f-field"><span class="f-label">状 态</span><div class="f-choice j-sts">${formChoicesHtml(['想看', '在看', '已看'], initSt, 'f-st')}</div></div>`;
   const ratingField = `<div class="f-field j-rating" style="display:${initSt === '已看' ? '' : 'none'}"><span class="f-label">评 分</span>
       <div class="f-range-row"><input type="range" class="f-range j-range" min="1" max="10" step="0.1" value="${opts.rating}"><span class="f-range-val j-rval">${Number(opts.rating).toFixed(1)}</span><span class="f-stars j-stars" data-lit="${starsLit(opts.rating)}">${starsHtml(opts.rating)}</span></div></div>`;
-  const reviewField = `<div class="f-field j-review" style="display:${initSt === '已看' ? '' : 'none'}"><span class="f-label">影 评</span><textarea class="f-input j-review-t" placeholder="写点什么…">${esc(opts.review)}</textarea></div>`;
+  const reviewField = `<div class="f-field j-review" style="display:${initSt === '已看' ? '' : 'none'}"><span class="f-label">感 想</span><textarea class="f-input j-review-t" placeholder="写点什么…">${esc(opts.review)}</textarea></div>`;
+  const countryField = `<div class="f-field"><span class="f-label">国 家</span><div class="f-choice j-countries">${optionChipsHtml(opts.countryOptions, country ? [country] : [], 'f-country', false)}</div></div>`;
+  const genreField = `<div class="f-field"><span class="f-label j-genre-label">${genreLabelText}</span><div class="f-choice j-genres">${optionChipsHtml(opts.genreOptions, opts.genres, 'f-genre', true)}</div></div>`;
+  const epsField = `<div class="f-field j-eps" style="display:none"><span class="f-label">集 数</span>
+      <div class="f-eps-row"><label>正在看 <input type="number" min="0" class="f-input j-eps-watching" value="${opts.epsWatching ?? ''}"></label><label>总集数 <input type="number" min="0" class="f-input j-eps-total" value="${opts.epsTotal ?? ''}"></label></div></div>`;
+  const chField = `<div class="f-field j-chapters" style="display:none"><span class="f-label">章 节</span>
+      <div class="f-eps-row"><label>正在看 <input type="number" min="0" class="f-input j-ch-watching" value="${opts.chWatching ?? ''}"></label><label>总章节数 <input type="number" min="0" class="f-input j-ch-total" value="${opts.chTotal ?? ''}"></label></div></div>`;
   if (editing) {
     return `<div class="cn-modal" style="width:100%">
-    <div class="cn-modal-title">编辑影视</div>
+    <div class="cn-modal-title">编辑条目</div>
     ${nameField}
     <div class="f-field"><span class="f-label">类 型</span><div class="f-choice j-tags">${formChoicesHtml(formAllTags(), opts.typeTag, 'f-tag')}</div></div>
-    ${stField}${ratingField}${reviewField}
+    ${countryField}${genreField}
+    ${stField}${epsField}${chField}${ratingField}${reviewField}
     <div class="dm-actions"><button class="dm-btn gold j-save">保存</button></div>
   </div>`;
   }
@@ -397,7 +411,7 @@ export function formModalHtml(opts: { [k: string]: unknown; editing: boolean; na
   return `<div class="cn-modal cn-modal--flip" style="width:100%">
     <div class="form-flip j-flip">
       <div class="form-face form-face--front">
-        <div class="cn-modal-title">添加影视</div>
+        <div class="cn-modal-title">添加条目</div>
         ${nameField}${stField}${ratingField}${reviewField}
         <div class="dm-actions"><button class="dm-btn gold j-parse"><span class="f-spin"></span><span class="j-parse-text">解析</span></button></div>
       </div>

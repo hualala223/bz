@@ -142,6 +142,20 @@ var BZR_cinema = (() => {
     for (let j = full; j < 5; j++) s += "☆";
     return s;
   }
+  var EPISODE_TYPES = ["电视剧", "短剧"];
+  function episodesEligibleTag(tag) {
+    var _a;
+    if (!tag) return false;
+    const normalized = (_a = LEGACY_TAG_MAP[tag]) != null ? _a : tag;
+    return EPISODE_TYPES.includes(normalized);
+  }
+  var CHAPTER_TYPES = ["书籍"];
+  function chaptersEligibleTag(tag) {
+    var _a;
+    if (!tag) return false;
+    const normalized = (_a = LEGACY_TAG_MAP[tag]) != null ? _a : tag;
+    return CHAPTER_TYPES.includes(normalized);
+  }
 
   // src/cinema/seasons.ts
   function cmpByRelease(a, b) {
@@ -249,19 +263,21 @@ var BZR_cinema = (() => {
     var _a;
     return ((_a = getStarString(rating).match(/★/g)) != null ? _a : []).length;
   }
-  function cardHtml(e, posterUrl, fetching = false) {
+  function cardHtml(e, posterUrl, fetching = false, picked = false) {
     const it = e.kind === "series" ? e.face : e.item;
     const st = cardStatus(e);
     const p = facePiecesHtml(it, posterUrl, e.kind === "series" ? { name: e.name, rating: e.rating } : {});
     const label = `${e.kind === "series" ? e.name : it.name}，${statusText(st)}`;
-    return `<div class="pcard${e.kind === "series" ? " pcard-series" : ""}" data-cinema-key="${esc(e.kind === "series" ? e.key : itemKey(it))}" tabindex="0" role="button" aria-label="${esc(label)}"><div class="pw"><div class="pw-face">${p.poster}</div>${fetching ? '<div class="pw-fetch"><span class="pw-spin"></span></div>' : ""}
-    ${st !== STATUS_WATCHED ? `<span class="badge" style="background:${statusColor(st)}">${statusText(st)}</span>` : ""}${e.kind === "series" ? seasonDotsHtml(e.seasons) : ""}</div>
+    const epsBadge = st === STATUS_WATCHING && episodesEligibleTag(it.typeTag) && it.episodesWatching !== null && it.episodesTotal !== null ? `<span class="badge badge-eps">${it.episodesWatching}/${it.episodesTotal}</span>` : "";
+    const chBadge = st === STATUS_WATCHING && chaptersEligibleTag(it.typeTag) && it.chaptersWatching !== null && it.chaptersTotal !== null ? `<span class="badge badge-eps">${it.chaptersWatching}/${it.chaptersTotal}章</span>` : "";
+    return `<div class="pcard${e.kind === "series" ? " pcard-series" : ""}${picked ? " is-picked" : ""}" data-cinema-key="${esc(e.kind === "series" ? e.key : itemKey(it))}" tabindex="0" role="button" aria-label="${esc(label)}"><div class="pw"><div class="pw-face">${p.poster}</div>${fetching ? '<div class="pw-fetch"><span class="pw-spin"></span></div>' : ""}
+    ${st !== STATUS_WATCHED ? `<span class="badge" style="background:${statusColor(st)}">${statusText(st)}</span>` : ""}${epsBadge}${chBadge}${e.kind === "series" ? seasonDotsHtml(e.seasons) : ""}</div>
     <div class="pname">${p.name}</div>
     <div class="pmeta">${p.meta}</div>
     <div class="pstars">${p.stars}</div></div>`;
   }
-  function pcardHtml(it, posterUrl, fetching = false) {
-    return cardHtml({ kind: "single", item: it }, posterUrl, fetching);
+  function pcardHtml(it, posterUrl, fetching = false, picked = false) {
+    return cardHtml({ kind: "single", item: it }, posterUrl, fetching, picked);
   }
   function multiBarHtml(view) {
     return `<div class="cn-multibar"><span class="mb-cnt">已选 ${view.selectedCount} 条</span>
@@ -273,7 +289,7 @@ var BZR_cinema = (() => {
   }
   var HOT_FOLD_MIN = 120;
   function detailModalHtml(it, posterUrl) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
     const badge = (color, text) => `<span class="dm-chip" style="background:${color}">${esc(text)}</span>`;
     const rows = [
       ["国家", (_a = it.country) != null ? _a : ""],
@@ -301,12 +317,12 @@ var BZR_cinema = (() => {
           ${it.watchDate ? `<span class="dm-date">${esc((it.watchDate || "").slice(0, 10))}</span>` : ""}</div>
         ${it.review ? `<div class="dm-review">${esc(it.review)}</div>` : ""}</div></div>
     ${rows.length ? '<div class="dm-sec">豆 瓣 信 息</div>' + rows.map(([k, v]) => `<div class="dm-kv"><span class="dm-kv-k">${k}</span><span class="dm-kv-v">${esc(v)}</span></div>`).join("") : ""}
-    ${it.episodesWatching != null || it.episodesTotal != null ? `<div class="dm-kv"><span class="dm-kv-k">集 数</span><span class="dm-kv-v">${(_k = it.episodesWatching) != null ? _k : "—"} / ${(_l = it.episodesTotal) != null ? _l : "—"}</span></div>` : ""}
-    ${it.chaptersWatching != null || it.chaptersTotal != null ? `<div class="dm-kv"><span class="dm-kv-k">章 节</span><span class="dm-kv-v">${(_m = it.chaptersWatching) != null ? _m : "—"} / ${(_n = it.chaptersTotal) != null ? _n : "—"}</span></div>` : ""}
+    ${it.episodesWatching !== null && it.episodesTotal !== null ? `<div class="dm-kv"><span class="dm-kv-k">集数</span><span class="dm-kv-v">${it.episodesWatching} / ${it.episodesTotal}</span></div>` : it.episodesTotal != null ? `<div class="dm-kv"><span class="dm-kv-k">集数</span><span class="dm-kv-v">共 ${it.episodesTotal} 集</span></div>` : ""}
+    ${it.chaptersWatching !== null && it.chaptersTotal !== null ? `<div class="dm-kv"><span class="dm-kv-k">章节</span><span class="dm-kv-v">${it.chaptersWatching} / ${it.chaptersTotal}</span></div>` : it.chaptersTotal != null ? `<div class="dm-kv"><span class="dm-kv-k">章节</span><span class="dm-kv-v">共 ${it.chaptersTotal} 章</span></div>` : ""}
     ${it.doubanUrl ? `<div class="dm-kv"><span class="dm-kv-k">豆瓣链接</span><span class="dm-kv-v"><a href="${esc(it.doubanUrl)}" target="_blank" rel="noopener">${esc(it.doubanUrl)}</a></span></div>` : ""}
     ${hot ? `<div class="dm-sec">热 门 短 评</div><div class="dm-quote${hotFold ? " is-fold" : ""}" data-dm-quote>${esc(hot)}</div>${hotFold ? `<button type="button" class="dm-fold j-quote-fold" data-dm-fold>展开全文（${hot.length} 字）</button>` : ""}` : ""}
     ${it.synopsis ? `<div class="dm-sec">简 介</div><div class="dm-synopsis">${esc(it.synopsis)}</div>` : ""}
-    <div class="dm-actions"><button class="dm-btn j-similar">${iconSpan(ICON.ai)}找同类</button><button class="dm-btn j-edit">${iconSpan(ICON.edit)}编辑</button><button class="dm-btn danger j-del">${iconSpan(ICON.del)}删除</button></div>
+    <div class="dm-actions">${it.file ? `<button class="dm-btn j-refetch">${iconSpan(ICON.refresh)}重抓豆瓣</button>` : ""}<button class="dm-btn j-similar">${iconSpan(ICON.ai)}找同类</button><button class="dm-btn j-edit">${iconSpan(ICON.edit)}编辑</button><button class="dm-btn danger j-del">${iconSpan(ICON.del)}删除</button></div>
   </div>`;
   }
   function seriesCountsText(card) {
@@ -359,10 +375,12 @@ var BZR_cinema = (() => {
   }
   var GROUP_SUBS_OF = {
     电影: [],
-    剧集: ["国产剧", "美剧", "英剧", "德剧", "日剧", "韩剧", "哥伦比亚剧"],
-    动漫: ["日漫", "国漫", "美漫"],
+    电视剧: [],
+    短剧: [],
+    书籍: [],
+    动漫: [],
     纪录片: [],
-    公开课: ["公开课"]
+    公开课: ["公开课", "TED"]
   };
   function genreLabel(group, spaced = false) {
     const t = group === "书籍" ? "体裁" : "题材";
@@ -385,26 +403,36 @@ var BZR_cinema = (() => {
     }).join("");
   }
   function formModalHtml(opts) {
+    var _a, _b, _c, _d, _e, _f;
     const { editing } = opts;
     const initSt = opts.stText;
-    const nameField = `<div class="f-field"><span class="f-label">名 称</span><input class="f-input j-name" value="${esc(opts.name)}" placeholder="影视名称"></div>`;
+    const country = (_a = opts.country) != null ? _a : "";
+    const genreLabelText = genreLabel((_b = getGroupForTag(opts.typeTag)) != null ? _b : "其他", true);
+    const nameField = `<div class="f-field"><span class="f-label">名 称</span><input class="f-input j-name" value="${esc(opts.name)}" placeholder="条目名称"></div>`;
     const stField = `<div class="f-field"><span class="f-label">状 态</span><div class="f-choice j-sts">${formChoicesHtml(["想看", "在看", "已看"], initSt, "f-st")}</div></div>`;
     const ratingField = `<div class="f-field j-rating" style="display:${initSt === "已看" ? "" : "none"}"><span class="f-label">评 分</span>
       <div class="f-range-row"><input type="range" class="f-range j-range" min="1" max="10" step="0.1" value="${opts.rating}"><span class="f-range-val j-rval">${Number(opts.rating).toFixed(1)}</span><span class="f-stars j-stars" data-lit="${starsLit(opts.rating)}">${starsHtml(opts.rating)}</span></div></div>`;
-    const reviewField = `<div class="f-field j-review" style="display:${initSt === "已看" ? "" : "none"}"><span class="f-label">影 评</span><textarea class="f-input j-review-t" placeholder="写点什么…">${esc(opts.review)}</textarea></div>`;
+    const reviewField = `<div class="f-field j-review" style="display:${initSt === "已看" ? "" : "none"}"><span class="f-label">感 想</span><textarea class="f-input j-review-t" placeholder="写点什么…">${esc(opts.review)}</textarea></div>`;
+    const countryField = `<div class="f-field"><span class="f-label">国 家</span><div class="f-choice j-countries">${optionChipsHtml(opts.countryOptions, country ? [country] : [], "f-country", false)}</div></div>`;
+    const genreField = `<div class="f-field"><span class="f-label j-genre-label">${genreLabelText}</span><div class="f-choice j-genres">${optionChipsHtml(opts.genreOptions, opts.genres, "f-genre", true)}</div></div>`;
+    const epsField = `<div class="f-field j-eps" style="display:none"><span class="f-label">集 数</span>
+      <div class="f-eps-row"><label>正在看 <input type="number" min="0" class="f-input j-eps-watching" value="${(_c = opts.epsWatching) != null ? _c : ""}"></label><label>总集数 <input type="number" min="0" class="f-input j-eps-total" value="${(_d = opts.epsTotal) != null ? _d : ""}"></label></div></div>`;
+    const chField = `<div class="f-field j-chapters" style="display:none"><span class="f-label">章 节</span>
+      <div class="f-eps-row"><label>正在看 <input type="number" min="0" class="f-input j-ch-watching" value="${(_e = opts.chWatching) != null ? _e : ""}"></label><label>总章节数 <input type="number" min="0" class="f-input j-ch-total" value="${(_f = opts.chTotal) != null ? _f : ""}"></label></div></div>`;
     if (editing) {
       return `<div class="cn-modal" style="width:100%">
-    <div class="cn-modal-title">编辑影视</div>
+    <div class="cn-modal-title">编辑条目</div>
     ${nameField}
     <div class="f-field"><span class="f-label">类 型</span><div class="f-choice j-tags">${formChoicesHtml(formAllTags(), opts.typeTag, "f-tag")}</div></div>
-    ${stField}${ratingField}${reviewField}
+    ${countryField}${genreField}
+    ${stField}${epsField}${chField}${ratingField}${reviewField}
     <div class="dm-actions"><button class="dm-btn gold j-save">保存</button></div>
   </div>`;
     }
     return `<div class="cn-modal cn-modal--flip" style="width:100%">
     <div class="form-flip j-flip">
       <div class="form-face form-face--front">
-        <div class="cn-modal-title">添加影视</div>
+        <div class="cn-modal-title">添加条目</div>
         ${nameField}${stField}${ratingField}${reviewField}
         <div class="dm-actions"><button class="dm-btn gold j-parse"><span class="f-spin"></span><span class="j-parse-text">解析</span></button></div>
       </div>
@@ -545,6 +573,7 @@ var BZR_cinema = (() => {
         <div class="rail-foot">
           <button class="rail-item j-tool" data-tool="ai">${iconSpan(ICON.ai)}AI 荐片</button>
           <button class="rail-item j-tool" data-tool="stat">${iconSpan(ICON.stat)}观影分析</button>
+          <button class="rail-item" data-film-open>${iconSpan(ICON.eye)}观影志</button>
         </div>
       </aside>
       <div class="d-main j-view"></div>
@@ -557,6 +586,7 @@ var BZR_cinema = (() => {
       <span class="m-acts">
         <button class="add j-madd" data-cinema-add title="添加条目">${iconSpan(ICON.add)}</button>
         <button class="m-tool j-mai" title="AI 荐片">${iconSpan(ICON.ai)}</button>
+        <button class="m-tool j-yb" data-film-open title="观影志">${iconSpan(ICON.eye)}</button>
         <button class="m-tool j-mstat" title="观影分析">${iconSpan(ICON.stat)}</button>
         <button class="m-tool j-mclose" title="关闭">${iconSpan(ICON.close)}</button>
       </span>
@@ -658,7 +688,7 @@ var BZR_cinema = (() => {
       };
       const cards = inp.list.map((it) => {
         var _a, _b;
-        return pcardHtml(it, inp.poster(it), (_b = (_a = inp.fetching) == null ? void 0 : _a.call(inp, it)) != null ? _b : false);
+        return pcardHtml(it, inp.poster(it), (_b = (_a = inp.fetching) == null ? void 0 : _a.call(inp, it)) != null ? _b : false, pick(it));
       }).join("");
       const body = inp.list.length ? `<div class="d-scroll"><div class="grid" style="grid-template-columns:repeat(${inp.cols},1fr)">${cards}</div></div>` : emptyPageHtml(viewFiltered(v));
       view.innerHTML = listHeadHtml(inp) + listToolsHtml(v) + body;
@@ -677,8 +707,8 @@ var BZR_cinema = (() => {
         mv.className = "m-scroll j-mview";
         const bar = v.multiSelect ? multiBarHtml(v) : "";
         mv.innerHTML = `${bar}<div class="m-grid">${inp.list.map((it) => {
-          var _a, _b;
-          return pcardHtml(it, inp.poster(it), (_b = (_a = inp.fetching) == null ? void 0 : _a.call(inp, it)) != null ? _b : false);
+          var _a, _b, _c, _d;
+          return pcardHtml(it, inp.poster(it), (_b = (_a = inp.fetching) == null ? void 0 : _a.call(inp, it)) != null ? _b : false, (_d = (_c = inp.picked) == null ? void 0 : _c.call(inp, it)) != null ? _d : false);
         }).join("")}</div>`;
       } else if (v.view === "ai") {
         mv.className = "sp-body j-mview";

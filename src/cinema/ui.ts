@@ -30,13 +30,16 @@ import { localNow, esc, iconSpan } from '../core/ui/str';
 import { getCountryOptions, getGenreOptions, addCountryOption, addGenreOption } from './options';
 import { runAIRecommend, runSimilarRecommend, buildTasteProfile, quickAddWant } from './recommend';
 import { buildAnalysisHTML } from './analysis';
-import { enqueueDoubanFetch, dequeueDoubanFetch, isFetching } from './douban-queue';
+import { enqueueDoubanFetch, dequeueDoubanFetch, isFetching, fetchDepsFromSettings } from './douban-queue';
 import { refetchCinemaDouban } from './douban-refetch';
+import { queryDoubanByName, type DoubanQuery } from './douban-fetcher';
+import { decideCinemaType } from './type-decide';
 import { fitRotatedBox } from '../core/landscape';
 import { bindYearbook, deriveYb, yearbookHtml, yearbookOpenHtml, yearbookFixedHtml, type YbHandle } from './yearbook';
 import {
   ICON, statusText, itemByKey, itemKey, doubanSearchUrl,
   detailModalHtml, confirmModalHtml, formModalHtml, optionChipsHtml, genreLabel,
+  formBackHtml, formTagChipHtml, formStChipHtml, type FormPreviewData,
   aiPageHtml, sheetHeadHtml, pcardHtml, type AiPageInput,
   midnightDeskHtml, midnightMobHtml, renderMidnightDesk, renderMidnightMob,
   type MidnightRenderInput,
@@ -391,7 +394,7 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
   let genrePool = mergePool(getGenreOptions(getGroupSafe(initTag)), item?.genres ?? []);
   const { el, close } = ovl(sec, formModalHtml({
     editing, name: item ? item.name : '', typeTag: initTag, stText: initSt,
-    rating: ratingVal, review: item ? item.review ?? '' : '', genres: item?.genres ?? [],
+    rating: ratingVal, review: item ? item.review ?? '' : '', country: item?.country ?? null, genres: item?.genres ?? [],
     countryOptions: countryPool, genreOptions: genrePool,
     epsTotal: item?.episodesTotal ?? null, epsWatching: item?.episodesWatching ?? null,
     chTotal: item?.chaptersTotal ?? null, chWatching: item?.chaptersWatching ?? null,
@@ -500,6 +503,94 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
       void saveNew(sec, { name, tag: cur.tag, st: cur.st, rating, date, review, country: cur.country, genres: [...cur.genres], epsTotal: epsT, epsWatching: epsW, chTotal: chT, chWatching: chW }, app, close);
     }
   });
+  // 添加卡双面流（issue 395 上游形态；批 5cine 曾把本段行为层整块丢失，「解析」点了没反应）：
+  // 解析 → queryDoubanByName → 背面预览翻面；分类判定（Jev→LLM）期间徽标骨架占位，出结果
+  // 就地换徽标（markup 单源 shared.formTagChipHtml）。判定不可用则骨架留空交给用户手点（不预选）；
+  // 查询失败也翻空背——背面只剩保存，走手动默认（电影/想看），不让添加流死在前置。
+  const flipCard = el.querySelector<HTMLElement>('.j-flip');
+  const backBox = el.querySelector<HTMLElement>('.j-back');
+  const parseBtn = el.querySelector<HTMLButtonElement>('.j-parse');
+  if (!editing && flipCard && backBox && parseBtn) {
+    const parseText = el.querySelector<HTMLElement>('.j-parse-text');
+    const closePickLists = () => backBox.querySelectorAll('.dm-pick-list').forEach((l) => l.classList.remove('is-open'));
+    const swapChip = (sel: string, html: string) => {
+      const chip = backBox.querySelector(sel);
+      if (chip) chip.outerHTML = html;
+    };
+    parseBtn.addEventListener('click', () => {
+      const name = (el.querySelector('.j-name') as HTMLInputElement).value.trim();
+      if (!name) { panelToast(sec, '请输入名称'); return; }
+      if (parseBtn.classList.contains('is-busy')) return;
+      parseBtn.classList.add('is-busy');
+      if (parseText) parseText.textContent = '解析中…';
+      void (async () => {
+        let q: DoubanQuery | null = null;
+        try {
+          const out = await queryDoubanByName(name, fetchDepsFromSettings(app));
+          if (out.ok) q = out.data;
+          else notice(out.reason === 'blocked' ? '豆瓣风控拦截，稍后再试解析' : out.reason === 'notfound' ? '豆瓣没搜到该名称，可翻面手动补全后保存' : '解析失败（网络异常）', 'error');
+        } catch {
+          notice('解析失败（网络异常）', 'error');
+        }
+        if (q) {
+          const a = q.apizero;
+          const preview: FormPreviewData = {
+            posterUrl: q.posterUrl, title: q.title, typeTag: cur.tag,
+            genre: a?.genre ?? '', director: a?.director ?? '', actors: a?.actor ?? '',
+            region: a?.area ?? '', releaseDate: a?.year ?? '', duration: a?.duration ?? '',
+            doubanRating: a?.score ?? '', doubanUrl: a?.doubanUrl || q.detailUrl, hotComment: a?.shortComment ?? '',
+          };
+          const rangeVal = Number((el.querySelector('.j-range') as HTMLInputElement | null)?.value ?? 0);
+          const reviewVal = (el.querySelector('.j-review-t') as HTMLTextAreaElement | null)?.value.trim() ?? '';
+          backBox.innerHTML = formBackHtml(preview, {
+            typeTag: cur.tag, stText: cur.st, classifying: true,
+            rating: cur.st === '已看' ? rangeVal : 0,
+            review: cur.st === '已看' ? reviewVal : '',
+          });
+          void decideCinemaType({ title: q.title, isTv: a?.isTv ?? null, area: a?.area ?? null, genre: a?.genre ?? null, year: a?.year ?? null })
+            .catch(() => null)
+            .then((decided) => {
+              if (!decided || !backBox.isConnected) return;
+              cur.tag = decided;
+              swapChip('[data-pick="tag"]', formTagChipHtml(decided));
+            });
+        } else {
+          backBox.innerHTML = '';
+        }
+        flipCard.classList.add('is-flipped');
+      })().finally(() => {
+        parseBtn.classList.remove('is-busy');
+        if (parseText) parseText.textContent = '解析';
+      });
+    });
+    // 背面徽标下拉：点徽标开对应清单，点项回填 cur 并就地换徽标（tag/st 同一套 dm-pick 机制）；
+    // 状态改动同步正面 chips（j-save 读 cur，双面须一致）
+    backBox.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      const pickBtn = t.closest('[data-pick]');
+      if (pickBtn) {
+        const kind = (pickBtn as HTMLElement).dataset.pick;
+        backBox.querySelectorAll('.dm-pick-list').forEach((l) => l.classList.toggle('is-open', l.getAttribute('data-pick-list') === kind));
+        return;
+      }
+      const tagItem = t.closest('[data-f-tag]') as HTMLElement | null;
+      if (tagItem) {
+        cur.tag = tagItem.dataset.fTag ?? cur.tag;
+        swapChip('[data-pick="tag"]', formTagChipHtml(cur.tag));
+        closePickLists();
+        return;
+      }
+      const stItem = t.closest('[data-f-st]') as HTMLElement | null;
+      if (stItem) {
+        cur.st = stItem.dataset.fSt ?? cur.st;
+        swapChip('[data-pick="st"]', formStChipHtml(cur.st));
+        el.querySelectorAll('[data-f-st]').forEach((x) => x.classList.toggle('is-on', (x as HTMLElement).dataset.fSt === cur.st));
+        syncEps();
+        syncChapters();
+        closePickLists();
+      }
+    });
+  }
   syncEps();
 }
 

@@ -25,6 +25,9 @@ vi.mock('../../src/secondbrain/vector-store', () => {
     hasPendingChanges(): boolean {
       return false;
     }
+    needsModelRebuild(): boolean {
+      return false; // 批 4b 换模型自动重建（issue 422/ADR-0182）：Fake 对齐真身 API 面
+    }
     isIndexReady(): boolean {
       return fakeState.ready;
     }
@@ -37,6 +40,9 @@ vi.mock('../../src/secondbrain/vector-store', () => {
     }
     async refresh(): Promise<void> {}
     async rebuildAll(): Promise<void> {}
+    onIndexUpdated(): () => void {
+      return () => {}; // 票 305：explorer 角标订阅（Fake 对齐真身 API 面）
+    }
     async search(): Promise<unknown[]> {
       return [];
     }

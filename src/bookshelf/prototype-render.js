@@ -61,6 +61,9 @@ var BZR_bookshelf = (() => {
   function esc(s) {
     return escapeHtml(String(s != null ? s : ""));
   }
+  function emptyHtmlStr(icon, title, desc) {
+    return `<div class="bz-empty">${icon ? iconSpan(icon, "bz-empty-ic") : ""}<div class="bz-empty-title">${esc(title)}</div>${desc ? `<div class="bz-empty-desc">${esc(desc)}</div>` : ""}</div>`;
+  }
   function iconSpan(name, extra = "") {
     return `<i data-lucide="${name}" class="bz-ic${extra ? " " + extra : ""}"></i>`;
   }
@@ -195,19 +198,26 @@ var BZR_bookshelf = (() => {
 
   // src/bookshelf/layouts/wall/render.ts
   var CAT = {
-    "文学": { bg: "#8f4a3a", fg: "#f2e4d8" },
     "推理": { bg: "#7a3b52", fg: "#f2dee6" },
-    "哲学": { bg: "#4f6f52", fg: "#e9efe6" },
     "科幻": { bg: "#3d5a73", fg: "#e2ecf4" },
-    "心理学": { bg: "#5c5273", fg: "#e9e4f2" },
-    "摄影": { bg: "#2f4858", fg: "#dbe8f0" },
-    "天文学": { bg: "#1f3242", fg: "#c9dde9" },
-    "生物学": { bg: "#6d7a3f", fg: "#eef0dc" },
-    "龙与地下城": { bg: "#4a3626", fg: "#e8d9b0" },
-    "历史": { bg: "#8a6d3b", fg: "#f5ecd8" },
-    "武侠": { bg: "#9a5a2f", fg: "#f7ead9" },
     "奇幻": { bg: "#3f5a4a", fg: "#dfeee4" },
+    "恐怖": { bg: "#3a2a33", fg: "#e3d5dc" },
+    "武侠": { bg: "#9a5a2f", fg: "#f7ead9" },
+    "戏剧": { bg: "#6e3b57", fg: "#f0dfe9" },
+    "历史小说": { bg: "#8a6d3b", fg: "#f5ecd8" },
+    "历史": { bg: "#7c6844", fg: "#f0e8d4" },
+    "哲学": { bg: "#4f6f52", fg: "#e9efe6" },
+    "心理学": { bg: "#5c5273", fg: "#e9e4f2" },
+    "科学": { bg: "#2f5679", fg: "#dbe9f4" },
+    "社科": { bg: "#5f5a45", fg: "#ece7d6" },
     "艺术": { bg: "#6b4a6e", fg: "#efe2f0" },
+    "摄影": { bg: "#2f4858", fg: "#dbe8f0" },
+    "中国古典文学": { bg: "#8f4a3a", fg: "#f2e4d8" },
+    "中国现当代文学": { bg: "#a0552f", fg: "#f6e6da" },
+    "中国散文": { bg: "#6d7a3f", fg: "#eef0dc" },
+    "外国小说": { bg: "#455a7a", fg: "#e0e7f2" },
+    "外国散文": { bg: "#57707a", fg: "#e2ecf0" },
+    "纪实": { bg: "#4a5245", fg: "#e4e8de" },
     "未分类": { bg: "#6b6257", fg: "#ded8ce" }
   };
   var FALLBACKS = ["#8a6d3b", "#4f6f52", "#3d5a73", "#8f4a3a", "#5c5273", "#7a3b52", "#6d7a3f", "#2f4858"];
@@ -260,6 +270,7 @@ var BZR_bookshelf = (() => {
     <span class="bz-bs-spine-title"></span>
     ${it.status === "已读" ? '<span class="stamp">讫</span>' : ""}
     ${it.status === "在读" ? '<span class="ribbon"></span>' : ""}
+    <span class="bz-bs-touch bz-touch-target--xl" aria-hidden="true"></span>
   </div>`;
   }
   function mkBookend() {
@@ -301,15 +312,12 @@ var BZR_bookshelf = (() => {
     }
     zone = null;
   }
-  function bzEmptyHtml(icon, title, desc) {
-    return `<div class="bz-empty">${iconSpan(icon, "bz-empty-ic")}<div class="bz-empty-title">${esc(title)}</div><div class="bz-empty-desc">${esc(desc)}</div></div>`;
-  }
   function wallEmptyHTML(itemsTotal, q, folder, tag) {
     const cfg = !itemsTotal ? { icon: EMPTY_BOOKS_ICON, title: "书库还是空的", desc: `把书籍笔记放进「${folder}」文件夹，并在 frontmatter 添加 tags: ${tag} 标签` } : q ? { icon: EMPTY_SEARCH_ICON, title: "没有找到相关的书", desc: "试试其他关键词，或换一个筛选" } : { icon: EMPTY_FILTER_ICON, title: "这个筛选下还没有书", desc: "换一个状态或分类标签，或用搜索找找" };
-    return `<div class="bz-bs-wall-empty">${bzEmptyHtml(cfg.icon, cfg.title, cfg.desc)}</div>`;
+    return `<div class="bz-bs-wall-empty">${emptyHtmlStr(cfg.icon, cfg.title, cfg.desc)}</div>`;
   }
   function wallLoadingHTML() {
-    return `<div class="bz-bs-wall-empty">${bzEmptyHtml("loader", "正在整理书架…", "")}</div>`;
+    return `<div class="bz-bs-wall-empty">${emptyHtmlStr("loader", "正在整理书架…", "")}</div>`;
   }
   function labelsHtml(items, side, catFilter) {
     const statusDefs = [
@@ -320,7 +328,6 @@ var BZR_bookshelf = (() => {
     ];
     const cats = /* @__PURE__ */ new Map();
     for (const b of items) {
-      if (b.status === "未读") continue;
       const k = b.category || "未分类";
       const c = cats.get(k) || { n: 0, ms: 0 };
       c.n++;
@@ -347,7 +354,7 @@ var BZR_bookshelf = (() => {
     return `${html}<div class="bz-bs-cats">${catHtml}</div>`;
   }
   function sortSegHtml(sortMode) {
-    return Object.keys(SORT_LABEL).map((k) => `<button type="button" data-bs-sort="${k}"${sortMode === k ? ' class="on"' : ""}>${SORT_LABEL[k]}</button>`).join("");
+    return Object.keys(SORT_LABEL).map((k) => `<button type="button" class="bz-touch-target${sortMode === k ? " on" : ""}" data-bs-sort="${k}">${SORT_LABEL[k]}</button>`).join("");
   }
   function panelHtml(skinClass) {
     return `
@@ -358,7 +365,10 @@ var BZR_bookshelf = (() => {
         <div class="bz-bs-labels" id="bz-bs-labels"></div>
       </div>
         <div class="bz-bs-tools">
-          <input id="bz-bs-dsearch" class="bz-bs-search" type="text" placeholder="检索书名或作者…" autocomplete="off">
+          <div class="bz-bs-searchbox">
+            <input id="bz-bs-dsearch" class="bz-bs-search" type="text" placeholder="检索书名或作者…" autocomplete="off">
+            <button type="button" class="bz-icon-btn bz-bs-search-clear" data-bs-search-clear title="清除检索" aria-label="清除检索" hidden>${iconSpan(ICON.close)}</button>
+          </div>
           <div class="bz-bs-seg" id="bz-bs-sortseg"></div>
           <div class="bz-bs-hint" id="bz-bs-hint"></div>
         </div>
@@ -371,7 +381,9 @@ var BZR_bookshelf = (() => {
         <div class="bz-bs-view bz-bs-view-report">
           <div class="bz-rr-head">
             <span class="bz-rr-title">${iconSpan(ICON.report, "bz-ic--sm")}阅读分析报告</span>
-            <button class="bz-icon-btn bz-rr-close" data-rr-goto-shelf title="返回书库">${iconSpan(ICON.close)}</button>
+            <!-- 深审 RR-U1/EFF-1：桌面也可见（左栏导航随书脊墙换血退役，头行返回钮 = 全宽度唯一返回出口）；
+                 RR-U3/EFF-10：22×26px icon 档挂 bz-touch-target--lg 热区外扩 + aria-label（同文件清除钮先例） -->
+            <button class="bz-icon-btn bz-rr-close bz-touch-target bz-touch-target--lg" data-rr-goto-shelf title="返回书库" aria-label="返回书库">${iconSpan(ICON.close)}</button>
           </div>
           <div class="bz-rr-content"></div>
         </div>

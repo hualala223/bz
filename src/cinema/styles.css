@@ -177,6 +177,20 @@
 .bz-cinema--midnight .f-range{flex:1;-webkit-appearance:none;appearance:none;height:4px;border-radius:99px;background:var(--chip);outline:none}
 .bz-cinema--midnight .f-range::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:var(--gold);cursor:pointer;border:2px solid var(--panel);box-shadow:0 1px 4px #0003}
 .bz-cinema--midnight .f-range-val{min-width:36px;text-align:center;font-size:var(--bz-font-label);font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+/* 添加卡双面翻转（issue 395；批 5cine 补嫁接：上游只进了 markup，样式与行为层同轮回归） */
+.bz-cinema--midnight .cn-modal--flip{perspective:900px}
+.bz-cinema--midnight .form-flip{position:relative;transform-style:preserve-3d;transition:transform var(--cn-m-impulse) var(--cn-e-move)}
+.bz-cinema--midnight .form-flip.is-flipped{transform:rotateY(180deg)}
+.bz-cinema--midnight .form-face{backface-visibility:hidden;-webkit-backface-visibility:hidden}
+.bz-cinema--midnight .form-face--back{position:absolute;inset:0;transform:rotateY(180deg);overflow-y:auto}
+.bz-cinema--midnight .f-spin{display:none;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--gold);border-radius:50%;animation:cn-spin .8s linear infinite}
+.bz-cinema--midnight .j-parse.is-busy .f-spin{display:inline-block;margin-right:6px;vertical-align:-2px}
+.bz-cinema--midnight .dm-chip--pick{cursor:pointer;border:0}
+.bz-cinema--midnight .dm-pick-list{display:none;flex-wrap:wrap;gap:4px;margin:var(--bz-space-sm) 0;padding:6px;border:1px solid var(--line);border-radius:var(--bz-radius-sm);background:var(--panel)}
+.bz-cinema--midnight .dm-pick-list.is-open{display:flex}
+.bz-cinema--midnight .dm-pick-item{display:inline-flex;align-items:center;gap:4px;border:0;background:none;border-radius:99px;padding:3px 9px;font-size:11px;color:var(--ink-2);cursor:pointer;font-family:inherit}
+.bz-cinema--midnight .dm-pick-item:hover{background:var(--chip);color:var(--ink)}
+.bz-cinema--midnight .dm-pick-item.is-on{background:var(--gold);color:#fff;font-weight:600}
 /* 确认框 */
 .bz-cinema--midnight .cn-confirm{text-align:center;padding:var(--bz-space-xs) 2px}
 .bz-cinema--midnight .cn-confirm-ic{display:inline-flex;width:34px;height:34px;color:#b3402a}
