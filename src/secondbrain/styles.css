@@ -1722,3 +1722,18 @@
 .theme-dark #__shared_confirm_popup__.bz-sb-flow-dialog {
   box-shadow: 0 24px 60px #00000080;
 }
+
+/* ==================== 文件列表「已入脑」角标（票 305/ADR-0133） ==================== */
+/* 类挂 Obsidian 文件浏览器原生行元素（.tree-item-self.nav-file-title），explorer-badge.ts 驱动；
+   绿点缀于行内容尾部——向量库已登记（已向量化）的视觉标识，标记不写笔记文件 */
+.tree-item-self.bz-sb-vec .tree-item-inner::after {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--color-green, #43b563);
+  opacity: 0.75;
+  vertical-align: middle;
+}

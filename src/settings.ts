@@ -243,6 +243,8 @@ export default interface BzSettings {
   secondBrainChunkMinLength: string;
   /** 允许的文件夹（逗号分隔；f8：留空/空=不索引任何目录，不是「全库」） */
   secondBrainAllowPaths: string;
+  /** 文件浏览器「已入脑」角标（票 305：已向量化笔记在文件列表挂绿点，缺省开） */
+  secondBrainExplorerBadge: boolean;
   /** Embedding 请求并发数（QA 遗留死配置：定义后从未接线，忠实保留不删） */
   secondBrainConcurrency: string;
   /** 上下文限制 */
@@ -730,6 +732,7 @@ export const DEFAULT_SETTINGS: BzSettings = {
   secondBrainChatTopK: '20',
   secondBrainChunkMinLength: '50',
   secondBrainAllowPaths: '', // ticket 116：默认空 = 什么也不录（不索引任何目录），由用户自行填写
+  secondBrainExplorerBadge: true, // 票 305：文件列表「已入脑」角标缺省开（派生标记，不写笔记）
   secondBrainConcurrency: '15',
   secondBrainContextLimit: '600',
   secondBrainDebounceDelay: '300',

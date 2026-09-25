@@ -2,6 +2,16 @@
 
 > 进度同步总表（AGENTS.md）。每票一节，状态：计划中 → 进行中 → 门禁 → 已交付。
 
+## 文件列表「已入脑」角标：向量化状态可视（票 305 / ADR-0133）— 2026-09-25
+
+**状态：已交付**（决策：派生标记不写笔记文件——写 frontmatter 会触发 modify 监听链空转、Syncthing 冲突高发、移出白名单后残留假信息）。
+
+- [x] `src/secondbrain/vector-store.ts`：`onIndexUpdated` 订阅（load 与每轮 refresh 成功收敛各通知一次，失败不通知；回调抛错仅告警不拖垮管线）
+- [x] `src/secondbrain/explorer-badge.ts`（新）：文件浏览器绿点装饰——挂 `.tree-item-self.nav-file-title[data-path]`，MutationObserver + 收敛回调 + layout-change 三路驱动幂等全量 pass；文件夹行不标
+- [x] `src/settings.ts`：`secondBrainExplorerBadge`（默认 true）；`panel.ts` ⚙️「外观」组 toggle 行（文案过 ticket 131 lint）
+- [x] `src/secondbrain/styles.css`：`.bz-sb-vec` 绿点；卸载全量清理（订阅/观察器/定时器/已挂类）
+- [x] 测试：explorer-badge.test.ts（5 例）+ vector-store.test.ts 追加订阅契约（2 例）+ smoke/范围内 vitest 全绿 + tsc 零错 + 构建部署验证
+
 ## 内容首页「计划」卡：PlanFlow 外部插件只读接入（票 304 / ADR-0132）— 2026-09-24
 
 **状态：已交付**（grill-with-docs Q1–Q6 收敛：planflow **不吸收**保持独立插件 Q1(b)，域卡+计数 Q5(b)，右键照挂 Q6(b)——首张外部插件卡入 DOMAINS）。
@@ -930,3 +940,13 @@
 - [x] styles.css：上游 .bz-yb 段 678 行整段落位；动效令牌上游共组（.bz-cinema--midnight,.bz-yb,.cn-skin）本地不存在，收窄为 .bz-yb 单独成组；空态排版两条本地补齐（上游靠全局 .bz-btn 兜底）
 - [x] tests/cinema/yearbook.test.ts：11 例（deriveYb 口径锚 / 覆盖层装配 / 幂等开合 / 入口 markup）
 - [x] 门禁：tsc --noEmit 0；vitest 全量 3870 全绿（secondbrain 3 处 unhandled error 为 master 既有噪声，主仓单跑复现）；合并后统一构建部署
+
+
+### 票 306 — 娱乐条目查重/去重（双口径判定 + 分组裁决 + 添加防重）
+
+- [x] dedupe.ts 数据层：双口径判定（豆瓣指纹站点前缀 movie:/book: = 确认重复；归一名称 = 疑似重复）、union-find 并组、保留推荐计分（指纹 > 评分/影评 > 观影日期）、用户数据搬补只补不覆盖
+- [x] ui.ts：裁决弹窗（每组单选保留项，默认推荐位）+ 删除走 vault.trash 回收站（G8 同款出队豆瓣抓取）+ 搬补后 persistItem 落盘；工具行「查重复」按钮；解析防重（命中的豆瓣条目已在库 → 提示不重复入库）；runCinemaDedupe 冷开/就地同口径
+- [x] shared.ts：dedupeModalHtml markup 单源；layouts 工具行按钮；styles 皮肤段（复用 cn-token，无新令牌）
+- [x] 命令 `bz-cinema-dedupe`（79→80）；tests/smoke.test.ts EXPECTED_COMMAND_IDS 同步
+- [x] 测试：dedupe.test.ts 10 例（node 纯函数）+ ui.test.ts 2 例（裁决删除回收站/搬补落盘、无重复只提示）
+- [x] 门禁：tsc --noEmit 0；cinema+smoke 225 全绿；全量测试 + 构建部署（真实库预扫 54 篇零重复，功能为防患工具）

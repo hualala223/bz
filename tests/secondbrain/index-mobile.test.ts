@@ -36,6 +36,9 @@ vi.mock('../../src/secondbrain/vector-store', () => {
     }
     async refresh(): Promise<void> {}
     async rebuildAll(): Promise<void> {}
+    onIndexUpdated(): () => void {
+      return () => {}; // 票 305：explorer 角标订阅（Fake 对齐真身 API 面）
+    }
     async search(): Promise<unknown[]> {
       return [];
     }

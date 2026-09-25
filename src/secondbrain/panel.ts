@@ -31,6 +31,7 @@ import type { VectorStore } from './vector-store';
 import { parsePathList, formatPathList } from './whitelist';
 import { loadStore } from './store-file';
 import { openWeeklyDigest, renderPanelWeeklyCard } from './weekly-ui';
+import { redrawExplorerBadge } from './explorer-badge';
 import {
   panelShellHtml,
   panelCardsHtml,
@@ -678,6 +679,8 @@ export function secondBrainSettingsSchema(): SettingsSchema {
         rows: [
           { type: 'choiceCards', name: '面板布局', binding: { key: 'secondbrainSkin' }, options: [{ value: 'default', label: '对话', prevClass: 'bz-sp-prev-panel' }] },
           { type: 'choiceCards', name: '面板主题', binding: { key: 'secondbrainSkinTheme' }, layoutKey: 'secondbrainSkin', options: [{ value: 'graphite', label: '石墨', layout: 'default', prevClass: 'bz-sp-prev-graphite' }] },
+          // 票 305/ADR-0133：「已入脑」角标——标记不写笔记文件，装饰实时派生自索引（explorer-badge.ts）
+          { type: 'toggle', name: '已入脑角标', desc: '已向量化入索引的笔记在左侧文件列表挂一枚绿点', binding: { key: 'secondBrainExplorerBadge' }, onChange: () => redrawExplorerBadge() },
         ],
       },
       {

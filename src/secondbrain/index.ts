@@ -16,7 +16,9 @@
  * - issue 360：每周知识动态——启动后延迟调度静默聚合（weekly-ui.scheduleWeeklyDigest，
  *   周界判定 lastRunAt 滚动 7 天，无新内容零打扰，有内容通知挂「查看详情」）；
  *   命令 bz-secondbrain-weekly（本周知识动态）随时手动重聚并开详情弹层；
- * - unload 全量清理：定时器、订阅、面板 DOM、link agent、每周动态弹层与调度
+ * - 票 305：文件浏览器「已入脑」角标——explorer-badge 给 meta.notes 已登记笔记挂绿点，
+ *   标记不写笔记文件（ADR-0133），开关 secondBrainExplorerBadge 缺省开；
+ * - unload 全量清理：定时器、订阅、面板 DOM、link agent、每周动态弹层与调度、explorer 角标
  *   （AI 通道无持久资源，issue 359 起单例已退役）。
  */
 import type { App } from 'obsidian';
@@ -33,6 +35,7 @@ import { MobilePanel } from './mobile-panel';
 import { LinkAgent } from './link-agent/pipeline';
 import { LinkAgentWatcher, createLinkBridge, startQueueConsumption, startStartupBackfill } from './link-agent/watch';
 import { scheduleWeeklyDigest, unloadWeeklyDigest, runWeeklyManual } from './weekly-ui';
+import { initExplorerBadge, unloadExplorerBadge } from './explorer-badge';
 
 let appRef: App | null = null;
 let store: VectorStore | null = null;
@@ -58,6 +61,8 @@ export function ensureSecondBrain(app: App): void {
   appRef = app;
   const s = new VectorStore(app);
   store = s;
+  // 票 305/ADR-0133：文件浏览器「已入脑」角标——实时派生自索引（不写笔记），开关 secondBrainExplorerBadge
+  initExplorerBadge(app, s);
   // issue 318：注册只读检索桥（窄口叶子模块；消费方值导入本 index 会把整条 UI 栈拖进构建闭包，见 readonly.ts）
   setVectorSearchSource({
     isIndexReady: () => !!store?.isIndexReady(),
@@ -143,6 +148,7 @@ export function unloadSecondBrain(): void {
   linkWatcher = null;
   linkAgent = null;
   setLinkBridge(null);
+  unloadExplorerBadge(); // 票 305：explorer 角标订阅/观察器/已挂类一并清理
   unloadWeeklyDigest(); // issue 360：每周动态调度定时器 + 详情弹层 DOM/ESC 句柄一并清理
   store = null;
   setVectorSearchSource(null); // issue 318：卸载即撤销只读检索桥（未初始化/已卸载取到 null）

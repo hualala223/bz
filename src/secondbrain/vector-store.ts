@@ -104,9 +104,30 @@ export class VectorStore {
   private normCache: NormCache | null = null;
   /** 进行中的 refresh（并发去重：重复调用复用同一 promise，ticket 107） */
   private refreshPromise: Promise<void> | null = null;
+  /** 索引收敛订阅（票 305：explorer「已入脑」角标等轻消费方）——load 与每轮 refresh 成功后触发 */
+  private indexUpdatedListeners = new Set<() => void>();
 
   constructor(app: App) {
     this.app = app;
+  }
+
+  /**
+   * 订阅索引收敛（票 305）：load 完成与每轮 refresh 成功收敛各触发一次。
+   * 返回退订函数；回调抛错仅告警不拖垮索引管线（装饰类消费方不许反噬主链路）。
+   */
+  onIndexUpdated(cb: () => void): () => void {
+    this.indexUpdatedListeners.add(cb);
+    return () => this.indexUpdatedListeners.delete(cb);
+  }
+
+  private notifyIndexUpdated(): void {
+    for (const cb of this.indexUpdatedListeners) {
+      try {
+        cb();
+      } catch (e) {
+        console.warn('[secondbrain] 索引更新回调失败', e);
+      }
+    }
   }
 
   get notes(): Record<string, NoteEntry> {
@@ -114,6 +135,11 @@ export class VectorStore {
   }
 
   async load(): Promise<void> {
+    await this.doLoad();
+    this.notifyIndexUpdated();
+  }
+
+  private async doLoad(): Promise<void> {
     // ticket 120：meta 段并入 secondbrain.json；旧 secondbrain_meta.json 经 store-file 一次性迁移
     const data = await loadStore(this.app);
     const parsed = data.meta as SecondBrainMeta | null;
@@ -322,13 +348,16 @@ export class VectorStore {
     await this.saveStore();
   }
 
-  /** 增量重建向量库（并发去重：进行中重复调用复用同一 promise——ticket 107） */
+  /** 增量重建向量库（并发去重：进行中重复调用复用同一 promise——ticket 107）。
+   *  成功收敛后通知 onIndexUpdated 订阅方（票 305）；失败不通知，订阅方拿到的总是有效索引态。 */
   refresh(updateProgress?: (msg: string) => void): Promise<void> {
     if (updateProgress) this.updateProgress = updateProgress;
     if (this.refreshPromise) return this.refreshPromise;
-    this.refreshPromise = this.doRefresh().finally(() => {
-      this.refreshPromise = null;
-    });
+    this.refreshPromise = this.doRefresh()
+      .then(() => this.notifyIndexUpdated())
+      .finally(() => {
+        this.refreshPromise = null;
+      });
     return this.refreshPromise;
   }
 

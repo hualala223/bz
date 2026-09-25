@@ -831,3 +831,56 @@ describe('VectorStore（检索链路）', () => {
     }
   });
 });
+
+describe('onIndexUpdated（票 305：索引收敛订阅）', () => {
+  beforeEach(() => {
+    resetObsidianMocks();
+    setApp(null as any);
+    setSettingsProvider(() => sbSettings() as any);
+    vi.mocked(getEmbeddingsBatch).mockReset();
+    vi.mocked(getEmbedding).mockReset();
+  });
+
+  it('load 完成与 refresh 成功收敛各通知一次；refresh 失败不通知（订阅方只拿有效索引态）', async () => {
+    const vault = new MockVault();
+    vault.files.set('我的/A.md', '第一段内容足够长可以成块。第二段内容也同样足够长可以成块。');
+    const { adapter } = makeAdapter(vault);
+    const app = makeApp(vault, adapter, { '我的/A.md': 11 });
+    setApp(app as any);
+    const vs = new VectorStore(app as any);
+    const seen: number[] = [];
+    const off = vs.onIndexUpdated(() => seen.push(1));
+
+    vi.mocked(getEmbeddingsBatch).mockImplementation(async (texts: string[]) => texts.map(() => [0.5, 0.5]));
+    await vs.load();
+    expect(seen.length).toBe(1);
+    await vs.refresh();
+    expect(seen.length).toBe(2);
+
+    // 失败不通知：doRefresh 拒绝（异常宿主）时订阅方不触发，promise 照常向上抛
+    (vs as any).doRefresh = async () => {
+      throw new Error('嵌入服务断连');
+    };
+    await expect(vs.refresh()).rejects.toThrow('嵌入服务断连');
+    expect(seen.length).toBe(2);
+    off();
+    await vs.load();
+    expect(seen.length).toBe(2); // 退订后不再通知
+  });
+
+  it('回调抛错只告警不拖垮索引管线（装饰类消费方不许反噬主链路）', async () => {
+    const vault = new MockVault();
+    vault.files.set('我的/A.md', '第一段内容足够长可以成块。第二段内容也同样足够长可以成块。');
+    const { adapter } = makeAdapter(vault);
+    const app = makeApp(vault, adapter, { '我的/A.md': 11 });
+    setApp(app as any);
+    const vs = new VectorStore(app as any);
+    vs.onIndexUpdated(() => {
+      throw new Error('boom');
+    });
+    vi.mocked(getEmbeddingsBatch).mockImplementation(async (texts: string[]) => texts.map(() => [0.5, 0.5]));
+    await expect(vs.load()).resolves.toBeUndefined();
+    await expect(vs.refresh()).resolves.toBeUndefined();
+    expect(Object.keys(vs.meta.notes)).toEqual(['我的/A.md']);
+  });
+});
