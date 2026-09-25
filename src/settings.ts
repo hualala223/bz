@@ -235,6 +235,10 @@ export default interface BzSettings {
   secondBrainOllamaUrl: string;
   /** Embedding 模型 */
   secondBrainEmbeddingModel: string;
+  /** 检索重排开关（上游 issue 429；仅 qwen3 embedding 下生效，config.rerankActive 同门） */
+  secondBrainRerank: boolean;
+  /** 重排模型（留空 = 内置 Qwen3-Reranker-4B） */
+  secondBrainRerankModel: string;
   /** 参考结果数 */
   secondBrainTopK: string;
   /** AI 检索结果数 */
@@ -352,6 +356,10 @@ export default interface BzSettings {
   aiMaxTokensOverrides: Record<string, number>;
   /** 🧩 per-provider 思考档位（上游 issue 330/411；键=provider id，值='off'|'default'） */
   aiThinkingOverrides: Record<string, string>;
+  /** Jev 判定通道（上游 issue 389/ADR-0173；与生成通道并存，cinema/secondbrain 消费） */
+  jevProvider: string;
+  jevApiKey: string;
+  jevModel: string;
   /** 🎨 知识盒面板皮肤（上游外观组范式） */
   knowledgeSkin: string;
   knowledgeSkinTheme: string;
@@ -734,6 +742,8 @@ export const DEFAULT_SETTINGS: BzSettings = {
   // 第二大脑（ticket 103：原闪念键更名，值语义与存储类型不变；META_PATH/VEC_PATH 废弃清除）
   secondBrainOllamaUrl: 'http://localhost:11434',
   secondBrainEmbeddingModel: 'bge-m3',
+  secondBrainRerank: true,
+  secondBrainRerankModel: '', // issue 429：空 = 默认 Qwen3-Reranker-4B（secondbrain/config RERANK_MODEL）
   secondBrainTopK: '20',
   secondBrainChatTopK: '20',
   secondBrainChunkMinLength: '50',
@@ -838,6 +848,9 @@ export const DEFAULT_SETTINGS: BzSettings = {
   ollamaModel: '',
   aiMaxTokensOverrides: {},
   aiThinkingOverrides: {},
+  jevProvider: 'typesafe',
+  jevApiKey: '',
+  jevModel: 'jev-latest',
   knowledgeSkin: 'default',
   knowledgeSkinTheme: 'manila',
   knowledgeImageFolder: '',

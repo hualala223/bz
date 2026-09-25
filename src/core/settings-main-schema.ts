@@ -18,6 +18,8 @@ import { notice } from './notice';
 import { getSettings, saveSettings, tryGetSettings } from './settings-provider';
 import type { SettingsRow, SettingsSchema } from './settings-schema';
 import { thinkingOptionsOf } from './ai';
+import { JEV_PROVIDER_REGISTRY } from './jev';
+import { isQwen3Embedding8b } from './ai-models';
 
 /** 存储路径改动防错提示（f1；正文不带 emoji，铁律 7）——文案逐字冻结，勿改 */
 export const STORAGE_PATH_COMMIT_NOTICE = '存储路径已修改：仅改路径，文件不会自动迁移，旧数据需自行迁移；重载插件后生效。';
@@ -45,6 +47,36 @@ function thinkingRow(providerId: string, name: string, desc: string): SettingsRo
   };
 }
 
+
+/** 最大输出 token 行（上游 ticket 172/issue 342 融合）：per-provider number 行，写 aiMaxTokensOverrides。
+ *  0 = 删键回落 model-limits 官方档（与 aiMaxTokensOf 消费口径自洽）。上游为单行 refreshKey 随服务商
+ *  联动，本地渲染器无该联动，落成 per-provider 静态行（visibleWhen 显隐，与思考档位行同范式）。 */
+function maxTokensRow(providerId: string): SettingsRow {
+  return {
+    type: 'number',
+    name: '最大输出 token',
+    desc: '留空时取该模型官方上限',
+    min: 0,
+    max: 200000, // 上界拦手滑多打的 0（上游同款量级）
+    binding: {
+      get: () => {
+        const rec = ((tryGetSettings() as any).aiMaxTokensOverrides || {}) as Record<string, number>;
+        const n = Number(rec[providerId]);
+        return Number.isFinite(n) && n > 0 ? n : 0;
+      },
+      set: (v: number) => {
+        const s = getSettings() as any;
+        const rec = { ...(s.aiMaxTokensOverrides || {}) };
+        if (!v || v <= 0) delete rec[providerId];
+        else rec[providerId] = v;
+        s.aiMaxTokensOverrides = rec;
+      },
+      save: () => saveSettings(),
+    },
+    placeholder: '默认上限',
+    visibleWhen: (snapshot) => snapshot.aiProvider === providerId,
+  };
+}
 /** 构造主设置页 schema（每次 display 重建；visibleWhen 在渲染器内随变更重求值） */
 export function mainSettingsSchema(): SettingsSchema {
   return {
@@ -180,6 +212,14 @@ export function mainSettingsSchema(): SettingsSchema {
           thinkingRow('siliconflow', '思考档位', '思考开关档位，跟随默认不注入思考参数'),
           thinkingRow('volcano-ark', '思考档位', '思考开关档位，跟随默认不注入思考参数'),
           thinkingRow('ollama', '思考档位', '思考强度档位，跟随默认不注入思考参数'),
+          // 最大输出 token（上游 ticket 172/issue 342 融合）：per-provider 覆盖，0/清空回落官方档
+          maxTokensRow('deepseek'),
+          maxTokensRow('opencode-go'),
+          maxTokensRow('zhipu'),
+          maxTokensRow('zhipu-plan'),
+          maxTokensRow('siliconflow'),
+          maxTokensRow('volcano-ark'),
+          maxTokensRow('ollama'),
           // 上游线 P5（ticket 173「获取模型名」本地适配）：按当前服务商拉取 /models 列表，
           // 弹选择器回填该服务商的模型行。端点/密钥键名与 core/ai.ts getAIProvider 逐字对齐。
           {
@@ -212,6 +252,56 @@ export function mainSettingsSchema(): SettingsSchema {
               })();
             },
           },
+        ],
+      },
+      {
+        // Embedding 组（上游 issue 422/423/ADR-0182/0183 的迁入目的地；本地 panel.ts 注释记载
+        // 「迁 AI 面板」而目的地一直缺位，本票补齐）。换模型后打开二脑面板自动全量重建
+        // （panel needsModelRebuild，F2 口径：只换模型不碰 .vec 布局，默认仍 bge-m3）。
+        name: 'Embedding',
+        rows: [
+          { type: 'text', name: 'Embedding 模型', desc: '第二大脑向量化模型，更换后自动重建索引', binding: { key: 'secondBrainEmbeddingModel' }, placeholder: '默认 bge-m3' },
+          {
+            type: 'button',
+            name: '获取模型',
+            buttonText: '获取已装模型',
+            desc: '拉取本机 Ollama 已装模型列表，选择后写入上方模型行',
+            onClick: () => {
+              void (async () => {
+                const { fetchProviderModels } = await import('./ai-models');
+                const { openModelPicker } = await import('./settings-model-picker');
+                try {
+                  const models = await fetchProviderModels('ollama');
+                  openModelPicker({
+                    providerLabel: 'Ollama',
+                    current: String((tryGetSettings() as any).secondBrainEmbeddingModel || ''),
+                    models,
+                    onPick: (m) => {
+                      (getSettings() as any).secondBrainEmbeddingModel = m.id;
+                      void saveSettings();
+                      notice(`模型已设为 ${m.id}`, 'success');
+                    },
+                  });
+                } catch (e) {
+                  notice(e instanceof Error ? e.message : String(e), 'error');
+                }
+              })();
+            },
+          },
+          { type: 'text', name: 'Ollama 本地 URL', desc: 'Ollama 服务地址，向量嵌入走此连接', binding: { key: 'secondBrainOllamaUrl' }, placeholder: 'http://localhost:11434' },
+          // 重排两行仅 qwen3 embedding 下生效（config.rerankActive 同门判据；bge-m3 下恒缺省）
+          { type: 'toggle', name: '启用重排', desc: '检索结果用重排模型精排，仅换序不重建', binding: { key: 'secondBrainRerank' }, visibleWhen: (snapshot) => isQwen3Embedding8b(snapshot.secondBrainEmbeddingModel) },
+          { type: 'text', name: '重排模型', desc: '留空使用内置重排模型，可填其他名称', binding: { key: 'secondBrainRerankModel' }, placeholder: '默认 Qwen3-Reranker-4B', visibleWhen: (snapshot) => isQwen3Embedding8b(snapshot.secondBrainEmbeddingModel) },
+        ],
+      },
+      {
+        // JEV 组（上游 issue 422/ADR-0182）：Jev 判定通道（core/jev），cinema 类型判定与
+        // secondbrain 链接代理消费；密钥留空回落生成通道。
+        name: 'JEV',
+        rows: [
+          { type: 'select', name: 'Jev 服务商', desc: '判定通道的服务商，目前仅支持一家', binding: { key: 'jevProvider' }, options: JEV_PROVIDER_REGISTRY.map((p) => ({ value: p.id, label: p.label })) },
+          { type: 'secret', name: 'Jev 密钥', desc: '填写后判定通道即启用，清空则回落语言模型', binding: { key: 'jevApiKey' }, placeholder: '粘贴 Jev 密钥' },
+          { type: 'text', name: 'Jev 模型', desc: '判定使用的模型，留空跟随服务端最新', binding: { key: 'jevModel' }, placeholder: 'jev-latest' },
         ],
       },
       {

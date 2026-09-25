@@ -969,3 +969,13 @@
 - [x] UI：「记忆目录」组加「读取笔记库」toggle（noteSource 首次暴露）+「禁止读取目录」多选行；两层 opts 回调接线（onNoteSourceChanged 关→拆同步器清空笔记记忆库/onExcludedDirectoriesChanged→回删+补扫跳过）
 - [x] 测试：excluded-dirs.test.ts 7 例 + excluded-dirs-ui.test.ts 3 例；门禁 tsc 0 错、smartcat 域 874 全绿、全量 274 文件 3963 例全绿、构建部署通过
 - [x] ADR-0134；CONTEXT.md 词条（禁止读取目录/读取笔记库）；issues/307
+
+
+### AI 设置对齐上游补票 — 最大输出/JEV/Embedding 三组落位（源 yeshimei/bz@42c00d1d）
+
+- [x] 背景：用户裁定 AI 设置按「本地功能全保、上游不冲突能力照加」对齐；逐行对照上游 settings-main-schema 后定三项真缺口（后端已在、入口缺失）
+- [x] 最大输出 token：per-provider number 行×7（写 aiMaxTokensOverrides，0/清空删键回落 model-limits 官方档；上游单行 refreshKey 联动，本地以 visibleWhen 静态行同范式落位）
+- [x] JEV 组：Jev 服务商（注册表驱动选项）/密钥（secret）/模型三行 + settings 三键——core/jev 通道早随批 4b 落地（cinema type-decide 与二脑 link-agent 消费），配置入口此票补齐
+- [x] Embedding 组：模型行 + 获取已装模型按钮（拉本机 Ollama /api/tags）+ Ollama 本地 URL 行 + 启用重排/重排模型两行（visibleWhen qwen3 embedding，config.rerankActive 同门判据）——panel.ts 注释记载的「迁 AI 面板」目的地此票落位；换模型走 needsModelRebuild 自动重建（F2 口径：默认仍 bge-m3，不碰 .vec 布局）
+- [x] 豆瓣 Cookie 核对：本地 cinemaDoubanCookie 键/行/消费链俱全，无缺口
+- [x] 门禁：tsc --noEmit 0；vitest 全量 3963 全绿；构建部署于合并后统一执行

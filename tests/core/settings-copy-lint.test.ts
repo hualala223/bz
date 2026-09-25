@@ -89,11 +89,12 @@ describe('全量 schema 文案 lint（注册表：LINT_TARGETS）', () => {
       '火山方舟密钥', '火山方舟模型',
       'Ollama 密钥', 'Ollama 模型',
       '思考档位', '思考档位', '思考档位', '思考档位', '思考档位', '思考档位', '思考档位',
+      '最大输出 token', '最大输出 token', '最大输出 token', '最大输出 token', '最大输出 token', '最大输出 token', '最大输出 token',
       '获取模型名',
     ]);
     expect(rows[1].desc).toBe('留空则自动回退读取外部配置密钥'); // ticket 100 冻结文案
     expect(rows[3].desc).toBe('在订阅官网获取后填入这里'); // ticket 100 冻结文案
-    const storageRow = schema.groups[1].rows[0] as { name: string; desc?: string };
+    const storageRow = schema.groups[3].rows[0] as { name: string; desc?: string }; // Embedding/JEV 插入后移位
     expect(storageRow.name).toBe('数据存储路径');
     expect(storageRow.desc).toBe('全部 JSON 数据文件统一存放的目录');
   });
