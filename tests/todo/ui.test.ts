@@ -1192,11 +1192,11 @@ describe('待办面板皮肤（issue 210）', () => {
     expect(row.type).toBe('choiceCards');
     expect(row.name).toBe('面板皮肤');
     expect(row.binding.key).toBe('todoSkin');
-    expect(row.options.map((o: any) => o.value)).toEqual(['paper', 'editorial']);
+    expect(row.options.map((o: any) => o.value)).toEqual(['editorial', 'paper']); // 编辑部置首（融合上游拍板）
     void app;
   });
 
-  it('打开面板按 todoSkin 挂皮肤类；未知/缺省值回落纸感（默认风格已下线）', async () => {
+  it('打开面板按 todoSkin 挂皮肤类；未知/缺省值回落编辑部（融合上游拍板）', async () => {
     const { app, settings } = seedVault();
     settings.todoSkin = 'paper';
     openTodoPanel(app);
@@ -1213,8 +1213,8 @@ describe('待办面板皮肤（issue 210）', () => {
     settings.todoSkin = 'default';
     openTodoPanel(app);
     const panel = document.querySelector('.bz-todo-panel') as HTMLElement;
-    expect(panel.classList.contains('bz-todo-skin-paper')).toBe(true);
-    expect(panel.classList.contains('bz-todo-skin-editorial')).toBe(false);
+    expect(panel.classList.contains('bz-todo-skin-paper')).toBe(false);
+    expect(panel.classList.contains('bz-todo-skin-editorial')).toBe(true);
   });
 
   it('主头行计数数字包 .bz-todo-cnt-num（皮肤染色钩子）', async () => {
@@ -1228,7 +1228,7 @@ describe('待办面板皮肤（issue 210）', () => {
     expect(nums[1].textContent).toBe('3');
   });
 
-  it('弹窗换肤：todoSkin=paper 时编辑器弹窗 popup 挂皮肤类；default 不挂', async () => {
+  it('弹窗换肤：todoSkin=paper 时编辑器弹窗 popup 挂皮肤类；default 回落编辑部', async () => {
     const { app, settings } = seedVault();
     settings.todoSkin = 'paper';
     openTodoPanel(app);
@@ -1246,10 +1246,10 @@ describe('待办面板皮肤（issue 210）', () => {
     openEditor(M.items.find((i) => i.id === 'a')!);
     const popup2 = document.querySelector('.bz-overlay-popup') as HTMLElement;
     expect(popup2.classList.contains('bz-todo-skin-paper')).toBe(false);
-    expect(popup2.classList.contains('bz-todo-skin-editorial')).toBe(false);
+    expect(popup2.classList.contains('bz-todo-skin-editorial')).toBe(true);
   });
 
-  it('applyTodoSkin 热切换已开面板；未知值回落纸感（默认风格已下线）', async () => {
+  it('applyTodoSkin 热切换已开面板；未知值回落编辑部（融合上游拍板）', async () => {
     const { app } = seedVault();
     openTodoPanel(app);
     const panel = document.querySelector('.bz-todo-panel') as HTMLElement;
@@ -1259,8 +1259,8 @@ describe('待办面板皮肤（issue 210）', () => {
     expect(panel.classList.contains('bz-todo-skin-paper')).toBe(false);
     expect(panel.classList.contains('bz-todo-skin-editorial')).toBe(true);
     applyTodoSkin('default');
-    expect(panel.classList.contains('bz-todo-skin-editorial')).toBe(false);
-    expect(panel.classList.contains('bz-todo-skin-paper')).toBe(true);
+    expect(panel.classList.contains('bz-todo-skin-editorial')).toBe(true);
+    expect(panel.classList.contains('bz-todo-skin-paper')).toBe(false);
     // 面板未开时调用不抛错（仅落盘路径）
     closeTodoPanel();
     expect(() => applyTodoSkin('paper')).not.toThrow();

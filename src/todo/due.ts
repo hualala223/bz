@@ -4,8 +4,10 @@
  * getDueStatus：overdue（已过期）/ today（今日到期）/ future（未来）/ null（无截止）
  * formatDueText：逾期文案（N天前已过期/今天 HH:mm 已过期/今天 HH:mm 到期/明天 HH:mm 到期/MM/DD HH:mm 到期）
  * formatDueText 支持 relative（默认，现语义）/ absolute（MM/DD HH:mm 固定格式）两种模式。
+ * 融合批：getTodayStr 换 core/utils localDayKey 单源（上游同款）；relative/absolute 二选为本地保留件。
  */
 import moment from 'moment';
+import { localDayKey } from '../core/utils';
 
 /** 当前时刻（'YYYY-MM-DD HH:mm'，getDueStatus 内部用） */
 function getNowStr(): string {
@@ -14,7 +16,7 @@ function getNowStr(): string {
 
 /** 今日日期（YYYY-MM-DD） */
 function getTodayStr(): string {
-  return moment().format('YYYY-MM-DD');
+  return localDayKey(); // 融合上游：本地时区日期键单源（core/utils，日记/统计同口径）
 }
 
 export type DueStatus = 'overdue' | 'today' | 'future' | null;

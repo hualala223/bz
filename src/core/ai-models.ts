@@ -25,9 +25,11 @@ const LOCAL_PROVIDERS: Record<string, AIProviderDescriptor> = {
   zhipu: { id: 'zhipu', label: '智谱', endpoint: 'https://open.bigmodel.cn/api/paas/v4', apiKeyKey: 'zhipuApiKey', apiKeyLabel: '智谱密钥' },
   siliconflow: { id: 'siliconflow', label: '硅基流动', endpoint: 'https://api.siliconflow.cn/v1', apiKeyKey: 'siliconflowApiKey', apiKeyLabel: '硅基流动密钥' },
   'volcano-ark': { id: 'volcano-ark', label: '火山方舟', endpoint: 'https://ark.cn-beijing.volces.com/api/v3', apiKeyKey: 'volcanoArkApiKey', apiKeyLabel: '火山方舟密钥' },
+  'zhipu-plan': { id: 'zhipu-plan', label: '智谱 Plan', endpoint: 'https://open.bigmodel.cn/api/coding/paas/v4', apiKeyKey: 'zhipuPlanApiKey', apiKeyLabel: '智谱 Plan 密钥' },
+  ollama: { id: 'ollama', label: 'Ollama（本地）', endpoint: 'http://localhost:11434/v1', apiKeyKey: 'ollamaApiKey', apiKeyLabel: 'Ollama 密钥' },
 };
 
-/** 当前 settings 里的服务商描述（本地五家静态表；未知名回退 deepseek——与 getAIProvider 历史兜底一致） */
+/** 当前 settings 里的服务商描述（本地七家静态表；未知名回退 deepseek——与 getAIProvider 历史兜底一致） */
 export function providerDescriptorOf(id: string): AIProviderDescriptor {
   return LOCAL_PROVIDERS[id] || LOCAL_PROVIDERS.deepseek;
 }

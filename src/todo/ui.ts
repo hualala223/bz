@@ -315,7 +315,7 @@ function sceneCount(scene: string): number {
 // ---------- 主面板（打开/关闭/ESC） ----------
 
 /**
- * 皮肤应用（issue 210）：面板根挂 bz-todo-skin-{paper|editorial}（默认无修饰类）。
+ * 皮肤应用（issue 210）：面板根挂 bz-todo-skin-{paper|editorial}（缺省一律编辑部——融合上游 2026-09-22 拍板）。
  * 双入口：openTodoPanel 打开时按 todoSkin 挂载；设置行 onChange 热切换已开面板。
  * 面板未开时仅落盘（设置行已持久化），下次打开生效。
  */
@@ -325,19 +325,19 @@ export function applyTodoSkin(skin: unknown): void {
   if (!panel) return;
   panel.classList.remove('bz-todo-skin-paper', 'bz-todo-skin-editorial');
   // 默认风格已下线（issue 210 四轮）：未知/缺省值一律回落纸感手账
-  const v = skin === 'editorial' ? 'editorial' : 'paper';
+  const v = skin === 'paper' ? 'paper' : 'editorial'; // 缺省/未知一律编辑部（与上游 applyMemoSkin 口径一致）
   panel.classList.add(`bz-todo-skin-${v}`);
 }
 
 /**
  * 当前皮肤类名（issue 210）：挂 body 的浮层（uiModal 弹窗 / 流程框 / 右键菜单 / 抽屉）
- * 与面板共用同套皮肤。回落口径**必须与 applyTodoSkin 逐字一致**（未知/缺省 → 纸感手账）：
+ * 与面板共用同套皮肤。回落口径**必须与 applyTodoSkin 逐字一致**（未知/缺省 → 编辑部）：
  * 面板回落纸感而弹窗返回空类的话，弹窗就掉回 core 裸皮——正是 issue 291 要消灭的
  * 「面板有皮、子弹窗没皮」；且四类浮层都靠这个类才拿得到 --bz-* 皮肤 token。
  */
 function skinClass(): string {
   const s = tryGetSettings().todoSkin;
-  return s === 'paper' || s === 'editorial' ? `bz-todo-skin-${s}` : '';
+  return `bz-todo-skin-${s === 'paper' ? 'paper' : 'editorial'}`; // 回落编辑部：弹窗与面板同皮（issue 291 裸皮口径）
 }
 
 /**

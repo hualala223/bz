@@ -4,7 +4,7 @@
  * （14 基础字段 + 票 298 category/urgency）、场景解析、条目 CRUD、公开课笔记检索。
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { TodoData, parseScenarios, normalizeItem, DEFAULT_SCENARIOS } from '../../src/todo/data';
+import { TodoData, parseScenarios, normalizeItem, DEFAULT_SCENARIOS, purgeStaleFields } from '../../src/todo/data';
 import { setApp } from '../../src/core/app';
 import { MockVault } from '../mock-vault';
 
@@ -213,5 +213,28 @@ describe('TodoData CRUD', () => {
       }));
     const notes = await TodoData.getCourseNotes();
     expect(notes).toEqual([{ name: '《公开课：AI入门》', path: '我的/影视/《公开课：AI入门》.md' }]);
+  });
+});
+
+describe('purgeStaleFields（融合上游：写盘单点消毒）', () => {
+  it('剥 recur/checklist 键，其余字段一字不损', () => {
+    const items = [
+      { id: 'a', title: '普通条目', due: '2026-01-01', recur: 'weekly', checklist: [{ t: 'x' }] },
+      { id: 'b', title: '干净条目', due: null },
+    ];
+    const out: any = purgeStaleFields(items);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toEqual({ id: 'a', title: '普通条目', due: '2026-01-01' });
+    expect(out[1]).toEqual({ id: 'b', title: '干净条目', due: null });
+  });
+
+  it('无残留走短路径：原数组同引用返回', () => {
+    const items = [{ id: 'a', title: 'x' }];
+    expect(purgeStaleFields(items)).toBe(items);
+  });
+
+  it('非数组原样返回（防御）', () => {
+    const obj: any = { not: 'an array' };
+    expect(purgeStaleFields(obj)).toBe(obj);
   });
 });

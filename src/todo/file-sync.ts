@@ -14,6 +14,7 @@ import { tryGetSettings } from '../core/settings-provider';
 import { onDomainEvent } from '../core/domain-bus';
 import { enqueueFileTask, jsonFileStore, storageFile } from '../core/storage';
 import { SYNC_WATCHED_FOLDERS } from '../core/settings-common';
+import { purgeStaleFields } from './data';
 
 // ---------- 同步纯函数（域内私有副本） ----------
 
@@ -78,7 +79,8 @@ async function loadJSON(app: App, filePath: string): Promise<any[]> {
 }
 
 async function saveJSON(app: App, filePath: string, data: any): Promise<void> {
-  await jsonFileStore<any[]>(filePath).write(data);
+  // 直写同样消毒：残留 recur/checklist 不得经引用同步路径回流盘上（融合上游）
+  await jsonFileStore<any[]>(filePath).write(purgeStaleFields(data));
 }
 
 // ---------- 路径 / 设置 ----------

@@ -29,7 +29,7 @@ describe('mainSettingsSchema：主设置页区块', () => {
     expect(schema.groups.every((g) => g.icon === undefined)).toBe(true);
   });
 
-  it('AI 区块：服务商下拉六项（融合批 +智谱 Plan）+ 各家「密钥行 + 可选模型行」（visibleWhen 按所选服务商显隐，ticket 175）', () => {
+  it('AI 区块：服务商下拉七项（融合批 +智谱 Plan/Ollama）+ 各家「密钥行 + 可选模型行」+ 逐家思考档位行（visibleWhen 显隐）', () => {
     const rows = schema.groups[0].rows;
     const rowName = (r: unknown): string => (r as { name: string }).name;
     expect(rows.map(rowName)).toEqual([
@@ -38,7 +38,10 @@ describe('mainSettingsSchema：主设置页区块', () => {
       'OpenCode 密钥', 'OpenCode 模型',
       '智谱密钥', '智谱 Plan 密钥', '智谱 Plan 模型', '智谱模型',
       '硅基流动密钥', '硅基流动模型',
-      '火山方舟密钥', '火山方舟模型', '获取模型名',
+      '火山方舟密钥', '火山方舟模型',
+      'Ollama 密钥', 'Ollama 模型',
+      '思考档位', '思考档位', '思考档位', '思考档位', '思考档位', '思考档位', '思考档位',
+      '获取模型名',
     ]);
     const [provider] = rows as Array<{
       binding?: { key: string };
@@ -46,20 +49,21 @@ describe('mainSettingsSchema：主设置页区块', () => {
     }>;
     expect(provider.binding).toEqual({ key: 'aiProvider' });
     expect(provider.options!.map((o) => o.value)).toEqual([
-      'deepseek', 'opencode-go', 'zhipu', 'zhipu-plan', 'siliconflow', 'volcano-ark',
+      'deepseek', 'opencode-go', 'zhipu', 'zhipu-plan', 'siliconflow', 'volcano-ark', 'ollama',
     ]);
     expect(provider.options!.map((o) => o.label)).toEqual([
-      'DeepSeek', 'OpenCode Go', '智谱', '智谱 Plan', '硅基流动', '火山方舟',
+      'DeepSeek', 'OpenCode Go', '智谱', '智谱 Plan', '硅基流动', '火山方舟', 'Ollama（本地）',
     ]);
-    const textRows = (rows as Array<{ binding?: { key: string }; visibleWhen?: (s: SettingsSnapshot) => boolean }>)
+    const textRows = (rows as Array<{ binding?: { key?: string }; visibleWhen?: (s: SettingsSnapshot) => boolean }>)
       .slice(1)
-      .filter((r) => r.binding) as Array<{ binding: { key: string }; visibleWhen?: (s: SettingsSnapshot) => boolean }>;
+      .filter((r) => r.binding && 'key' in r.binding) as Array<{ binding: { key: string }; visibleWhen?: (s: SettingsSnapshot) => boolean }>; // 键直绑行（思考档位行走三函数逃生口，不在此列）
     expect(textRows.map((r) => r.binding.key)).toEqual([
       'deepseekApiKey', 'deepseekModel',
       'opencodeGoApiKey', 'opencodeGoModel',
       'zhipuApiKey', 'zhipuPlanApiKey', 'zhipuPlanModel', 'zhipuModel',
       'siliconflowApiKey', 'siliconflowModel',
       'volcanoArkApiKey', 'volcanoArkModel',
+      'ollamaApiKey', 'ollamaModel',
     ]);
     // 融合批：Plan 两行归 zhipu-plan，其余各行只认自家 id（未知值不显任何行，175 收窄口径）
     const owner = [
@@ -68,6 +72,7 @@ describe('mainSettingsSchema：主设置页区块', () => {
       'zhipu', 'zhipu-plan', 'zhipu-plan', 'zhipu',
       'siliconflow', 'siliconflow',
       'volcano-ark', 'volcano-ark',
+      'ollama', 'ollama',
     ];
     textRows.forEach((row, i) => {
       for (const id of owner) {

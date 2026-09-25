@@ -77,7 +77,7 @@ describe('全量 schema 文案 lint（注册表：LINT_TARGETS）', () => {
   it('主设置页修正后文案抽查：新标题收短、描述自然句、键名不动', () => {
     const schema = mainSettingsSchema();
     const rows = schema.groups[0].rows as Array<{ name: string; desc?: string }>;
-    // 键名/行为不动，标题可改（ticket 100 ④）；行清单随 ticket 175 五家扩容（密钥行 + 可选模型行）
+    // 键名/行为不动，标题可改（ticket 100 ④）；行清单随 ticket 175 扩容与融合批扩容（密钥/模型/档位行）
     expect(rows.map((r) => r.name)).toEqual([
       'AI 服务商',
       'DeepSeek 密钥', 'DeepSeek 模型',
@@ -86,7 +86,10 @@ describe('全量 schema 文案 lint（注册表：LINT_TARGETS）', () => {
       '智谱 Plan 密钥',
       '智谱 Plan 模型', '智谱模型',
       '硅基流动密钥', '硅基流动模型',
-      '火山方舟密钥', '火山方舟模型', '获取模型名',
+      '火山方舟密钥', '火山方舟模型',
+      'Ollama 密钥', 'Ollama 模型',
+      '思考档位', '思考档位', '思考档位', '思考档位', '思考档位', '思考档位', '思考档位',
+      '获取模型名',
     ]);
     expect(rows[1].desc).toBe('留空则自动回退读取外部配置密钥'); // ticket 100 冻结文案
     expect(rows[3].desc).toBe('在订阅官网获取后填入这里'); // ticket 100 冻结文案

@@ -16,10 +16,34 @@
  */
 import { notice } from './notice';
 import { getSettings, saveSettings, tryGetSettings } from './settings-provider';
-import type { SettingsSchema } from './settings-schema';
+import type { SettingsRow, SettingsSchema } from './settings-schema';
+import { thinkingOptionsOf } from './ai';
 
 /** 存储路径改动防错提示（f1；正文不带 emoji，铁律 7）——文案逐字冻结，勿改 */
 export const STORAGE_PATH_COMMIT_NOTICE = '存储路径已修改：仅改路径，文件不会自动迁移，旧数据需自行迁移；重载插件后生效。';
+
+/** 思考档位行（上游 issue 411/ADR-0179 融合）：per-provider 档位下拉，选项与请求注入同源 core/ai。
+ *  aiThinkingOverrides 是 per-provider 记录键，走三函数逃生口读写；选「跟随模型默认」即删键不注入。 */
+function thinkingRow(providerId: string, name: string, desc: string): SettingsRow {
+  return {
+    type: 'select',
+    name,
+    desc,
+    binding: {
+      get: () => ((tryGetSettings() as any).aiThinkingOverrides || {})[providerId] || 'auto',
+      set: (v: string) => {
+        const s = getSettings() as any;
+        const rec = { ...(s.aiThinkingOverrides || {}) };
+        if (v === 'auto') delete rec[providerId];
+        else rec[providerId] = v;
+        s.aiThinkingOverrides = rec;
+      },
+      save: () => saveSettings(),
+    },
+    options: thinkingOptionsOf(providerId),
+    visibleWhen: (snapshot) => snapshot.aiProvider === providerId,
+  };
+}
 
 /** 构造主设置页 schema（每次 display 重建；visibleWhen 在渲染器内随变更重求值） */
 export function mainSettingsSchema(): SettingsSchema {
@@ -40,6 +64,7 @@ export function mainSettingsSchema(): SettingsSchema {
               { value: 'zhipu-plan', label: '智谱 Plan' },
               { value: 'siliconflow', label: '硅基流动' },
               { value: 'volcano-ark', label: '火山方舟' },
+              { value: 'ollama', label: 'Ollama（本地）' },
             ],
           },
           {
@@ -132,6 +157,29 @@ export function mainSettingsSchema(): SettingsSchema {
             placeholder: '默认 doubao-seed-1-6-flash-250828',
             visibleWhen: (snapshot) => snapshot.aiProvider === 'volcano-ark',
           },
+          {
+            type: 'text',
+            name: 'Ollama 密钥',
+            desc: '本地服务无需密钥，留空即可',
+            binding: { key: 'ollamaApiKey' },
+            visibleWhen: (snapshot) => snapshot.aiProvider === 'ollama',
+          },
+          {
+            type: 'text',
+            name: 'Ollama 模型',
+            desc: '留空使用内置模型，可填已拉取的模型名',
+            binding: { key: 'ollamaModel' },
+            placeholder: '默认 llama3.1',
+            visibleWhen: (snapshot) => snapshot.aiProvider === 'ollama',
+          },
+          // 思考档位（上游 issue 411/ADR-0179 融合）：逐家档位下拉，选项与注入同源
+          thinkingRow('deepseek', '思考档位', '思考强度档位，跟随默认不注入思考参数'),
+          thinkingRow('opencode-go', '思考档位', '思考开关档位，跟随默认不注入思考参数'),
+          thinkingRow('zhipu', '思考档位', '思考开关档位，跟随默认不注入思考参数'),
+          thinkingRow('zhipu-plan', '思考档位', '思考强度档位，跟随默认不注入思考参数'),
+          thinkingRow('siliconflow', '思考档位', '思考开关档位，跟随默认不注入思考参数'),
+          thinkingRow('volcano-ark', '思考档位', '思考开关档位，跟随默认不注入思考参数'),
+          thinkingRow('ollama', '思考档位', '思考强度档位，跟随默认不注入思考参数'),
           // 上游线 P5（ticket 173「获取模型名」本地适配）：按当前服务商拉取 /models 列表，
           // 弹选择器回填该服务商的模型行。端点/密钥键名与 core/ai.ts getAIProvider 逐字对齐。
           {

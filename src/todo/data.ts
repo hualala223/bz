@@ -34,6 +34,21 @@ export function parseScenarios(raw: string | undefined): string[] {
   return list.length ? [...new Set(list)] : [...DEFAULT_SCENARIOS];
 }
 
+/** 剥离条目残留回滚字段（recur/checklist）（融合上游 2026-09-19 拍板件）：
+ *  只剥键不删条目，其余字段一字不损；写盘单点消毒（DataManager.write / file-sync saveJSON 共用）。 */
+export function purgeStaleFields<T>(data: T): T {
+  if (!Array.isArray(data)) return data;
+  const stale = (it: any) => !!it && typeof it === 'object' && ('recur' in it || 'checklist' in it);
+  if (!data.some(stale)) return data;
+  return data.map((it: any) => {
+    if (!stale(it)) return it;
+    const rest = { ...it };
+    delete rest.recur;
+    delete rest.checklist;
+    return rest;
+  }) as unknown as T;
+}
+
 /** 文件缓存中是否含「公开课」标签（正文标签或 frontmatter tags） */
 function hasCourseTag(cache: any): boolean {
   if (cache.tags && (cache.tags as any[]).some((t) => t.tag === '#公开课' || t.tag === '公开课')) return true;
@@ -86,7 +101,8 @@ export const TodoData = {
     return this._store!.read();
   },
   async write(data: any) {
-    return this._store!.write(data);
+    // 写盘单点消毒（融合上游）：残留 recur/checklist 任何回写路径不得再落盘
+    return this._store!.write(purgeStaleFields(data));
   },
 
   /** 加载条目：读 + 缺 id 生成 + 字段归一（与旧 memo 一致：有缺 id 整写回补）。

@@ -30,8 +30,8 @@ export function todoSettingsSchema(): SettingsSchema {
             name: '面板皮肤',
             binding: { key: 'todoSkin' },
             options: [
-              { value: 'paper', label: '纸感手账', prevClass: 'bz-skinprev-paper' },
               { value: 'editorial', label: '编辑部', prevClass: 'bz-skinprev-editorial' },
+              { value: 'paper', label: '纸感手账', prevClass: 'bz-skinprev-paper' },
             ],
             onChange: (v) => applyTodoSkin(v),
           },

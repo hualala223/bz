@@ -1,11 +1,13 @@
 /**
  * AIService / createAI（Q3.js window.__utils 移植，ticket 03）
- * provider：deepseek / opencode-go / zhipu / siliconflow / volcano-ark（插件设置注入，取代 Q3 的 QuickAdd 宏设置）；
+ * provider：deepseek / opencode-go / zhipu / siliconflow / volcano-ark / zhipu-plan / ollama（插件设置注入，取代 Q3 的 QuickAdd 宏设置）；
  * override 字符串（五家 id 或历史遗留值走 deepseek 兜底）或对象 {endpoint, apiKey, model}。
  * prompt：fetch 流式（stream:true），失败自动 fallback requestUrl 非流式；noCors 直接走 requestUrl。
  * opencode-go 须带 x-opencode-session 头（ticket 174：官方端点强制，缺失一律 400 MissingSessionID）；
  * requestUrl 传 throw:false 自判状态码，400+ 报错透出服务端报文（默认 throw 只抛一句 "Request failed, status N"）。
  * thinking 方言（ticket 175）：智谱/方舟要 thinking 对象，其余原生 enable_thinking，prompt 内统一翻译。
+ * 思考档位（上游 issue 411/ADR-0179 融合）：per-provider 档位表 thinkingBodyFor，消费 aiThinkingOverrides
+ * （auto/档位不在表内一律不注入）；ollama 第七家（本地 OpenAI 兼容层，密钥留空放行）。
  */
 import { requestUrl } from 'obsidian';
 import { getApp } from './app';
@@ -23,6 +25,10 @@ export interface AISettingsLike {
   zhipuModel?: string;
   zhipuPlanApiKey?: string;
   zhipuPlanModel?: string;
+  /** Ollama（本地）密钥（融合上游 issue 411；本地服务无需密钥，留空放行） */
+  ollamaApiKey?: string;
+  /** Ollama 模型（留空 = 内置 llama3.1） */
+  ollamaModel?: string;
   aiMaxTokensOverrides?: Record<string, number>;
   siliconflowApiKey?: string;
   siliconflowModel?: string;
@@ -44,6 +50,8 @@ function getQ3Settings(): AISettingsLike {
 // ---------------- provider 解析 ----------------
 
 interface AIProvider {
+  /** 注册表身份（思考档位表按它查）；对象 override 无 id = 不注入 */
+  id?: string;
   endpoint: string;
   apiKey: string;
   model?: string;
@@ -114,6 +122,7 @@ export async function getAIProvider(override?: string | { endpoint?: string; api
       throw new Error('未配置 OpenCode Go API Key：插件设置 → AI 配置 → OpenCode Go API Key');
     }
     _aiProviderCache = {
+      id: 'opencode-go',
       endpoint: 'https://opencode.ai/zen/go/v1',
       apiKey: s.opencodeGoApiKey,
       model: s.opencodeGoModel || 'deepseek-v4-flash',
@@ -129,6 +138,7 @@ export async function getAIProvider(override?: string | { endpoint?: string; api
       throw new Error('未配置智谱 Plan API Key：插件设置 → AI 配置 → 智谱 Plan 密钥');
     }
     _aiProviderCache = {
+      id: 'zhipu-plan',
       endpoint: 'https://open.bigmodel.cn/api/coding/paas/v4',
       apiKey: s.zhipuPlanApiKey,
       model: s.zhipuPlanModel || 'glm-5.3-flash',
@@ -143,6 +153,7 @@ export async function getAIProvider(override?: string | { endpoint?: string; api
       throw new Error('未配置智谱 API Key：插件设置 → AI 配置 → 智谱密钥');
     }
     _aiProviderCache = {
+      id: 'zhipu',
       endpoint: 'https://open.bigmodel.cn/api/paas/v4',
       apiKey: s.zhipuApiKey,
       model: s.zhipuModel || 'glm-4.7-flash',
@@ -155,6 +166,7 @@ export async function getAIProvider(override?: string | { endpoint?: string; api
       throw new Error('未配置硅基流动 API Key：插件设置 → AI 配置 → 硅基流动密钥');
     }
     _aiProviderCache = {
+      id: 'siliconflow',
       endpoint: 'https://api.siliconflow.cn/v1',
       apiKey: s.siliconflowApiKey,
       model: s.siliconflowModel || 'deepseek-ai/DeepSeek-V3', // 平台对 V3 系列升级不换 ID
@@ -166,6 +178,7 @@ export async function getAIProvider(override?: string | { endpoint?: string; api
       throw new Error('未配置火山方舟 API Key：插件设置 → AI 配置 → 火山方舟密钥');
     }
     _aiProviderCache = {
+      id: 'volcano-ark',
       endpoint: 'https://ark.cn-beijing.volces.com/api/v3',
       apiKey: s.volcanoArkApiKey,
       model: s.volcanoArkModel || 'doubao-seed-1-6-flash-250828', // 方舟 Model ID 带日期后缀
@@ -173,9 +186,21 @@ export async function getAIProvider(override?: string | { endpoint?: string; api
     };
     return _aiProviderCache;
   }
+  // 本地 Ollama（融合上游 issue 411/ADR-0179）：OpenAI 兼容层；本地服务无需密钥，留空放行。
+  // fetch 优先（用户设 OLLAMA_ORIGINS 放行时可流式），CORS 拦截自动落 requestUrl 非流式
+  if (name === 'ollama') {
+    _aiProviderCache = {
+      id: 'ollama',
+      endpoint: 'http://localhost:11434/v1',
+      apiKey: s.ollamaApiKey || '',
+      model: s.ollamaModel || 'llama3.1',
+    };
+    return _aiProviderCache;
+  }
   // deepseek：settings 里配的 key 优先，其次 QuickAdd data.json（未知 provider 名也落到此处，历史行为）
   if (s.deepseekApiKey) {
     _aiProviderCache = {
+      id: 'deepseek',
       endpoint: 'https://api.deepseek.com',
       apiKey: s.deepseekApiKey,
       model: s.deepseekModel || undefined,
@@ -191,7 +216,101 @@ export async function getAIProvider(override?: string | { endpoint?: string; api
       return _aiProviderCache;
     }
   } catch (e) { /* 读取失败由调用方提示 */ }
-  throw new Error('未找到 AI 配置：请在插件设置中配置 API Key（DeepSeek / OpenCode Go / 智谱 / 硅基流动 / 火山方舟）');
+  throw new Error('未找到 AI 配置：请在插件设置中配置 API Key（DeepSeek / OpenCode Go / 智谱 / 硅基流动 / 火山方舟 / Ollama）');
+}
+
+// ---------------- 思考档位（上游 issue 411/ADR-0179 融合） ----------------
+
+/** 档位一项：面板档位 → 请求体片段（body = null 表示不注入任何思考参数 = 跟随模型默认） */
+export interface AIThinkingLevel {
+  /** 档位值（存设置 aiThinkingOverrides；auto = 跟随默认不注入） */
+  value: string;
+  /** 设置面板展示名 */
+  label: string;
+  /** 该档位注入的请求体键值；null = 不注入 */
+  body: Record<string, unknown> | null;
+}
+
+/** 存档/注入共用的档位动词表（逐家档位表由此取项，避免各写一份字面量） */
+const THINK_AUTO: AIThinkingLevel = { value: 'auto', label: '跟随模型默认', body: null };
+const THINK_OFF: AIThinkingLevel = { value: 'off', label: '关闭（省 token）', body: null };
+const THINK_LOW: AIThinkingLevel = { value: 'low', label: '低', body: null };
+const THINK_MEDIUM: AIThinkingLevel = { value: 'medium', label: '中', body: null };
+const THINK_HIGH: AIThinkingLevel = { value: 'high', label: '高', body: null };
+const THINK_MAX: AIThinkingLevel = { value: 'max', label: '最高', body: null };
+const THINK_ON: AIThinkingLevel = { value: 'on', label: '开启', body: null };
+
+/** 逐家档位表（参数名与被支持的档逐家不同，核对口径随上游 2026-09-23）：
+ *  - deepseek：开关 thinking:{type} + 强度 reasoning_effort（官方无 medium 档）；
+ *  - zhipu-plan：glm-5.3 系强制思考（无关闭档），仅 reasoning_effort low/high/max；
+ *  - ollama：兼容层把 reasoning_effort 映射为内部 Think（none = 关）；
+ *  - 智谱/方舟（ticket 175 方言）：thinking:{type} 二档；opencode-go/硅基流动：enable_thinking 二档。
+ *  未表内的 provider 无档位表 = 不注入（保守，不冒进发参数）。 */
+const AI_THINKING_LEVELS: Record<string, AIThinkingLevel[]> = {
+  'deepseek': [
+    THINK_AUTO,
+    { ...THINK_OFF, body: { thinking: { type: 'disabled' } } },
+    { ...THINK_LOW, body: { thinking: { type: 'enabled' }, reasoning_effort: 'low' } },
+    { ...THINK_HIGH, body: { thinking: { type: 'enabled' }, reasoning_effort: 'high' } },
+    { ...THINK_MAX, body: { thinking: { type: 'enabled' }, reasoning_effort: 'max' } },
+  ],
+  'zhipu-plan': [
+    THINK_AUTO,
+    { ...THINK_LOW, body: { reasoning_effort: 'low' } },
+    { ...THINK_HIGH, body: { reasoning_effort: 'high' } },
+    { ...THINK_MAX, body: { reasoning_effort: 'max' } },
+  ],
+  'ollama': [
+    THINK_AUTO,
+    { ...THINK_OFF, body: { reasoning_effort: 'none' } },
+    { ...THINK_LOW, body: { reasoning_effort: 'low' } },
+    { ...THINK_MEDIUM, body: { reasoning_effort: 'medium' } },
+    { ...THINK_HIGH, body: { reasoning_effort: 'high' } },
+  ],
+  'zhipu': [
+    THINK_AUTO,
+    { ...THINK_OFF, body: { thinking: { type: 'disabled' } } },
+    { ...THINK_ON, body: { thinking: { type: 'enabled' } } },
+  ],
+  'volcano-ark': [
+    THINK_AUTO,
+    { ...THINK_OFF, body: { thinking: { type: 'disabled' } } },
+    { ...THINK_ON, body: { thinking: { type: 'enabled' } } },
+  ],
+  'opencode-go': [
+    THINK_AUTO,
+    { ...THINK_OFF, body: { enable_thinking: false } },
+    { ...THINK_ON, body: { enable_thinking: true } },
+  ],
+  'siliconflow': [
+    THINK_AUTO,
+    { ...THINK_OFF, body: { enable_thinking: false } },
+    { ...THINK_ON, body: { enable_thinking: true } },
+  ],
+};
+
+/** 该 provider 的档位表（设置面板选项与请求注入同源；未表内 id 回空表） */
+export function thinkingLevelsOf(providerId?: string): AIThinkingLevel[] {
+  return (providerId && AI_THINKING_LEVELS[providerId]) || [];
+}
+
+/** 档位值 → 应注入的请求体键值对；null = 不注入（auto/空/档位不在表内一律不注入——
+ *  「不认识的档位宁可不动」优先于「尽力翻译」，避免给端点发它不认识的参数） */
+export function thinkingBodyFor(providerId: string | undefined, level: string | undefined): Record<string, unknown> | null {
+  if (!providerId || !level || level === 'auto') return null;
+  const hit = thinkingLevelsOf(providerId).find((l) => l.value === level);
+  return hit?.body ?? null;
+}
+
+/** 设置面板选项面（settings-main-schema 消费；auto 恒在首位） */
+export function thinkingOptionsOf(providerId?: string): { value: string; label: string }[] {
+  return thinkingLevelsOf(providerId).map((l) => ({ value: l.value, label: l.label }));
+}
+
+/** modelOptions 是否显式带了思考键（显式优先：调用方直给的思考参数不被面板档位改写——
+ *  域内确有「与面板档位不同」的实测语义，如 knowledge/mount-suggest 的 low 档） */
+export function hasExplicitThinkingOption(mo: Record<string, any>): boolean {
+  return 'enable_thinking' in mo || 'reasoning_effort' in mo || 'thinking' in mo;
 }
 
 // ---------------- 请求实现 ----------------
@@ -327,6 +446,13 @@ export class AIService {
     if (provider.thinkingParam === 'thinking' && body.enable_thinking !== undefined) {
       body.thinking = { type: body.enable_thinking ? 'enabled' : 'disabled' };
       delete body.enable_thinking;
+    }
+    // 思考档位注入（上游 issue 411/ADR-0179 融合）：档位与参数名由 per-provider 档位表决定；
+    // 调用方显式思考键优先；auto / 档位不在表内 / 对象 override（无注册表身份）一律不注入
+    if (!hasExplicitThinkingOption(mo)) {
+      const overrides = (getQ3Settings() as Record<string, unknown>).aiThinkingOverrides as Record<string, string> | undefined;
+      const thinking = thinkingBodyFor(provider.id, overrides?.[provider.id || '']);
+      if (thinking) Object.assign(body, thinking);
     }
     const signal = mergedOptions.signal instanceof AbortSignal ? (mergedOptions.signal as AbortSignal) : undefined;
     const onDelta = typeof mergedOptions.onDelta === 'function' ? (mergedOptions.onDelta as (delta: string) => void) : undefined;

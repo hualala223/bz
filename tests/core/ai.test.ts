@@ -4,7 +4,7 @@
  * fallback 非流式（requestUrl）、noCors 直走、chat/json 方法、provider 解析与错误。
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { AIService, createAI, getAIProvider, setAISettingsProvider, resetAIProviderCache } from '../../src/core/ai';
+import { AIService, createAI, getAIProvider, setAISettingsProvider, resetAIProviderCache, thinkingBodyFor } from '../../src/core/ai';
 import { setApp } from '../../src/core/app';
 import { MockVault } from '../mock-vault';
 import { requestUrl } from '../mock-obsidian-entry';
@@ -409,5 +409,112 @@ describe('createAI', () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.max_tokens).toBe(8192);
     delete (global as any).fetch;
+  });
+});
+
+// ---------------- 融合补票：ollama 第七家 + 思考档位表（上游 issue 411/ADR-0179） ----------------
+
+describe('AI 融合：ollama 本地通道', () => {
+  let fetchMock: any;
+  beforeEach(() => {
+    setApp({ vault: new MockVault(), adapter: { read: vi.fn() } } as any);
+    setAISettingsProvider(() => ({ aiProvider: 'ollama' } as any));
+    resetAIProviderCache();
+    vi.mocked(requestUrl).mockReset();
+    fetchMock = vi.fn();
+    (global as any).fetch = fetchMock;
+  });
+  afterEach(() => { delete (global as any).fetch; });
+
+  it('密钥留空放行：解析出本地端点与内置默认模型', async () => {
+    const p = await getAIProvider();
+    expect(p.endpoint).toBe('http://localhost:11434/v1');
+    expect(p.model).toBe('llama3.1');
+    expect(p.apiKey).toBe('');
+    expect(p.id).toBe('ollama');
+  });
+
+  it('prompt 走本地端点；模型行覆盖生效', async () => {
+    setAISettingsProvider(() => ({ aiProvider: 'ollama', ollamaModel: 'qwen3:8b' } as any));
+    resetAIProviderCache();
+    fetchMock.mockResolvedValue({ ok: true, status: 200, body: sseBody(['data: {"choices":[{"delta":{"content":"好"}}]}\n', 'data: [DONE]\n']) });
+    const ai = new AIService({}, 'deepseek-v4-flash');
+    await ai.prompt('在吗');
+    const call = fetchMock.mock.calls.find((c: any[]) => String(c[0]).includes('/chat/completions'));
+    expect(String(call[0])).toBe('http://localhost:11434/v1/chat/completions');
+    expect(JSON.parse(call[1].body).model).toBe('qwen3:8b');
+  });
+});
+
+describe('AI 融合：per-provider 思考档位表', () => {
+  let fetchMock: any;
+  beforeEach(() => {
+    setApp({ vault: new MockVault(), adapter: { read: vi.fn() } } as any);
+    resetAIProviderCache();
+    vi.mocked(requestUrl).mockReset();
+    fetchMock = vi.fn();
+    (global as any).fetch = fetchMock;
+  });
+  afterEach(() => { delete (global as any).fetch; });
+
+  function mockStream(): void {
+    fetchMock.mockResolvedValue({ ok: true, status: 200, body: sseBody(['data: {"choices":[{"delta":{"content":"好"}}]}\n', 'data: [DONE]\n']) });
+  }
+  function sentBody(): any {
+    const call = fetchMock.mock.calls.find((c: any[]) => String(c[0]).includes('/chat/completions'));
+    return JSON.parse(call[1].body);
+  }
+
+  it('deepseek low 档：thinking.type enabled + reasoning_effort low 注入请求体', async () => {
+    setAISettingsProvider(() => ({ aiProvider: 'deepseek', deepseekApiKey: 'sk-x', aiThinkingOverrides: { deepseek: 'low' } } as any));
+    mockStream();
+    const ai = new AIService({}, 'deepseek-v4-flash');
+    await ai.prompt('hi');
+    const body = sentBody();
+    expect(body.thinking).toEqual({ type: 'enabled' });
+    expect(body.reasoning_effort).toBe('low');
+  });
+
+  it('auto / 档位不在表内 / 无 override：一律不注入', async () => {
+    for (const level of ['auto', 'bogus', undefined]) {
+      resetAIProviderCache();
+      fetchMock.mockReset();
+      mockStream();
+      const ov: any = {};
+      if (level !== undefined) ov.deepseek = level;
+      setAISettingsProvider(() => ({ aiProvider: 'deepseek', deepseekApiKey: 'sk-x', aiThinkingOverrides: ov } as any));
+      const ai = new AIService({}, 'deepseek-v4-flash');
+      await ai.prompt('hi');
+      const body = sentBody();
+      expect(body.thinking).toBeUndefined();
+      expect(body.reasoning_effort).toBeUndefined();
+      expect(body.enable_thinking).toBeUndefined();
+    }
+  });
+
+  it('调用方显式思考键优先：enable_thinking 直给不被面板档位改写', async () => {
+    setAISettingsProvider(() => ({ aiProvider: 'deepseek', deepseekApiKey: 'sk-x', aiThinkingOverrides: { deepseek: 'low' } } as any));
+    mockStream();
+    const ai = new AIService({}, 'deepseek-v4-flash');
+    await ai.prompt('hi', 'deepseek-v4-flash', { modelOptions: { enable_thinking: false } });
+    const body = sentBody();
+    expect(body.enable_thinking).toBe(false);
+    expect(body.reasoning_effort).toBeUndefined();
+  });
+
+  it('智谱二档方言：on 档注入 thinking:{type:enabled}', async () => {
+    setAISettingsProvider(() => ({ aiProvider: 'zhipu', zhipuApiKey: 'zk-x', aiThinkingOverrides: { zhipu: 'on' } } as any));
+    mockStream();
+    const ai = new AIService({}, 'deepseek-v4-flash');
+    await ai.prompt('hi');
+    expect(sentBody().thinking).toEqual({ type: 'enabled' });
+  });
+
+  it('thinkingBodyFor 表口径：zhipu-plan 无 off 档；ollama off=reasoning_effort none；未知 id 回 null', () => {
+    expect(thinkingBodyFor('zhipu-plan', 'off')).toBeNull();
+    expect(thinkingBodyFor('ollama', 'off')).toEqual({ reasoning_effort: 'none' });
+    expect(thinkingBodyFor('no-such-provider', 'low')).toBeNull();
+    expect(thinkingBodyFor(undefined, 'low')).toBeNull();
+    expect(thinkingBodyFor('deepseek', 'auto')).toBeNull();
   });
 });

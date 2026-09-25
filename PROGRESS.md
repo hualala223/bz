@@ -950,3 +950,14 @@
 - [x] 命令 `bz-cinema-dedupe`（79→80）；tests/smoke.test.ts EXPECTED_COMMAND_IDS 同步
 - [x] 测试：dedupe.test.ts 10 例（node 纯函数）+ ui.test.ts 2 例（裁决删除回收站/搬补落盘、无重复只提示）
 - [x] 门禁：tsc --noEmit 0；cinema+smoke 225 全绿；全量测试 + 构建部署（真实库预扫 54 篇零重复，功能为防患工具）
+
+### 融合补票 — 上游细项四件落位（todo 三件 + AI 三件；源 yeshimei/bz@42c00d1d）
+
+- [x] 背景：批 3g2/AI 批当时的四项「不采纳」经用户裁定改融合——本地功能全保留，上游不冲突能力并入
+- [x] 待办编辑部皮肤置首：DEFAULT todoSkin paper→editorial、applyTodoSkin/skinClass 缺省一律编辑部（issue 291 裸皮口径同上游）、面板皮肤选项编辑部置首
+- [x] due.ts：getTodayStr 换 core/utils localDayKey 单源（上游同款）；memoDueFormat relative/absolute 二选为本地保留件，不随上游退役
+- [x] purgeStaleFields：recur/checklist 写盘单点消毒（DataManager.write + file-sync saveJSON 两路），只剥键不删条目
+- [x] AI +ollama 第七家：本地 OpenAI 兼容层（localhost:11434/v1，密钥留空放行，默认 llama3.1），settings 两键 + 面板密钥/模型两行
+- [x] AI 思考档位表：激活 aiThinkingOverrides 死键（原只有键无消费）——per-provider 档位表 thinkingBodyFor 注入，调用方显式思考键优先；deepseek 强度三档/智谱 Plan 无关闭档/ollama 四档/智谱方舟 opencode 硅基二档
+- [x] AI 面板七行思考档位下拉（三函数逃生口读写 aiThinkingOverrides）；ai-models 注册表补 zhipu-plan/ollama 两行（顺带修复智谱 Plan 获取模型名错落 deepseek 端点的既有缺口）
+- [x] 门禁：tsc --noEmit 0；vitest 全量绿；构建部署于合并后统一执行

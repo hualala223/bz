@@ -344,6 +344,10 @@ export default interface BzSettings {
   zhipuPlanApiKey: string;
   /** 🧩 智谱 Plan 模型（默认 glm-5.3-flash） */
   zhipuPlanModel: string;
+  /** Ollama（本地）密钥（融合上游 issue 411；本地服务无需密钥，留空放行） */
+  ollamaApiKey: string;
+  /** Ollama 模型（留空 = 内置 llama3.1） */
+  ollamaModel: string;
   /** 🧩 per-provider 最大输出 token 覆盖（上游 ADR-0148/0151；键=provider id） */
   aiMaxTokensOverrides: Record<string, number>;
   /** 🧩 per-provider 思考档位（上游 issue 330/411；键=provider id，值='off'|'default'） */
@@ -798,7 +802,7 @@ export const DEFAULT_SETTINGS: BzSettings = {
   // 待办（todo 域）：面板尺寸记忆 + 皮肤 + 移动端默认全屏（默认关，与旧备忘录一致）
   todoPanelWidth: 0,
   todoPanelHeight: 0,
-  todoSkin: 'paper',
+  todoSkin: 'editorial', // 融合上游 2026-09-22 拍板：默认编辑部（显式选纸感的存量用户不受影响）
   todoMobileDefaultFullscreen: false,
   belongingsMobileDefaultFullscreen: true,
   // clipbook（上游 ADR-0082）：移动端默认全屏对齐 clipping 默认开
@@ -828,6 +832,8 @@ export const DEFAULT_SETTINGS: BzSettings = {
   bilibiliCookie: '',
   zhipuPlanApiKey: '',
   zhipuPlanModel: '',
+  ollamaApiKey: '',
+  ollamaModel: '',
   aiMaxTokensOverrides: {},
   aiThinkingOverrides: {},
   knowledgeSkin: 'default',
