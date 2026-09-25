@@ -961,3 +961,11 @@
 - [x] AI 思考档位表：激活 aiThinkingOverrides 死键（原只有键无消费）——per-provider 档位表 thinkingBodyFor 注入，调用方显式思考键优先；deepseek 强度三档/智谱 Plan 无关闭档/ollama 四档/智谱方舟 opencode 硅基二档
 - [x] AI 面板七行思考档位下拉（三函数逃生口读写 aiThinkingOverrides）；ai-models 注册表补 zhipu-plan/ollama 两行（顺带修复智谱 Plan 获取模型名错落 deepseek 端点的既有缺口）
 - [x] 门禁：tsc --noEmit 0；vitest 全量绿；构建部署于合并后统一执行
+
+### 票 307 — 小橘「禁止读取目录」多选 +「读取笔记库」开关（ADR-0134）
+
+- [x] 数据层：`smartcatExcludedDirectories` 键（默认 []）+ `isPathExcluded` 纯函数（前缀语义对齐 resolveOwnerDir，''=库根全禁）
+- [x] 读取入口全短路：日记/卡片盒/诗/信活动与结算（挂起计时器到期不读）、删改观察、剪藏补全、书评、两条基线；记忆目录同步器 getExcluded 注入（seedsFor/onModified/onRenamed/syncDirectories）+ dropExcludedRefs 存量清理（init/syncDirectories 双挂点）+ wipeAll
+- [x] UI：「记忆目录」组加「读取笔记库」toggle（noteSource 首次暴露）+「禁止读取目录」多选行；两层 opts 回调接线（onNoteSourceChanged 关→拆同步器清空笔记记忆库/onExcludedDirectoriesChanged→回删+补扫跳过）
+- [x] 测试：excluded-dirs.test.ts 7 例 + excluded-dirs-ui.test.ts 3 例；门禁 tsc 0 错、smartcat 域 874 全绿、全量 274 文件 3963 例全绿、构建部署通过
+- [x] ADR-0134；CONTEXT.md 词条（禁止读取目录/读取笔记库）；issues/307

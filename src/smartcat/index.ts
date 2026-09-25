@@ -9,7 +9,7 @@
  */
 import type { App } from 'obsidian';
 import { notice } from '../core/notice';
-import { getSettings, saveSettings } from '../core/settings-provider';
+import { getSettings, saveSettings, tryGetSettings } from '../core/settings-provider';
 import { closeSettingsModal } from '../core/settings-modal';
 import { loadSmartCatData, saveSmartCatData, getSmartcatFilePath, smartcatStorageDir, defaultPersonalityGrowth, touchPresence, applyInsightPatch } from './data';
 import { eventSystem, setSmartcatApp, setupVisibilityCheck, __resetVisibilityForTests } from './state';
@@ -27,7 +27,7 @@ import { callChat, isAIConfigured } from './api';
 import { generateBookDescription, hasBookTag } from './content';
 import { classifyPath } from './context-source';
 import { NoteMemorySync, type NoteMemoryBackend } from './note-memory';
-import { normalizeMemoryDirectories } from './config';
+import { normalizeMemoryDirectories, isPathExcluded } from './config';
 import { onDomainEvent } from '../core/domain-bus';
 import type { MovieActionEvent } from './movie-source';
 import { buildMemoStructured, buildMemoDueScanStructured, type MemoActionEvent, type MemoDueLike } from './memo-source';
@@ -500,6 +500,13 @@ export async function ensureSmartCat(app: App, opts?: { startHidden?: boolean })
 
 // ---------------- 记忆目录同步（ADR-0069：笔记记忆库增量接线） ----------------
 
+/** 禁止读取目录命中（票 307）：路径命中设置清单（smartcatExcludedDirectories）→ 小橘一概不读。
+ *  观察链（日记/卡片盒/现代诗/信结算与删改观察）/ 记忆库同步 / 书评 / 剪藏补全在各自入口调用本判定短路。 */
+function readBlocked(path: string | null | undefined): boolean {
+  if (!path) return false;
+  return isPathExcluded(path, normalizeMemoryDirectories((tryGetSettings() as any)?.smartcatExcludedDirectories));
+}
+
 /** 记忆目录同步器懒初始化（幂等）：noteSource 开 + 配置了 memoryDirectories 才装配；
  *  已装配时仅同步目录集合（设置变更后的移除清理/新增补扫由 syncDirectories 承担）。
  *  backend 即 memorySystem（ADR-0069 契约 API upsertNoteMemory/removeMemoryByRef/setRefResolver
@@ -538,8 +545,19 @@ function ensureNoteMemorySync(): void {
     },
     backend: memorySystem as unknown as NoteMemoryBackend,
     getDirectories: () => normalizeMemoryDirectories((getSettings() as any).memoryDirectories),
+    getExcluded: () => normalizeMemoryDirectories((tryGetSettings() as any).smartcatExcludedDirectories),
   });
   void noteMemorySync.init();
+}
+
+/** 直清笔记记忆库引用（票 307「读取笔记库」开关关闭且同步器未装配时的兜底：
+ *  跨会话存量引用经 memorySystem 契约 API 全量回删；引用是文件派生数据，重开后重扫重建） */
+async function wipeNoteMemoryRefsDirect(): Promise<void> {
+  if (!memorySystem?.listRefPaths) return;
+  try {
+    const refs = await memorySystem.listRefPaths();
+    for (const ref of refs) await memorySystem.removeMemoryByRef(ref);
+  } catch { /* 清理失败静默（重启后 init/dropExcludedRefs 自愈） */ }
 }
 
 
@@ -936,6 +954,9 @@ async function maybeDossierNarrative(): Promise<void> {
 /** 书评（原 ContentMonitor.generateBookReview：book 标签笔记首次打开一句话评价） */
 async function generateBookReview(): Promise<void> {
   if (!appRef || !data || !bubbleManager || !moodSystem) return;
+  // 票 307 禁止读取目录：当前笔记命中禁止清单 → 不读不评
+  const activePath: string | undefined = appRef.workspace.getActiveFile?.()?.path;
+  if (readBlocked(activePath)) return;
   try {
     const app = appRef;
     // 仅当当前笔记带 book 标签才生成；每文件一次（dom 内 Set 记忆）
@@ -1127,6 +1148,23 @@ function openSettings(): void {
         noteMemorySync = null;
         if (sync) void sync.syncDirectories([]).catch(() => { /* 清理失败静默 */ }).finally(() => sync.dispose());
       } else ensureNoteMemorySync();
+    },
+    // 票 307「读取笔记库」开关：关闭 → 拆同步器 + 清空笔记记忆库（引用是文件派生数据，重开后重扫重建）；
+    // 同步器未装配也可能有跨会话存量引用（直清 backend 兜底）。开启 → 重建同步器全量补扫
+    onNoteSourceChanged: (on: boolean) => {
+      if (on) {
+        ensureNoteMemorySync();
+        return;
+      }
+      const sync = noteMemorySync;
+      noteMemorySync = null;
+      if (sync) void sync.wipeAll().catch(() => { /* 清理失败静默 */ }).finally(() => sync.dispose());
+      else void wipeNoteMemoryRefsDirect();
+    },
+    // 票 307「禁止读取目录」变更：syncDirectories 内按禁止清单回删命中条目（tracked + listRefPaths 全量），
+    // 补扫自动跳过禁止目录；同步器未装配（无记忆目录/开关关）时不做事，重启 init 自愈
+    onExcludedDirectoriesChanged: () => {
+      if (noteMemorySync) ensureNoteMemorySync();
     },
     // ticket 103 本地移植：电源组对账回调——启用/关闭方式变更后立即把运行态对齐（stop 全量卸载 / hide 隐藏启动 / lazy 不动）
     onPowerStateChange: async (enabled, offMode) => {
@@ -1646,6 +1684,7 @@ function removePendingNewsSave(clipPath: string): void {
  *  按事件文件 frontmatter url / 文件名反查登记表，改名场景同样补全命中。 */
 async function completePendingNewsSave(file: any): Promise<void> {
   const path = file?.path;
+  if (readBlocked(path)) return; // 票 307 禁止读取目录：不读 frontmatter 不补全
   let reg = newsPendingSaves.get(path);
   let regPath = path;
   const fm = await readClipFrontmatterOrEmpty(file);
@@ -1836,6 +1875,7 @@ async function buildDiaryBaseline(): Promise<void> {
     for (const f of app.vault.getMarkdownFiles?.() || []) {
       if (diaryDateFromEntryPath(f.path || '') !== date) continue;
       const filePath = f.path;
+      if (readBlocked(filePath)) continue; // 票 307 禁止读取目录：基线不读不建快照
       let content = '';
       try { content = await app.vault.read(f as any); } catch { continue; }
       const e = parseDiaryEntry(content, filePath);
@@ -1876,6 +1916,11 @@ async function settleDiaryEntry(filePath: string, date: string, time: string): P
   const key = diaryEntryKey(filePath, date, time);
   const st = diaryTimers.get(key);
   if (!st) return;
+  // 票 307 禁止读取目录：禁止期间挂起的计时器到期 → 不读文件，清计时即弃
+  if (readBlocked(filePath)) {
+    dropDiaryTimer(filePath, date, time);
+    return;
+  }
   st.timer = null; // 结算中：防重入（若期间被重设计时，其新 timer 会覆盖此 null）
   // B1（ticket 084d）：「真删除」与「瞬态读失败」分离——getAbstractFileByPath null（文件已删除/移出，
   // 事件未及感知）→ 删除观察 + 清记录；vault.read 抛错（瞬态 IO）→ 保留记录等下轮，不误判删除。
@@ -1953,6 +1998,7 @@ async function handleDiaryVaultActivity(file: any): Promise<void> {
   if (!appRef || !memorySystem || !data?.config?.noteSource) return;
   const filePath = file?.path;
   if (!filePath) return;
+  if (readBlocked(filePath)) return; // 票 307 禁止读取目录：不读不跟踪不结算
   const date = diaryFileDate(filePath);
   if (!date) return; // 非条目命名文件不跟踪（观察文案需要日期）
   let content = '';
@@ -2027,6 +2073,7 @@ function handleNoteTrackedDelete(filePath: string): void {
 async function onVaultDelete(file: any): Promise<void> {
   if (!file?.path || !initialized || !appRef || !memorySystem || !data?.config?.noteSource) return;
   const filePath = file.path;
+  if (readBlocked(filePath)) return; // 票 307 禁止读取目录：不产删除观察（快照不再消费）
   const kind = classifyPath(filePath);
   if (kind === 'diary') {
     handleDiaryTrackedDelete(filePath);
@@ -2075,9 +2122,11 @@ function migrateNoteKeys(oldPath: string, newPath: string): void {
 async function onVaultRename(file: any, oldPath: string): Promise<void> {
   if (!file?.path || !oldPath || oldPath === file.path) return;
   if (!initialized || !appRef || !memorySystem || !data?.config?.noteSource) return;
-  const oldKind = classifyPath(oldPath);
+  // 票 307 禁止读取目录：命中清单的路径按「非观察域」处理——旧路径被禁视为从未跟踪（直接跳过），
+  // 新路径被禁沿用「移出观察目录」分支（按旧快照产删除观察 + 清理，不读新文件）
+  const oldKind = readBlocked(oldPath) ? null : classifyPath(oldPath);
   if (oldKind !== 'diary' && oldKind !== 'flash' && oldKind !== 'poem' && oldKind !== 'letter') return;
-  const newKind = classifyPath(file.path);
+  const newKind = readBlocked(file.path) ? null : classifyPath(file.path);
   if (newKind === oldKind) {
     if (oldKind === 'diary') migrateDiaryKeys(oldPath, file.path);
     else migrateNoteKeys(oldPath, file.path);
@@ -2123,6 +2172,7 @@ async function buildNoteBaseline(): Promise<void> {
     if (!filePath.endsWith('.md')) continue;
     const kind = observeNoteKind(filePath);
     if (!kind) continue;
+    if (readBlocked(filePath)) continue; // 票 307 禁止读取目录：基线不读不建快照
     let content = '';
     try { content = await app.vault.read(file as any); } catch { continue; }
     const date = parseNoteDate(kind, content, filePath);
@@ -2159,6 +2209,11 @@ async function settleNoteFile(filePath: string): Promise<void> {
   if (!appRef || !mem || !data?.config?.noteSource) return;
   const st = noteTimers.get(filePath);
   if (!st) return;
+  // 票 307 禁止读取目录：禁止期间挂起的计时器到期 → 不读文件，清计时即弃
+  if (readBlocked(filePath)) {
+    dropNoteTimer(filePath);
+    return;
+  }
   st.timer = null; // 结算中：防重入（若期间被重设计时，其新 timer 会覆盖此 null）
   // B1（ticket 084d，对齐日记）：「真删除」与「瞬态读失败」分离——getAbstractFileByPath null（文件已删除/移出，
   // 事件未及感知）→ 兜底删除观察 + 清记录；vault.read 抛错（瞬态 IO）→ 保留记录等下轮，不误产差异观察。
@@ -2236,6 +2291,7 @@ async function handleNoteVaultActivity(file: any): Promise<void> {
   if (!appRef || !memorySystem || !data?.config?.noteSource) return;
   const filePath = file?.path;
   if (!filePath) return;
+  if (readBlocked(filePath)) return; // 票 307 禁止读取目录：不读不跟踪不结算
   const kind = observeNoteKind(filePath);
   if (!kind) return;
   let content = '';

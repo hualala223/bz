@@ -69,3 +69,15 @@ export function normalizeMemoryDirectories(raw: unknown): string[] {
   }
   return out;
 }
+
+/** 禁止读取目录命中（票 307）：前缀语义对齐 note-memory resolveOwnerDir——'' = 库根（全禁），
+ *  p === d 或 p 以「d/」开头即命中；反斜杠归一后比较。 */
+export function isPathExcluded(path: string, dirs: string[]): boolean {
+  const p = String(path || '').replace(/\\/g, '/');
+  if (!p) return false;
+  for (const dir of dirs) {
+    const d = String(dir || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    if (d === '' || p === d || p.startsWith(d + '/')) return true;
+  }
+  return false;
+}

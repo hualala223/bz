@@ -13,10 +13,13 @@
  *  - 增量：modify 按 mtime 节流（R4：距上次 ≥10min 才重入库，期间变更合并 pending；「今天」的
  *    日记段即时）；delete → removeMemoryByRef；rename → 删旧 ref + 读新文件重新 upsert（R6）；
  *    目录从设置移除 → 清其名下全部条目；
+ *  - 禁止读取目录（票 307）：命中清单的路径一概不读不入库；init/syncDirectories 双挂点全量清理
+ *    存量引用（含跨会话残留）；wipeAll 供「读取笔记库」开关关闭时清空重建；
  *  - 引用失效自愈：resolver/getFile 返回 null 的条目登记（onStaleRef）并清理。
  */
 import { parseDiaryEntryFile, diaryDateFromEntryPath, resolveDiaryEntryMeta } from '../core/diary-format';
 import { pad2 } from '../core/ui/str';
+import { isPathExcluded } from './config';
 
 /** 记忆入库种子（memory.ts 契约 API 入参，签名冻结） */
 export interface NoteMemorySeed {
@@ -55,6 +58,8 @@ export interface NoteMemoryDeps {
   backend: NoteMemoryBackend;
   /** 当前记忆目录配置（normalizeMemoryDirectories 清洗后） */
   getDirectories(): string[];
+  /** 禁止读取目录（票 307，可选）：命中路径一概不入库，存量引用随 syncDirectories/init 清理 */
+  getExcluded?(): string[];
   /** 引用失效登记回调（自愈观察钩子，可选） */
   onStaleRef?(ref: string): void;
 }
@@ -183,10 +188,16 @@ export class NoteMemorySync {
     this.throttleMs = throttleMs;
   }
 
-  /** 首启全量扫描建库（ADR-0069 §3）+ refResolver 注入 + 引用失效自愈 */
+  /** 禁止读取目录命中（票 307；deps.getExcluded 缺省 = 无禁止） */
+  private blocked(path: string): boolean {
+    return isPathExcluded(path, this.deps.getExcluded?.() ?? []);
+  }
+
+  /** 首启全量扫描建库（ADR-0069 §3）+ refResolver 注入 + 引用失效自愈 + 禁止目录存量清理 */
   async init(): Promise<void> {
     this.injectRefResolver();
     await this.scanAndUpsert(this.deps.getDirectories());
+    await this.dropExcludedRefs();
     await this.verifyStaleRefs();
   }
 
@@ -229,9 +240,9 @@ export class NoteMemorySync {
     return count;
   }
 
-  /** 读文件 + 构建种子（当前配置目录） */
+  /** 读文件 + 构建种子（当前配置目录；禁止目录命中 → 不读文件直接空） */
   private async seedsFor(path: string, dirs: string[], today: string): Promise<NoteMemorySeed[]> {
-    if (isSkippablePath(path)) return [];
+    if (isSkippablePath(path) || this.blocked(path)) return [];
     const content = await this.deps.adapter.readFile(path);
     if (content == null) return [];
     return buildSeedsForFile(path, content, this.deps.adapter.fileMtime(path), dirs, this.deps.adapter.diaryDirectory(), today);
@@ -241,6 +252,11 @@ export class NoteMemorySync {
   async onModified(path: string): Promise<void> {
     const p = normPath(path);
     if (!p) return;
+    // 禁止目录（票 307）：不读文件，顺带回删存量（目录刚被禁止/跨会话残留兜底）
+    if (this.blocked(p)) {
+      await this.dropRefs(p);
+      return;
+    }
     const dirs = this.deps.getDirectories();
     const cls = classifyForMemory(p, dirs, this.deps.adapter.diaryDirectory());
     if (!cls) return;
@@ -297,14 +313,15 @@ export class NoteMemorySync {
     await this.dropRefs(p);
   }
 
-  /** vault rename（R6：不拆 delete+create——删旧 ref + 读新文件重新 upsert，即时不走节流） */
+  /** vault rename（R6：不拆 delete+create——删旧 ref + 读新文件重新 upsert，即时不走节流；
+   *  票 307：新路径命中禁止目录 → 同「移出配置」只删不建） */
   async onRenamed(oldPath: string, newPath: string): Promise<void> {
     const from = normPath(oldPath);
     const to = normPath(newPath);
     if (!from || !to || from === to) return;
     await this.dropRefs(from);
     const dirs = this.deps.getDirectories();
-    if (classifyForMemory(to, dirs, this.deps.adapter.diaryDirectory())) {
+    if (!this.blocked(to) && classifyForMemory(to, dirs, this.deps.adapter.diaryDirectory())) {
       await this.upsertFile(to, this.deps.adapter.now(), dirs);
     } else {
       this.lastAt.delete(from);
@@ -312,17 +329,55 @@ export class NoteMemorySync {
     }
   }
 
-  /** 目录配置变更（R6）：移除目录 → 清其名下全部条目；新增目录 → 补扫入库 */
+  /** 目录配置变更（R6）：移除目录/新命中禁止 → 清名下全部条目；新增目录 → 补扫入库 */
   async syncDirectories(dirs: string[]): Promise<void> {
-    // 回删：已跟踪 ref 的归属目录不再在配置内 → 清条目
+    // 回删：已跟踪 ref 的归属目录不再在配置内（或已命中禁止清单）→ 清条目
     for (const p of [...this.refs.keys()]) {
-      if (!classifyForMemory(p, dirs, this.deps.adapter.diaryDirectory())) {
+      if (this.blocked(p) || !classifyForMemory(p, dirs, this.deps.adapter.diaryDirectory())) {
         await this.dropRefs(p);
       }
     }
+    // 禁止目录存量清理（票 307）：listRefPaths 全量枚举，跨会话/本会话未跟踪的一并回删
+    await this.dropExcludedRefs();
     // 补扫：新目录内未跟踪文件入库（已跟踪幂等跳过由 upsert 去重语义兜底）
     await this.scanAndUpsert(dirs);
     await this.verifyStaleRefs();
+  }
+
+  /** 禁止目录清理（票 307）：枚举条目引用，路径命中禁止清单 → 回删（不读文件内容）。
+   *  init/syncDirectories 双挂点：设置变更当场清 + 重启自愈（变更时同步器未装配的残留）。 */
+  async dropExcludedRefs(): Promise<void> {
+    let refs: string[];
+    try {
+      const listed = await this.deps.backend.listRefPaths?.();
+      refs = listed && listed.length ? [...listed] : [...new Set([...this.refs.values()].flat())];
+    } catch {
+      refs = [...new Set([...this.refs.values()].flat())];
+    }
+    for (const ref of refs) {
+      const i = ref.indexOf('#');
+      const basePath = i === -1 ? ref : ref.slice(0, i);
+      if (!this.blocked(basePath)) continue;
+      await this.deps.backend.removeMemoryByRef(ref);
+      this.dropTrackedState(basePath);
+    }
+  }
+
+  /** 清空笔记记忆库（票 307 读取笔记库开关关闭）：全部引用回删 + 内存表清空。
+   *  引用是文件的纯派生数据（重开后全量重扫重建），清空可逆。 */
+  async wipeAll(): Promise<void> {
+    let refs: string[];
+    try {
+      const listed = await this.deps.backend.listRefPaths?.();
+      refs = listed && listed.length ? [...listed] : [...new Set([...this.refs.values()].flat())];
+    } catch {
+      refs = [...new Set([...this.refs.values()].flat())];
+    }
+    for (const ref of refs) await this.deps.backend.removeMemoryByRef(ref);
+    this.lastAt.clear();
+    this.refs.clear();
+    this.pending.clear();
+    this.lastContent.clear();
   }
 
   /** 引用失效自愈（ADR-0069 R3）：枚举条目引用，resolver 读不到正文 → 登记 + 清理 */
@@ -372,10 +427,15 @@ export class NoteMemorySync {
       // 未跟踪过的普通笔记（重启前入库）：按路径兜底回删（日记段无时间信息，交 memory.ts 对账）
       await this.deps.backend.removeMemoryByRef(p);
     }
-    this.refs.delete(p);
-    this.lastAt.delete(p);
-    this.pending.delete(p);
-    this.lastContent.delete(p);
+    this.dropTrackedState(p);
+  }
+
+  /** 清单文件的本地跟踪态（refs/节流/合并/内容基线四表；不触 backend） */
+  private dropTrackedState(path: string): void {
+    this.refs.delete(path);
+    this.lastAt.delete(path);
+    this.pending.delete(path);
+    this.lastContent.delete(path);
   }
 
   /** 测试辅助：读取已跟踪 ref 表 */

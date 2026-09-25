@@ -212,6 +212,10 @@ export function smartcatSettingsSchema(opts: {
   setMobileFullscreen: (v: boolean) => Promise<void>;
   /** 记忆目录变更回调（ADR-0069：index 注入——增量同步目录移除清理/新增补扫） */
   onMemoryDirectoriesChanged?: (dirs: string[]) => void;
+  /** 「读取笔记库」开关变更回调（票 307：index 注入——关闭拆同步器清空笔记记忆库，开启重建补扫） */
+  onNoteSourceChanged?: (on: boolean) => void;
+  /** 「禁止读取目录」变更回调（票 307：index 注入——回删命中条目 + 补扫跳过禁止目录） */
+  onExcludedDirectoriesChanged?: (dirs: string[]) => void;
   onOpenDashboard?: () => void;
   onAppearanceChanged?: (appearance: string) => void;
   /** 电源对账回调（ticket 103 本地移植：启用/三档关闭方式变更后把运行态对齐到目标姿态，index 注入） */
@@ -403,6 +407,38 @@ export function smartcatSettingsSchema(opts: {
         icon: 'folder-open',
         name: '记忆目录',
         rows: [
+          // 票 307「读取笔记库」总开关（smartcat.json config.noteSource，ADR-0024 键首次暴露 UI）：
+          // 关闭后各读取链在事件入口短路（noteSource 守卫既有语义），笔记记忆库清空（重开后重扫重建）
+          {
+            type: 'toggle',
+            name: '读取笔记库',
+            desc: '关闭后不再读取笔记与域动态，已入库笔记记忆清空，重开后重新扫描',
+            binding: bindConfig('noteSource'),
+            onChange: (v) => {
+              opts.onNoteSourceChanged?.(v);
+            },
+          },
+          // 票 307 禁止读取目录：多选；命中路径观察链/记忆库/书评全部短路，入库存量随变更清理
+          {
+            type: 'custom',
+            render: (body) => {
+              renderPathSettingRow({
+                parent: body,
+                name: '禁止读取目录',
+                desc: '这些文件夹内的笔记小橘一概不读取，已入库记忆一并清除；移除禁止即恢复读取',
+                mode: 'multi',
+                value: normalizeMemoryDirectories((tryGetSettings() as any).smartcatExcludedDirectories),
+                pickerTitle: '选择禁止读取目录',
+                pickerDesc: '选择小橘不允许读取的文件夹（可多选）',
+                onChange: (list) => {
+                  const next = normalizeMemoryDirectories(list);
+                  (getSettings() as any).smartcatExcludedDirectories = next;
+                  void saveSettings();
+                  opts.onExcludedDirectoriesChanged?.(next);
+                },
+              });
+            },
+          },
           {
             type: 'custom',
             render: (body) => {
@@ -487,6 +523,10 @@ export function openSmartcatSettings(opts: {
   onOpenDashboard?: () => void;
   /** 记忆目录变更回调（ADR-0069：index 注入，同步增量同步器目录集合） */
   onMemoryDirectoriesChanged?: (dirs: string[]) => void;
+  /** 「读取笔记库」开关变更回调（票 307：index 注入，透传给 schema） */
+  onNoteSourceChanged?: (on: boolean) => void;
+  /** 「禁止读取目录」变更回调（票 307：index 注入，透传给 schema） */
+  onExcludedDirectoriesChanged?: (dirs: string[]) => void;
   /** 选皮肤即时生效（换色块后立刻切猫容器皮肤类，不必重载插件） */
   onAppearanceChanged?: (appearance: Appearance) => void;
   /** 电源对账回调（ticket 103 本地移植：透传给 schema 电源组） */
