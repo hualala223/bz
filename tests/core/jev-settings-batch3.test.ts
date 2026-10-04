@@ -63,7 +63,7 @@ describe('主设置 schema（JEV 分存 + 测试钮）', () => {
   const aiGroup = schema.groups.find((g) => g.name === '🤖 AI')!;
 
   it('组结构不破坏（设置面板导航契约）', () => {
-    expect(groupNames).toEqual(['🤖 AI', 'Embedding', 'JEV', '📂 数据存储路径', '🔔 通知']);
+    expect(groupNames).toEqual(['🤖 AI', 'Embedding', 'JEV', '语音转写', '📂 数据存储路径', '🔔 通知']);
   });
 
   it('注册表两家：typesafe + 博查（博查缺省模型 bocha-jev-v1）', () => {
@@ -97,5 +97,15 @@ describe('主设置 schema（JEV 分存 + 测试钮）', () => {
       expect(row!.actions?.[0]?.stateful, key).toBe(true);
       expect(row!.actions?.[0]?.text, key).toBe('测试');
     }
+  });
+
+  it('语音转写组：LLM 校对单一开关（ADR-0222，缺省关）', () => {
+    const asrGroup = schema.groups.find((g) => g.name === '语音转写')!;
+    const rows = asrGroup.rows as Array<Record<string, any>>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe('LLM 校对');
+    expect(rows[0].type).toBe('toggle');
+    expect(rows[0].binding).toEqual({ key: 'asrLlmProofread' });
+    expect(DEFAULT_SETTINGS.asrLlmProofread).toBe(false);
   });
 });

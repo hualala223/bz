@@ -535,6 +535,9 @@ export default interface BzSettings {
   knowledgeCacheDir: string;
   /** 知识盒：缓存保留天数（原工具 rc cacheRetentionDays） */
   knowledgeCacheRetentionDays: number;
+  /** 转写 LLM 校对总开关（ADR-0222/issue 518，上游吸收批 3，缺省关）：知识盒影像转写文本在
+   *  成文前发送到 AI 面板所配服务商「只修错不创作」校对。开启即同意文本出域 */
+  asrLlmProofread: boolean;
 
   // ===== 🐱 小橘陪伴猫（smartcat 域：桌面宠物 + AI 陪伴）=====
   /** 小橘启用开关（l7A）：仅控制启动时自动加载（猫容器挂载/常驻行为），关闭后仍可从命令面板手动打开 */
@@ -899,6 +902,8 @@ export const DEFAULT_SETTINGS: BzSettings = {
   knowledgeWhisperModel: 'small',
   knowledgeCacheDir: '',
   knowledgeCacheRetentionDays: 7,
+  // 转写 LLM 校对（ADR-0222/issue 518，上游吸收批 3）：缺省关——出域是显式行为，不默认替用户同意
+  asrLlmProofread: false,
   secondBrainMobileDefaultFullscreen: true,
 
   // 上游线（yeshimei/bz）并入新域设置键默认值（第一档加法）

@@ -417,6 +417,15 @@ export function mainSettingsSchema(): SettingsSchema {
         ],
       },
       {
+        // 语音转写组（ADR-0222/issue 518，上游吸收批 3）：LLM 校对单一总开关（缺省关，出域是
+        // 显式行为）。上游 issue 444 的转写引擎选择行未随本批吸收，本组先落校对开关，
+        // 引擎行后续吸收 444 时插入本组。
+        name: '语音转写',
+        rows: [
+          { type: 'toggle', name: 'LLM 校对', desc: '转写文本发送到所配大模型只修错校对，开启即同意文本出域', binding: { key: 'asrLlmProofread' } },
+        ],
+      },
+      {
         name: '📂 数据存储路径',
         rows: [
           {
