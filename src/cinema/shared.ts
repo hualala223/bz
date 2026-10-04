@@ -298,6 +298,8 @@ export function detailModalHtml(it: CinemaItem, posterUrl: string | null): strin
         ${it.review ? `<div class="dm-review">${esc(it.review)}</div>` : ''}
         ${timeline}</div></div>
     ${rows.length ? '<div class="dm-sec">豆 瓣 信 息</div>' + rows.map(([k, v]) => `<div class="dm-kv"><span class="dm-kv-k">${k}</span><span class="dm-kv-v">${esc(v)}</span></div>`).join('') : ''}
+    ${it.episodesWatching !== null && it.episodesTotal !== null ? `<div class="dm-kv"><span class="dm-kv-k">集数</span><span class="dm-kv-v">${it.episodesWatching} / ${it.episodesTotal}</span></div>` : it.episodesTotal != null ? `<div class="dm-kv"><span class="dm-kv-k">集数</span><span class="dm-kv-v">共 ${it.episodesTotal} 集</span></div>` : ''}
+    ${it.chaptersWatching !== null && it.chaptersTotal !== null ? `<div class="dm-kv"><span class="dm-kv-k">章节</span><span class="dm-kv-v">${it.chaptersWatching} / ${it.chaptersTotal}</span></div>` : it.chaptersTotal != null ? `<div class="dm-kv"><span class="dm-kv-k">章节</span><span class="dm-kv-v">共 ${it.chaptersTotal} 章</span></div>` : ''}
     ${it.doubanUrl ? `<div class="dm-kv"><span class="dm-kv-k">豆瓣链接</span><span class="dm-kv-v"><a href="${esc(it.doubanUrl)}" target="_blank" rel="noopener">${esc(it.doubanUrl)}</a></span></div>` : ''}
     ${hot ? `<div class="dm-sec">热 门 短 评</div><div class="dm-quote${hotFold ? ' is-fold' : ''}" data-dm-quote>${esc(hot)}</div>${hotFold ? `<button type="button" class="dm-fold j-quote-fold" data-dm-fold>展开全文（${hot.length} 字）</button>` : ''}` : ''}
     ${it.synopsis ? `<div class="dm-sec">简 介</div><div class="dm-synopsis">${esc(it.synopsis)}</div>` : ''}

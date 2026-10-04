@@ -76,7 +76,7 @@ describe('国家筛选条（票 294）', () => {
   });
 
   it('无条目缺国家时不出「未填」桶', () => {
-    const noEmpty = [{ name: '甲', group: '电影', status: 0, typeTag: '电影', country: '内地' }] as any;
+    const noEmpty = { name: '甲', group: '电影', status: 0, typeTag: '电影', country: '内地' } as any;
     const cs = [card(noEmpty)];
     const cn = countryTally(cs);
     expect(cn.empty).toBe(0);

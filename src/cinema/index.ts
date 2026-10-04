@@ -5,6 +5,7 @@
 import type { App } from 'obsidian';
 import { tryGetSettings } from '../core/settings-provider';
 import { onDomainEvent } from '../core/domain-bus';
+import { unregisterPanelEsc } from '../core/esc-manager';
 import { M, resetCinemaState, resolveCinemaFolderPath, DEFAULT_FOLDER } from './state';
 import { rebuildItems } from './data';
 import { createOverlay, closeOverlay, registerEscapeHandler, renderAll, openAddModalDirect, openRandomMovie, runCinemaDedupe } from './ui';
@@ -150,6 +151,9 @@ export function unloadCinema(): void {
   initialized = false;
   autoRefreshRegistered = false;
   shutdownDoubanQueue(); // 杀活动抓取子进程、清队列状态（卸载后会话语义重置）
+  // 注销面板 ESC 层（批 C 审计口径）：面板 ESC 注册点已随合并提前到常驻路径，
+  // 不注销则重启用后同 id 注册被幂等静默吞，ESC 到不了新层
+  unregisterPanelEsc('bz-cinema');
   if (M.currentOverlay) {
     M.currentOverlay.remove();
     M.currentOverlay = null;

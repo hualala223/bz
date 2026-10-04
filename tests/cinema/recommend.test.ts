@@ -96,7 +96,7 @@ describe('cinema quickAddWant', () => {
     const app = M.appRef as any;
     const sizeBefore = (app.vault as any).files.size;
     await quickAddWant(app, '静默片', '电影', { silent: true });
-    expect((app.vault as any).files.get('我的/影视/《静默片》.md')).toContain('状态: 想看');
+    expect((app.vault as any).files.get('我的/娱乐/《静默片》.md')).toContain('状态: 想看');
     expect((app.vault as any).files.size).toBe(sizeBefore + 1);
     // silent 下在库重复同样静默跳过（不 notice 不抛，由调用方汇总统计）
     await quickAddWant(app, '静默片', '电影', { silent: true });

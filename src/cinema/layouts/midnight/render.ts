@@ -261,9 +261,9 @@ export function renderMidnightDesk(root: HTMLElement, inp: MidnightRenderInput):
   if (!view) return;
   const v = inp.view;
   // 底片（滑动高亮）的回落目标是 `.is-on` 项：AI 荐片页把入口点亮，底片就常驻在它身上
-  // （原来这两页 rail 整体熄灭、底片没有目标而隐去；观影分析盖住面板，不需要停留点）
+  // （观影分析盖住面板，入口不亮、底片隐去——无需停留点）
   root.querySelectorAll<HTMLElement>('.rail-foot .j-tool')
-    .forEach((b) => b.classList.toggle('is-on', (v.view === 'ai' && b.dataset.tool === 'ai') || (v.view === 'stat' && b.dataset.tool === 'stat')));
+    .forEach((b) => b.classList.toggle('is-on', v.view === 'ai' && b.dataset.tool === 'ai'));
   if (v.view === 'ai') {
     view.innerHTML = spHeadHtml('AI 荐片', inp.aiCount ? `· ${inp.aiCount} 部` : '') + `<div class="sp-body">${inp.aiHtml}</div>`;
   } else if (v.view === 'stat') {

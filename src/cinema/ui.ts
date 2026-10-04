@@ -109,7 +109,7 @@ async function markStatus(item: CinemaItem, target: '在看' | '已看', app: Ap
   item.watchDate = localNow();
   try {
     await persistItem(item, app);
-    notice(`已把「${item.name}」标记为${target}`, 'success');
+    panelToast(cinemaRoot(), `已把「${item.name}」标记为${target}`);
     const toSt = target === '已看' ? 'watched' : 'watching';
     if (toSt !== fromSt) emitDomainEvent('movie', { kind: 'status', name: item.name, from: fromSt, to: toSt });
     if (item.rating !== null && item.rating > 0 && item.rating !== prevRating) {
@@ -660,9 +660,10 @@ function listTitle(): string {
   return t;
 }
 
-/** 面板内 toast（原型 .cn-toast 同构；无面板时回落 core notice） */
+/** 面板内 toast（原型 .cn-toast 同构；无面板时回落 core notice。
+ *  不设 isConnected 守卫：脱离文档的面板树（测试/换壳间隙）也照落面板内 toast，语义与上游一致） */
 function panelToast(sec: HTMLElement | null, msg: string): void {
-  if (!sec || !sec.isConnected) { notice(msg); return; }
+  if (!sec) { notice(msg); return; }
   const t = document.createElement('div');
   t.className = 'cn-toast';
   t.textContent = msg;
@@ -779,9 +780,9 @@ function ovl(sec: HTMLElement, html: string, opts: { onWillClose?: (finish: () =
   return { el, close };
 }
 
-// 面板内 toast 已收编 core notice 单源（一致审查#2）：不再自绘 .cn-toast——通知偏好
-// （issue 297 级别/时长/位置）与类型图标语义全部生效，调 notice(msg, type) 直达。
-// 各消费点：成功 completion → 'success'，校验拦截（空名/重名）→ 'warning'，失败 → 'error'。
+// 面板内 toast 双通道（本批 4 收尾裁决）：本地既有流（保存/改名/删除/标记/校验拦截）沿用
+// 自绘 .cn-toast（panelToast，面板内午夜场皮，回落 core notice）；上游新增流（片单/导入/重温等）
+// 直接 notice(msg, type)——通知偏好（issue 297 级别/时长/位置）对 notice 通道生效。
 
 // ---------- 弹窗：跟手菜单 / 长按抽屉（统一走 core/item-actions） ----------
 //
@@ -1978,7 +1979,7 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
    *  字段已经到手，分类留空、由用户手点。 */
   async function runParse(): Promise<void> {
     const name = nameInput?.value.trim() ?? '';
-    if (!name) { notice('请输入名称', 'warning'); return; }
+    if (!name) { panelToast(el.closest<HTMLElement>('[data-cinema-root]'), '请输入名称'); return; }
     if (hasIllegalNameChar(name)) { notice(`${ILLEGAL_NAME_HINT}，请修改`, 'error'); return; }
     phase = 'parsing';
     refreshFormState();
@@ -2226,8 +2227,8 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
   el.querySelector('.j-save')?.addEventListener('click', () => {
     if (phase === 'parsing' || classifying) return; // 防御：解析/判定中不落盘（disabled 已挡一层）
     const name = (el.querySelector('.j-name') as HTMLInputElement).value.trim();
-    if (!name) { notice('请输入名称', 'warning'); return; }
-    if (isDuplicateName(name, item?.name)) { notice(DUP_NAME_HINT_FULL, 'warning'); return; }
+    if (!name) { panelToast(el.closest<HTMLElement>('[data-cinema-root]'), '请输入名称'); return; }
+    if (isDuplicateName(name, item?.name)) { panelToast(el.closest<HTMLElement>('[data-cinema-root]'), DUP_NAME_HINT_FULL); return; }
     const date = watchDateOf();
     // 评分编码退役（2026-09-30 拍板，兼容推断 2026-10-03 移除）：状态走独立键落盘，评分只在「已看」态有真值
     // （想看/在看给 null，不会再被兜底成编码值弹回）。
@@ -2284,7 +2285,7 @@ async function saveNew(p: FormPayload, app: App, form: FormHandle): Promise<void
   const it: CinemaItem = { file: null, name: p.name, typeTag: p.tag, group, status: st, rating: p.rating, watchDate: p.date, wantDate: st === STATUS_WANT ? today : null, watchingDate: st === STATUS_WATCHING ? today : null, watchedDate: st === STATUS_WATCHED ? today : null, rewatches: [], lists: [], shelvedOnly: false, review: p.review, poster: null, genre: null, director: null, actors: null, region: null, year: null, releaseDate: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, hotComment: null, bookInfo: [], country: p.country, genres: p.genres, episodesTotal: episodesEligibleTag(p.tag) ? p.epsTotal : null, episodesWatching: episodesEligibleTag(p.tag) ? p.epsWatching : null, chaptersTotal: chaptersEligibleTag(p.tag) ? p.chTotal : null, chaptersWatching: chaptersEligibleTag(p.tag) ? p.chWatching : null };
   try {
     if (app.vault.getAbstractFileByPath(`${M.folderPath}/《${p.name}》.md`)) {
-      notice(DUP_NAME_HINT_FULL, 'warning');
+      panelToast(form.el.closest<HTMLElement>('[data-cinema-root]'), DUP_NAME_HINT_FULL);
       return;
     }
     M.items.unshift(it);
@@ -2298,7 +2299,9 @@ async function saveNew(p: FormPayload, app: App, form: FormHandle): Promise<void
     emitDomainEvent('movie', { kind: 'created', name: p.name, status: stToken(st), rating: p.rating, review: p.review || null });
     // 票 293 起仅 电影/电视剧 入队（书籍/剧集细分走图书/追更链路，本地保留件）
     if (it.file && !posterRel && doubanEligibleTag(it.typeTag)) enqueueDoubanFetch(it.file, it.name, 'movie');
-    notice(`已添加「${p.name}」${it.episodesWatching !== null || it.episodesTotal !== null ? catchUpSuffix(it.episodesWatching, it.episodesTotal, '集') : catchUpSuffix(it.chaptersWatching, it.chaptersTotal, '章')}`, 'success');
+    // toast 落点取表单所在面板根（form.el 反查）：面板活着 = 同 cinemaRoot()；
+    // 测试/非常规路径下面板已换新或脱离文档时，cinemaRoot() 重查会 null 回落 notice，丢面板内 toast 语义
+    panelToast(form.el.closest<HTMLElement>('[data-cinema-root]'), `已添加「${p.name}」${it.episodesWatching !== null || it.episodesTotal !== null ? catchUpSuffix(it.episodesWatching, it.episodesTotal, '集') : catchUpSuffix(it.chaptersWatching, it.chaptersTotal, '章')}`);
     markCardFlash(itemKey(it), p.rating !== null && p.rating > 0); // 新卡落位闪（issue 403）
     renderAll(app);
     foldOverlayToCard(form, itemKey(it)); // 折回新卡；键不在当前视图（被筛选滤掉）则即时关
@@ -2326,7 +2329,7 @@ async function saveEdit(item: CinemaItem, p: FormPayload, app: App, form: FormHa
       return;
     }
     if (app.vault.getAbstractFileByPath(`${M.folderPath}/《${p.name}》.md`)) {
-      notice(DUP_NAME_HINT_FULL, 'warning');
+      panelToast(form.el.closest<HTMLElement>('[data-cinema-root]'), DUP_NAME_HINT_FULL);
       return;
     }
   }
@@ -2364,7 +2367,7 @@ async function saveEdit(item: CinemaItem, p: FormPayload, app: App, form: FormHa
     if (prevReview !== toReview) {
       emitDomainEvent('movie', { kind: 'review', name: item.name, fromReview: prevReview, toReview });
     }
-    notice(`已保存「${p.name}」${item.episodesWatching !== null || item.episodesTotal !== null ? catchUpSuffix(item.episodesWatching, item.episodesTotal, '集') : catchUpSuffix(item.chaptersWatching, item.chaptersTotal, '章')}`, 'success');
+    panelToast(form.el.closest<HTMLElement>('[data-cinema-root]'), `已保存「${p.name}」${item.episodesWatching !== null || item.episodesTotal !== null ? catchUpSuffix(item.episodesWatching, item.episodesTotal, '集') : catchUpSuffix(item.chaptersWatching, item.chaptersTotal, '章')}`);
     // 评分变了才点亮星级（只改状态/影评时不给星级加戏）
     markCardFlash(itemKey(item), item.rating !== null && item.rating > 0 && item.rating !== prev.rating);
     renderAll(app);                       // 先刷：卡片就地换成新数据（issue 398「保存即齐」的数据侧）
@@ -2423,7 +2426,7 @@ function openConfirm(item: CinemaItem, app: App): void {
     const idx = M.items.indexOf(item);
     if (idx > -1) M.items.splice(idx, 1);
     emitDomainEvent('movie', { kind: 'deleted', name: item.name });
-    notice(`已删除「${item.name}」`, 'success');
+    panelToast(cinemaRoot(), `已删除「${item.name}」`);
     renderAll(app);
   });
 }
@@ -2553,7 +2556,10 @@ function refreshDeskList(app: App, sec: HTMLElement): void {
  *  单源，与 gameshelf 各持一份（跨域提取涉两域，待收口批上提，不在本批白名单内动）。 */
 function hoverCapable(): boolean {
   try {
-    return typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    // 无 matchMedia 的环境（jsdom 测试壳等）：回落壳类近似（桌面壳 = 有鼠标），
+    // 否则桌面右键菜单在测试与受限 webview 里恒不弹
+    if (typeof window === 'undefined' || !window.matchMedia) return !cinemaRoot()?.classList.contains('mob');
+    return !!window.matchMedia('(hover: hover) and (pointer: fine)').matches;
   } catch {
     return false;
   }

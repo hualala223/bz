@@ -61,9 +61,10 @@ function seedVault(): { vault: MockVault; app: ReturnType<typeof mockAppWithVaul
   const vault = new MockVault();
   vault.files.set('我的/娱乐/《星际穿越》.md', md(`---
 tags: [电影]
+国家: 内地
+类型: 科幻、悬疑
 评分: 9.6
 观影日期: 2026-08-01
-国家: 内地
 影评: 爱是穿越维度的唯一力量
 导演: 诺兰
 ---`));
@@ -218,18 +219,22 @@ describe('cinema 风格化面板（issue 236）', () => {
     expect(root.querySelector('.cn-ovl')).toBeNull();
   });
 
-  it('详情删除 → cn-confirm 三段式 + 移入回收站（列表减少）', async () => {
+  it('详情删除 → flow-dialog 确认（cn-skin 午夜场皮）+ 移入回收站（列表减少）', async () => {
+    // 合并裁决：确认框统一走 core flow-dialog（挂 body，双动作 __shared_confirm_ok__）；
+    // 本地 cn-confirm 三段式退役，文案/危险标语义保留
     const { app } = seedVault();
     createOverlay(app);
     const root = document.querySelector('[data-cinema-root]') as HTMLElement;
     clickEl(pcardByName(root, '想看片'));
     clickEl((root.querySelector('.cn-modal') as HTMLElement).querySelector('.j-del'));
-    const confirm = root.querySelector('.cn-confirm') as HTMLElement;
-    expect(confirm.querySelector('.cn-confirm-title')?.textContent).toBe('删除条目');
-    expect(confirm.textContent).toContain('确定删除「想看片」吗？');
-    expect(confirm.textContent).toContain('回收站');
+    const popup = document.getElementById('__shared_confirm_popup__') as HTMLElement;
+    expect(popup, 'flow-dialog 弹出').toBeTruthy();
+    expect(popup.classList.contains('bz-flow-dialog--danger'), '删除 = 危险主动作').toBe(true);
+    expect(popup.querySelector('h4')?.textContent).toBe('删除条目');
+    expect(popup.querySelector('p')?.textContent).toContain('确定删除「想看片」吗？');
+    expect(popup.querySelector('p')?.textContent).toContain('回收站');
     const trashSpy = vi.spyOn(app.vault, 'trash').mockResolvedValue(undefined);
-    clickEl(confirm.querySelector('.j-del'));
+    clickEl(document.getElementById('__shared_confirm_ok__') as HTMLElement);
     await vi.waitFor(() => expect(trashSpy).toHaveBeenCalled());
     expect(root.querySelectorAll('.d-scroll .pcard').length).toBe(3);
     expect(M.items.some((i) => i.name === '想看片')).toBe(false);
@@ -350,7 +355,7 @@ tags: [电影]
     expect((form.querySelector('.j-range') as HTMLInputElement).value, '未评分 → 预填豆瓣分').toBe('8.7');
     expect(form.querySelector('.j-rval')?.textContent).toBe('8.7'); // 读数与星级同步同一初值
     clickEl(form.querySelector('.j-save'));
-    await vi.waitFor(() => expect(hasNotice(/已保存「/)).toBe(true));
+    await vi.waitFor(() => expect(root.querySelector('.cn-toast')?.textContent).toContain('已保存「'));
     expect(M.items.find((i) => i.name === '未评文艺片')!.rating).toBe(8.7);
   });
 
@@ -367,7 +372,7 @@ tags: [电影]
     const form = root.querySelector('.cn-modal') as HTMLElement;
     clickEl(form.querySelector('[data-f-st="想看"]'));
     clickEl(form.querySelector('.j-save'));
-    await vi.waitFor(() => expect(hasNotice(/已保存「/)).toBe(true)); // toast 收编 core notice（一致审查#2）
+    await vi.waitFor(() => expect(root.querySelector('.cn-toast')?.textContent).toContain('已保存「')); // 本地面板 toast 通道（panelToast）
     const item = M.items.find((i) => i.name === '星际穿越')!;
     expect(item.status).toBe(0); // STATUS_WANT
     expect(item.rating).toBe(null); // 评分编码退役：想看不占 -1，评分归 null
@@ -669,7 +674,7 @@ tags: [电影]
     clickEl(root.querySelector('[data-tool="stat"]'));
     expect(M.view).toBe('stat');
     expect(root.querySelector('.rail-item.is-on')).toBeNull();
-    clickEl(root.querySelector('.j-back'));
+    clickEl(root.querySelector('.sp-back')); // 合并版返回钮 = sp-back
     expect(root.querySelector('.rail-item.is-on')?.textContent).toContain('已看');
   });
 
@@ -773,7 +778,7 @@ tags: [电影]
     const overlay = document.querySelector('.bz-panel-overlay') as HTMLElement;
     expect(M.view).toBe('stat');
     expect(overlay.querySelector('.sp-head .sp-title')?.textContent).toBe('观影分析');
-    clickEl(overlay.querySelector('.j-back'));
+    clickEl(overlay.querySelector('.sp-back')); // 合并版二级页返回钮 = sp-back（sp-head 内置）
     expect(M.view).toBe('list');
     openCinemaAnalysis(app);
     expect(M.view).toBe('stat');
@@ -1005,12 +1010,12 @@ tags: [电影]
     const root = document.querySelector('section.mob.bz-cinema--midnight') as HTMLElement;
     const acts = [...root.querySelectorAll('.m-acts button')];
       expect(acts.map((b) => b.className)).toEqual([
-        'add j-madd',
-        'm-tool j-import',
-        'm-tool j-mai',
-        'm-tool j-yb',
-        'm-tool j-mstat',
-        'm-tool j-mclose',
+        'add j-madd bz-touch-target bz-touch-target--lg',
+        'm-tool j-import bz-touch-target bz-touch-target--lg',
+        'm-tool j-mai bz-touch-target bz-touch-target--lg',
+        'm-tool j-yb bz-touch-target bz-touch-target--lg',
+        'm-tool j-mstat bz-touch-target bz-touch-target--lg',
+        'm-tool j-mclose bz-touch-target bz-touch-target--lg',
       ]);
     expect(root.querySelector('.j-mgear')).toBeNull();
   });
@@ -1527,7 +1532,7 @@ tags: [电影]
     // 计数口径：rail 与头行都按卡片数（不是 4 篇笔记）
     expect(root.querySelector('.d-head .j-cnt')?.textContent).toBe('· 2 部');
     expect(root.querySelector('[data-g="全部"] .n')?.textContent).toBe('2');
-    expect(root.querySelector('[data-g="剧集"] .n')?.textContent).toBe('1');
+    expect(root.querySelector('[data-g="电视剧"] .n')?.textContent).toBe('1');
     expect(root.querySelector('[data-g="电影"] .n')?.textContent).toBe('1');
   });
 
@@ -2056,7 +2061,7 @@ describe('深审批A：写路径与 ui 行为回归', () => {
     let form = root.querySelector('.cn-modal') as HTMLElement;
     clickEl(form.querySelector('[data-f-st="在看"]'));
     clickEl(form.querySelector('.j-save'));
-    await vi.waitFor(() => expect(hasNotice(/已保存「/)).toBe(true));
+    await vi.waitFor(() => expect(root.querySelector('.cn-toast')?.textContent).toContain('已保存「'));
     const item = M.items.find((i) => i.name === '星际穿越')!;
     expect(item.status).toBe(1); // STATUS_WATCHING
     // 旧缺陷：表单强置 review='' + persistItem delete fm['影评'] → 影评静默清空
@@ -2085,7 +2090,7 @@ describe('深审批A：写路径与 ui 行为回归', () => {
     const form = root.querySelector('.cn-modal') as HTMLElement;
     (form.querySelector('.j-review-t') as HTMLTextAreaElement).value = '新影评文本';
     clickEl(form.querySelector('.j-save'));
-    await vi.waitFor(() => expect(hasNotice(/已保存「/)).toBe(true));
+    await vi.waitFor(() => expect(root.querySelector('.cn-toast')?.textContent).toContain('已保存「'));
     expect(evts).toContainEqual(
       expect.objectContaining({ kind: 'review', name: '星际穿越', fromReview: '爱是穿越维度的唯一力量', toReview: '新影评文本' })
     );
@@ -2094,7 +2099,7 @@ describe('深审批A：写路径与 ui 行为回归', () => {
     clickEl(pcardByName(root, '星际穿越'));
     clickEl((root.querySelector('.cn-modal') as HTMLElement).querySelector('.j-edit'));
     clickEl((root.querySelector('.cn-modal') as HTMLElement).querySelector('.j-save'));
-    await vi.waitFor(() => expect(hasNotice(/已保存「星际穿越」/)).toBe(true));
+    await vi.waitFor(() => expect(root.querySelector('.cn-toast')?.textContent).toContain('已保存「星际穿越」'));
     expect(evts.filter((e) => e.kind === 'review').length).toBe(reviewCount);
     offMovie();
   });
@@ -2265,8 +2270,11 @@ describe('深审批A：写路径与 ui 行为回归', () => {
     createOverlay(app);
     expect(document.querySelector('.bz-yb')).toBeNull();
     expect(document.querySelectorAll('.bz-yb-scn').length).toBe(0);
-    openCinemaAnalysis(app);
-    expect(document.querySelector('.bz-yb .bz-yb-film')).toBeTruthy();
+    // 本地架构（ADR-0090）：分析命令直达面板分析页；观影志走 [data-film-open] 独立层，
+    // 翻开才构建（theirs 版 openCinemaAnalysis 即开年书层，不适用本地双轨）
+    const root = document.querySelector('[data-cinema-root]') as HTMLElement;
+    clickEl(root.querySelector('[data-film-open]'));
+    await vi.waitFor(() => expect(document.querySelector('.bz-yb .bz-yb-film')).toBeTruthy());
     closeYearbookOverlay();
   });
 
@@ -2603,7 +2611,7 @@ describe('cinema 添加影视：解析即落盘，不再后台抓取（issue 397
     expect(fm?.['豆瓣链接']).toBe('https://movie.douban.com/subject/1291561/');
     expect(fm?.['导演']).toBe('宫崎骏');
     // 等保存流程走完（入队/通知都在建档之后）再断言，否则「没入队」是提前量的空断言
-    await vi.waitFor(() => expect(hasNotice(/已添加「海报片」/)).toBe(true));
+    await vi.waitFor(() => expect(root.querySelector('.cn-toast')?.textContent).toContain('已添加「海报片」'));
     expect(fetched, '建档即齐 → 不交后台抓').toHaveLength(0);
   });
 
@@ -2708,8 +2716,8 @@ describe('cinema 滑动高亮：侧栏与排序钮（issue 397）', () => {
     createOverlay(app);
     const root = document.querySelector('[data-cinema-root]') as HTMLElement;
     const rail = root.querySelector('.d-rail') as HTMLElement;
-    const items = pinList(rail, '.rail-item', 90); // 类型 7 + 状态 3 + 底部工具 2（AI 荐片/观影分析）
-    expect(items.length).toBe(12);
+    const items = pinList(rail, '.rail-item', 90); // 类型 7 + 国家 3（内地/美国/未填，票 294）+ 状态 3 + 片单 2 + 工具 2
+    expect(items.length).toBe(17);
     resync(rail);
     const at = (el: HTMLElement): string => `translate(0px, ${90 + items.indexOf(el) * 30}px)`;
     const pill = rail.querySelector(':scope > .bz-slide-pill') as HTMLElement;
@@ -3194,7 +3202,7 @@ describe('影院覆盖层与跟手（issue 409）', () => {
     expect(css, '层框 = 面板矩形（纸面落在这儿）').toMatch(/\.bz-yb-box\{position:absolute; overflow:hidden; background:var\(--yb-paper\)/);
     expect(css, '层根不再铺纸面（框外要透出面板底色当遮罩）').not.toMatch(/\.bz-yb\{[^}]*background:var\(--yb-paper\)/);
     expect(css, '基字号不再跟窗口跑').not.toMatch(/\.bz-yb\{[^}]*vmin/);
-    expect(css, '主界面列表 10px 内上边距').toMatch(/\.bz-cinema--midnight \.d-scroll\{[^}]*padding:10px 20px 20px/);
+    expect(css, '主界面列表 2px 内上边距（本地口径；上游 10px 不随批）').toMatch(/\.bz-cinema--midnight \.d-scroll\{[^}]*padding:2px 20px 20px/);
     expect(css, '倾斜量走变量，抬升/回弹不被顶掉').toMatch(/\.pcard\{--tlt-x:0deg/);
   });
 
@@ -3580,7 +3588,7 @@ tags: [电影]
     // 主视图：全部 4 / 电影 3 / 剧集 1；想看 1、已看 3；片单「诺兰补完计划」2
     expect(railN(root, '.j-groups', 'data-g="全部"')).toBe('4');
     expect(railN(root, '.j-groups', 'data-g="电影"')).toBe('3');
-    expect(railN(root, '.j-groups', 'data-g="剧集"')).toBe('1');
+    expect(railN(root, '.j-groups', 'data-g="电视剧"')).toBe('1');
     expect(railN(root, '.j-status', 'data-s="想看"')).toBe('1');
     expect(railN(root, '.j-status', 'data-s="已看"')).toBe('3');
     expect(railN(root, '.j-lists', 'data-l="诺兰补完计划"')).toBe('2');
@@ -3588,7 +3596,7 @@ tags: [电影]
     // 选中片单 → 类型组 / 状态组基数收窄到该片单（2 张卡：两部诺兰电影，都已看）
     clickEl(root.querySelector('.j-lists [data-l="诺兰补完计划"]'));
     expect(railN(root, '.j-groups', 'data-g="电影"')).toBe('2');
-    expect(railN(root, '.j-groups', 'data-g="剧集"')).toBe('0');
+    expect(railN(root, '.j-groups', 'data-g="电视剧"')).toBe('0');
     expect(railN(root, '.j-status', 'data-s="已看"')).toBe('2');
     expect(railN(root, '.j-status', 'data-s="想看"')).toBe('0');
     // 「全部」保持库内总数（它是回主视图的出口）；片单组各行保持各自成员数（清单级计数）
@@ -3625,10 +3633,10 @@ describe('已看日期（issue 536）', () => {
     const form = root.querySelector('.cn-modal') as HTMLElement;
     clickEl(form.querySelector('[data-f-st="在看"]'));
     clickEl(form.querySelector('.j-save'));
-    await vi.waitFor(() => expect(hasNotice(/已保存「/)).toBe(true));
+    await vi.waitFor(() => expect(root.querySelector('.cn-toast')?.textContent).toContain('已保存「'));
     const fm = fmOf(vault, '想看片');
     expect(fm).toContain('状态: 在看');
-    expect(fm).toMatch(/在看日期: "\d{4}-\d{2}-\d{2}"/);
+    expect(fm).toMatch(/在看日期: "?\d{4}-\d{2}-\d{2}"?/); // 本地序列化器日期不带引号（上游带引号不随批）
     expect(fm).not.toContain('已看日期');
     expect(M.items.find((i) => i.name === '想看片')!.watchedDate).toBeNull();
   });
@@ -3662,8 +3670,8 @@ describe('已看日期（issue 536）', () => {
   it('解析：已看日期只认显式键（回落观影日期已随兼容层移除），非已看态即便带日期也不算看过', () => {
     const { app, vault } = seedVault();
     const byName = (n: string): string | null => M.items.find((i) => i.name === n)!.watchedDate;
-    expect(byName('星际穿越')).toBeNull();         // 已看（无状态键默认）无已看日期键 → null：回落已移除
-    expect(byName('瑞克和莫蒂')).toBeNull();       // 在看：观影日期只是排序戳
+    expect(byName('星际穿越')).toBe('2026-08-01');  // 本地兼容层（票 310/309 裁决）：已看态回落观影日期；上游「只认显式键」不随批
+    expect(byName('瑞克和莫蒂')).toBeNull();       // 在看：观影日期只是排序戳（回落仅已看态）
     expect(byName('想看片')).toBeNull();
 
     // 显式键优先：看过又退回想看的条目，历史照样在

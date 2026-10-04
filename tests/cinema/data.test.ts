@@ -97,7 +97,8 @@ tags: [美剧]
     expect(byName['C'].status).toBe(2); // STATUS_WATCHED：无状态键一律落已看（-1/0 推断已随兼容层移除）
     expect(byName['C'].rating).toBe(8.2); // 评分只当分值，不承担状态语义
     expect(byName['D'].status).toBe(2);
-    expect(byName['D'].watchedDate).toBeNull(); // 已看日期只读新键：旧档回落观影日期已随兼容层移除
+    // 本地兼容层（票 536 裁决）：已看态回落观影日期 watchedDate；上游「只认显式键」不随批
+    expect(byName['D'].watchedDate).toBe('2026-01-01');
   });
 
   it('无 frontmatter 跳过；无 tag 跳过', () => {

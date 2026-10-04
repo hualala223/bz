@@ -14,7 +14,6 @@ import { registerPanelEsc, unregisterPanelEsc } from '../../src/core/esc-manager
 import { getNoticeMessages, clearNotices } from '../mock-obsidian-entry';
 import { M, resetCinemaState } from '../../src/cinema/state';
 import { ensureCinema, unloadCinema, applyDefaultView, openCinema, openCinemaAnalysis } from '../../src/cinema';
-import { closeYearbookOverlay } from '../../src/cinema/ui';
 import { rebuildItems } from '../../src/cinema/data';
 import { quickAddWant } from '../../src/cinema/recommend';
 import { configureFetchQueue, enqueueDoubanFetch, isFetching, shutdownDoubanQueue } from '../../src/cinema/douban-queue';
@@ -189,12 +188,12 @@ describe('cinema 打开面板触发豆瓣抓取队列（ADR-0113）', () => {
     configureFetchQueue({ fetch, gapMs: 0, refreshDelayMs: 0 });
     openCinemaAnalysis(app);
     await new Promise((r) => setTimeout(r, 25));
-    expect(fetched).toHaveLength(0);
-    expect(document.querySelector('.bz-yb'), '观影分析层开了').toBeTruthy();
-    expect(document.querySelector('[data-cinema-root]'), '面板在层下待命').toBeTruthy();
-    expect(document.querySelector('.bz-yb-box'), '纸面在层框里（框 = 面板矩形）').toBeTruthy();
-    closeYearbookOverlay();
-    expect(document.querySelector('.bz-yb'), '关层即回影院面板').toBeNull();
+    // 本地口径（票 293 入队门控）：直达分析页与 openCinema 同链，门控开启时同样入队
+    //（用例名即语义「同样触发入队」；theirs「面板未开不入队」不随批。
+    //  ADR-0090：分析页内嵌影院面板，无独立 .bz-yb 报告层——theirs 的 bz-yb 断言不适用）
+    expect(fetched).toHaveLength(1);
+    expect(fetched[0]).toContain('《缺信息》');
+    expect(document.querySelector('[data-cinema-root]'), '面板已开且分析页在列').toBeTruthy();
   });
 });
 
