@@ -16,9 +16,9 @@
  */
 import { notice } from './notice';
 import { getSettings, saveSettings, tryGetSettings } from './settings-provider';
-import type { SettingsRow, SettingsSchema } from './settings-schema';
-import { thinkingOptionsOf } from './ai';
-import { JEV_PROVIDER_REGISTRY } from './jev';
+import type { RowAction, SettingsRow, SettingsSchema } from './settings-schema';
+import { thinkingOptionsOf, testAIConnectivity } from './ai';
+import { DEFAULT_JEV_PROVIDER, JEV_PROVIDER_REGISTRY, fetchJevModels, getJevProviderDescriptor, testJevConnectivity } from './jev';
 import { isQwen3Embedding8b } from './ai-models';
 
 /** 存储路径改动防错提示（f1；正文不带 emoji，铁律 7）——文案逐字冻结，勿改 */
@@ -77,6 +77,58 @@ function maxTokensRow(providerId: string): SettingsRow {
     visibleWhen: (snapshot) => snapshot.aiProvider === providerId,
   };
 }
+
+// ---------------- 行内「测试」钮 + Jev 按服务商分存（issue 433/434，上游吸收批 3） ----------------
+
+/** 当前 Jev 服务商 id（设置未显式时取注册表缺省；口径同 core/jev 的 resolveJevConfig） */
+function currentJevProviderId(): string {
+  const s = tryGetSettings() as any;
+  return String(s.jevProvider || '') || DEFAULT_JEV_PROVIDER;
+}
+
+/** 读当前服务商的分存槽位（keys = 密钥 map，model = 模型 map；空 = 显示空，回落逻辑在消费侧） */
+function jevScopedValue(kind: 'keys' | 'model'): string {
+  const s = tryGetSettings() as any;
+  const map = kind === 'keys' ? s.jevApiKeys : s.jevModels;
+  return String(map?.[currentJevProviderId()] ?? '');
+}
+
+/** 写当前服务商的分存槽位（空值 = 删键：密钥删即回落 LLM，模型删即回落该家缺省）；持久化走 binding.save */
+function setJevScopedValue(kind: 'keys' | 'model', raw: string): void {
+  const s = getSettings() as any;
+  const field = kind === 'keys' ? 'jevApiKeys' : 'jevModels';
+  if (!s[field] || typeof s[field] !== 'object') s[field] = {};
+  const map = s[field] as Record<string, string>;
+  const v = String(raw ?? '').trim();
+  if (v === '') delete map[currentJevProviderId()];
+  else map[currentJevProviderId()] = v;
+}
+
+/** Jev「测试」钮（issue 434 拍板：状态长在按钮上——点击转圈、成功绿框「已连通」、失败红框简短
+ *  原因，不弹通知）。先落盘防抖中的手输值——所配即所测；失败经 reject 交给渲染器翻红。 */
+function jevTestAction(): RowAction {
+  return {
+    text: '测试',
+    stateful: true,
+    onClick: async () => {
+      await saveSettings();
+      await testJevConnectivity(); // 抛错 = 红✕；成功 = 绿✓
+    },
+  };
+}
+
+/** LLM 密钥行「测试」钮（issue 433/434）：对该行所属服务商发一次真实极小请求验证连通
+ *  （testAIConnectivity 按 id 解析该家设置，不受当前下拉选中影响）；三态同 jevTestAction。 */
+function providerTestAction(providerId: string): RowAction {
+  return {
+    text: '测试',
+    stateful: true,
+    onClick: async () => {
+      await saveSettings();
+      await testAIConnectivity(providerId);
+    },
+  };
+}
 /** 构造主设置页 schema（每次 display 重建；visibleWhen 在渲染器内随变更重求值） */
 export function mainSettingsSchema(): SettingsSchema {
   return {
@@ -104,6 +156,7 @@ export function mainSettingsSchema(): SettingsSchema {
             name: 'DeepSeek 密钥',
             desc: '留空则自动回退读取外部配置密钥',
             binding: { key: 'deepseekApiKey' },
+            actions: [providerTestAction('deepseek')],
             visibleWhen: (snapshot) => snapshot.aiProvider === 'deepseek',
           },
           {
@@ -119,6 +172,7 @@ export function mainSettingsSchema(): SettingsSchema {
             name: 'OpenCode 密钥',
             desc: '在订阅官网获取后填入这里',
             binding: { key: 'opencodeGoApiKey' },
+            actions: [providerTestAction('opencode-go')],
             visibleWhen: (snapshot) => snapshot.aiProvider === 'opencode-go',
           },
           {
@@ -134,6 +188,7 @@ export function mainSettingsSchema(): SettingsSchema {
             name: '智谱密钥',
             desc: '在智谱开放平台获取后填入这里',
             binding: { key: 'zhipuApiKey' },
+            actions: [providerTestAction('zhipu')],
             visibleWhen: (snapshot) => snapshot.aiProvider === 'zhipu',
           },
             {
@@ -141,6 +196,7 @@ export function mainSettingsSchema(): SettingsSchema {
               name: '智谱 Plan 密钥',
               desc: '智谱 Coding 套餐专用端点，密钥与智谱开放平台相同',
               binding: { key: 'zhipuPlanApiKey' },
+              actions: [providerTestAction('zhipu-plan')],
               visibleWhen: (snapshot) => snapshot.aiProvider === 'zhipu-plan',
             },
             {
@@ -164,6 +220,7 @@ export function mainSettingsSchema(): SettingsSchema {
             name: '硅基流动密钥',
             desc: '在硅基流动官网获取后填入这里',
             binding: { key: 'siliconflowApiKey' },
+            actions: [providerTestAction('siliconflow')],
             visibleWhen: (snapshot) => snapshot.aiProvider === 'siliconflow',
           },
           {
@@ -179,6 +236,7 @@ export function mainSettingsSchema(): SettingsSchema {
             name: '火山方舟密钥',
             desc: '在火山方舟控制台获取后填入这里',
             binding: { key: 'volcanoArkApiKey' },
+            actions: [providerTestAction('volcano-ark')],
             visibleWhen: (snapshot) => snapshot.aiProvider === 'volcano-ark',
           },
           {
@@ -194,6 +252,7 @@ export function mainSettingsSchema(): SettingsSchema {
             name: 'Ollama 密钥',
             desc: '本地服务无需密钥，留空即可',
             binding: { key: 'ollamaApiKey' },
+            actions: [providerTestAction('ollama')],
             visibleWhen: (snapshot) => snapshot.aiProvider === 'ollama',
           },
           {
@@ -296,12 +355,62 @@ export function mainSettingsSchema(): SettingsSchema {
       },
       {
         // JEV 组（上游 issue 422/ADR-0182）：Jev 判定通道（core/jev），cinema 类型判定与
-        // secondbrain 链接代理消费；密钥留空回落生成通道。
+        // secondbrain 链接代理消费；密钥留空回落生成通道。issue 430/433/434（上游吸收批 3）：
+        // 服务商两家（博查与 Typesafe 报文同构、模型缺省各配），密钥/模型按服务商分存
+        // （refreshKey 随「Jev 服务商」切换原地换值），行内「测试」钮发真实请求验证连通。
         name: 'JEV',
         rows: [
-          { type: 'select', name: 'Jev 服务商', desc: '判定通道的服务商，目前仅支持一家', binding: { key: 'jevProvider' }, options: JEV_PROVIDER_REGISTRY.map((p) => ({ value: p.id, label: p.label })) },
-          { type: 'secret', name: 'Jev 密钥', desc: '填写后判定通道即启用，清空则回落语言模型', binding: { key: 'jevApiKey' }, placeholder: '粘贴 Jev 密钥' },
-          { type: 'text', name: 'Jev 模型', desc: '判定使用的模型，留空跟随服务端最新', binding: { key: 'jevModel' }, placeholder: 'jev-latest' },
+          { type: 'select', name: 'Jev 服务商', desc: '判定通道的服务商，密钥与模型随服务商各自保存', binding: { key: 'jevProvider' }, options: JEV_PROVIDER_REGISTRY.map((p) => ({ value: p.id, label: p.label })) },
+          {
+            type: 'secret',
+            name: 'Jev 密钥',
+            desc: '填写后判定通道即启用，测试按钮会发一次真实请求',
+            binding: { get: () => jevScopedValue('keys'), set: (v: string) => setJevScopedValue('keys', v), save: () => saveSettings() },
+            placeholder: '粘贴 Jev 密钥',
+            refreshKey: () => jevScopedValue('keys'),
+            actions: [jevTestAction()],
+          },
+          {
+            type: 'text',
+            name: 'Jev 模型',
+            desc: '判定使用的模型，留空跟随服务商缺省',
+            placeholder: 'jev-latest',
+            binding: { get: () => jevScopedValue('model'), set: (v: string) => setJevScopedValue('model', v), save: () => saveSettings() },
+            refreshKey: () => jevScopedValue('model'),
+            actions: [{
+              text: '获取模型',
+              onClick: async (_value, ctx) => {
+                try {
+                  await saveSettings(); // 先落盘防抖中的手输值，再读当前状态拉取
+                  const providerId = currentJevProviderId();
+                  const models = await fetchJevModels();
+                  // 拉取期间服务商仍可能被切——以当前为准，不一致即弃用（照 LLM 模型行口径）
+                  if (currentJevProviderId() !== providerId) {
+                    notice('服务商已切换，请重新获取', 'warning');
+                    return;
+                  }
+                  const { openModelPicker } = await import('./settings-model-picker');
+                  await new Promise<void>((resolve) => {
+                    openModelPicker({
+                      providerLabel: getJevProviderDescriptor(providerId).label,
+                      current: jevScopedValue('model'),
+                      models,
+                      onPick: (m) => {
+                        setJevScopedValue('model', m.id);
+                        void saveSettings();
+                        // 与手输 onChange 同口径；回填显示值由渲染器动作链负责
+                        ctx.refreshVisibility();
+                        notice(`Jev 模型已设为 ${m.id}`, 'success');
+                        resolve();
+                      },
+                    });
+                  });
+                } catch (e) {
+                  notice(e instanceof Error ? e.message : String(e), 'error');
+                }
+              },
+            }],
+          },
         ],
       },
       {

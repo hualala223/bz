@@ -18,7 +18,7 @@ import { bindMobileViewport, unbindMobileViewport } from './core/viewport';
 import { renderSettingsInto } from './core/settings-schema';
 import { mainSettingsSchema } from './core/settings-main-schema';
 
-import BzSettings, { DEFAULT_SETTINGS, migrateSecondBrainSettings } from './settings';
+import BzSettings, { DEFAULT_SETTINGS, migrateSecondBrainSettings, migrateRetiredJevKeys } from './settings';
 
 // 15 域（懒加载：首次命令/事件触发时 ensureXxx 幂等初始化）
 // 待办（todo 域，上游 ADR-0092：memo.json 唯一属主——UI/交互/写盘/引用同步/被动捕获全归本域）
@@ -237,9 +237,12 @@ export default class BzPlugin extends Plugin {
     // ESC 管理器软关恢复（上游 N1：禁用→再启用后 keydown 处理随 arm() 复位；幂等）
     escManager.arm();
     const loaded = await this.loadData();
+    // issue 424/433：Jev 旧键退役迁移（424 期退役键兜底清除 + 全局密钥/模型迁入按服务商分存 map）
+    const retiredJevKeysMigrated = migrateRetiredJevKeys(loaded);
     this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
     // ADR-0009 迁移：共享数据路径 storagePath 初始化（旧 7 字段废弃仅兼容保留）
     let migrated = false;
+    if (retiredJevKeysMigrated) migrated = true;
     if (!loaded || loaded.storagePath === undefined) {
       this.migrateStoragePath();
       migrated = true;

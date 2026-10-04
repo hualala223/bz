@@ -13,8 +13,8 @@
  *
  * 与生成通道的边界（ADR-0173 §6）：Jev **不走** `AI_PROVIDER_REGISTRY`——那张表的每条描述符
  * 都带生成专用语义（max_tokens / 思考档位风格映射），判定通道没有这些概念，故自带一张更小的
- * `JEV_PROVIDER_REGISTRY`（issue 424/ADR-0184：服务商选择照 LLM 同款，目前仅 Typesafe）。
- * 配置只剩服务商 / 密钥 / 模型三项 `jev*` 键（超时固化、总开关退役，issue 424/ADR-0184）。
+ * `JEV_PROVIDER_REGISTRY`（issue 424/ADR-0184：服务商选择照 LLM 同款；issue 430 起两家，
+ * 在册者必须与 SystemOne 报文同构）。配置只剩服务商 / 密钥 / 模型三项 `jev*` 键（超时固化、总开关退役，issue 424/ADR-0184）。
  *
  * 失败一律**抛错**，由调用方决定回落（ADR-0173 §2：Jev 优先、失败即当次回落 LLM）——
  * 通道自己不兜底、不静默返回空答案，否则一次故障会被伪装成「这批确实没有关联」。
@@ -91,7 +91,9 @@ export interface JevResult {
 
 /** Jev 服务商描述符（issue 424/ADR-0184：照 `AI_PROVIDER_REGISTRY` 同款，供设置行与端点解析共用）。
  *  与生成通道注册表分开的理由见模块头——判定通道没有 max_tokens / 思考档位这些生成专用语义。
- *  `modelsUrl` 为服务商自家模型列表端点（GET，非 OpenAI 兼容面，响应见 parseJevModels）。 */
+ *  `modelsUrl` 为服务商自家模型列表端点（GET，非 OpenAI 兼容面，响应见 parseJevModels）。
+ *  在册者必须与 SystemOne 报文同构（issue 430：博查实测同款报文/同款列表格式）——
+ *  OpenAI chat 面的服务商（如硅基流动）报文不同构，接入前先加适配层，不许直接塞进本表。 */
 export interface JevProviderDescriptor {
   id: string;
   label: string;
@@ -99,15 +101,27 @@ export interface JevProviderDescriptor {
   endpoint: string;
   /** 模型列表端点（GET） */
   modelsUrl: string;
+  /** 服务商缺省模型（「Jev 模型」留空时回落；issue 430 起按服务商各配） */
+  defaultModel: string;
 }
 
-/** 在册 Jev 服务商（目前仅 Typesafe——2026-09-24 实测其 /v1/models 只要模型名清单） */
+/** 在册 Jev 服务商（issue 430 起两家：Typesafe 官方 + 博查平替。
+ *  博查 2026-09-24 实测：jev.bochaai.com 与 Typesafe 报文/列表格式同构，国内直连 ~0.2s；
+ *  `jev-latest` 在博查是 bocha-jev-v1 的兼容别名，故存量模型键换服务商后依旧可调。） */
 export const JEV_PROVIDER_REGISTRY: JevProviderDescriptor[] = [
   {
     id: 'typesafe',
     label: 'Typesafe',
     endpoint: 'https://api.typesafe.ai/v1/systemone',
     modelsUrl: 'https://api.typesafe.ai/v1/models',
+    defaultModel: 'jev-latest',
+  },
+  {
+    id: 'bocha',
+    label: '博查',
+    endpoint: 'https://jev.bochaai.com/v1/systemone',
+    modelsUrl: 'https://jev.bochaai.com/v1/models',
+    defaultModel: 'bocha-jev-v1',
   },
 ];
 
@@ -120,8 +134,9 @@ export function getJevProviderDescriptor(id?: string): JevProviderDescriptor {
 
 /** 缺省服务商判定端点（= 注册表首条；issue 424 起端点由「Jev 服务商」行决定，不再是设置项） */
 export const JEV_DEFAULT_ENDPOINT = JEV_PROVIDER_REGISTRY[0].endpoint;
-/** 缺省模型：服务端最新版（issue 424/ADR-0184 起——模型可用列表在线获取，别名不再由插件钉版本） */
-export const JEV_DEFAULT_MODEL = 'jev-latest';
+/** 缺省模型：服务端最新版（issue 424/ADR-0184 起——模型可用列表在线获取，别名不再由插件钉版本）。
+ *  实为 Typesafe 的缺省；其他服务商看各自描述符的 `defaultModel`（resolveJevConfig 按服务商回落）。 */
+export const JEV_DEFAULT_MODEL = JEV_PROVIDER_REGISTRY[0].defaultModel;
 /** 实测单次 1–2 秒（含跨国网络），留 5x 余量；issue 424 起固化（原「Jev 超时」设置项已删） */
 export const JEV_DEFAULT_TIMEOUT_MS = 10000;
 
@@ -133,7 +148,9 @@ export interface JevConfig {
   timeoutMs: number;
 }
 
-/** 读取 Jev 配置（设置注入未就绪时用缺省；`override` 用于测试与显式指定） */
+/** 读取 Jev 配置（设置注入未就绪时用缺省；`override` 用于测试与显式指定）。
+ *  密钥 / 模型按服务商分存（issue 433/ADR-0190）：读当前服务商的 map 槽位，
+ *  切换「Jev 服务商」即整体换槽，两家的凭据互不覆盖。 */
 export function resolveJevConfig(override?: Partial<JevConfig>): JevConfig {
   const s = tryGetSettings() as Record<string, unknown>;
   const pick = <T>(key: string, fallback: T): T => {
@@ -141,12 +158,20 @@ export function resolveJevConfig(override?: Partial<JevConfig>): JevConfig {
     return v === undefined || v === null || v === '' ? fallback : (v as T);
   };
   const desc = getJevProviderDescriptor(pick('jevProvider', DEFAULT_JEV_PROVIDER));
+  const keys = (s?.jevApiKeys ?? {}) as Record<string, unknown>;
+  const models = (s?.jevModels ?? {}) as Record<string, unknown>;
   return {
     endpoint: String(override?.endpoint ?? desc.endpoint),
-    apiKey: String(override?.apiKey ?? pick('jevApiKey', '')),
-    model: String(override?.model ?? pick('jevModel', JEV_DEFAULT_MODEL)),
+    apiKey: String(override?.apiKey ?? pickFrom(keys[desc.id], '')),
+    // 模型槽位留空 → 该服务商缺省（issue 430 起：typesafe → jev-latest，博查 → bocha-jev-v1）
+    model: String(override?.model ?? pickFrom(models[desc.id], desc.defaultModel)),
     timeoutMs: override?.timeoutMs ?? JEV_DEFAULT_TIMEOUT_MS,
   };
+}
+
+/** map 槽位取值：undefined/null/'' 一律回落 fallback（与 pick 同口径，作用于分存 map） */
+function pickFrom(v: unknown, fallback: string): string {
+  return v === undefined || v === null || v === '' ? fallback : String(v);
 }
 
 /**
@@ -348,4 +373,36 @@ export async function askJev(
     throw new Error(`Jev API ${status}: ${brief || '无响应正文'}`);
   }
   return parseJevResponse(text, status);
+}
+
+// ---------------- 连通性测试（issue 433：设置面板「测试」按钮） ----------------
+
+export interface JevTestResult {
+  /** 服务商显示名（如 博查 / Typesafe） */
+  provider: string;
+  /** 服务端实际解析到的模型版本 */
+  model: string;
+  /** 全程耗时（毫秒） */
+  ms: number;
+  /** 测试题的 noul 概率（回显用，不作判定） */
+  noul: number;
+}
+
+/**
+ * 连通性测试：发一道**真实**的 noul 小题走完整判定链路（鉴权 / 报文 / 解析全过一遍才算通），
+ * 配置读当前设置（走 `resolveJevConfig`，测试按钮先落盘防抖值再调本函数即为所配即所测）。
+ * 失败一律抛错（超时 / 网络 / HTTP 非 2xx / 响应畸形），文案直接可弹通知。
+ */
+export async function testJevConnectivity(opts: JevAskOptions = {}): Promise<JevTestResult> {
+  const s = tryGetSettings() as Record<string, unknown>;
+  const desc = getJevProviderDescriptor(String(s?.jevProvider ?? '') || DEFAULT_JEV_PROVIDER);
+  const t0 = Date.now();
+  const result = await askJev(
+    '这是一条连通性测试消息。',
+    { ping: { instructions: '这条消息是连通性测试消息吗？', type: 'noul' } },
+    opts
+  );
+  const answer = result.answers.ping;
+  const noul = answer && answer.type === 'noul' && Number.isFinite(answer.noul) ? answer.noul : NaN;
+  return { provider: desc.label, model: result.model || '未知模型', ms: Date.now() - t0, noul };
 }

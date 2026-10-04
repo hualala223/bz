@@ -17,6 +17,7 @@
  */
 import { getSettings, saveSettings } from '../core/settings-provider';
 import type { SettingsSchema, SettingsRow, SettingsSnapshot, SettingsRowContext, SettingsListItem } from '../core/settings-schema';
+import { armRowBtnReset, setRowBtnState, shortFailReason } from '../core/settings-btn-state';
 import { setIcon } from 'obsidian';
 import { mountIcons } from '../core/ui/icons';
 import { uiSetlist } from '../core/ui';
@@ -274,15 +275,25 @@ function renderRow(
         });
       }
       // 行内附加按钮（按钮在左、输入框右，2026-09-08 拍板口径）：onClick 传当前输入值，
-      // 完成后重读绑定回填显示（不置脏）+ 刷新显隐——供「填入/回填」类动作（issue 263）
-      const litActions = (row as { actions?: Array<{ text: string; cta?: boolean; onClick: (value: string | undefined, ctx: SettingsRowContext) => void | Promise<void> }> }).actions;
+      // 完成后重读绑定回填显示（不置脏）+ 刷新显隐——供「填入/回填」类动作（issue 263）。
+      // stateful 钮（issue 434 测试类）：转圈→绿框/红框简短原因，2 秒后复原（btn-state 助手单源）
+      const litActions = (row as { actions?: Array<{ text: string; cta?: boolean; stateful?: boolean; onClick: (value: string | undefined, ctx: SettingsRowContext) => void | Promise<void> }> }).actions;
       for (const a of litActions ?? []) {
         const holder = document.createElement('div');
         holder.innerHTML = rowBtnHtml(a.text, a.cta);
         const btn = holder.firstElementChild as HTMLElement;
         btn.addEventListener('click', () => {
           void (async () => {
-            await a.onClick(input.value, ctx);
+            try {
+              if (a.stateful) setRowBtnState(btn, 'busy', a.text);
+              await a.onClick(input.value, ctx);
+              if (a.stateful) setRowBtnState(btn, 'ok', a.text);
+            } catch (e) {
+              if (a.stateful) setRowBtnState(btn, 'fail', a.text, shortFailReason(e));
+              else throw e;
+            } finally {
+              if (a.stateful) armRowBtnReset(btn, a.text);
+            }
             dirty = false;
             const f = String(acc.read() ?? '');
             if (input.value !== f) input.value = f;

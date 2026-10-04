@@ -21,6 +21,7 @@ import { renderPathSettingRow } from './path-picker';
 import { createSettingsGroup, markSettingSplitRows, refreshSettingsGroupCounts } from './settings-modal';
 import { uiCardChoice, uiSetlist } from './ui';
 import { notifySaveError } from './notice';
+import { armRowBtnReset, setRowBtnState, shortFailReason } from './settings-btn-state';
 
 /** 设置快照：visibleWhen 条件函数的入参（键直绑行的当前值；外部数据行请自行闭包捕获）。 */
 export type SettingsSnapshot = Readonly<BzSettings>;
@@ -96,6 +97,9 @@ export interface RowAction {
   text: string;
   /** 强调色按钮 */
   cta?: boolean;
+  /** 状态反馈钮（issue 434，测试类按钮专用）：点击即转圈，resolve→绿✓、reject→红✕，
+   *  短暂停留后复原；约定不弹通知——结果长在按钮上（core/settings-btn-state 单源）。 */
+  stateful?: boolean;
   onClick: (value: string | undefined, ctx: SettingsRowContext) => void | Promise<void>;
 }
 
@@ -526,8 +530,18 @@ export function renderSettingsInto(container: HTMLElement, schema: SettingsSchem
         setting.addButton((b) => {
           if (a.cta) b.setCta();
           b.setButtonText(a.text).onClick(() => {
+            const btnEl = (b as { buttonEl?: HTMLElement }).buttonEl;
             void (async () => {
-              await a.onClick(last, ctx);
+              try {
+                if (a.stateful) setRowBtnState(btnEl, 'busy', a.text);
+                await a.onClick(last, ctx);
+                if (a.stateful) setRowBtnState(btnEl, 'ok', a.text);
+              } catch (e) {
+                if (a.stateful) setRowBtnState(btnEl, 'fail', a.text, shortFailReason(e));
+                else throw e;
+              } finally {
+                if (a.stateful) armRowBtnReset(btnEl, a.text);
+              }
               if (currentText && currentText.setValue) {
                 dirty = false;
                 currentText.setValue(String(acc.read() ?? ''));

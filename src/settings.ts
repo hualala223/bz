@@ -356,10 +356,14 @@ export default interface BzSettings {
   aiMaxTokensOverrides: Record<string, number>;
   /** 🧩 per-provider 思考档位（上游 issue 330/411；键=provider id，值='off'|'default'） */
   aiThinkingOverrides: Record<string, string>;
-  /** Jev 判定通道（上游 issue 389/ADR-0173；与生成通道并存，cinema/secondbrain 消费） */
+  /** Jev 判定通道（上游 issue 389/ADR-0173；与生成通道并存，cinema/secondbrain 消费）。
+   *  issue 430/433/ADR-0188/0190（上游吸收批 3）起：服务商两家（typesafe / bocha），
+   *  密钥与模型按服务商分存（键 = JEV_PROVIDER_REGISTRY id），旧全局键经 onload 迁移进 typesafe 槽位 */
   jevProvider: string;
-  jevApiKey: string;
-  jevModel: string;
+  /** 各服务商密钥（各控制台创建，互不通用）——填了即接管判定，无独立开关 */
+  jevApiKeys: Record<string, string>;
+  /** 各服务商模型名（空/缺 = 跟随该家缺省：typesafe → jev-latest，博查 → bocha-jev-v1） */
+  jevModels: Record<string, string>;
   /** 🎨 知识盒面板皮肤（上游外观组范式） */
   knowledgeSkin: string;
   knowledgeSkinTheme: string;
@@ -849,8 +853,8 @@ export const DEFAULT_SETTINGS: BzSettings = {
   aiMaxTokensOverrides: {},
   aiThinkingOverrides: {},
   jevProvider: 'typesafe',
-  jevApiKey: '',
-  jevModel: 'jev-latest',
+  jevApiKeys: {},
+  jevModels: {},
   knowledgeSkin: 'default',
   knowledgeSkinTheme: 'manila',
   knowledgeImageFolder: '',
@@ -980,6 +984,45 @@ export function migrateSecondBrainSettings(s: BzSettings): boolean {
   for (const dead of ['META_PATH', 'VEC_PATH']) {
     if (anyS[dead] !== undefined) {
       delete anyS[dead];
+      migrated = true;
+    }
+  }
+  return migrated;
+}
+
+/** Jev 旧键退役迁移（issue 424/ADR-0184 + 433/ADR-0190，上游吸收批 3）：
+ * 1) 424 期退役键兜底清除——`jevEnabled` / `jevEndpoint` / `jevTimeoutMs`（本地未发放过则空转，幂等）；
+ * 2) 旧缺省模型名改写 `jev-1.13.0` → `jev-latest`（插件缺省被落盘的产物，用户自选值保留）；
+ * 3) 全局 `jevApiKey` / `jevModel` 退役——迁移进按服务商分存 `jevApiKeys` / `jevModels` 的
+ *    **typesafe 槽位**（存量用户无感：原值原样带走，换服务商后各存各的互不覆盖；非空才搬，空值是噪音）。
+ * 幂等：无旧键/无脏值即不改动，返回是否动过（调用方据返回值调度落盘）。 */
+const RETIRED_JEV_KEYS: string[] = ['jevEnabled', 'jevEndpoint', 'jevTimeoutMs', 'jevApiKey', 'jevModel'];
+/** 旧缺省模型名（ADR-0173 §5 曾刻意钉版本；issue 424 起改为跟随服务端最新） */
+const LEGACY_JEV_DEFAULT_MODEL = 'jev-1.13.0';
+/** 全局密钥/模型键迁移的落位服务商（旧键只有一份，归属缺省服务商 typesafe） */
+const LEGACY_JEV_PROVIDER = 'typesafe';
+
+export function migrateRetiredJevKeys(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object') return false;
+  const rec = raw as Record<string, unknown>;
+  let migrated = false;
+  if (rec.jevModel !== undefined && String(rec.jevModel) === LEGACY_JEV_DEFAULT_MODEL) {
+    rec.jevModel = 'jev-latest';
+    migrated = true;
+  }
+  // 全局键 → 按服务商分存 map（issue 433/ADR-0190）
+  for (const [oldKey, mapField] of [
+    ['jevApiKey', 'jevApiKeys'],
+    ['jevModel', 'jevModels'],
+  ] as const) {
+    const v = rec[oldKey];
+    if (v === undefined || v === null || v === '') continue;
+    if (!rec[mapField] || typeof rec[mapField] !== 'object') rec[mapField] = {};
+    (rec[mapField] as Record<string, unknown>)[LEGACY_JEV_PROVIDER] = v;
+  }
+  for (const key of RETIRED_JEV_KEYS) {
+    if (rec[key] !== undefined) {
+      delete rec[key];
       migrated = true;
     }
   }
