@@ -31,6 +31,7 @@ var BZR_cinema = (() => {
     cardStatus: () => cardStatus,
     chipsHtml: () => chipsHtml,
     confirmModalHtml: () => confirmModalHtml,
+    dedupeModalHtml: () => dedupeModalHtml,
     detailModalHtml: () => detailModalHtml,
     doubanSearchUrl: () => doubanSearchUrl,
     emptyPageHtml: () => emptyPageHtml,
@@ -555,6 +556,19 @@ var BZR_cinema = (() => {
     <div class="dm-actions"><button class="dm-btn j-cancel">取消</button><button class="dm-btn danger j-del">${iconSpan(ICON.del)}删除</button></div>
   </div>`;
   }
+  function dedupeModalHtml(groupCount, dropCount, groups) {
+    return `<div class="cn-modal cn-dedupe" style="max-width:540px;width:100%">
+    <div class="cn-modal-title">查重复（${groupCount} 组 · 建议删除 ${dropCount} 条）</div>
+    <div class="dd-list">${groups.map((g, gi) => `
+      <div class="dd-group"><div class="dd-kind${g.kind === "sid" ? " is-sid" : ""}">${g.kind === "sid" ? "确认重复（豆瓣同一条目）" : "疑似重复（归一同名，注意甄别）"}</div>
+        ${g.members.map((m, mi) => `
+        <label class="dd-item"><input type="radio" name="dd-${gi}" value="${mi}"${mi === 0 ? " checked" : ""}>
+          <span class="dd-name">${esc(m.name)}</span><span class="dd-meta">${esc(m.meta)}</span></label>`).join("")}
+      </div>`).join("")}
+    </div>
+    <div class="dm-actions"><button class="dm-btn j-cancel">取消</button><button class="dm-btn gold j-dd-run">去重（删 ${dropCount} 条）</button></div>
+  </div>`;
+  }
 
   // src/cinema/layouts/midnight/render.ts
   function midnightDeskHtml() {
@@ -664,7 +678,7 @@ var BZR_cinema = (() => {
     if (view.multiSelect) return multiBarHtml(view);
     return `<div class="d-tools"><label class="d-search">${iconSpan(ICON.search)}<input class="j-q" placeholder="搜索条目（名称、类型、感想）..." value="${esc(view.searchKeyword)}"></label>
     <div class="seg j-sort">${[["date", "最近观看"], ["created", "加入先后"], ["rating", "按评分"]].map(([k, l]) => `<button data-k="${k}" class="${view.sortMode === k ? "is-on" : ""}">${l}</button>`).join("")}</div>
-    <button class="dm-btn j-multi" data-cinema-multiselect>多选</button></div>`;
+    <button class="dm-btn j-multi" data-cinema-multiselect>多选</button><button class="dm-btn j-dd" data-cinema-dedupe>查重复</button></div>`;
   }
   function renderMidnightDesk(root, inp) {
     const rail = railHtml(inp.items, inp.view);
