@@ -9,6 +9,8 @@ import { notice, cleanupNotices } from './core/notice';
 import { escManager } from './core/esc-manager';
 import { closeItemMenu } from './core/item-actions';
 import { setApp, getApp } from './core/app';
+import { scheduleSelfUpdateCheck } from './core/self-update';
+import { refreshManifest } from './core/download-manifest';
 import { setAISettingsProvider, resetAIProviderCache } from './core/ai';
 import { setSettingsProvider, setSettingsSaver } from './core/settings-provider';
 import { clearDomainEvents } from './core/domain-bus';
@@ -230,6 +232,8 @@ export function applyDiarySettingsToRuntime(s: BzSettings) {
 
 export default class BzPlugin extends Plugin {
   settings: BzSettings = { ...DEFAULT_SETTINGS };
+  /** 卸载标志（上游 issue 480 随批）：自更新巡检定时器据此在插件停用后中止 */
+  private unloaded = false;
   private registeredCommandIds: string[] = [];
   private unregisterGestures: (() => void) | null = null;
 
@@ -359,6 +363,16 @@ export default class BzPlugin extends Plugin {
         ensureFavoritesFileSync(this.app); // 收藏本引用同步（本地保留）
       }
       if (this.settings.secondBrainEnabled) ensureSecondBrainOnReady(this.app);
+      // 新版本自更新巡检（上游 issue 480/ADR-0203 随批：24h 节流、启动 15s 后静默跑；有新版才弹通知，
+      // 失败不吵）。after = 在线资源清单对比（ADR-0203）：只对比 + 就绪注入，**绝不下载**（半自动铁则：
+      // 下载只听用户的，在设置面板「在线资源」组触发）；失败静默等下次启动，组内失败态由 UI 自行呈现。
+      scheduleSelfUpdateCheck(getApp, () => this.unloaded, async () => {
+        try {
+          await refreshManifest(getApp());
+        } catch (e) {
+          console.warn('[bz] 下载清单拉取失败（已静默，等下次启动/手动重试）:', (e as Error)?.message || e);
+        }
+      });
       // 复习计划：到期提醒开启时常驻（ticket 100——监听/染色/轮询统一启动；否则懒加载）；enableAutoNotify 缺省视为开
       if (this.settings.enableAutoNotify !== false) void ensureReview(this.app);
       // 番茄钟：启动即恢复（load+recover，正在倒计时则后台继续/按设置自动弹窗）
@@ -378,6 +392,7 @@ export default class BzPlugin extends Plugin {
   }
 
   async onunload() {
+    this.unloaded = true;
     // 统一右键菜单/长按抽屉浮层先收口（fix(main)：卸载接线补全）
     closeItemMenu();
     // toast 卸载清理（UX 整改 l2-toast）：清空通知容器 DOM + 存活/去重状态

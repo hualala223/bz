@@ -4,7 +4,8 @@
  * 弹窗）在 shared.ts，午夜场 desk/mob 壳与渲染胶水在 layouts/midnight/——ui.ts 经域入口
  * render.ts 消费同一份（与原型壳 prototype-render.js 同源）。本文件只留：
  * 事件绑定 / core 服务（落盘、通知、域事件、ESC、全屏、图标物化）/ AI·分析·海报守护接线。
- * 三风格单键 cinemaStyle（清单 CINEMA_STYLES）；共享弹窗宿主为 display:contents 的
+ * 三风格单键 = cinemaStyle 设置键（settings.ts，深审批A P3-17 措辞修正：无 CINEMA_STYLES
+ * 清单常量，风格枚举即该设置键的合法值域）；共享弹窗宿主为 display:contents 的
  * .bz-cinema--midnight 锚类容器。业务层零迁移：persistItem 落盘 / smartcat movie 域事件 /
  * AI 推荐 / 分析统计 / 海报守护全部原样。
  * 落域适配（ADR-0103 §5，原型不出）：移动头行补 ✕ 关闭钮；移动 ✦ 再点回列表。
@@ -13,49 +14,58 @@
 import type { App, IconName } from 'obsidian';
 import { TFile } from 'obsidian';
 import { notice, notifySaveError } from '../core/notice';
+import { openFlowDialog } from '../core/flow-dialog';
 import { emitDomainEvent } from '../core/domain-bus';
 import { escManager, registerPanelEsc, unregisterPanelEsc } from '../core/esc-manager';
+import { firstFocusable, trapPanelFocus } from '../core/ui/focus-trap';
 import { isMobileEnv } from '../core/mobile';
+import { fitRotatedBox } from '../core/landscape';
 import { topifyZ, longPress } from '../core/dom';
 import { openItemMenu, openItemSheet, closeItemMenu, resetItemMenuClickGuard, type ItemAction } from '../core/item-actions';
-import { tryGetSettings } from '../core/settings-provider';
-import { mountIcons } from '../core/ui';
+import { tryGetSettings, panelSizePersist } from '../core/settings-provider';
+import { mountIcons, openLightbox, uiSuggest, uiResizable } from '../core/ui';
+import { syncSlidePills, type BzSlidePillTarget } from '../core/ui/slide-pill';
+import { iconSpan, esc, localNow } from '../core/ui/str';
+import { openExternalUrl, sleep } from '../core/utils';
+import { bindFormSubmit } from '../core/ui/modal';
 import {
   STATUS_WANT, STATUS_WATCHING, STATUS_WATCHED, DEFAULT_RATING,
-  getGroupForTag, getGroupSafe, doubanEligibleTag, episodesEligibleTag, chaptersEligibleTag,
+  getGroupForTag, getGroupSafe, hasIllegalNameChar, ILLEGAL_NAME_HINT, rewatchCount, REWATCH_SHELF,
+  doubanEligibleTag, episodesEligibleTag, chaptersEligibleTag,
 } from './constants';
 import { M, type CinemaItem, type CinemaSortMode } from './state';
-import { rebuildItems, getDisplayItems, parseEpisodeCount } from './data';
-import { localNow, esc, iconSpan } from '../core/ui/str';
-import { getCountryOptions, getGenreOptions, addCountryOption, addGenreOption } from './options';
+import { loadDoubanNameIndex, searchDoubanNameIndex, normName, type DoubanIndexRow } from '../core/douban-name-index';
+import { rebuildItems, getDisplayItems, normalizeTags, normalizeRewatches, normalizeLists, allLists, refreshDataAndView, parseEpisodeCount } from './data';
 import { runAIRecommend, runSimilarRecommend, buildTasteProfile, quickAddWant } from './recommend';
+import { bindYearbook, deriveYb, yearbookHtml, yearbookFixedHtml, yearbookOpenHtml, type YbHandle } from './yearbook';
+import { enqueueDoubanFetch, dequeueDoubanFetch, isFetching, queryDoubanForPreview, downloadPreviewPoster, fetchDoubanListForImport, fetchDepsFromSettings } from './douban-queue';
+import { normalizeListValue, insertPosterEmbed, type DoubanQuery } from './douban-fetcher';
+import { getCountryOptions, getGenreOptions, addCountryOption, addGenreOption } from './options';
 import { buildAnalysisHTML } from './analysis';
-import { enqueueDoubanFetch, dequeueDoubanFetch, isFetching, fetchDepsFromSettings } from './douban-queue';
 import { refetchCinemaDouban } from './douban-refetch';
-import { queryDoubanByName, type DoubanQuery } from './douban-fetcher';
 import { decideCinemaType } from './type-decide';
 import { extractDoubanSid, findDuplicateGroups, mergeUserData } from './dedupe';
-import { fitRotatedBox } from '../core/landscape';
-import { bindYearbook, deriveYb, yearbookHtml, yearbookOpenHtml, yearbookFixedHtml, type YbHandle } from './yearbook';
 import {
-  ICON, statusText, itemByKey, itemKey, doubanSearchUrl,
-  detailModalHtml, confirmModalHtml, formModalHtml, optionChipsHtml, genreLabel,
-  formBackHtml, formTagChipHtml, formStChipHtml, type FormPreviewData,
-  dedupeModalHtml,
-  aiPageHtml, sheetHeadHtml, pcardHtml, type AiPageInput,
-  midnightDeskHtml, midnightMobHtml, renderMidnightDesk, renderMidnightMob,
+  ICON, statusText, statusNum, itemByKey, doubanSearchUrl, itemKey,
+  detailModalHtml, seriesDetailModalHtml, formModalHtml, formBackHtml,
+  formTagChipHtml, formStChipHtml, type FormPreviewData,
+  confirmModalHtml, optionChipsHtml, genreLabel, dedupeModalHtml,
+  aiPageHtml, sheetHeadHtml, seriesSheetHeadHtml, cardHtml, facePiecesHtml, starsHtml, starsLit, seriesStatus, type AiPageInput,
+  midnightDeskHtml, midnightMobHtml, renderMidnightDesk, renderMidnightMob, countryTally,
   type MidnightRenderInput,
 } from './render';
-
-// ---------- 小工具 ----------
+import { mergeSeasonCards, isSeriesKey, cardFace, type SeriesCard } from './seasons';
+import { MOTION, EASE, STAGGER } from './motion';
 
 // ---------- 海报 ----------
 
-/** 海报资源 URL（vault 资源路径）；无图返回 null（markup 侧只认 URL，资源解析留行为层） */
+/** 海报资源 URL（vault 资源路径）；无图返回 null（markup 侧只认 URL，资源解析留行为层）。
+ *  白名单补齐 avif/bmp/svg（深审批A P3-12）——Obsidian 库内合法图片格式都能给到资源路径，
+ *  真不支持的格式由 posterInner 的 onerror 兜底 */
 function posterUrl(item: CinemaItem, app: App): string | null {
   if (!item.poster) return null;
   const f = app.vault.getAbstractFileByPath(item.poster);
-  if (f && f instanceof TFile && /\.(png|jpe?g|gif|webp)$/i.test(f.name)) {
+  if (f && f instanceof TFile && /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i.test(f.name)) {
     return app.vault.getResourcePath(f);
   }
   return null;
@@ -69,38 +79,43 @@ function itemByKeyInState(key: string | undefined): CinemaItem | undefined {
 
 // ---------- 通用业务（菜单/抽屉动作、快速状态、豆瓣） ----------
 
-/** 在豆瓣打开：有豆瓣链接走链接，否则走片名搜索页（新窗） */
+/** 在豆瓣打开：有豆瓣链接走链接，否则走片名搜索页（openExternalUrl 单源：
+ *  openUrl → electron shell → window.open 兜底链 + 全链失败人话提示；深审批A P3-9，
+ *  私有裸 window.open + try/catch 退役） */
 function openDouban(item: CinemaItem): void {
   const url = item.doubanUrl || doubanSearchUrl(item.name);
-  try {
-    window.open(url, '_blank');
-  } catch {
-    /* jsdom 未实现 window.open：忽略 */
-  }
+  openExternalUrl(M.appRef, url);
 }
 
+/** 状态数值 → 域事件 token（movie:status 事件的 from/to 用） */
+const stToken = (n: number): 'want' | 'watching' | 'watched' =>
+  n === STATUS_WANT ? 'want' : n === STATUS_WATCHING ? 'watching' : 'watched';
+
 /** 快速标记状态（菜单/抽屉「标记在看」）：状态流转 + 刷新观影日期 + 域事件补发。
- *  「标记已看」已改走编辑窗（评分影评由用户在表单输入，saveEdit 落盘时补发同款域事件） */
-async function markStatus(item: CinemaItem, target: '在看' | '已看', sec: HTMLElement, app: App): Promise<void> {
-  const fromSt = item.status === STATUS_WANT ? 'want' : item.status === STATUS_WATCHING ? 'watching' : 'watched';
+ *  「标记已看」已改走编辑窗（评分影评由用户在表单输入，saveEdit 落盘时补发同款域事件）；
+ *  两态的日期分工见状态切点：到已看盖「已看日期」，观影日期只管排序（两者同值）。 */
+async function markStatus(item: CinemaItem, target: '在看' | '已看', app: App): Promise<void> {
+  const fromSt = stToken(item.status);
   const prevRating = item.rating && item.rating > 0 ? item.rating : null;
   // G7：先记快照，落盘失败回滚内存（saveEdit 同法）——否则面板显示与磁盘相反
-  const prev = { status: item.status, rating: item.rating, watchDate: item.watchDate };
+  const prev = { status: item.status, rating: item.rating, watchDate: item.watchDate, watchingDate: item.watchingDate, watchedDate: item.watchedDate };
   item.status = target === '已看' ? STATUS_WATCHED : STATUS_WATCHING;
   if (target === '在看') {
-    item.rating = 0;
-  } else if (!prevRating) {
-    item.rating = DEFAULT_RATING;
+    item.watchingDate = localNow().slice(0, 10); // 状态日期（在看日期记到达日）
+  } else if (!item.watchedDate) {
+    item.watchedDate = localNow().slice(0, 10); // 到已看才盖「已看日期」；只增不删
   }
+  // 评分不再参与状态编码（2026-09-30 拍板）：流转不动评分——已看没分就是没分，分值只由用户在表单给
   item.watchDate = localNow();
   try {
     await persistItem(item, app);
-    panelToast(sec, `已把「${item.name}」标记为${target}`);
+    notice(`已把「${item.name}」标记为${target}`, 'success');
     const toSt = target === '已看' ? 'watched' : 'watching';
     if (toSt !== fromSt) emitDomainEvent('movie', { kind: 'status', name: item.name, from: fromSt, to: toSt });
     if (item.rating !== null && item.rating > 0 && item.rating !== prevRating) {
       emitDomainEvent('movie', { kind: 'rated', name: item.name, fromRating: prevRating, toRating: item.rating });
     }
+    markCardFlash(itemKey(item), item.rating !== prevRating); // 流转的因果看得见（issue 403）
     renderAll(app);
   } catch (e) {
     Object.assign(item, prev);
@@ -110,50 +125,450 @@ async function markStatus(item: CinemaItem, target: '在看' | '已看', sec: HT
   }
 }
 
+/** 重温 +1：现在（日期+时刻）追加进 frontmatter「重看」（2026-09-30 拍板升级为时刻粒度，
+ *  同日多刷各成一条可辨；旧 date-only 档照旧）。若影片在「重映厅」，重温即自动移出
+ *  （候补架语义：重温了就该出来）——同一笔 processFrontMatter 里同步改「片单」键。
+ *  内存先行——processFrontMatter 落盘后 metadataCache 就绪是异步的，紧跟的 renderAll
+ *  要拿到新值（markStatus 同模式）；写盘失败回滚内存快照（重温数组 + 片单一起回）。 */
+async function markRewatch(it: CinemaItem, app: App): Promise<void> {
+  if (!it.file) return;
+  const now = localNow();
+  const prev = { rewatches: it.rewatches, lists: it.lists };
+  it.rewatches = [...prev.rewatches, now];
+  const wasOnShelf = it.lists.includes(REWATCH_SHELF);
+  if (wasOnShelf) it.lists = it.lists.filter((l) => l !== REWATCH_SHELF);
+  try {
+    await app.fileManager.processFrontMatter(it.file, (fm: Record<string, unknown>) => {
+      fm['重看'] = normalizeRewatches(fm['重看']).concat(now);
+      if (wasOnShelf) {
+        const rest = normalizeLists(fm['片单']).filter((l) => l !== REWATCH_SHELF);
+        if (rest.length) fm['片单'] = rest;
+        else delete fm['片单'];
+      }
+    });
+    notice(`「${it.name}」记下第 ${rewatchCount(it)} 刷（${now.slice(0, 16)}）${wasOnShelf ? `，已移出「${REWATCH_SHELF}」` : ''}`, 'success');
+    markCardFlash(itemKey(it));
+    renderAll(app);
+  } catch (e) {
+    it.rewatches = prev.rewatches;
+    it.lists = prev.lists;
+    notifySaveError(e);
+    console.error(e);
+    renderAll(app);
+  }
+}
+
+/**
+ * 片单归入/移出落盘（含内置「重映厅」）：frontmatter「片单」数组按需增删——建档/编辑不写此键；
+ * 空数组删键（不留无意义的空列表）。内存先行（markRewatch 同模式），写盘失败回滚。
+ *
+ * **多条目变体**（issue 535）：合并卡 = 全部季 + 特别篇一起动，故入参是条目集合。
+ * 逐篇 processFrontMatter（各写各的文件，互不依赖）；任一篇抛错 → 全部内存快照回滚 + 报错，
+ * 保证内存态与「可能已写了一半的盘」至少不会二次漂移。
+ *
+ * @param on 目标成员态（true = 归入 / false = 移出）。**幂等**：已在目标态的条目既不写内存也不
+ *           碰盘——合并卡常出现「3 季里只有 1 季已在」的半吊子态（移出时另两季本就没这份键）。
+ * @param label 通知里的主语；缺省按条目名单条 `「片名」` / 多条 `N 部`
+ */
+async function setListMembership(items: CinemaItem[], list: string, on: boolean, app: App, label = ''): Promise<void> {
+  const targets = items.filter((it) => it.file);
+  if (!targets.length) return;
+  const who = label || (targets.length === 1 ? `「${targets[0].name}」` : `${targets.length} 部`);
+  const changing = targets.filter((it) => it.lists.includes(list) !== on);
+  const prev = changing.map((it) => it.lists);
+  changing.forEach((it) => {
+    it.lists = on ? [...it.lists, list] : it.lists.filter((l) => l !== list);
+  });
+  try {
+    for (const it of changing) {
+      await app.fileManager.processFrontMatter(it.file!, (fm: Record<string, unknown>) => {
+        const cur = normalizeLists(fm['片单']);
+        const next = on
+          ? cur.includes(list) ? cur : [...cur, list]
+          : cur.filter((l) => l !== list);
+        if (next.length) fm['片单'] = next;
+        else delete fm['片单'];
+      });
+    }
+  } catch (e) {
+    changing.forEach((it, i) => { it.lists = prev[i]; });
+    notifySaveError(e);
+    console.error(e);
+    renderAll(app);
+    return;
+  }
+  // 通知在守卫之前：全员已在目标态时（弹层里点的那个片单，全组成员本来就都在）动作**已经**是目标态，
+  // 报一句终态不算谎报；只是没写盘、不必整刷，故守卫只挡 flash 与 renderAll
+  notice(on ? `已把${who}归入「${list}」` : `已把${who}移出「${list}」`, 'success');
+  if (!changing.length) return;
+  changing.forEach((it) => markCardFlash(itemKey(it)));
+  renderAll(app);
+}
+
+/** 单条目片单 toggle（调用点语义不变：入参条目当前不在 → 归入，在 → 移出） */
+async function toggleListMembership(it: CinemaItem, list: string, app: App): Promise<void> {
+  await setListMembership([it], list, !it.lists.includes(list), app);
+}
+
+/** 片单改名（归入弹层行尾铅笔钮，2026-09-30 拍板补改名途径）：全库扫含旧名的笔记
+ *  批量重写「片单」数组（130 部也只是一串本地写盘），内存同步后整刷——侧栏片单组
+ *  计数与新名即时生效。校验：新名非空/无非法字符/不与其他片单重名。 */
+async function renameList(oldName: string, newName: string, app: App): Promise<void> {
+  const targets = M.items.filter((x) => x.lists.includes(oldName) && x.file);
+  try {
+    for (const x of targets) {
+      await app.fileManager.processFrontMatter(x.file!, (fm: Record<string, unknown>) => {
+        const cur = normalizeLists(fm['片单']);
+        const at = cur.indexOf(oldName);
+        if (at >= 0) {
+          cur[at] = newName;
+          fm['片单'] = cur;
+        }
+      });
+      x.lists = x.lists.map((l) => (l === oldName ? newName : l));
+    }
+    notice(`片单已改名：「${oldName}」→「${newName}」${targets.length ? `（${targets.length} 部成员同步更新）` : ''}`, 'success');
+    renderAll(app);
+  } catch (e) {
+    notifySaveError(e);
+    console.error(e);
+    renderAll(app);
+  }
+}
+
+/** 归入片单弹层（cn-modal--listpick）：现有片单逐行点选（就地切换勾选不关层）+ 底部新建行
+ *  + 行尾铅笔改名（行内编辑态：label 换输入框，Enter 提交 / Esc 还原；编辑中行点击不触发勾选）。
+ *  落盘走 setListMembership / renameList；勾选态刷新走 ovl 局部 class 翻转，不整刷。
+ *  行内计数 = 库内成员数（与侧栏「卡片数」口径不同：这里是笔记粒度，弹层语境更直观）
+ *
+ *  **多目标（issue 535）**：合并卡 = 全部季 + 特别篇一起归入/移出。勾选态 = **任一成员命中**
+ *  （与 cardInList / 侧栏计数 / 片单筛选同一口径——卡片在片单视图里出现靠的就是这条），
+ *  点一下 = 对全部成员执行同一动作。head 用卡片名与正脸海报（不是某一季的名字）。
+ *
+ *  @param head.who 通知主语（合并卡传「剧名」+ 总数）；缺省由 setListMembership 按条目数兜底 */
+function openListPick(sec: HTMLElement, targets: CinemaItem[], app: App, head: { name: string; face: CinemaItem; who?: string }): void {
+  const inList = (name: string): boolean => targets.some((t) => t.lists.includes(name));
+  const countOf = (name: string): number => M.items.reduce((n, x) => n + (x.lists.includes(name) ? 1 : 0), 0);
+  const rowHtml = (name: string): string =>
+    `<button type="button" class="lp-item${inList(name) ? ' is-on' : ''}" data-lp="${esc(name)}"><span class="lp-check">${iconSpan('check')}</span><span class="lp-label">${esc(name)}</span><span class="lp-n">${countOf(name)}</span><span class="lp-rename" data-lp-rename="${esc(name)}" title="改名片单">${iconSpan(ICON.edit)}</span></button>`;
+  const bodyHtml = (): string => allLists(M.items).map(rowHtml).join('') || '<div class="lp-empty">还没有片单——下面建第一个</div>';
+  const url = posterUrl(head.face, app);
+  const { el, close } = ovl(sec, `<div class="cn-modal cn-modal--listpick">
+    <div class="lp-head"><div class="lp-poster">${url ? `<img src="${esc(url)}" onerror="this.remove()">` : ''}</div>
+      <div class="lp-head-txt"><span class="lp-kicker">归入片单</span><span class="lp-name">${esc(head.name)}</span></div></div>
+    <div class="lp-body" data-lp-body>${bodyHtml()}</div>
+    <div class="lp-new"><input class="j-lp-new" placeholder="新片单名，回车新建并归入"><button type="button" class="lp-add j-lp-add">${iconSpan(ICON.listPlus)}新建</button></div>
+  </div>`);
+  mountIcons(el);
+  const bodyEl = el.querySelector<HTMLElement>('[data-lp-body]');
+  bodyEl?.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    // 改名态中的行：点击不触发勾选（正在编辑）
+    if (target.closest('.j-lp-edit')) return;
+    // 行尾铅笔 → 行内改名编辑态（label 换输入框，Enter 提交 / Esc 还原）
+    const ren = target.closest('[data-lp-rename]') as HTMLElement | null;
+    if (ren) {
+      const oldName = ren.dataset.lpRename as string;
+      const row = ren.closest('.lp-item') as HTMLElement;
+      const label = row.querySelector<HTMLElement>('.lp-label');
+      if (!label || label.querySelector('.j-lp-edit')) return;
+      label.innerHTML = `<input class="j-lp-edit" value="${esc(oldName)}">`;
+      const input = label.querySelector<HTMLInputElement>('.j-lp-edit');
+      input?.focus();
+      input?.select();
+      let done = false;
+      const finish = (): void => {
+        if (done) return;
+        done = true;
+        if (bodyEl) bodyEl.innerHTML = bodyHtml();
+        mountIcons(el); // 重建后的勾选图标重新物化（iconSpan 是 data-lucide 占位）
+      };
+      const commit = (): void => {
+        const newName = (input?.value ?? '').trim();
+        if (!newName || newName === oldName) { finish(); return; }
+        if (hasIllegalNameChar(newName)) { notice(`${ILLEGAL_NAME_HINT}，请修改`, 'error'); return; }
+        if (allLists(M.items).includes(newName)) { notice(`片单「${newName}」已存在`, 'warning'); return; }
+        finish();
+        void renameList(oldName, newName, app);
+      };
+      input?.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+        else if (ev.key === 'Escape') finish();
+      });
+      input?.addEventListener('blur', commit);
+      return;
+    }
+    const btn = target.closest('[data-lp]') as HTMLElement | null;
+    if (!btn) return;
+    const name = btn.dataset.lp as string;
+    // 目标态取反 = 勾选态（任一成员在即算「在」）的 toggle：**勾着再点就是整组移出**——
+    // 勾选表达的是「这部剧在本片单里」，取消勾选即全部成员退出，不是补齐缺席的那几季
+    void setListMembership(targets, name, !inList(name), app, head.who);
+    // 弹层勾选态就地翻转（renderAll 重建的是面板与卡片，弹层挂在 ovHost 上不随整刷换血；
+    // 语义一致靠这里同步——落盘失败时 notifySaveError 有 toast，勾选漂移一次可接受）
+    btn.classList.toggle('is-on');
+  });
+  const submitNew = (): void => {
+    const input = el.querySelector<HTMLInputElement>('.j-lp-new');
+    const name = (input?.value ?? '').trim();
+    if (!name) return;
+    if (hasIllegalNameChar(name)) { notice(`${ILLEGAL_NAME_HINT}，请修改`, 'error'); return; }
+    void setListMembership(targets, name, true, app, head.who);
+    close();
+  };
+  el.querySelector('.j-lp-add')?.addEventListener('click', submitNew);
+  el.querySelector<HTMLInputElement>('.j-lp-new')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); submitNew(); }
+  });
+}
+
+/** 一键导入豆瓣片单（桌面列表头「添加影片」后的图标钮；移动端在头行 ＋ 后同款图标钮）：贴 wish 收藏页 / 豆列链接 → **流式**抓取
+ *  （结果区随页增量出现，不等全部抓完——豆列几十部要翻好几页，过程肉眼可见）→
+ *  清单由用户二次确认 → 确认后按「想看」静默批量建档（quickAddWant silent 携带
+ *  sid，补抓队列直取 queryDoubanBySid——与表单解析 sid 直取同口径），并可归入
+ *  同名自建片单（片单名默认取抓取到的片单标题——豆列名 / 「XXX 的想看」，可改，留空不归入）。
+ *  **弹层轻装**（2026-10-01 拍板）：无标题块、无「返回重填」钮——重来一次 = 关掉重开。
+ *  **在库条目不过滤**（2026-09-30 拍板）：照常进清单参与导入，建档层的重名保护
+ *  自然让它们保持现状，toast 汇总区分「新导入 / 已在库未动」。Cookie 走设置键
+ *  cinemaDoubanCookie（queue 单源装配），弹层不收敏感值。 */
+function openDoubanImport(sec: HTMLElement, app: App): void {
+  const { el, close } = ovl(sec, `<div class="cn-modal cn-modal--dimp">
+    <div class="dimp-stage" data-dimp-input>
+      <input class="j-dimp-url" placeholder="粘贴 wish 收藏页 / 豆列链接">
+      <button type="button" class="lp-add j-dimp-fetch">抓取片单</button>
+    </div>
+    <div class="dimp-stage" data-dimp-result hidden>
+      <div class="dimp-stat j-dimp-stat"></div>
+      <div class="dimp-list j-dimp-list"></div>
+      <div class="dimp-newlist"><label>归入片单</label><input class="j-dimp-listname" placeholder="片单名（留空不归入）"></div>
+      <button type="button" class="lp-add j-dimp-run">导入</button>
+    </div>
+  </div>`);
+  mountIcons(el);
+  const inputStage = el.querySelector<HTMLElement>('[data-dimp-input]');
+  const resultStage = el.querySelector<HTMLElement>('[data-dimp-result]');
+  const listEl = resultStage?.querySelector<HTMLElement>('.j-dimp-list');
+  const statEl = resultStage?.querySelector<HTMLElement>('.j-dimp-stat');
+  const runBtn = resultStage?.querySelector<HTMLButtonElement>('.j-dimp-run');
+  let pending: { sid: string; name: string }[] = [];
+  let inLibCount = 0;
+  let fetching = false;
+  const inLibrary = (name: string): boolean => M.items.some((it) => it.name === name);
+  const rowHtml = (e: { name: string }): string =>
+    `<div class="dimp-row${inLibrary(e.name) ? ' is-inlib' : ''}"><span class="lp-label">${esc(e.name)}</span><span class="dimp-tag">${inLibrary(e.name) ? '已在库' : '新片'}</span></div>`;
+  const refreshStat = (done: boolean): void => {
+    if (!statEl) return;
+    statEl.textContent = done
+      ? `抓到 ${pending.length} 部${inLibCount ? `（其中 ${inLibCount} 部已在库）` : ''}`
+      : `抓取中… 已 ${pending.length} 部`;
+  };
+  const fetchBtn = el.querySelector<HTMLButtonElement>('.j-dimp-fetch');
+  fetchBtn?.addEventListener('click', () => {
+    const url = (el.querySelector<HTMLInputElement>('.j-dimp-url')?.value ?? '').trim();
+    if (!/^https?:\/\/(www\.)?(movie\.)?douban\.com\//.test(url)) {
+      notice('先贴一个豆瓣片单链接（movie.douban.com 下）', 'warning');
+      return;
+    }
+    if (!inputStage || !resultStage || !listEl || !statEl || !runBtn) return;
+    // 流式：立即切结果区，逐页增量出现（fetchDoubanList 的 onPage 回调驱动）
+    pending = [];
+    inLibCount = 0;
+    fetching = true;
+    listEl.innerHTML = '';
+    refreshStat(false);
+    const listNameInput = resultStage.querySelector<HTMLInputElement>('.j-dimp-listname');
+    if (listNameInput) listNameInput.value = '';
+    inputStage.hidden = true;
+    resultStage.hidden = false;
+    runBtn.disabled = true;
+    runBtn.textContent = '抓取中…';
+    void fetchDoubanListForImport(app, url, (batch, total) => {
+      pending = pending.concat(batch);
+      inLibCount = pending.filter((e) => inLibrary(e.name)).length;
+      if (listEl) listEl.insertAdjacentHTML('beforeend', batch.map(rowHtml).join(''));
+      refreshStat(false);
+      void total;
+    }).then(({ entries, firstPageEmpty, listTitle }) => {
+      fetching = false;
+      if (listNameInput && listTitle) listNameInput.value = listTitle;
+      if (!entries.length) {
+        inputStage.hidden = false;
+        resultStage.hidden = true;
+        notice(/doulist/.test(url)
+          ? '豆列一条都没抓到：可能被豆瓣风控拦截或链接已失效，稍后再试'
+          : firstPageEmpty
+            ? '一条都没抓到：个人收藏页需要登录态（设置里填豆瓣 Cookie）'
+            : '这个链接没解析出条目，确认是豆瓣 wish 页或豆列链接', 'warning');
+        return;
+      }
+      // 完成态以返回值为准做全量兜底渲染（onPage 只是过程增量，注入/异常路径都可能缺页）
+      pending = entries;
+      inLibCount = entries.filter((e) => inLibrary(e.name)).length;
+      if (listEl) listEl.innerHTML = entries.map(rowHtml).join('');
+      refreshStat(true);
+      runBtn.textContent = `导入 ${pending.length} 部`;
+      runBtn.disabled = false;
+    });
+  });
+  el.querySelector('.j-dimp-run')?.addEventListener('click', () => {
+    if (fetching || !runBtn) return;
+    runBtn.disabled = true;
+    runBtn.textContent = '导入中…';
+    const listName = (resultStage?.querySelector<HTMLInputElement>('.j-dimp-listname')?.value ?? '').trim();
+    void (async () => {
+      const createdNames: string[] = [];
+      for (const e of pending) {
+        // 在库条目照常尝试加入（不跳过）：建档层重名保护让它们保持现状（false）
+        if (await quickAddWant(app, e.name, '电影', { silent: true, sid: e.sid })) createdNames.push(e.name);
+      }
+      // 归入片单（拍板：导入的片单要在侧栏可见）+ 打「片单收纳」标志（拍板：一键导入
+      // 的新片只在片单里显示，不混入正常影视视图）——都只作用于新建档条目；
+      // 已在库保持不动的条目两者都不做（按「在库的按照在库的」口径不动它）
+      const validList = listName && !hasIllegalNameChar(listName) ? listName : '';
+      if (createdNames.length) {
+        refreshDataAndView(app);
+        for (const name of createdNames) {
+          const it = M.items.find((x) => x.name === name);
+          if (!it?.file) continue;
+          await app.fileManager.processFrontMatter(it.file, (fm: Record<string, unknown>) => {
+            fm['片单收纳'] = true;
+            if (validList) {
+              const cur = normalizeLists(fm['片单']);
+              if (!cur.includes(validList)) {
+                cur.push(validList);
+                fm['片单'] = cur;
+              }
+            }
+          });
+          it.shelvedOnly = true;
+          if (validList) it.lists = [...new Set([...it.lists, validList])]; // 内存同步（侧栏片单计数即时可见）
+        }
+      }
+      refreshDataAndView(app);
+      renderAll(app);
+      close();
+      const listTail = validList && createdNames.length ? `，归入片单「${validList}」（仅在片单中显示）` : createdNames.length ? '（仅在片单中显示，可右键「归入片单…」补归）' : '';
+      notice(createdNames.length
+        ? `已从豆瓣片单导入 ${createdNames.length} 部到想看${pending.length > createdNames.length ? `（${pending.length - createdNames.length} 部已在库保持不动）` : ''}${listTail}，海报与信息后台补齐`
+        : '片单里的片都已在库，没有新增', createdNames.length ? 'success' : 'warning');
+    })();
+  });
+}
+
 /** 菜单/抽屉动作列表（顺序即显示顺序） */
 interface MenuAct { icon: string; label: string; danger?: boolean; run: () => void }
+
+/**
+ * 「移出<片单名>」直出行（issue 535）：把条目集合所归属的片单各出一条出口——标签带**真实片单名**，
+ * 不点进弹层就能退。
+ *
+ * - **重映厅除外**：抽屉里本就有它的专用 toggle 行（放入/移出重映厅），再出一条是同一动作两个入口。
+ * - 出现条件 = **任一成员命中**（`cardInList` / 片单筛选 / 侧栏计数同一口径）——卡片能在片单视图里
+ *   被看见靠的就是这条，所以「看得见就该退得掉」。动作作用于**全部成员**。
+ * - 顺序 = 侧栏片单组同序（`allLists`：重映厅恒首位、其余按成员数降序、同数按名称），剔掉重映厅后原序不变。
+ *
+ * @param who 通知主语（合并卡传「剧名 + 全部 N 部」；单条目留空 → 走 `「片名」` 缺省）
+ */
+function listExitActs(items: CinemaItem[], app: App, who = ''): MenuAct[] {
+  return allLists(M.items)
+    .filter((l) => l !== REWATCH_SHELF && items.some((it) => it.lists.includes(l)))
+    .map((l) => ({
+      icon: ICON.shelf,
+      label: `移出${l}`,
+      run: () => void setListMembership(items, l, false, app, who),
+    }));
+}
+
 function itemActions(it: CinemaItem, sec: HTMLElement, app: App): MenuAct[] {
   const out: MenuAct[] = [{ icon: ICON.eye, label: '打开详情', run: () => openDetail(sec, it, app) }];
   if (it.status !== STATUS_WATCHING && it.status !== STATUS_WATCHED) {
-    out.push({ icon: ICON.play, label: '标记在看', run: () => void markStatus(it, '在看', sec, app) });
+    out.push({ icon: ICON.play, label: '标记在看', run: () => void markStatus(it, '在看', app) });
   }
   if (it.status !== STATUS_WATCHED) {
     // 标记已看不直改状态/评分：改走编辑窗预选「已看」，评分影评由用户确认后保存（memo item-1789105594322）
     out.push({ icon: 'check', label: '标记已看', run: () => openForm(sec, it, app, '已看') });
+  } else {
+    // 重温只对已看成立（想看/在看没有「再来一遍」语义）；当前时刻入列 frontmatter「重看」
+    out.push({ icon: ICON.repeat, label: '重温 +1', run: () => void markRewatch(it, app) });
+    // 重温候补架（内置片单，不动三状态机）：看过想再看的归堆，侧栏「重映厅」直达
+    out.push({
+      icon: ICON.shelf,
+      label: it.lists.includes(REWATCH_SHELF) ? '移出重映厅' : '放入重映厅',
+      run: () => void toggleListMembership(it, REWATCH_SHELF, app),
+    });
   }
+  out.push({ icon: ICON.listPlus, label: '归入片单…', run: () => openListPick(sec, [it], app, { name: it.name, face: it }) });
+  // 已在的片单各出一条「移出<片单名>」（issue 535）；无归属时零条，不占位
+  out.push(...listExitActs([it], app));
   out.push(
     { icon: ICON.ai, label: '找同类', run: () => void runSimilarRecommend(it, app) },
     { icon: ICON.globe, label: '在豆瓣打开', run: () => openDouban(it) },
     { icon: ICON.edit, label: '编辑', run: () => openForm(sec, it, app) },
-    { icon: ICON.del, label: '删除', danger: true, run: () => openConfirm(sec, it, app) },
+    { icon: ICON.del, label: '删除', danger: true, run: () => openConfirm(it, app) },
   );
   return out;
 }
 
 // ---------- 落盘（数据契约零改动） ----------
 
-/** 文件名非法字符（Windows 保留集；名称源自文件名《X》，改名前拦截） */
-const ILLEGAL_NAME_RE = /[\\/:*?"<>|]/;
-
 /**
  * 把条目落盘：新增建笔记，编辑/快速状态写 frontmatter（保留海报/豆瓣字段）；
  * 改名走 fileManager.renameFile（自动更新双链）；类型写入 frontmatter tags。
  */
-async function persistItem(item: CinemaItem, app: App, edit?: { prevName: string; prevTag: string }): Promise<void> {
+async function persistItem(item: CinemaItem, app: App, edit?: { prevName: string; prevTag: string }, douban?: DoubanQuery | null, posterRel?: string | null): Promise<void> {
   if (!item.file) {
     const folder = M.folderPath;
     if (!app.vault.getAbstractFileByPath(folder)) {
       await app.vault.createFolder(folder);
     }
     const filePath = `${folder}/《${item.name}》.md`;
+    // 建档模板只写最小安全集（无影评，深审批A P2-1）：影评值可多行/含「: 」「#」，
+    // 裸值直拼模板会写破 YAML → 影片从面板黏性消失、豆瓣 sweep 永不补抓。
+    // 影评在建档后与编辑路径同通道（processFrontMatter，Obsidian YAML 序列化兜底）写入。
+    // 观影日期加双引号（深审批A P3-8）：裸日期被真机 YAML 解析成 timestamp（Moment 对象）
+    // → 展示英文星期；评分/(tags 列表项) 是纯数字/固定枚举，无需引号。
+    // 状态单源键「状态」随建档必写（2026-09-30 拍板：评分编码 -1/0 退役）；
+    // 评分只有真分值才落键；状态日期随建档落键（有才写，向后兼容旧档）
+    const stDates = `${item.wantDate ? `\n想看日期: "${item.wantDate}"` : ''}${item.watchingDate ? `\n在看日期: "${item.watchingDate}"` : ''}${item.watchedDate ? `\n已看日期: "${item.watchedDate}"` : ''}`;
+    const ratingLine = item.rating !== null && item.rating > 0 ? `\n评分: ${item.rating}` : '';
+    // 票 294/295/301（本地保留件）：国家/题材/集数/章节随建档落新笔记（纯标量/数字，安全集口径不破）
     const drama = episodesEligibleTag(item.typeTag);
     const epsLines = drama && item.episodesTotal !== null ? `总集数: ${item.episodesTotal}\n${item.episodesWatching !== null ? `正在看集数: ${item.episodesWatching}\n` : ''}` : '';
-    // 票 301：书籍新增时章节两键同口径落新笔记
     const isBook = chaptersEligibleTag(item.typeTag);
     const chLines = isBook && item.chaptersTotal !== null ? `总章节数: ${item.chaptersTotal}\n${item.chaptersWatching !== null ? `正在看章节: ${item.chaptersWatching}\n` : ''}` : '';
-    const content = `---\ntags:\n- ${item.typeTag}\n${item.country ? `国家: ${item.country}\n` : ''}${item.genres.length ? `类型: ${item.genres.join('、')}\n` : ''}${epsLines}${chLines}观影日期: ${item.watchDate || localNow()}\n评分: ${item.rating ?? 0}\n${item.review ? `影评: ${item.review}\n` : ''}海报: \n---\n`;
+    const cnLine = item.country ? `国家: ${item.country}\n` : '';
+    const genreLine = item.genres.length ? `类型: ${item.genres.join('、')}\n` : '';
+    let content = `---\ntags:\n- ${item.typeTag}\n状态: ${statusText(item.status)}\n${cnLine}${genreLine}${epsLines}${chLines}观影日期: "${item.watchDate || localNow()}"${stDates}${ratingLine}\n海报: \n---\n`;
+    // 海报已落库（issue 397：保存时下载进库）→ 正文 embed 与抓取路径同款插入，
+    // 免得「建档即齐」的笔记比队列抓过的少一张图（insertPosterEmbed 单源）
+    if (posterRel) content = insertPosterEmbed(content, posterRel);
     const f = await app.vault.create(filePath, content);
     item.file = f;
+    if (item.review || douban || posterRel) {
+      await app.fileManager.processFrontMatter(f, (fm: Record<string, unknown>) => {
+        if (posterRel) fm['海报'] = posterRel;
+        if (item.review) fm['影评'] = item.review;
+        // 解析阶段已拿到豆瓣字段 → 建档时直接写入（issue 395）：省掉落盘后再抓一次的往返。
+        // 口径与 fetchNoteDouban 一致（ApiZero 优先、rexxar 兜底、缺失才填由本处新檔天然满足）。
+        if (douban) {
+          const az = douban.apizero;
+          if (douban.detailUrl) fm['豆瓣链接'] = douban.detailUrl;
+          if (az) {
+            if (az.score) fm['豆瓣评分'] = az.score;
+            if (az.genre) fm['类型'] = normalizeListValue(az.genre);
+            if (az.area) fm['制片国家/地区'] = normalizeListValue(az.area);
+            if (az.duration) fm['片长'] = az.duration;
+            if (az.year) fm['上映日期'] = az.year;
+            if (az.shortComment) fm['热门短评'] = az.shortComment;
+          }
+          const director = az?.director ? normalizeListValue(az.director) : douban.celebrities?.directors ?? '';
+          const actors = az?.actor ? normalizeListValue(az.actor) : douban.celebrities?.casts ?? '';
+          if (director) fm['导演'] = director;
+          if (actors) fm['主演'] = actors;
+          if (douban.celebrities?.writers) fm['编剧'] = douban.celebrities.writers;
+        }
+      });
+    }
     return;
   }
   if (edit && item.name !== edit.prevName) {
@@ -164,16 +579,28 @@ async function persistItem(item: CinemaItem, app: App, edit?: { prevName: string
     }
   }
   await app.fileManager.processFrontMatter(item.file, (fm: Record<string, unknown>) => {
-    fm['评分'] = item.rating ?? 0;
+    // 状态单源键必写（迁移即补键）；评分编码退役：只有真分值落键，-1/0 旧编码顺手摘除
+    fm['状态'] = statusText(item.status);
+    if (item.rating !== null && item.rating > 0) fm['评分'] = item.rating;
+    else if (fm['评分'] !== undefined) delete fm['评分'];
     fm['观影日期'] = item.watchDate || localNow();
+    // 状态日期只增不删（历史足迹）：进过想看/在看就一直留着，状态再流转也不抹（引号口径同观影日期）
+    if (item.wantDate) fm['想看日期'] = item.wantDate;
+    if (item.watchingDate) fm['在看日期'] = item.watchingDate;
+    // 已看日期（issue 536）：只在条目确实到过已看时才写——非已看态不落这个键（幽灵节点的根），
+    // 已看后即便状态退回在看也留着（那是真看过的历史凭据）
+    if (item.watchedDate) fm['已看日期'] = item.watchedDate;
     if (item.review) fm['影评'] = item.review;
     else delete fm['影评'];
+    // 状态离开「想看」（在看/已看）→ 摘「片单收纳」：用户开始正式管理这条片，
+    // 它回归正常影视视图（2026-09-30 拍板）；仍是想看（含想看态编辑）保持收纳
+    if (item.status === STATUS_WANT) {
+      if (item.shelvedOnly && fm['片单收纳'] !== true) fm['片单收纳'] = true;
+    } else if (fm['片单收纳'] !== undefined) {
+      delete fm['片单收纳'];
+    }
     if (edit) {
-      const tags = Array.isArray(fm['tags'])
-        ? (fm['tags'] as unknown[]).map((t) => String(t))
-        : typeof fm['tags'] === 'string' && fm['tags']
-          ? [fm['tags'] as string]
-          : [];
+      const tags = normalizeTags(fm['tags']);
       const at = tags.indexOf(edit.prevTag);
       if (at >= 0) tags[at] = item.typeTag;
       else if (!tags.includes(item.typeTag)) tags.unshift(item.typeTag);
@@ -205,32 +632,100 @@ async function persistItem(item: CinemaItem, app: App, edit?: { prevName: string
       }
     }
   });
+  // 内存标志与盘上同步（紧跟的 renderAll 走内存态：转在看/已看后要立刻在正常视图出现）
+  item.shelvedOnly = item.status === STATUS_WANT && item.shelvedOnly;
 }
 
 /** 打开添加弹窗（命令 bz-cinema-add 直达；未开主面板则先建） */
 export function openAddModalDirect(app: App): void {
   if (!M.currentOverlay) createOverlay(app);
-  const root = M.currentOverlay?.querySelector<HTMLElement>('[data-cinema-root]');
+  const root = cinemaRoot();
   if (root) openForm(root, null, app);
 }
 
-// ---------- 面板统计/标题 ----------
+// ---------- 面板标题 ----------
 
+/** 已看部数（分析页头计数，本地内嵌分析视图用） */
 function watchedCount(): number {
   return M.items.filter((it) => it.status === STATUS_WATCHED).length;
 }
-/** 列表标题 = 筛选名（组 + 国家 + 状态叠加） */
+/** 列表标题 = 筛选名（片单 + 组 + 国家 + 状态叠加；全空回落「全部」） */
 function listTitle(): string {
-  let t = M.typeFilter || '全部';
-  if (M.countryFilter) t += ` · ${M.countryFilter === '未填' ? '国家未填' : M.countryFilter}`;
-  if (M.statusFilter) t += ` · ${M.statusFilter}`;
-  return t;
+  const parts = [
+    M.listFilter ? `片单·${M.listFilter}` : '',
+    M.typeFilter || '',
+    M.countryFilter ? (M.countryFilter === '未填' ? '国家未填' : M.countryFilter) : '',
+    M.statusFilter || '',
+  ].filter(Boolean);
+  return parts.join(' · ') || '全部';
 }
-/** 网格每行列数（设置 cinemaGridColumns；空值/非法回退 5，钳制 2~12） */
-export function gridColumns(): number {
-  const raw = Number((tryGetSettings() as Record<string, unknown>).cinemaGridColumns);
-  if (!Number.isFinite(raw) || raw <= 0) return 5;
-  return Math.min(12, Math.max(2, Math.round(raw)));
+
+/** 面板内 toast（原型 .cn-toast 同构；无面板时回落 core notice） */
+function panelToast(sec: HTMLElement | null, msg: string): void {
+  if (!sec || !sec.isConnected) { notice(msg); return; }
+  const t = document.createElement('div');
+  t.className = 'cn-toast';
+  t.textContent = msg;
+  ovHost(sec).appendChild(t);
+  setTimeout(() => t.remove(), 1800);
+}
+/** 网格每行列数：2026-09-26 用户拍板固定 5 列，面板不再暴露该设置（cinemaGridColumns 键退役）。
+ *  窄屏另有自适应（移动端 3 列，见本文件网格渲染处），与这里无关。 */
+function gridColumns(): number {
+  return 5;
+}
+
+/** 剧集按季合并（设置 cinemaMergeSeasons；缺省开）。渲染前实时读——设置面板一改即生效 */
+function mergeSeasonsOn(): boolean {
+  return (tryGetSettings() as Record<string, unknown>).cinemaMergeSeasons === true;
+}
+
+/** 当前展示列表里的合并卡（点击分流用；与网格同一份入参，保证键能对上） */
+function seriesCardByKey(key: string): SeriesCard | undefined {
+  return mergeSeasonCards(getDisplayItems(), mergeSeasonsOn())
+    .find((c): c is SeriesCard => c.kind === 'series' && c.key === key);
+}
+
+/** 合并卡的全部成员（各季 + 特别篇）——片级动作（片单 / 重映厅）的作用目标 */
+function seriesMembers(card: SeriesCard): CinemaItem[] {
+  return [...card.seasons.map((s) => s.item), ...card.specials];
+}
+
+/**
+ * 合并卡的手势（桌面右键菜单 / 移动长按抽屉）：一条「查看全部」+ 片单归属动作（issue 535）。
+ *
+ * 仍然**不放**标记/编辑/删除这类**笔记级**动作——合并卡手里没有「一条笔记」可指
+ * （要动具体哪一季就进「查看全部」的列表点它）；文案也不用「各季列表」：卡里除了各季还可能挂着
+ * 电影版 / 特别篇 / 外传，「查看全部」不带类型限定，与弹窗头部「共 N 季 · M 部电影」互补。
+ *
+ * 新放的这几条是**片级**动作——片单归属天然以「一部剧」为单位，逼用户挨个点 N 季才是荒唐的那个：
+ * - 「归入片单…」一次把全部成员归入所选片单（弹层勾选态 = 任一成员命中）；
+ * - 重映厅行沿用单条目的「已看」门控（issue 535 用户拍板）：聚合状态为已看才给入口，
+ *   但**已在架中一律给出口**——否则状态退回在看之后成员会卡在重映厅里、卡上无路可退；
+ *   标签与单条目同词（放入 / 移出），同一动作不另造第二个动词；
+ * - 其余片单各出一条「移出<片单名>」，作用于全部成员。
+ */
+function seriesActs(card: SeriesCard, sec: HTMLElement, app: App): MenuAct[] {
+  const members = seriesMembers(card);
+  const who = `「${card.name}」全部 ${members.length} 部`;
+  const out: MenuAct[] = [{ icon: 'layers', label: '查看全部', run: () => openSeriesDetail(sec, card.key, app) }];
+  const onShelf = members.some((m) => m.lists.includes(REWATCH_SHELF));
+  if (onShelf || seriesStatus(card.seasons, card.specials) === STATUS_WATCHED) {
+    out.push({
+      icon: ICON.shelf,
+      label: onShelf ? `移出${REWATCH_SHELF}` : `放入${REWATCH_SHELF}`,
+      run: () => void setListMembership(members, REWATCH_SHELF, !onShelf, app, who),
+    });
+  }
+  out.push({ icon: ICON.listPlus, label: '归入片单…', run: () => openListPick(sec, members, app, { name: card.name, face: card.face }) });
+  out.push(...listExitActs(members, app, who));
+  return out;
+}
+
+/** 卡片条目 → HTML（正脸季的海报与抓取态；网格与局部重刷共用一份口径） */
+function cardEntryHtml(e: Parameters<typeof cardHtml>[0], app: App): string {
+  const face = cardFace(e);
+  return cardHtml(e, posterUrl(face, app), isFetching(face.file?.path));
 }
 
 // ---------- 共享弹窗宿主（display:contents 午夜场锚类：三风格共用弹窗样式，ADR-0103 §3） ----------
@@ -247,32 +742,46 @@ function ovHost(sec: HTMLElement): HTMLElement {
   return host;
 }
 
-interface OvlHandle { el: HTMLDivElement; close: () => void }
+interface OvlHandle { el: HTMLDivElement; close: (o?: { skipReturn?: boolean }) => void }
 
-let ovlSeq = 0;
+/** 活跃弹窗层 close 句柄集（深审批A P3-10 双保险之一）：关面板时统一结算。
+ *  ESC 层 id 固定 'bz-cinema-ovl' 交 escManager 同 id 清扫自愈（原递增 id 会随
+ *  close 未走到的路径在层表里无限堆积）；这里再留 close 引用，closeOverlay 遍历
+ *  补一刀 unregister，双路径都能把层表清干净。 */
+const liveOvlCloses = new Set<() => void>();
 
-/** 面板内弹窗层（.cn-ovl 挂共享宿主；ESC 走 escManager 层级，后注册先关） */
-function ovl(sec: HTMLElement, html: string, opts: { sticky?: boolean } = {}): OvlHandle {
+/** 面板内弹窗层（.cn-ovl 挂共享宿主；ESC 走 escManager 层级，后注册先关）。
+ *  opts.onWillClose：关闭接管协议（issue 396 共享元素过渡用）——返回 true 表示动效接管本次
+ *  关闭，真正的移除由动效结束自行调用 finish()；返回 false/缺省则立即移除。ESC、点遮罩、
+ *  显式 close() 三条路径都汇到这里，动效不会漏接。close({skipReturn:true}) 供「关了马上开
+ *  下一个弹窗」的路径跳过返程动效（编辑/删除/找同类——叠两段过渡只会互相打架）。 */
+function ovl(sec: HTMLElement, html: string, opts: { onWillClose?: (finish: () => void) => boolean; sticky?: boolean } = {}): OvlHandle {
   const el = document.createElement('div');
   el.className = 'cn-ovl';
   el.innerHTML = html;
   ovHost(sec).appendChild(el);
-  let close = () => {};
-  const handle = escManager.register(`bz-cinema-ovl-${++ovlSeq}`, { isVisible: () => el.isConnected, close: () => close() });
-  close = () => { handle.unregister(); el.remove(); };
+  let close: (o?: { skipReturn?: boolean }) => void = () => {};
+  const finish = (): void => { handle.unregister(); liveOvlCloses.delete(close); el.remove(); };
+  const handle = escManager.register('bz-cinema-ovl', { isVisible: () => el.isConnected, close: () => close() });
+  close = (o) => {
+    if (!o?.skipReturn && opts.onWillClose?.(finish)) return;
+    finish();
+  };
+  liveOvlCloses.add(close);
   el.addEventListener('click', (e) => { if (e.target === el && !opts.sticky) close(); });
+  // 遮罩区整段不吃滚轮（2026-10-01 用户反馈：在遮罩上滚鼠标会滚动弹窗卡片/把背后页面也滚了）——
+  // 滚轮只在卡片（.cn-modal 内容树）上生效：落在遮罩空区的滚轮直接吞掉，既不滚卡片，
+  // 也不把默认滚动链递给背后页面。passive:false 才允许 preventDefault（元素级监听虽默认非 passive，
+  // 显式写出防引擎差异）。卡片上的滚轮照常（含卡片内滚动区与 --flip 层的整卡滚动）。
+  el.addEventListener('wheel', (e) => {
+    if (!(e.target as HTMLElement | null)?.closest?.('.cn-modal')) e.preventDefault();
+  }, { passive: false });
   return { el, close };
 }
 
-/** 面板内 toast（原型 .cn-toast 同构；无面板时回落 core notice） */
-function panelToast(sec: HTMLElement | null, msg: string): void {
-  if (!sec || !sec.isConnected) { notice(msg); return; }
-  const t = document.createElement('div');
-  t.className = 'cn-toast';
-  t.textContent = msg;
-  ovHost(sec).appendChild(t);
-  setTimeout(() => t.remove(), 1800);
-}
+// 面板内 toast 已收编 core notice 单源（一致审查#2）：不再自绘 .cn-toast——通知偏好
+// （issue 297 级别/时长/位置）与类型图标语义全部生效，调 notice(msg, type) 直达。
+// 各消费点：成功 completion → 'success'，校验拦截（空名/重名）→ 'warning'，失败 → 'error'。
 
 // ---------- 弹窗：跟手菜单 / 长按抽屉（统一走 core/item-actions） ----------
 //
@@ -295,45 +804,388 @@ function toItemActions(acts: MenuAct[]): ItemAction[] {
   }));
 }
 
-/** 抽屉头部节点（海报 + 名称 + meta）：markup 单源 shared.sheetHeadHtml，core 侧要元素 */
-function sheetHeadEl(it: CinemaItem, url: string | null): HTMLElement {
+/** 动作包一层「先收弹窗再执行」：合并卡弹窗里的动作都要换层（钻详情 / 开表单 / 开确认），
+ *  弹窗留着会压在新层上。菜单 ESC / 点外部关闭时弹窗仍在，用户可接着操作别的季。 */
+function deferClose(acts: MenuAct[], close: () => void): MenuAct[] {
+  return acts.map((a) => ({ ...a, run: () => { close(); a.run(); } }));
+}
+
+/** 抽屉头部 markup → 节点（core 侧要元素，markup 单源在 shared） */
+function headElOf(html: string): HTMLElement {
   const box = document.createElement('div');
-  box.innerHTML = sheetHeadHtml(it, url);
+  box.innerHTML = html;
   return (box.firstElementChild as HTMLElement) ?? box;
 }
 
-/** 移动端长按 → 底部抽屉（手势 core/dom.longPress；卡片每次重渲染重建后重挂）。 */
+/** 抽屉头部节点（海报 + 名称 + meta）：markup 单源 shared.sheetHeadHtml */
+function sheetHeadEl(it: CinemaItem, url: string | null): HTMLElement {
+  return headElOf(sheetHeadHtml(it, url));
+}
+
+/** 合并卡抽屉头部节点（剧名 + 共 N 季 · M 部电影）：markup 单源 shared.seriesSheetHeadHtml */
+function seriesSheetHeadEl(card: SeriesCard, url: string | null): HTMLElement {
+  return headElOf(seriesSheetHeadHtml(card, url));
+}
+
+/** 涟漪原点（.pw 盒内坐标）+ 罩满整盒所需半径（圆点到最远角的距离） */
+interface RippleOrigin { x: number; y: number; r: number }
+
+/** 悬浮换脸的静息态快照 + 在飞的涟漪（卡片元素 → 状态）。合并卡正脸口径与单季不同
+ *  （名字是归一名称、评分取最新已评季），复原必须回快照、不能靠重算。
+ *  卡片每次重渲染都是新元素，旧键自然被 GC → WeakMap 不积残留。
+ *  `gen` 是收尾令牌：折回的 finished 回调与兜底定时器都按它判「我这一轮还算不算数」——
+ *  折回途中鼠标又落回圆点时，新一轮涟漪把 gen 顶掉，旧的收尾必须自己作废
+ *  （否则会 remove 掉新一轮正在用的来片层）。 */
+interface PeekState {
+  snap: string[];
+  anim: Animation | null;
+  origin: RippleOrigin | null;
+  gen: number;
+}
+const peekStates = new WeakMap<HTMLElement, PeekState>();
+
+/** 涟漪时长（2026-09-21 用户拍板方案 A「涟漪揭示」：来片从**被悬浮的那枚圆点**扩散开）。
+ *  与 396 共享元素、滑动高亮同一口径：**刻意不做 prefers-reduced-motion 分支**——
+ *  用户本人系统即报 reduce，而这条动效正是他点名要的，降级/放缓等于替他改决定。 */
+const PEEK_MS = MOTION.base;      // 来片从圆点扩散开（台账「揭示」档）
+const PEEK_BACK_MS = MOTION.move; // 折回圆点（台账「空间位移」档）
+
+/** 正脸四件挂点（海报内芯 / 名字 / meta / 星级）；缺一即不换（如非合并卡） */
+function faceSlots(card: HTMLElement): HTMLElement[] {
+  return (['pw-face', 'pname', 'pmeta', 'pstars'] as const)
+    .map((c) => card.querySelector<HTMLElement>(`.${c}`)).filter((x): x is HTMLElement => !!x);
+}
+
+/** 涟漪原点：圆点中心 → .pw 盒内坐标。涟漪起点跟着圆点走——位置本身编码季号 */
+function rippleOrigin(pw: HTMLElement, dot: HTMLElement): RippleOrigin {
+  const pr = pw.getBoundingClientRect();
+  const dr = dot.getBoundingClientRect();
+  const x = dr.left + dr.width / 2 - pr.left;
+  const y = dr.top + dr.height / 2 - pr.top;
+  return { x, y, r: Math.hypot(Math.max(x, pr.width - x), Math.max(y, pr.height - y)) };
+}
+
+/** 来片层：正脸之上的一张覆盖层。**不加 z-index**——.pw 内的绘制序靠 DOM 顺序，
+ *  插在 .pw-face 紧后就天然压在正脸上、又垫在角标/季圆点/抓取遮罩之下。 */
+function peekLayer(pw: HTMLElement): HTMLElement {
+  let layer = pw.querySelector<HTMLElement>('.pw-in');
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.className = 'pw-in';
+    pw.querySelector('.pw-face')?.after(layer);
+  }
+  return layer;
+}
+
+/** 文案三件（名字/meta/星级）淡入：给「换脸了」多一层明确信号 */
+function peekTextFade(els: HTMLElement[]): void {
+  els.forEach((el, i) => {
+    try {
+      el.animate([{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }],
+        { duration: MOTION.move, delay: i * STAGGER, easing: EASE.out, fill: 'backwards' });
+    } catch { /* 动画不可用（jsdom/老宿主）：文案已在终态 */ }
+  });
+}
+
+/** 悬浮的那枚圆点是否就是卡片静息时显示的那一季（合并卡正脸 = 最近观看的那一季）。
+ *  换脸到它等于空转：层里和层下是同一张图，肉眼只会看见多余的一次折回；
+ *  更重要的是它会把「打断冻结的上一季」暴露出来（见 peekSeasonDot / restFace 注释）。 */
+function isFaceSeason(card: HTMLElement, dot: HTMLElement): boolean {
+  const key = card.dataset.cinemaKey;
+  const seasonKey = dot.dataset.cinemaSeasonKey;
+  if (!key || !seasonKey || !isSeriesKey(key)) return false;
+  const sc = seriesCardByKey(key as string);
+  return !!sc && itemKey(cardFace(sc)) === seasonKey;
+}
+
+/** 悬浮季圆点：来片层从被悬浮的那枚圆点涟漪扩散 + 文案三件淡入（格式走 shared.facePiecesHtml 单源）。
+ *  @returns 是否真的开始了换脸（false = 这枚圆点对应正脸那一季，或卡片条件不成立——调用方别记账） */
+function peekSeasonDot(dot: HTMLElement, app: App): boolean {
+  const card = dot.closest<HTMLElement>('.pcard');
+  const pw = card?.querySelector<HTMLElement>('.pw');
+  const it = itemByKeyInState(dot.dataset.cinemaSeasonKey);
+  const slots = card ? faceSlots(card) : [];
+  if (!card || !pw || !it || slots.length !== 4) return false;
+  let st = peekStates.get(card);
+  if (!st) {
+    st = { snap: slots.map((s) => s.innerHTML), anim: null, origin: null, gen: 0 };
+    peekStates.set(card, st);
+  }
+  st.gen++;
+  // 文案三件（名字/meta/星级）两个分支同口径：正脸季直写、来片层先铺海报后写
+  const putFaceText = (p: { name: string; meta: string; stars: string }): void => {
+    slots[1].innerHTML = p.name;
+    slots[2].innerHTML = p.meta;
+    slots[3].innerHTML = p.stars;
+  };
+  // 悬停的正是正脸那一季：海报本就是它——不建来片层、不演涟漪（层里层下会同一张图，
+  // 折回毫无信息量，还把打断冻结的那一季露出来）；但**文案与其余圆点同口径**，
+  // 要换成这一季的完整标题（2026-09-21 用户拍板）。手上若有在途换脸（层里还是别季海报）
+  // 先整体落回静息态再换文案，不然层盖着 A 的海报、文字却写正脸季，图和字对不上；
+  // 文案直接写、不补淡入——慢半拍的回填就是用户报的「文字闪一下」。
+  if (isFaceSeason(card, dot)) {
+    // 折回途中（is-peek 已摘但层还在飞）划回正脸季也要收：层不收会盖着别季海报，
+    // 而它的收尾回调已被新 gen 作废，没人再清层
+    if (card.classList.contains('is-peek') || pw.querySelector('.pw-in')) collapsePeek(card);
+    putFaceText(facePiecesHtml(it, posterUrl(it, app)));
+    card.classList.add('is-peek');
+    return true;
+  }
+  const layer = peekLayer(pw);
+  // 打断（鼠标在圆点间滑行）：来片层还在 → 先把「刚才那一季」冻结成正脸。
+  // 不冻结的话，新涟漪之外露出的会是静息态那一季，划过圆点时会闪回（同点已由调用方拦掉）。
+  if (layer.firstChild) slots[0].innerHTML = layer.innerHTML;
+  st.anim?.cancel();
+  st.anim = null;
+  const o = rippleOrigin(pw, dot);
+  st.origin = o;
+  // 底衬先写「已铺满」的终态：动画不可用（jsdom/老宿主）时停在「这一季已铺满」而不是空盒
+  layer.style.clipPath = `circle(${o.r.toFixed(1)}px at ${o.x.toFixed(1)}px ${o.y.toFixed(1)}px)`;
+  const p = facePiecesHtml(it, posterUrl(it, app));
+  layer.innerHTML = p.poster;
+  putFaceText(p);
+  peekTextFade(slots.slice(1));
+  card.classList.add('is-peek');
+  try {
+    st.anim = layer.animate(
+      [{ clipPath: `circle(0px at ${o.x.toFixed(1)}px ${o.y.toFixed(1)}px)` },
+        { clipPath: `circle(${o.r.toFixed(1)}px at ${o.x.toFixed(1)}px ${o.y.toFixed(1)}px)` }],
+      { duration: PEEK_MS, easing: EASE.out, fill: 'forwards' },
+    );
+  } catch { /* 动画不可用：底衬已是终态 */ }
+  return true;
+}
+
+/** 把卡片**整体一次**落回静息态：清来片层、四件全按快照回填，不演折回、不给文案补淡入。
+ *  专给「滑回正脸那一季」用——层里层下是同一张海报，任何动画都是多余信息；
+ *  gen 顶掉在途收尾，折回/涟漪的回调作废。 */
+function collapsePeek(card: HTMLElement): void {
+  const st = peekStates.get(card);
+  if (!st) return;
+  card.classList.remove('is-peek');
+  st.anim?.cancel();
+  st.anim = null;
+  st.gen++; // 在途折回/涟漪的收尾（闭包里存的是旧 gen）就此作废
+  card.querySelector('.pw-in')?.remove();
+  const slots = faceSlots(card);
+  if (slots.length !== 4) return;
+  slots.forEach((s, i) => { s.innerHTML = st.snap[i]; });
+}
+
+/** 离开圆点：涟漪折回圆点 → 清来片层 → 正脸/文案按快照回填 */
+function restFace(dot: HTMLElement): void {
+  const card = dot.closest<HTMLElement>('.pcard');
+  const st = card ? peekStates.get(card) : undefined;
+  if (!card || !st) return;
+  const layer = card.querySelector<HTMLElement>('.pw-in');
+  card.classList.remove('is-peek');
+  // 折回前先把**正脸**写回静息态：层下面若还压着「打断时冻结的那一季」，折回露出的就是它，
+  // 收尾再按快照回填 → 肉眼看到「缩回去露出上一季、再闪回静息态」（2026-09-21 用户报）。
+  // 文案三件仍在折回后回填：它们在 .pw 之外，不受这轮圆裁剪影响。
+  const slotsNow = faceSlots(card);
+  if (slotsNow.length === 4) slotsNow[0].innerHTML = st.snap[0];
+  const gen = ++st.gen;
+  // 同轮只收一次：`fold.finished` 与兜底定时器**都会**叫 done，gen 只挡「新一轮换脸」，
+  // 挡不住同轮重入——重入一次就多播一遍 peekTextFade（用户报的「移开鼠标文字闪两次」，issue 409）
+  let closed = false;
+  const done = (): void => {
+    if (closed || st.gen !== gen) return; // 已收过 / 已被新一轮涟漪接管（本轮折回被 cancel）→ 作废
+    closed = true;
+    st.anim = null;
+    layer?.remove();
+    const slots = faceSlots(card);
+    if (slots.length !== 4) return;
+    slots.forEach((s, i) => { s.innerHTML = st.snap[i]; });
+    peekTextFade(slots.slice(1));
+  };
+  if (!layer || !st.origin) { done(); return; }
+  const o = st.origin;
+  st.anim?.cancel();
+  st.anim = null;
+  try {
+    // 从**当前帧**折回（可能还在扩散途中），不是从满圆重来
+    const fold = layer.animate(
+      [{ clipPath: getComputedStyle(layer).clipPath }, { clipPath: `circle(0px at ${o.x.toFixed(1)}px ${o.y.toFixed(1)}px)` }],
+      { duration: PEEK_BACK_MS, easing: EASE.out },
+    );
+    st.anim = fold;
+    fold.finished.then(done).catch(done);
+  } catch {
+    done(); // 动画不可用：立即收尾
+    return;
+  }
+  window.setTimeout(done, PEEK_BACK_MS + 400); // 兜底：动画事件丢失也必须收尾（同 396 handOver）
+}
+
+const TILT_DEG = 5.5; // 倾斜上限（度）：再大就不是「跟手」而是「晃卡」了
+
+/** 卡片海报跟手倾斜（issue 409）：指针在海报上时整卡随位置小幅 3D 倾斜。
+ *  量写进 `--tlt-x/--tlt-y` 变量、由 CSS 那条 transform 统一消费——`.pcard` 的 transform 还背着
+ *  hover 抬升与按下回弹（issue 401），inline transform 会把它们整条顶掉。
+ *  rect 在**进入这张卡时**量一次并缓存：倾斜会改变海报的投影矩形，逐帧重量等于把自己量进反馈环。
+ *  只在悬浮能力的设备上绑（触屏 tap 会发 pointermove 却不发 leave，倾斜会粘住）。 */
+function bindCardTilt(sec: HTMLElement): void {
+  let card: HTMLElement | null = null;
+  let box: DOMRect | null = null;
+  const rest = (): void => {
+    if (!card) return;
+    card.style.setProperty('--tlt-x', '0deg');
+    card.style.setProperty('--tlt-y', '0deg');
+    card.classList.remove('is-tilt');
+    card = null;
+    box = null;
+  };
+  sec.addEventListener('pointermove', (e) => {
+    const pw = (e.target as HTMLElement | null)?.closest?.('.pw') as HTMLElement | null;
+    const next = pw?.closest<HTMLElement>('.pcard') ?? null;
+    if (!pw || !next) { rest(); return; }
+    if (next !== card) {
+      rest();
+      const r = pw.getBoundingClientRect();
+      if (r.width < 8 || r.height < 8) return; // 无几何（测试环境 / 卡片隐藏）：不接
+      card = next;
+      box = r;
+      next.classList.add('is-tilt');
+    }
+    if (!box) return;
+    const x = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+    const y = Math.min(1, Math.max(0, (e.clientY - box.top) / box.height));
+    card.style.setProperty('--tlt-y', `${((x - .5) * 2 * TILT_DEG).toFixed(2)}deg`);
+    card.style.setProperty('--tlt-x', `${((.5 - y) * 2 * TILT_DEG).toFixed(2)}deg`);
+  });
+  sec.addEventListener('pointerleave', rest);
+  // 点海报开详情前先归零：共享元素过渡量的是静置矩形，带着倾斜量会把飞行起点算歪（捕获先于开层）
+  sec.addEventListener('click', rest, true);
+}
+
+/** 移动端长按 → 底部抽屉（手势 core/dom.longPress；卡片每次重渲染重建后重挂）。
+ *  合并卡（剧集按季合并）长按出**片级动作集**（查看全部 + 片单归属，同桌面右键口径，issue 535）；
+ *  左键点击仍是「查看全部」。 */
 function attachLongPress(sec: HTMLElement, app: App): void {
   sec.querySelectorAll<HTMLElement>('.m-grid .pcard').forEach((c) => {
     // 原生长按菜单（保存图片/复制链接）让位给抽屉
     c.addEventListener('contextmenu', (ev) => ev.preventDefault());
     longPress(c, () => {
-      const it = itemByKeyInState(c.dataset.cinemaKey);
+      const key = c.dataset.cinemaKey;
+      if (isSeriesKey(key)) {
+        const card = seriesCardByKey(key as string);
+        if (card) openSheet(sec, seriesSheetTarget(card, sec, app));
+        return;
+      }
+      const it = itemByKeyInState(key);
       if (!it) return;
-      openSheet(sec, it, app);
+      openSheet(sec, itemSheetTarget(it, sec, app));
     });
   });
 }
 
-/** 移动端抽屉：core openItemSheet（遮罩 + 底部滑入 + 头部信息 + 动作行，皮肤保午夜场观感） */
-function openSheet(sec: HTMLElement, it: CinemaItem, app: App): void {
+/** 抽屉目标：动作集 + 头部节点（单条目 / 合并卡两种来源，禁在调用处各拼一套） */
+interface SheetTarget { acts: MenuAct[]; head: HTMLElement }
+
+/** 单条目抽屉目标：该条目的单条动作 + 该条目信息 */
+function itemSheetTarget(it: CinemaItem, sec: HTMLElement, app: App): SheetTarget {
+  return { acts: itemActions(it, sec, app), head: sheetHeadEl(it, posterUrl(it, app)) };
+}
+
+/** 合并卡抽屉目标：片级动作集（查看全部 + 片单归属，issue 535）+ 剧名（正脸季海报）+ 共 N 季 · M 部电影 */
+function seriesSheetTarget(card: SeriesCard, sec: HTMLElement, app: App): SheetTarget {
+  return { acts: seriesActs(card, sec, app), head: seriesSheetHeadEl(card, posterUrl(card.face, app)) };
+}
+
+/** 移动端抽屉：core openItemSheet（遮罩 + 底部滑入 + 头部信息 + 动作行，皮肤保午夜场观感）
+ *  @param preFire 动作执行前先跑（各季明细弹窗里长按出的抽屉：点动作时先把弹窗收掉，
+ *                  否则弹窗压在新层上） */
+function openSheet(sec: HTMLElement, target: SheetTarget, preFire?: () => void): void {
   if (!sec.isConnected) return;
-  openItemSheet(toItemActions(itemActions(it, sec, app)), {
+  openItemSheet(toItemActions(preFire ? deferClose(target.acts, preFire) : target.acts), {
     sheetClass: SHEET_SKIN,
-    sheetHead: sheetHeadEl(it, posterUrl(it, app)),
+    sheetHead: target.head,
   });
 }
 
 // ---------- 弹窗：详情 ----------
 
-function openDetail(sec: HTMLElement, it: CinemaItem, app: App): void {
+/** @param opts.from 过渡来源（网格卡 / 合集弹窗里的季行）；缺省按键反查网格卡
+ *  @param opts.borrow 抽离口径，缺省 'card'（整卡抽离）；合集行钻入传 'image'（只借图，列表不动） */
+function openDetail(sec: HTMLElement, it: CinemaItem, app: App, opts: { from?: HTMLElement | null; borrow?: Borrow } = {}): void {
   const url = posterUrl(it, app);
-  const { el, close } = ovl(sec, detailModalHtml(it, url));
+  // 共享元素过渡（issue 396）：来源卡 = 调用方显式给的（点卡片 / 键盘激活 / 合集行）；
+  // 缺省按键反查——菜单与抽屉动作手里只有条目没有卡元素，反查到同一张卡即可，飞行起点不会飘。
+  const from = opts.from ?? sec.querySelector<HTMLElement>(`.pcard[data-cinema-key="${CSS.escape(itemKey(it))}"]`);
+  const se = from ? createSharedFlight() : null;
+  const { el, close } = ovl(sec, detailModalHtml(it, url), { onWillClose: se?.willClose });
   mountIcons(el);
-  el.querySelector('.j-edit')?.addEventListener('click', () => { close(); openForm(sec, it, app); });
-  el.querySelector('.j-del')?.addEventListener('click', () => { close(); openConfirm(sec, it, app); });
-  el.querySelector('.j-similar')?.addEventListener('click', () => { close(); void runSimilarRecommend(it, app); });
-  el.querySelector('.j-refetch')?.addEventListener('click', () => { close(); void refetchFromDetail(sec, it, app); });
+  if (se) se.begin(el, { el: from as HTMLElement, borrow: opts.borrow ?? 'card' });
+  // 编辑 / 删除 / 找同类：关了马上开下一个弹窗，跳过返程动效（叠两段过渡只会互相打架）；
+  // 卡片海报的归位由遮罩层移除观察者兜底，不会因为跳过返程而丢
+  el.querySelector('.j-edit')?.addEventListener('click', () => { close({ skipReturn: true }); openForm(sec, it, app); });
+  el.querySelector('.j-del')?.addEventListener('click', () => { close({ skipReturn: true }); openConfirm(it, app); });
+  el.querySelector('.j-similar')?.addEventListener('click', () => { close({ skipReturn: true }); void runSimilarRecommend(it, app); });
+  // 票 301：重抓豆瓣（弹框改搜索词 → 重抓 → 原样重开详情看新数据；本地保留件）
+  el.querySelector('.j-refetch')?.addEventListener('click', () => { close({ skipReturn: true }); void refetchFromDetail(sec, it, app); });
+  // 重温 +1：关弹窗走面板级动作（同上面三钮语义——动作后 N 刷徽标/角标由整刷带新），
+  // skipReturn 跳过返程动效，卡片闪一下 + toast 就是落点
+  el.querySelector('.j-rewatch')?.addEventListener('click', () => { close({ skipReturn: true }); void markRewatch(it, app); });
+  // 热门短评展开/收起（纯层对超阈值长评打 .is-fold 收 3 行；短评无按钮）
+  const foldBtn = el.querySelector<HTMLElement>('[data-dm-fold]');
+  const quote = el.querySelector<HTMLElement>('[data-dm-quote]');
+  if (foldBtn && quote) {
+    const foldText = foldBtn.textContent ?? '展开全文';
+    foldBtn.addEventListener('click', () => toggleQuoteFold(quote, foldBtn, foldText));
+  }
+  // 看大图（issue 403）：复用 core 灯箱（单例 / ESC / 点背景 / 滚动锁 / z 发号都在 core）。
+  // 不自造一层——「ESC 与层级」正是最难做对的部分，为一段入场动画复刻一套是负收益。
+  const dmPoster = el.querySelector<HTMLElement>('.dm-poster');
+  dmPoster?.addEventListener('click', () => {
+    const src = dmPoster.querySelector('img')?.getAttribute('src');
+    if (src) openLightbox({ src, type: 'image', title: it.name });
+  });
+}
+
+/** 短评展开 / 收起补中间态（issue 401）：下拉候选（.dm-pick-list）早有 max-height 过渡，
+ *  同一「揭示」语义的短评却一直走 `is-fold` 类硬切。这里按实测高度演一段：
+ *  展开到内容实测高、收回到 3 行高（`.dm-quote.is-fold` 的 line-clamp 口径），
+ *  收尾清掉内联样式把文本交回自然回流。无几何环境（jsdom / 老宿主）量不到行高 → 回落即时切换，
+ *  行为与旧版一致（单测因此断言的是状态而非像素）。gen 令牌：连点两次时旧的收尾作废。 */
+const foldGens = new WeakMap<HTMLElement, number>();
+function toggleQuoteFold(quote: HTMLElement, btn: HTMLElement, expandText: string): void {
+  const folded = quote.classList.contains('is-fold');
+  const lh = parseFloat(getComputedStyle(quote).lineHeight);
+  const collapsed = Number.isFinite(lh) && lh > 0 ? lh * 3 : 0;
+  const setText = (): void => { btn.textContent = folded ? '收起' : expandText; };
+  if (!collapsed || typeof quote.animate !== 'function') {
+    quote.classList.toggle('is-fold');
+    setText();
+    return;
+  }
+  let full: number;
+  if (folded) {
+    // 摘掉 clamp 量全高：同一帧内读完即写回，浏览器不在这中间绘制 → 不闪
+    quote.classList.remove('is-fold');
+    full = quote.getBoundingClientRect().height;
+    if (!full || full <= collapsed) { setText(); return; } // 内容本来就短：直接落在展开态
+    quote.style.maxHeight = `${collapsed}px`;
+  } else {
+    full = quote.getBoundingClientRect().height;
+    quote.style.maxHeight = `${full}px`;
+  }
+  quote.style.overflow = 'hidden';
+  const gen = (foldGens.get(quote) ?? 0) + 1;
+  foldGens.set(quote, gen);
+  const done = (): void => {
+    if (foldGens.get(quote) !== gen) return; // 已被下一次点击接管 → 旧收尾作废
+    quote.style.maxHeight = '';
+    quote.style.overflow = '';
+    if (!folded) quote.classList.add('is-fold');
+    setText();
+  };
+  try {
+    const a = quote.animate(
+      [{ maxHeight: `${folded ? collapsed : full}px` }, { maxHeight: `${folded ? full : collapsed}px` }],
+      { duration: MOTION.base, easing: EASE.out });
+    a.finished.then(done).catch(done);
+    window.setTimeout(done, MOTION.base + 400); // 兜底：动画事件丢失也必须收尾
+  } catch { done(); }
 }
 
 /** 详情卡「重抓豆瓣」（Q17c）：重抓（弹框改搜索词）→ 重建条目 → 原样重开详情卡看新数据 */
@@ -346,7 +1198,405 @@ async function refetchFromDetail(sec: HTMLElement, it: CinemaItem, app: App): Pr
   rebuildItems(app);
   M.renderFn?.();
   const fresh = itemByKey(M.items, itemKey(it));
-  if (fresh) openDetail(sec, fresh, app);
+  if (fresh) openDetail(sec, fresh, app, {});
+}
+
+// ---------- 详情弹窗共享元素过渡（issue 396 / 397） ----------
+
+/** 抽离口径（issue 396 点卡 / issue 397 合集行钻入）：两者的**形态完全一致**——
+ *  被点的那一件从列表里抽离（display:none）、同容器的其余件 FLIP 补位，关闭时反向让位再插回原位；
+ *  差别只在容器与件选择器（网格 .pcard / 合集弹窗 .s-list 里的 .s-row）。
+ *  2026-09-21 用户拍板：「合集季中的列表也要移除掉，和在卡片列表中一样」——不是只借走小图。 */
+type Borrow = 'card' | 'row';
+
+/** 过渡来源：`el` = 网格卡 或 合集弹窗里的季行（.s-row） */
+interface FlightFrom { el: HTMLElement; borrow: Borrow }
+
+/** 过渡时长（2026-09-21 用户拍板：**很短，图片飞行 0.2s**——开 = 飞行 200 + 撑开 200，
+ *  关 = 折回 200 + 飞回 200）。刻意不做 prefers-reduced-motion 放缓分支：用户本人系统即报
+ *  reduce，时长是他试出来的明确口径，放缓分支等于替他改决定。 */
+const SE_FLIGHT = MOTION.move; // 海报单程飞行（去程直达）
+const SE_GROW = MOTION.move;   // 面板折回海报（关闭方向）
+/** 开面板（海报矩形撑开成详情）的时长：2026-09-21 用户拍板「改成 .3s」——比台账四档都长，
+ *  是这条揭示动效的**用户指定值**（不放宽台账，只是这一个数由拍板给定；口径在 .8/.6/.5 后定为 .3）。
+ *  **不提前**（同日拍板「改成不提前了」）：海报落地那一帧才起撑，两段仍是先飞后开。
+ *  与关闭方向不对称是刻意的：开是揭示、慢；关是收回、干脆。 */
+const SE_GROW_OPEN = 300;
+
+/** 目标尺寸的海报克隆（飞行件）。挂哪层由调用方定：去程挂遮罩层（随弹窗生灭），
+ *  返程挂共享宿主——它是 display:contents、自己没有盒，绝对定位实际落在面板根上，
+ *  所以遮罩先走也不牵连飞行件。 */
+function spawnFlyClone(host: HTMLElement, imgSrc: string, w: number, h: number, radius: string): HTMLElement {
+  const clone = document.createElement('div');
+  clone.className = 'cn-fly';
+  clone.style.width = `${Math.round(w)}px`;
+  clone.style.height = `${Math.round(h)}px`;
+  clone.style.borderRadius = radius;
+  const img = document.createElement('img');
+  img.alt = '';
+  img.src = imgSrc;
+  clone.appendChild(img);
+  host.appendChild(clone);
+  return clone;
+}
+
+/** 飞行 keyframes：clone 是目标尺寸的盒，「平移 + 非均匀缩放」把盒依次对到每个途经矩形。
+ *  卡片 2:3 与详情 7:10 差约 5%，飞行中不可辨；transform 动画全程不触布局。
+ *  途经点个数不限（直飞给两个，绕行给三个），要「在某点停留」就重复给同一个矩形。 */
+function flyKeyframes(base: DOMRect, w: number, h: number, ...stops: DOMRect[]): Keyframe[] {
+  const at = (r: DOMRect): string =>
+    `translate(${(r.left + r.width / 2 - base.left - w / 2).toFixed(1)}px, ${(r.top + r.height / 2 - base.top - h / 2).toFixed(1)}px) scale(${(r.width / w).toFixed(4)}, ${(r.height / h).toFixed(4)})`;
+  return stops.map((r) => ({ transform: at(r) }));
+}
+
+/** 列表重排 FLIP 的「量」半步（issue 396 / 397）：mutate 前后各量一次，得到每件的位移差。
+ *  **只量不动**——调用方常要在补动画之前再取一次几何（返程落点），而 FLIP 一旦开跑，
+ *  被动画元素的**子孙**矩形就被 transform 污染了（祖先带位移，子孙的 getBoundingClientRect 跟着走）。 */
+function measureFlip(targets: HTMLElement[], mutate: () => void): { el: HTMLElement; dx: number; dy: number; before: DOMRect; now: DOMRect }[] {
+  const before = targets.map((c) => c.getBoundingClientRect());
+  mutate();
+  // 位移差与「量前/量后矩形」一起量齐：光标卡在补动画之后会读到被污染的值（见上）
+  return targets.map((c, i) => {
+    const now = c.getBoundingClientRect();
+    return { el: c, dx: before[i].left - now.left, dy: before[i].top - now.top, before: before[i], now };
+  });
+}
+
+/** 视口邻域判定（±120px 余量）：视口外的件跳变看不见，不演（display:none 全零矩形自然落在界外） */
+function nearViewport(viewport: DOMRect, r: DOMRect): boolean {
+  return r.width > 0 && r.top < viewport.bottom + 120 && r.bottom > viewport.top - 120
+    && r.left < viewport.right + 120 && r.right > viewport.left - 120;
+}
+
+/** 折回矩形：面板框 → 目标（海报）矩形的 clip-path inset（四边各取正值；圆角与卡面一致取 8px） */
+function foldInsetOf(frame: DOMRect, target: DOMRect): string {
+  return `inset(${Math.max(0, target.top - frame.top)}px ${Math.max(0, frame.right - target.right)}px ${Math.max(0, frame.bottom - target.bottom)}px ${Math.max(0, target.left - frame.left)}px round 8px)`;
+}
+
+/** 面板折回动画（详情关 → 卡片位）：遮罩同步淡出 + clip-path 收拢；WAAPI 不可用返回 undefined */
+function playFold(el: HTMLElement, radius: number, inset: string, duration: number): Animation | undefined {
+  try {
+    el.animate([
+      { clipPath: `inset(-64px round ${radius}px)`, backgroundColor: 'rgba(20,16,8,.45)' },
+      { clipPath: inset, backgroundColor: 'rgba(20,16,8,0)' },
+    ], { duration, easing: EASE.out });
+    return el.getAnimations().pop();
+  } catch { return undefined; }
+}
+
+/** 列表重排 FLIP 的「演」半步：按量好的位移差补一段位移动画——「其他卡/行移动补齐 / 让位」读得见。
+ *  视口外的件跳变看不见，不演（也省下几百个合成层）；display:none 的件全零矩形自然落在视口判断之外。 */
+function playFlip(deltas: { el: HTMLElement; dx: number; dy: number; before: DOMRect; now: DOMRect }[], viewport: DOMRect, duration: number = SE_FLIGHT): void {
+  const near = (r: DOMRect): boolean => nearViewport(viewport, r);
+  for (const d of deltas) {
+    if (typeof d.el.animate !== 'function') continue;
+    if ((Math.abs(d.dx) < 1 && Math.abs(d.dy) < 1) || (!near(d.now) && !near(d.before))) continue;
+    d.el.animate([{ transform: `translate(${d.dx.toFixed(1)}px, ${d.dy.toFixed(1)}px)` }, { transform: 'none' }],
+      { duration, easing: EASE.out });
+  }
+}
+
+/**
+ * 共享元素过渡状态机（issue 396）。
+ *
+ * 开：卡片海报「抽出」飞到详情海报位（FLIGHT）→ 面板从海报矩形撑开（GROW）。
+ * 关：面板折回海报矩形（GROW 逆放，遮罩同步淡出）→ 海报飞回卡片位（FLIGHT）→ 落地归位。
+ * 卡片海报自抽出起保持空框、整卡压暗（.is-out），直到返程落地才归位——
+ * 「详情开着 = 这张卡被借走了」（2026-09-21 拍板）。
+ *
+ * 坑位（都踩过）：
+ * - close 闭包在 ovl 内部收口（ESC / 点遮罩都走它），外层拿不到 → 关闭接管走 ovl 的
+ *   onWillClose 协议，finish 由动效自行调用，另有超时兜底防动画事件丢失卡死弹窗层；
+ * - 返程克隆挂宿主（display:contents，无盒），坐标系是面板根——宿主的
+ *   getBoundingClientRect 是全零，照着它算位移会把海报飞到屏幕外；
+ * - 编辑 / 删除 / 找同类是「关了马上开下一个弹窗」，skipReturn 跳过返程，归位交给
+ *   宿主观察者（遮罩被移除且不在关闭流程 → 归位）；
+ * - 面板几何全部**同步**量取（visibility 不影响排版，藏着的间隙里量得准），
+ *   异步只留 transform / clip-path 动画，全程不触布局。
+ */
+function createSharedFlight(): {
+  willClose: (finish: () => void) => boolean;
+  begin: (ovlEl: HTMLElement, from: FlightFrom) => void;
+  bail: () => void;
+} {
+  let phase: 'idle' | 'flying' | 'open' | 'closing' = 'idle';
+  let overlay: HTMLElement | null = null;
+  let target: HTMLElement | null = null;
+  let src: HTMLImageElement | null = null;   // 被抽离那件里的图（返程落点量它的矩形）
+  let taken: HTMLElement | null = null;      // 被抽离的那一件：网格卡（card）/ 合集行（row）
+  let borrow: Borrow = 'card';
+  let boxEl: HTMLElement | null = null;      // 抽离件的所在容器（补位/让位的量测范围与视口）
+  let flyingClone: HTMLElement | null = null; // 去程飞行件（起飞途中被打断时要靠它折返）
+  let srcRect: DOMRect | null = null;         // 源件抽离前的矩形（抽离后源件全零矩形，落点只能记着）
+
+  /** 让位/补位的动画集合 = 同容器里的兄弟件；合集模式再带上弹窗本体——
+   *  行被抽走后弹窗变矮，而弹窗是 flex 居中的，不带上它会硬跳一下（2026-09-21 实测手感）。 */
+  const reflowSet = (): HTMLElement[] => {
+    if (!boxEl) return [];
+    const sibs = [...boxEl.querySelectorAll<HTMLElement>(borrow === 'row' ? '.s-row' : '.pcard')];
+    const panel = borrow === 'row' ? boxEl.closest<HTMLElement>('.cn-modal') : null;
+    return panel ? [panel, ...sibs] : sibs;
+  };
+
+  /** 抽离：整件 display:none，其余件动画补位。图 rect 要在调用**前**量好——抽离后源件没有几何 */
+  const extractSrc = (): void => {
+    const t = taken; // 局部非空副本：TS 的收窄穿不进 mutate 闭包
+    if (!t) return;
+    // 源件必须排除在补位集合外：display:none 后它没有几何，混进去只会领一条无意义动画
+    const set = reflowSet().filter((c) => c !== t);
+    const viewport = (boxEl ?? t).getBoundingClientRect();
+    playFlip(measureFlip(set, () => { t.style.display = 'none'; }), viewport);
+  };
+
+  /** 插回：列表让出空位（其余件让位动画），本件以 visibility:hidden 占位，返回图的新 rect
+   *  供返程克隆瞄准；显形由调用方在克隆落地时做（揭掉 visibility） */
+  const reinsertSrc = (reflowMs: number): DOMRect | null => {
+    const t = taken;
+    if (!t || !t.isConnected || !boxEl?.isConnected) return null;
+    // 让位时长跟返程同长：空位张开的节奏才对得上海报插回的那一下。
+    // ⚠ 源件必须排除在让位集合外——它 display:none 时矩形是全零，混进去会领一条
+    // 「从 (0,0) 飞到空位」的纠正动画，而 getBoundingClientRect 连 transform 一起量，
+    // 返回的就是被位移污染的假坐标 → 返程克隆照着飞，落点跑到面板角落（2026-09-21 实测）
+    const set = reflowSet().filter((c) => c !== t);
+    const viewport = boxEl.getBoundingClientRect();
+    const deltas = measureFlip(set, () => { t.style.display = ''; t.style.visibility = 'hidden'; });
+    // ⚠ 落点必须在补动画**之前**量：集合里带了弹窗本体（合集模式），它一开跑，
+    // 行的矩形就跟着祖先的 transform 走 —— 量到的是假坐标，海报落点偏一条行高再弹回来，
+    // 正是用户 2026-09-21 报的「插回时有一些抖动」。先量后演，两件事互不干扰。
+    const to = src?.isConnected ? src.getBoundingClientRect() : null;
+    playFlip(deltas, viewport, reflowMs);
+    return to;
+  };
+
+  const restoreSrc = (): void => {
+    if (taken) { taken.style.display = ''; taken.style.visibility = ''; }
+  };
+
+  return {
+    /** 关闭接管：返回 true = 本模块收下这次关闭，finish 由动效结束（或超时兜底）调用 */
+    willClose(finish) {
+      // 局部非空副本：TS 的空值收窄穿不进嵌套闭包，handOver 里直接用
+      const ov = overlay;
+      const t = target;
+      const s = src;
+      if (phase === 'idle' || !ov || !t || !s) return false; // 没起飞过：按普通关闭走
+      // 起飞途中被关（ESC / 点遮罩）：面板立刻藏、遮罩淡出，海报克隆**折返**回源卡（issue 401）。
+      // 原来直接 finish() 会让海报凭空消失——与「涟漪 / 滑动高亮都可中断」的口径不齐。
+      if (phase === 'flying') {
+        phase = 'closing';
+        const host = ov.parentNode as HTMLElement | null;
+        const frame = (ov.offsetParent as HTMLElement | null) ?? host;
+        const clone = flyingClone;
+        const back = srcRect;
+        const land = (): void => {
+          if (phase !== 'closing') return; // 已结算过（动画事件与兜底定时器赛跑）
+          clone?.remove();
+          restoreSrc();
+          phase = 'idle';
+          finish();
+        };
+        try { ov.animate([{ opacity: 1 }, { opacity: 0 }], { duration: MOTION.move, easing: 'linear' }); } catch { /* 动画不可用：直接撤层 */ }
+        const modal = ov.querySelector<HTMLElement>('.cn-modal--detail');
+        if (modal) modal.style.visibility = 'hidden'; // 面板本体立刻消失，只有海报自己往回飞
+        if (clone && back && host && frame) {
+          host.appendChild(clone); // 面板要撤，飞行件搬到共享宿主（坐标系同为面板根，不跳位）
+          const cur = clone.getBoundingClientRect(); // 当前视觉矩形：正好是折返的起点（中途打断也不跳）
+          const w = clone.offsetWidth || cur.width;
+          const h = clone.offsetHeight || cur.height;
+          try {
+            const fly = clone.animate(flyKeyframes(frame.getBoundingClientRect(), w, h, cur, back),
+              { duration: MOTION.move, easing: EASE.move });
+            fly.finished.then(land).catch(land);
+            window.setTimeout(land, MOTION.move + 400); // 兜底：动画事件丢失也必须收尾
+          } catch { land(); }
+        } else land();
+        return true;
+      }
+      if (phase === 'closing') { finish(); return true; } // 重入（面板整刷连发 close）：立刻收尾
+      phase = 'closing';
+      const host = ov.parentNode as HTMLElement;
+      const frame = (ov.offsetParent as HTMLElement | null) ?? host; // 返程克隆的坐标系（见上：宿主无盒）
+      const modal = ov.querySelector<HTMLElement>('.cn-modal--detail') ?? ov;
+      // ① 面板折回海报矩形 + 遮罩同步淡出（只动遮罩背景色，面板由 clip-path 收）
+      const or = ov.getBoundingClientRect();
+      const posterR = t.getBoundingClientRect();
+      const panelRadius = parseFloat(getComputedStyle(modal).borderTopLeftRadius) || 12;
+      const foldInset = foldInsetOf(or, posterR);
+      let handed = false;
+      const handOver = (): void => {
+        if (handed || phase !== 'closing') return;
+        handed = true;
+        // ② 列表让位（其余卡动画挪开、卡本体隐形占位）→ 移除遮罩（背景已淡到全透明，无感）
+        //    → 海报从详情海报位**直飞**回列表空位，落地卡才显形。
+        //    （2026-09-21 澄清：此前「绕右上角再插入」是用户报的 bug——曾把绕行误当需求实现过，
+        //     已拆。绕行若真要，flyKeyframes 的途经点形态还在，加一个矩形就行。）
+        const fb = frame.getBoundingClientRect();
+        const to = reinsertSrc(SE_FLIGHT);
+        finish();
+        if (!to) { phase = 'idle'; return; } // 卡已不在线（面板整刷过）：新网格自带它，无需返程
+        const clone = spawnFlyClone(host, s.getAttribute('src') ?? '', posterR.width, posterR.height, getComputedStyle(t).borderTopLeftRadius);
+        const fly = clone.animate(flyKeyframes(fb, posterR.width, posterR.height, posterR, to),
+          { duration: SE_FLIGHT, easing: EASE.move, fill: 'forwards' });
+        const done = (): void => {
+          if (taken) taken.style.visibility = ''; // 落地：卡（或行内小图）在自己的空位里显形
+          clone.remove();
+          phase = 'idle';
+        };
+        fly.finished.then(done).catch(done);
+      };
+      // 折回与撑开同曲线（issue 401）：往返不同缓动会让「关」比「开」急。
+      // WAAPI 不可用（jsdom / 老环境）：撤层直交棒——与上方「起飞途中被关」同款兜底
+      const fold = playFold(ov, panelRadius, foldInset, SE_GROW);
+      if (fold) fold.finished.then(handOver).catch(handOver);
+      else handOver();
+      window.setTimeout(handOver, SE_GROW + 1200); // 兜底：动画事件丢失也必须交棒，弹窗层不能赖着不走
+      return true;
+    },
+
+    begin(ovlEl, from) {
+      overlay = ovlEl;
+      borrow = from.borrow;
+      target = overlay.querySelector<HTMLElement>('.cn-modal--detail .dm-poster');
+      // 被抽离的那一件 = 整卡 / 整行；图 = 卡面海报（配 .pw img）/ 行内小图（配 .s-thumb img）
+      taken = from.el;
+      src = from.el.querySelector<HTMLImageElement>(borrow === 'row' ? '.s-thumb img' : '.pw img');
+      boxEl = borrow === 'row' ? from.el.closest<HTMLElement>('.s-list') : from.el.closest<HTMLElement>('.d-scroll, .m-scroll');
+      // 无海报 / 图对不上（季明细钻入时源是合并卡正脸，与钻入季可能不同图，硬飞会在
+      // 落地瞬间跳图）→ 不飞，维持原有整体入场
+      if (!overlay || !target || !src?.getAttribute('src')) { this.bail(); return; }
+      const dstImg = target.querySelector('img');
+      if (!dstImg || dstImg.getAttribute('src') !== src.getAttribute('src')) { this.bail(); return; }
+      try {
+        const modal = overlay.querySelector<HTMLElement>('.cn-modal--detail');
+        if (!modal) { this.bail(); return; }
+        modal.classList.add('cn-modal--fly');       // 压整体入场与内容接力（styles.css 末段）
+        modal.style.visibility = 'hidden';          // 布局照常，几何量得准
+        phase = 'flying';
+        const sr = src.getBoundingClientRect();     // 先量：整卡抽离后源就没有几何了
+        const tr = target.getBoundingClientRect();
+        const base = overlay.getBoundingClientRect();
+        if (sr.width < 8 || sr.height < 8 || tr.width < 8 || tr.height < 8) { this.bail(); return; }
+        srcRect = sr;                               // 记下落点：抽离之后源件没有几何，起飞途中被打断要靠它折返
+        extractSrc();                               // 整卡从列表抽离，其余卡动画补位
+        const clone = spawnFlyClone(overlay, src.getAttribute('src') as string, tr.width, tr.height, getComputedStyle(target).borderTopLeftRadius);
+        flyingClone = clone;
+        const fly = clone.animate(flyKeyframes(base, tr.width, tr.height, sr, tr), { duration: SE_FLIGHT, easing: EASE.move, fill: 'forwards' });
+        // 宿主观察：遮罩被移除且不在关闭流程（skipReturn 的编辑/删除、异常路径）→ 源卡归位。
+        // 关闭流程中的归位由返程落地负责，这里不能抢（抢了就是飞行途中卡片先长回列表）
+        if (overlay.parentNode) {
+          const moo = new MutationObserver(() => {
+            if (overlay?.isConnected) return;
+            moo.disconnect();
+            if (phase !== 'closing') restoreSrc();
+          });
+          moo.observe(overlay.parentNode, { childList: true });
+        }
+        // 面板从海报矩形撑开：clip-path 只揭示、不位移，海报原地不动；
+        // 终帧外扩 64px 罩住面板投影（clip-path 连投影一起裁），fill 缺省 none，结束即卸
+        let revealed = false;
+        const reveal = (): void => {
+          if (revealed || phase !== 'flying') return;
+          revealed = true;
+          modal.style.visibility = '';
+          try {
+            const pr = modal.getBoundingClientRect();
+            const t2 = target!.getBoundingClientRect();
+            const radius = parseFloat(getComputedStyle(modal).borderTopLeftRadius) || 12;
+            modal.animate([
+              { clipPath: `inset(${Math.max(0, t2.top - pr.top)}px ${Math.max(0, pr.right - t2.right)}px ${Math.max(0, pr.bottom - t2.bottom)}px ${Math.max(0, t2.left - pr.left)}px round 8px)` },
+              { clipPath: `inset(-64px round ${radius}px)` },
+            ], { duration: SE_GROW_OPEN, easing: EASE.out });
+          } catch { /* 动画不可用（测试环境）：面板已在终态 */ }
+        };
+        const land = (): void => {
+          if (phase !== 'flying') return;
+          reveal(); // 海报落地那一帧才起撑（2026-09-21 用户拍板：不提前）
+          phase = 'open';
+          clone.remove();
+          flyingClone = null;
+        };
+        fly.finished.then(land).catch(() => { if (phase === 'flying') this.bail(); });
+      } catch {
+        this.bail();
+      }
+    },
+
+    /** 任何一步走不下去就整体回到「没飞过」的形态，不留半藏的面板或缺一块的列表 */
+    bail() {
+      overlay?.querySelector<HTMLElement>('.cn-modal--detail')?.classList.remove('cn-modal--fly');
+      const modal = overlay?.querySelector<HTMLElement>('.cn-modal--detail');
+      if (modal) modal.style.visibility = '';
+      restoreSrc();
+      overlay = null;
+      target = null;
+      src = null;
+      taken = null;
+      borrow = 'card';
+      boxEl = null;
+      flyingClone = null;
+      srcRect = null;
+      phase = 'idle';
+    },
+  };
+}
+
+/**
+ * 合并卡详情：头部 + 各季明细行 + 特别篇行（2026-09-20 用户拍板：行上补手势，
+ * 桌面右键出**该行**的跟手菜单、移动长按出底部抽屉；行点击仍是钻入该行详情）。
+ * 入口 = 左键点卡片 / 卡片浮层的「查看全部」；卡片级不落笔记级动作，行级才有落点。
+ *
+ * 钻入某一季（issue 397, 2026-09-21 用户拍板）：合集弹窗**留着**——「列表页面不会消失」，
+ * 单季详情以共享元素过渡叠在它之上，海报从行内小图长成详情海报、关闭再飞回这一行的原位。
+ *
+ * 坑位（都踩过）：
+ * - 行内条目**触发时现取**，不在绑定时闭包捕获：面板重刷后条目对象会换，旧引用指向陈货；
+ * - 桌面右键后必须 `resetItemMenuClickGuard()`：Chromium 右键时序（mousedown → contextmenu →
+ *   mouseup 落在菜单外）会置位残余 click 抑制，吞掉用户下一次左键（菜单项要点两次才生效）；
+ * - 长按回调里**不关弹窗**：`longPress` 靠元素级捕获吞长按后的合成 click，元素一旦被移除，
+ *   合成 click 落到 document 层 → 被 item-actions 的「外部点击关闭」分支当成外部点击，
+ *   抽屉开出即关（正是真机「长按没反应」那个回归）；
+ * - 动作一律「先收弹窗再执行」（见 deferClose）——行右键菜单的动作仍按老口径收掉合集弹窗；
+ *   只有**左键点击钻入**保留弹窗（分层：详情压列表，正是用户要的形态）。
+ */
+function openSeriesDetail(sec: HTMLElement, key: string, app: App, opts: { from?: HTMLElement | null } = {}): void {
+  const card = seriesCardByKey(key);
+  if (!card) return;
+  // mobile 只管长按手势挂载（维持移动壳现状）；右键菜单分流不走壳类，见行内 hoverCapable 注
+  const mobile = sec.classList.contains('mob');
+  // 共享元素过渡（issue 397）：合集卡与单季卡同款——海报抽出飞入、面板从海报生长、关闭插回原位。
+  // 来源 = 调用方显式给的卡（点卡片 / 键盘激活）；缺省按键反查（浮层「查看全部」手里只有键）
+  const from = opts.from ?? sec.querySelector<HTMLElement>(`.pcard[data-cinema-key="${CSS.escape(key)}"]`);
+  const se = from ? createSharedFlight() : null;
+  const { el, close } = ovl(sec, seriesDetailModalHtml(card, (it) => posterUrl(it, app)), { onWillClose: se?.willClose });
+  mountIcons(el);
+  if (se) se.begin(el, { el: from as HTMLElement, borrow: 'card' });
+  const rowItem = (row: HTMLElement): CinemaItem | undefined => itemByKeyInState(row.dataset.cinemaSeasonKey);
+  el.querySelectorAll<HTMLElement>('.s-row').forEach((row) => {
+    row.addEventListener('click', () => {
+      const it = rowItem(row);
+      if (!it) return;
+      // 钻入某一季：合集弹窗**留着**（2026-09-21 用户拍板「列表页面不会消失」），单季详情叠在它
+      // 之上；这一行从明细列表里抽离（其余行上移补位，与网格点卡同一套），海报从行内小图长成
+      // 详情海报，关闭时行让位、海报飞回这一行的原位
+      openDetail(sec, it, app, { from: row, borrow: 'row' });
+    });
+    // 拦原生右键菜单：桌面换成跟手菜单；移动端只为挡「保存图片 / 复制链接」（触屏长按会同时发它）。
+    // 跟手菜单走 hoverCapable（sec 级 contextmenu 同一出口）：壳类近似「桌面=有鼠标」会让
+    // 桌面宽度的触屏长按误弹鼠标菜单
+    row.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const it = rowItem(row);
+      if (!it || !hoverCapable()) return;
+      openItemMenu(e.clientX, e.clientY, toItemActions(deferClose(itemActions(it, sec, app), close)), true, MENU_SKIN);
+      resetItemMenuClickGuard();
+    });
+    if (mobile) {
+      longPress(row, () => {
+        const it = rowItem(row);
+        if (it) openSheet(sec, itemSheetTarget(it, sec, app), close); // 弹窗不关（见上），点抽屉动作时再收
+      });
+    }
+  });
 }
 
 /**
@@ -359,21 +1609,125 @@ export function openRandomMovie(app: App): void {
   const want = M.items.filter((it) => it.status === STATUS_WANT);
   const pool = want.length ? want : M.items;
   if (!pool.length) {
-    notice('娱乐里还没有条目可抽');
+    notice('影院里还没有片子可抽');
     return;
   }
   const it = pool[Math.floor(Math.random() * pool.length)];
   if (!M.currentOverlay) createOverlay(app);
   // C（补扫 cinema P3）：面板已开时先整刷（pickRandomCinema 已把 M.view 回落 list，样板同
-  // openCinemaAnalysis 的「已开则 renderAll」分支）——否则详情弹窗叠在旧 ai/stat 页上，状态与画面错位
+  // openCinemaAnalysis 的「已开则 renderAll」分支）——否则详情弹窗叠在旧 ai 页上，状态与画面错位
   else renderAll(app);
-  const root = M.currentOverlay?.querySelector<HTMLElement>('[data-cinema-root]');
+  const root = cinemaRoot();
   if (!root) return;
   openDetail(root, it, app);
-  notice(want.length ? `抽到「${it.name}」` : `想看清单空着，从全部条目里抽到「${it.name}」`, 'success');
+  notice(want.length ? `抽到「${it.name}」` : `想看清单空着，从全部影视里抽到「${it.name}」`, 'success');
+}
+
+// ---------- 观影分析：覆盖影院面板的一层（ADR-0175；25 幕长片见 yearbook/） ----------
+
+let ybOvl: HTMLElement | null = null;
+let ybHandle: YbHandle | null = null;
+let ybSync: (() => void) | null = null; // 层框跟随面板矩形（窗 resize / 面板 resize）
+let ybRo: ResizeObserver | null = null;
+
+/** 层框 = 面板矩形（ADR-0175）：几何与软横屏转置单源在 core/landscape（review/clipbook 同款）。
+ *  基字号随层框派生（不再 vmin）——面板是固定尺寸，跟窗口跑会让真机与原型排成两个密度。 */
+function fitYbBox(box: HTMLElement, panel: HTMLElement | null): void {
+  const fit = fitRotatedBox(box, panel, isMobileEnv());
+  if (!fit || !panel) return; // 面板没几何（测试环境）：保持 CSS 兜底
+  const base = Math.max(12, Math.min(19, 12 * Math.min(fit.w / 900, fit.h / 620)));
+  box.style.fontSize = `${base.toFixed(2)}px`;
+  box.style.borderRadius = getComputedStyle(panel).borderTopLeftRadius || '';
+}
+
+/** 打开观影分析：**覆盖影院面板的一层**（ADR-0175，2026-09-21 用户改口径；推翻此前的整屏独立形态）。
+ *  点框外（遮罩）＝关、ESC 同义；桌面不给关闭按钮，移动端面板满屏没有遮罩可点、按钮即出口。
+ *  内容 = 25 幕长片（yearbook/），全部数据来自笔记 frontmatter 里的真实字段；
+ *  一条影视都没有时给空态（带「添加影视」入口）。明暗跟随 Obsidian（styles.css 的 --yb-* 变量层）。
+ *  翻幕：滚轮/方向键一滚一幕，翻到的那幕从头演一遍；「自动」按钮按各幕时长自己往下放。 */
+export function openYearbookOverlay(app: App): void {
+  if (ybOvl?.isConnected) { // 已开：不叠第二层，晃一下提示还在
+    const box = ybOvl.querySelector<HTMLElement>('.bz-yb-box');
+    if (box) { box.classList.remove('is-nudge'); void box.offsetWidth; box.classList.add('is-nudge'); }
+    return;
+  }
+  rebuildItems(app);
+  const data = deriveYb(M.items);
+  const panel = cinemaRoot();
+  const ovl = document.createElement('div');
+  ovl.className = 'bz-yb';
+  // 层根只当遮罩（透明、接「点框外」）；纸面与内容全在 .bz-yb-box 里，框即面板矩形。
+  // 固定层（导航点/底栏/遮片）放 .bz-yb-scroll 的兄弟位：box 不滚，翻到哪幕都常驻
+  ovl.innerHTML = `
+    <div class="bz-yb-box">
+      ${isMobileEnv() ? `<button class="bz-yb-close" data-yb-close title="关闭观影分析" aria-label="关闭观影分析">${iconSpan(ICON.close)}</button>` : ''}
+      ${data.total ? yearbookOpenHtml() : ''}
+      <div class="bz-yb-scroll">${data.total
+        ? yearbookHtml(data, (it) => posterUrl(it, app))
+        : `<div class="bz-yb-blank"><p>影院还是空的——先添一部，这一页才有得放。</p><button class="bz-btn" data-cinema-analysis-add type="button">添加影视</button></div>`}</div>
+      ${data.total ? yearbookFixedHtml() : ''}
+    </div>`;
+  document.body.appendChild(ovl);
+  mountIcons(ovl);
+  topifyZ(ovl); // 显示即发号（ADR-0067）：叠在影院面板/其它浮层之上，关掉即销号
+  ybOvl = ovl;
+  const box = ovl.querySelector<HTMLElement>('.bz-yb-box');
+  if (box) {
+    fitYbBox(box, panel);
+    ybSync = () => fitYbBox(box, panel);
+    window.addEventListener('resize', ybSync);
+    // 面板自身也会 resize（Obsidian 窗口变化 / 移动端旋屏）：跟它同步，别只在窗 resize 时对一次
+    if (typeof ResizeObserver === 'function' && panel) {
+      ybRo = new ResizeObserver(ybSync);
+      ybRo.observe(panel);
+    }
+  }
+  ovl.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    // 空态里的「添加影视」：先收观影分析再开表单（表单在面板层，留着会把它盖住）
+    if (t.closest('[data-cinema-analysis-add]')) { closeYearbookOverlay(); openAddModalDirect(app); return; }
+    if (t.closest('[data-yb-close]')) { closeYearbookOverlay(); return; }
+    if (!t.closest('.bz-yb-box')) closeYearbookOverlay(); // 点框外 = 遮罩，关掉露出影院面板
+  });
+  registerPanelEsc('cinema-yearbook', () => !!ybOvl?.isConnected, closeYearbookOverlay);
+  if (data.total) ybHandle = bindYearbook(ovl, data);
+}
+
+/** 关闭观影分析：引擎先停（rAF/监听/观察者自灭），再摘层与几何跟随。幂等。 */
+export function closeYearbookOverlay(): void {
+  ybHandle?.stop();
+  ybHandle = null;
+  if (ybSync) { window.removeEventListener('resize', ybSync); ybSync = null; }
+  ybRo?.disconnect();
+  ybRo = null;
+  unregisterPanelEsc('cinema-yearbook');
+  ybOvl?.remove();
+  ybOvl = null;
 }
 
 // ---------- 弹窗：添加 / 编辑表单 ----------
+
+/** 重名文案单源（issue 394）：按钮态用短句，拦截 notice 用完整句 */
+const DUP_NAME_HINT = '已存在同名影视';
+const DUP_NAME_HINT_FULL = `${DUP_NAME_HINT}，请换个名称`;
+
+/** 重名判据单源（issue 394）：新增时比对全库、编辑时排除自身原名。
+ *  保存拦截、输入框红边框、保存按钮禁用三处共用同一判据——各写一份必然漂移。 */
+function isDuplicateName(name: string, selfName?: string): boolean {
+  return name !== (selfName ?? '') && M.items.some((x) => x.name === name);
+}
+
+/** 评分滑杆初值（2026-10-03 用户点名）：已评过 → 我的原值；**还没评分 → 拿豆瓣评分兜底**
+ *  （打开编辑面板就是它，省得自己对着豆瓣回忆），豆瓣分缺失 / 非数值 / 落在滑杆域（1~10）
+ *  之外 → 才回落 DEFAULT_RATING。
+ *  ⚠ 它只是**预填默认值**：用户不动滑杆点保存才会写成我的评分（与原「默认分」口径同源，
+ *  所以判断逻辑必须留在这一处，别在保存路径再抄一份）。 */
+function formInitRating(item: CinemaItem | null): number {
+  if (item && item.rating && item.rating > 0) return item.rating;
+  const db = item?.doubanRating ? Number.parseFloat(item.doubanRating) : Number.NaN;
+  if (Number.isFinite(db) && db >= 1 && db <= 10) return Math.round(db * 10) / 10; // 对齐滑杆 step 0.1
+  return DEFAULT_RATING;
+}
 
 /** 待选项并集（基础池在前，已选但不在池中的值补在尾——豆瓣解析出的题材直接可选，票 294） */
 function mergePool(base: string[], extra: string[]): string[] {
@@ -384,15 +1738,32 @@ function mergePool(base: string[], extra: string[]): string[] {
   return out;
 }
 
+/** 小输入弹窗：自定义添加选项（票 294「＋」按钮共用；确认后回调，弹窗自身不落盘） */
+function promptOptionValue(sec: HTMLElement, title: string, onSubmit: (v: string) => void): void {
+  const { el, close } = ovl(sec, `<div class="cn-modal" style="max-width:280px;width:100%">
+    <div class="cn-modal-title">${esc(title)}</div>
+    <div class="f-field"><input class="f-input j-opt-name" placeholder="输入新选项名称"></div>
+    <div class="dm-actions"><button class="dm-btn j-cancel">取消</button><button class="dm-btn gold j-ok">确定</button></div>
+  </div>`, { sticky: true });
+  el.querySelector('.j-cancel')?.addEventListener('click', () => close());
+  const ok = () => {
+    const v = (el.querySelector('.j-opt-name') as HTMLInputElement).value.trim();
+    close();
+    if (v) onSubmit(v);
+  };
+  el.querySelector('.j-ok')?.addEventListener('click', ok);
+}
+
 /** 添加/编辑表单弹窗。presetSt：预选状态（中文口径，如「已看」）——「标记已看」入口传入，
- *  状态 chip 预选、评分滑杆（预填当前评分，无则默认分）与影评框自动展开；弹窗本身不落盘，保存才生效 */
+ *  状态 chip 预选、评分滑杆（预填当前评分，未评分回落豆瓣分、再回默认分）与影评框自动展开；
+ *  弹窗本身不落盘，保存才生效 */
 function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?: string): void {
   const editing = !!item;
   const initTag = item ? item.typeTag : '电影';
   const initSt = presetSt ?? (item ? statusText(item.status) : '想看');
-  const ratingVal = item && item.rating && item.rating > 0 ? item.rating : DEFAULT_RATING;
+  const ratingVal = formInitRating(item);
+  // 票 294/299（本地保留件）：国家/题材池（题材按顶级类型隔离，已选值恒可见）
   const countryPool = mergePool(getCountryOptions(), item?.country ? [item.country] : []);
-  // 票 299：题材池按顶级类型隔离（书籍=体裁默认中图法 22 大类）；已选值恒可见（mergePool 兜底）
   let genrePool = mergePool(getGenreOptions(getGroupSafe(initTag)), item?.genres ?? []);
   const { el, close } = ovl(sec, formModalHtml({
     editing, name: item ? item.name : '', typeTag: initTag, stText: initSt,
@@ -402,7 +1773,11 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
     chTotal: item?.chaptersTotal ?? null, chWatching: item?.chaptersWatching ?? null,
   }));
   mountIcons(el);
+  // 新增态是双面卡片：遮罩层多留上下留白并允许滚动（垂直居中由 .cn-modal--flip 的 margin:auto 负责，
+  // 两种居中手段并存是为了背面比视口高时仍能从头滚起——见 styles.css 那段注释）
+  if (!editing) el.classList.add('cn-ovl--flip');
   const cur = { tag: initTag, st: initSt, country: item?.country ?? null, genres: [...(item?.genres ?? [])] };
+
   // 票 299：切类型后题材池与「体裁/题材」行标签跟随目标组重取
   const syncGenrePool = (tag: string) => {
     genrePool = mergePool(getGenreOptions(getGroupSafe(tag)), cur.genres);
@@ -422,14 +1797,7 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
     const ch = el.querySelector('.j-chapters') as HTMLElement | null;
     if (ch) ch.style.display = chaptersVisible() ? '' : 'none';
   };
-  el.querySelectorAll<HTMLElement>('[data-f-tag]').forEach((b) => b.addEventListener('click', () => {
-    cur.tag = b.dataset.fTag ?? cur.tag;
-    el.querySelectorAll('[data-f-tag]').forEach((x) => x.classList.toggle('is-on', x === b));
-    syncGenrePool(cur.tag);
-    syncEps();
-    syncChapters();
-  }));
-  // 票 294：国家（单选，再点取消）与题材（多选）chips——委托绑在容器上，自定义添加后重绘行不丢事件
+  // 票 294：国家（单选，再点取消）与题材（多选）chips 行重绘
   const syncCountries = () => {
     const row = el.querySelector('.j-countries');
     if (row) row.innerHTML = optionChipsHtml(countryPool, cur.country ? [cur.country] : [], 'f-country', false);
@@ -438,6 +1806,375 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
     const row = el.querySelector('.j-genres');
     if (row) row.innerHTML = optionChipsHtml(genrePool, cur.genres, 'f-genre', true);
   };
+
+  // 表单阶段（issue 395）：新增 = 双面卡片「正面（名称+状态）→ 解析 → 背面（全部信息）→ 保存」；
+  // 编辑 = 单面到底（已有笔记不必重解析）。
+  let phase: 'idle' | 'parsing' | 'parsed' = editing ? 'parsed' : 'idle';
+  /** 换面之后分类仍在判定（2026-09-21 拆两段：豆瓣信息到手即换面，分类随后补）。
+   *  此间徽标是占位骨架、保存按钮锁着——分类没落定就保存，等于把这个值当默认值用。 */
+  let classifying = false;
+  let parsed: DoubanQuery | null = null;
+  let userPickedTag = false; // 2026-09-21 拍板：用户手点过 chip → 解析出的分类不覆盖他的选择
+  /** 名称索引命中携带的豆瓣 sid（issue 498）：下拉选中时记、手输改动即失效、
+   *  解析时交给 queryDoubanForPreview 跳过按名搜索直取 ApiZero。 */
+  let pickedSid: string | null = null;
+  const nameInput = el.querySelector<HTMLInputElement>('.j-name');
+  const parseBtn = el.querySelector<HTMLButtonElement>('.j-parse');
+  const saveBtn = el.querySelector<HTMLButtonElement>('.j-save');
+  const flipEl = el.querySelector<HTMLElement>('.j-flip');
+  const backSlot = el.querySelector<HTMLElement>('.j-back');
+
+  /** 表单态唯一刷新点：正面按钮文案与禁用、输入框红边框、chip 流动特效都在这。
+   *  重名反馈（issue 394）与解析态（issue 395）共用同一个按钮，散着改 class 必然漂移。 */
+  const refreshFormState = (): void => {
+    const name = nameInput?.value.trim() ?? '';
+    const dup = !!name && isDuplicateName(name, item?.name);
+    if (nameInput) nameInput.classList.toggle('is-dup', dup);
+    if (parseBtn) {
+      const busy = phase === 'parsing';
+      parseBtn.disabled = dup || busy;
+      parseBtn.classList.toggle('is-parsing', busy);
+      // 文案写在子节点上：直接赋 textContent 会把转圈那个 span 一起抹掉
+      const txt = parseBtn.querySelector('.j-parse-text');
+      if (txt) txt.textContent = dup ? DUP_NAME_HINT : busy ? '解析中' : '解析';
+    }
+    // 背面「保存」与编辑态「保存」是同一个按钮：重名同样锁死（issue 394 的行为不能因双面改造丢掉）。
+    // 解析中与分类判定中都锁住（2026-09-21）：分类未落定就保存，可能把那时的占位/默认值当结果用。
+    if (saveBtn) {
+      saveBtn.disabled = dup || phase === 'parsing' || classifying;
+      saveBtn.textContent = dup ? DUP_NAME_HINT : '保存';
+    }
+    // 解析中：全部分类 chip 的边框走流光（2026-09-21 用户点名）
+    el.querySelectorAll('[data-f-tag]').forEach((x) => x.classList.toggle('is-scanning', phase === 'parsing'));
+  };
+
+  /** 分类 chip 选中态（手点与解析预选共用，别各写一份 toggle） */
+  const applyTagOn = (): void => {
+    el.querySelectorAll<HTMLElement>('[data-f-tag]').forEach((b) => b.classList.toggle('is-on', b.dataset.fTag === cur.tag));
+  };
+
+  /** 状态 chip 选中态 + 「我的记录」段显隐（正反两面都有状态 chip，用 querySelectorAll 全覆盖） */
+  const applyStOn = (): void => {
+    el.querySelectorAll<HTMLElement>('[data-f-st]').forEach((b) => b.classList.toggle('is-on', b.dataset.fSt === cur.st));
+    const show = cur.st === '已看';
+    el.querySelectorAll<HTMLElement>('.j-rating').forEach((x) => { x.style.display = show ? '' : 'none'; });
+    el.querySelectorAll<HTMLElement>('.j-review').forEach((x) => { x.style.display = show ? '' : 'none'; });
+  };
+
+  /** 换到背面（新增态只有单向：正面 → 解析 → 背面；2026-09-21 去掉「返回」后没有反向路径）。
+   *
+   *  **高度不在这层管**：两面用 grid 叠在同一格，容器高度自动取较高那一面（见 styles.css）——
+   *  于是换面全程高度零变化，没有重排可卡。此前是「量高 + height 过渡 + ResizeObserver 持续同步」，
+   *  每帧重排整个弹窗，是「翻转时卡顿一下」的根因（2026-09-21 定位并移除）。
+   *
+   *  动效 = 纯 CSS 换面编排（2026-10-01 撤 3D 后重做）：行为层只切 is-flipped 一个类——
+   *  正面快出 / 背面按弹窗语汇浮现 / 内容分段接力 / 收口微光，全在 styles.css 换面段
+   *  （cnModalIn / cnRiseIn / cnSheen 复用，时长曲线走台账 token）；不再有 is-flipping
+   *  清理与光照遮罩，animationend 只剩一处用途：入场毕的焦点接力（见下）。
+   *  起手前先强制一次布局：把 renderBack 插入整卡 + 海报解码的排版开销结在过渡之前，
+   *  否则过渡首帧要同时做「插入 + 重排 + 合成」，表现为起手一顿。 */
+  const flipToBack = (): void => {
+    if (!flipEl) return;
+    void flipEl.offsetHeight;
+    const start = (): void => {
+      if (!el.isConnected) return; // 过渡起手前弹窗已被关掉（用户手快）
+      flipEl.classList.add('is-flipped');
+      // 焦点接力（复审 P1①）：正面「解析」钮在 .16s 时被 visibility 摘出焦点序，焦点掉到 body；
+      // 背面浮现完（cnModalIn 的 animationend，.34s）若焦点还没落回弹窗，交给背面首个可交互项——
+      // 键盘用户无缝续上，鼠标用户无感（程序化聚焦不亮焦点环）。
+      // 只认背面本体：内容分段接力的动画同事件冒泡（子元素先结束），不筛会在入场半途提前交接；
+      // 收口微光（::after）也不算子元素——它的 animationend 带同一个 target、只多一个
+      // pseudoElement（复审 P2），一并筛掉，别把交接时刻赌在「微光比浮现晚」的时间账上。
+      const backFace = flipEl.querySelector<HTMLElement>('.form-face--back');
+      if (!backFace) return;
+      const onEnd = (e: AnimationEvent): void => {
+        if (e.target !== backFace || e.pseudoElement) return;
+        backFace.removeEventListener('animationend', onEnd);
+        if (!el.isConnected || el.contains(document.activeElement)) return; // 焦点已在他处 → 不抢
+        firstFocusable(backFace)?.focus({ preventScroll: true });
+      };
+      backFace.addEventListener('animationend', onEnd);
+    };
+    // 推到下一帧起手（jsdom 无 rAF 时退回定时器，测试不必区分两种环境）
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(start);
+    else window.setTimeout(start, 16);
+  };
+
+  /** 预览卡数据：字段口径与落盘一致（ApiZero 优先、rexxar 兜底）。
+   *  海报**不给豆瓣直链**（2026-09-21 用户实测 418：豆瓣 CDN 拒热链）——由 ensurePreviewPoster
+   *  本地下载落库后换图；下载前维持骨架。 */
+  const previewDataOf = (q: DoubanQuery | null): FormPreviewData | null => {
+    if (!q) return null;
+    const az = q.apizero;
+    return {
+      posterUrl: '',
+      title: q.title || nameInput?.value.trim() || '',
+      typeTag: cur.tag,
+      genre: az?.genre ? normalizeListValue(az.genre) : '',
+      director: az?.director ? normalizeListValue(az.director) : q.celebrities?.directors ?? '',
+      actors: az?.actor ? normalizeListValue(az.actor) : q.celebrities?.casts ?? '',
+      region: az?.area ? normalizeListValue(az.area) : '',
+      releaseDate: az?.year ?? '',
+      duration: az?.duration ?? '',
+      doubanRating: az?.score ?? '',
+      doubanUrl: q.detailUrl,
+      hotComment: az?.shortComment ?? '',
+    };
+  };
+
+  /** 预览海报（2026-09-21 用户实测 418）：不直连豆瓣 CDN，改为解析后**本地下载落库**
+   *  （与保存落库同一函数 downloadPreviewPoster）→ 把 vault 资源 URL 换进预览卡。
+   *  下载失败保持骨架（保存路径还会再试一次），预览卡不因海报阻塞。 */
+  let previewPosterRel: string | null = null;
+  let posterKicked = false;
+  /** 等 vault 索引的轮询节奏：150ms × 10 ≈ 1.5s 上限（等不到就交保存路径与后台抓取） */
+  const POSTER_INDEX_POLL_MS = 150;
+  const POSTER_INDEX_TRIES = 10;
+
+  /** 等 vault 索引追上刚落盘的海报。
+   *  海报是 `adapter.writeBinary` 裸写的（douban-queue 的 deps 组装）——只落磁盘、**不动 vault
+   *  内存索引**，索引要等文件监听回调才更新。解析回来后的同一个微任务链里查
+   *  `getAbstractFileByPath` 中间没有一次宏任务让 watcher 插进来，**必是 null**：
+   *  于是预览卡永远停在骨架，而卡片路径（保存后几十秒、每次都重查）正常——
+   *  同一个海报文件，差的只是查索引的时刻。这里短轮询等索引，拿到文件再贴图。 */
+  const waitPosterFile = async (rel: string): Promise<TFile | null> => {
+    for (let i = 0; i < POSTER_INDEX_TRIES; i++) {
+      const f = app.vault.getAbstractFileByPath(rel);
+      if (f instanceof TFile) return f;
+      await sleep(POSTER_INDEX_POLL_MS);
+    }
+    return null;
+  };
+  const applyPreviewPoster = (f: TFile): void => {
+    const box = backSlot?.querySelector<HTMLElement>('.dm-poster');
+    if (!box) return;
+    let img = box.querySelector('img');
+    if (!img) {
+      img = document.createElement('img');
+      img.alt = '';
+      img.addEventListener('load', () => box.classList.add('is-ready'), { once: true });
+      img.addEventListener('error', () => img?.remove(), { once: true });
+      box.appendChild(img);
+    }
+    img.src = app.vault.getResourcePath(f);
+  };
+  const ensurePreviewPoster = async (url: string | null | undefined): Promise<void> => {
+    if (!url || posterKicked) return;
+    posterKicked = true;
+    try {
+      const rel = await downloadPreviewPoster(app, nameInput?.value.trim() ?? '', url);
+      if (!rel || !el.isConnected) return;
+      previewPosterRel = rel;
+      const f = await waitPosterFile(rel);
+      if (!f || !el.isConnected) return;
+      applyPreviewPoster(f);
+    } catch { /* 预览海报失败不阻断表单（保存路径兜底） */ }
+  };
+
+  /** 解析（2026-09-21 拆两段）：
+   *  ① 豆瓣信息到手 → **立刻换面**（不等信息全齐才让用户看到卡）
+   *  ② 海报与分类随后补——海报交给 img 自己加载（骨架 → 淡入），分类等 Jev 回来就地填
+   *  （Jev 不可用回落 LLM，见 type-decide）。判定弃权或两道都不可用都不阻断解析：
+   *  字段已经到手，分类留空、由用户手点。 */
+  async function runParse(): Promise<void> {
+    const name = nameInput?.value.trim() ?? '';
+    if (!name) { notice('请输入名称', 'warning'); return; }
+    if (hasIllegalNameChar(name)) { notice(`${ILLEGAL_NAME_HINT}，请修改`, 'error'); return; }
+    phase = 'parsing';
+    refreshFormState();
+    // 名称索引命中的精确 sid → 解析直取 ApiZero 跳过按名搜索（issue 498）；
+    // 直取失败在 queryDoubanForPreview 内部回落按名全链，调用方无感。
+    // 异常兜底（评审 P1-2）：网络层异常上抛时不复位 phase 会把表单永久锁在「解析中」
+    let q: Awaited<ReturnType<typeof queryDoubanForPreview>>;
+    try {
+      q = await queryDoubanForPreview(app, name, pickedSid ?? undefined);
+    } catch {
+      phase = 'idle';
+      refreshFormState();
+      notice('网络不畅，未能获取豆瓣信息', 'warning');
+      return;
+    }
+    if (!q.ok) {
+      phase = 'idle';
+      refreshFormState();
+      notice(
+        q.reason === 'blocked' ? '豆瓣搜索被风控，稍后再试'
+          : q.reason === 'notfound' ? '豆瓣没有找到这部影视'
+            : '网络不畅，未能获取豆瓣信息',
+        'warning',
+      );
+      return;
+    }
+    parsed = q.data;
+    // 添加防重（票 306 本地保留件）：解析命中的豆瓣条目 sid 已在库 → 收场提示，不重复入库
+    // （同名的硬拦截 saveNew 本就有，这里兜「同名不同译/加过没记住」的情形）
+    const dupSid = extractDoubanSid(q.data.apizero?.doubanUrl || q.data.detailUrl);
+    const dupItem = dupSid ? M.items.find((x) => extractDoubanSid(x.doubanUrl) === dupSid) : undefined;
+    if (dupItem) {
+      phase = 'idle';
+      refreshFormState();
+      close();
+      notice(`该条目已在库中：《${dupItem.name}》，不再重复添加`);
+      return;
+    }
+    // ① 字段到手即换面：分类先占位（骨架），海报由 img 加载完自行淡入
+    phase = 'parsed';
+    classifying = true;
+    renderBack();
+    flipToBack();
+    refreshFormState();
+    void ensurePreviewPoster(q.data.posterUrl); // 海报本地落库后换图（防 418 热链拒绝）
+    // ② 分类随后补：就地换徽标，不重渲染整卡（重渲染会让海报 img 重新发起请求、白闪一下）
+    try {
+      const az = q.data.apizero;
+      const mediaType = q.data.celebrities?.mediaType ?? null;
+      const decided = await decideCinemaType({
+        title: q.data.title,
+        isTv: az ? az.isTv : mediaType ? mediaType === 'tv' : null,
+        area: az?.area ?? null,
+        genre: az?.genre ?? null,
+        year: az?.year ?? null,
+      });
+      if (decided && !userPickedTag) cur.tag = decided;
+    } catch { /* 两道判定通道都不可用不阻断解析：字段已到手，分类由用户手点 */ }
+    classifying = false;
+    updateBadges();
+    refreshFormState();
+  }
+
+  /** 观影日期判据（单源）：状态变了取当下、没变沿用原有——保存落盘与背面展示共用这一份，
+   *  各算一份必然出现「背面写的日期和真存下去的不是同一天」。 */
+  const watchDateOf = (): string => {
+    const stChanged = !editing || !item || item.status !== statusNum(cur.st);
+    return stChanged ? localNow() : (item!.watchDate || localNow());
+  };
+
+  /** 背面渲染：与详情弹窗同形制；分类 / 状态是有下拉的徽标。
+   *  可填控件（评分滑杆 / 影评框）在正面状态下方（2026-09-21 拍板：点已看当场能填）；
+   *  背面把「我的记录」**只读显示**出来（issue 409 追加拍板：解析之后翻不回正面，
+   *  背面得看得见自己刚填的评分 / 影评，以及这一笔存下去会是哪一天）。 */
+  function renderBack(): void {
+    if (!backSlot) return;
+    const watched = cur.st === '已看'; // 只有已看有记录：非已看态正面根本不给填
+    backSlot.innerHTML = formBackHtml(previewDataOf(parsed), {
+      typeTag: cur.tag, stText: cur.st, classifying,
+      rating: watched ? Number(el.querySelector<HTMLInputElement>('.j-range')?.value ?? 0) : 0,
+      review: watched ? el.querySelector<HTMLTextAreaElement>('.j-review-t')?.value ?? '' : '',
+      watchDate: watched ? watchDateOf() : '',
+    });
+    applyTagOn();
+    applyStOn();
+  }
+
+  /** 收起两个候选下拉（徽标切换、选完都要收）。
+   *  走 .is-open 类而非 hidden 属性：hidden 是瞬切、没有中间态，展开会「啪」地弹出来。 */
+  const closePickLists = (): void => {
+    el.querySelectorAll<HTMLElement>('[data-pick-list]').forEach((l) => l.classList.remove('is-open'));
+  };
+
+  /** 两个徽标就地重渲（分类回来、用户改选时用）。
+   *  为什么不 renderBack()：整卡重渲染会重建海报 <img>，图片重新加载 → 白闪一下。
+   *  为什么不逐个改文本：徽标颜色 / 选中态 / 占位骨架的切换都跟着值走，重渲这两个节点最省心。
+   *  背面尚未渲染时（正面点状态）row 取不到，但下面两行仍要跑——正面状态 chip 靠 applyStOn 上选中态。 */
+  const updateBadges = (): void => {
+    const row = backSlot?.querySelector<HTMLElement>('.dm-badges');
+    if (row) row.innerHTML = formTagChipHtml(cur.tag) + formStChipHtml(cur.st);
+    applyTagOn();
+    applyStOn();
+  };
+
+  /** 名称联想（issue 498 / ADR-0210）：本地名称索引命中 → 下拉选片 → 携带 sid 解析直取。
+   *  索引未下载/校验不过 → loadDoubanNameIndex 返回 null → source 恒空 → 下拉静默缺席，
+   *  一切回落既有手输+按名检索；下载入口在设置面板在线资源组（ADR-0207 通用行，零新 UI）。
+   *  同名条目（不同年份各占一行）在候选取最优评分一行作为 sid 载体——其余同名片
+   *  仍可手输名称走按名检索（ADR-0210 决策 5）。 */
+  const nameDropRows = new Map<string, DoubanIndexRow>();
+  if (!editing && nameInput) {
+    void loadDoubanNameIndex(app).then((index) => {
+      if (!index || !el.isConnected || phase !== 'idle') return;
+      // 浮层生命周期自愈：挂表单 DOM 内随其消亡，document 外点监听按 isConnected 自清
+      //（core uiSuggest 既有语义，favorites/memo 同款）——无需存句柄做 detach
+      uiSuggest({
+        anchor: nameInput,
+        max: 12,
+        source: (): string[] => {
+          if (!index) return [];
+          const q = nameInput.value.trim();
+          if (!q) return []; // 空查询不开壳（uiSuggest 无匹配即收）
+          const hits = searchDoubanNameIndex(index, q, 12);
+          nameDropRows.clear();
+          const out: string[] = [];
+          const seenNames = new Set<string>();
+          for (const r of hits) {
+            if (seenNames.has(r.n)) continue; // 同名去重：候选取排名最优一行做 sid 载体（ADR-0210 决策 5）
+            seenNames.add(r.n);
+            nameDropRows.set(r.n, r);
+            out.push(r.n);
+          }
+          return out;
+        },
+        // source 层是归一化检索（去标点等），draw 层缺省原串 includes 会把归一命中误滤掉——
+        // 传同口径谓词（评审 P2-1）
+        matchOf: (candidate, rawQuery) =>
+          normName(candidate).includes(normName(rawQuery)),
+        /** 灰字小注：年份 · 评分 · 类别（issue 498 用户点名三件参考值）；无评分（含 0）不冒充 */
+        hintOf: (n) => {
+          const r = nameDropRows.get(n);
+          if (!r) return '';
+          const score = r.s && r.s !== '0' ? `评分 ${r.s}` : '';
+          return [r.y, score, r.k].filter(Boolean).join(' · ');
+        },
+        onPick: (n) => {
+          const r = nameDropRows.get(n);
+          pickedSid = r ? r.id : null;
+          refreshFormState();
+        },
+      });
+    });
+  }
+
+  nameInput?.addEventListener('input', () => {
+    pickedSid = null; // 手输任何改动都使索引携带的 sid 失效（回填后的名称是精确的，改动就不是了）
+    refreshFormState();
+  });
+  refreshFormState();
+  applyStOn();
+  // 分类/状态走事件委托（绑 el，不绑具体按钮）：背面是 innerHTML 动态生成的，逐个绑定必然漏一半；
+  // 两面共用同一份 cur，点哪一面都同步（issue 395）
+  el.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    // 背面徽标 → 展开候选下拉（先全收再开目标；同键再点即收起）
+    const pick = t.closest<HTMLElement>('[data-pick]');
+    if (pick) {
+      const key = pick.dataset.pick;
+      const target = el.querySelector<HTMLElement>(`[data-pick-list="${key}"]`);
+      const willOpen = !!target && !target.classList.contains('is-open');
+      closePickLists();
+      if (target && willOpen) target.classList.add('is-open');
+      return;
+    }
+    // 选中候选项 → 收回下拉 + 就地换徽标。正面状态 chip 也走这里（同一份 cur，两面同步）
+    const tagBtn = t.closest<HTMLElement>('[data-f-tag]');
+    if (tagBtn) {
+      cur.tag = tagBtn.dataset.fTag ?? cur.tag;
+      userPickedTag = true;
+      closePickLists();
+      syncGenrePool(cur.tag);
+      syncEps();
+      syncChapters();
+      updateBadges();
+      return;
+    }
+    const stBtn = t.closest<HTMLElement>('[data-f-st]');
+    if (stBtn) {
+      cur.st = stBtn.dataset.fSt ?? cur.st;
+      closePickLists();
+      syncEps();
+      syncChapters();
+      updateBadges();
+    }
+  });
+  // 票 294：国家（单选，再点取消）与题材（多选）chips——委托绑在容器上，自定义添加后重绘行不丢事件
   el.querySelector('.j-countries')?.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;
     if (t.closest('.j-add-opt')) {
@@ -475,24 +2212,35 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
     else cur.genres.push(v);
     syncGenres();
   });
-  el.querySelectorAll<HTMLElement>('[data-f-st]').forEach((b) => b.addEventListener('click', () => {
-    cur.st = b.dataset.fSt ?? cur.st;
-    el.querySelectorAll('[data-f-st]').forEach((x) => x.classList.toggle('is-on', x === b));
-    const show = cur.st === '已看';
-    (el.querySelector('.j-rating') as HTMLElement).style.display = show ? '' : 'none';
-    (el.querySelector('.j-review') as HTMLElement).style.display = show ? '' : 'none';
-    syncEps();
-    syncChapters();
-  }));
+  // 表单 Enter 提交（深审批A P3-13）：core bindFormSubmit——名称框纯 Enter 直存，
+  // 影评 textarea 回车换行天然豁免；Ctrl/⌘+Enter 恒提交。
+  // 双面卡片（issue 395）：正面 Enter = 解析、背面 Enter = 保存，按当前阶段分流。
+  bindFormSubmit(el, () => {
+    if (phase === 'idle' && !editing) { void runParse(); return; }
+    (el.querySelector('.j-save') as HTMLElement | null)?.click();
+  });
+  // 桌面端打开即聚焦名称框（呈报#7 / C2，2026-09-19 拍板改口径：省一次点击）；
+  // 移动端维持不聚焦——弹窗即弹软键盘遮挡表单（core settings-modal「移动端跳过 input 聚焦」同款口径）
+  if (!isMobileEnv()) (el.querySelector('.j-name') as HTMLInputElement | null)?.focus();
+  parseBtn?.addEventListener('click', () => { void runParse(); });
   el.querySelector('.j-save')?.addEventListener('click', () => {
+    if (phase === 'parsing' || classifying) return; // 防御：解析/判定中不落盘（disabled 已挡一层）
     const name = (el.querySelector('.j-name') as HTMLInputElement).value.trim();
-    if (!name) { panelToast(sec, '请输入名称'); return; }
-    if (editing && item && name !== item.name && M.items.some((x) => x.name === name)) { panelToast(sec, '已存在同名条目，请换个名称'); return; }
-    if (!editing && M.items.some((x) => x.name === name)) { panelToast(sec, '已存在同名条目，请换个名称'); return; }
-    const stChanged = !editing || !item || item.status !== (cur.st === '想看' ? STATUS_WANT : cur.st === '在看' ? STATUS_WATCHING : STATUS_WATCHED);
-    const date = stChanged ? localNow() : (item!.watchDate || localNow());
-    const rating = cur.st === '已看' ? parseFloat((el.querySelector('.j-range') as HTMLInputElement).value) : cur.st === '在看' ? 0 : null;
-    const review = cur.st === '已看' ? (el.querySelector('.j-review-t') as HTMLTextAreaElement).value.trim() : '';
+    if (!name) { notice('请输入名称', 'warning'); return; }
+    if (isDuplicateName(name, item?.name)) { notice(DUP_NAME_HINT_FULL, 'warning'); return; }
+    const date = watchDateOf();
+    // 评分编码退役（2026-09-30 拍板，兼容推断 2026-10-03 移除）：状态走独立键落盘，评分只在「已看」态有真值
+    // （想看/在看给 null，不会再被兜底成编码值弹回）。
+    // 评分/影评在正面状态下方（2026-09-21 用户拍板）——编辑/新增两态同一个框，querySelector 直取。
+    const ratingBox = el.querySelector<HTMLInputElement>('.j-range');
+    const rating = cur.st === '已看'
+      ? (ratingBox ? parseFloat(ratingBox.value) : DEFAULT_RATING)
+      : null;
+    // 非「已看」态保留原影评不写空（深审批A P2-2）：影评框在非已看态隐藏，原实现在这里
+    // 强置空串 + persistItem `delete fm['影评']`——「已看」影片改回想看/在看保存，影评被静默清空。
+    // 影评只在「已看」态的输入框里被用户显式改写/清空（空串保存 = 显式删除，语义保留）。
+    const reviewBox = el.querySelector<HTMLTextAreaElement>('.j-review-t');
+    const review = reviewBox ? reviewBox.value.trim() : (editing && item ? item.review ?? '' : '');
     // 票 295：集数仅剧类+在看时读取；不可见时置 null（非剧类落盘时删键，不残留）
     const epsW = epsVisible() ? parseEpisodeCount((el.querySelector('.j-eps-watching') as HTMLInputElement).value) : null;
     const epsT = epsVisible() ? parseEpisodeCount((el.querySelector('.j-eps-total') as HTMLInputElement).value) : null;
@@ -500,152 +2248,60 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
     const chW = chaptersVisible() ? parseEpisodeCount((el.querySelector('.j-ch-watching') as HTMLInputElement).value) : null;
     const chT = chaptersVisible() ? parseEpisodeCount((el.querySelector('.j-ch-total') as HTMLInputElement).value) : null;
     if (editing && item) {
-      void saveEdit(sec, item, { name, tag: cur.tag, st: cur.st, rating, date, review, country: cur.country, genres: [...cur.genres], epsTotal: epsT, epsWatching: epsW, chTotal: chT, chWatching: chW }, app, close);
+      void saveEdit(item, { name, tag: cur.tag, st: cur.st, rating, date, review, country: cur.country, genres: [...cur.genres], epsTotal: epsT, epsWatching: epsW, chTotal: chT, chWatching: chW }, app, { el, close });
     } else {
-      void saveNew(sec, { name, tag: cur.tag, st: cur.st, rating, date, review, country: cur.country, genres: [...cur.genres], epsTotal: epsT, epsWatching: epsW, chTotal: chT, chWatching: chW }, app, close);
+      void saveNew({ name, tag: cur.tag, st: cur.st, rating, date, review, country: cur.country, genres: [...cur.genres], epsTotal: epsT, epsWatching: epsW, chTotal: chT, chWatching: chW, douban: parsed, posterRel: previewPosterRel }, app, { el, close });
     }
   });
-  // 添加卡双面流（issue 395 上游形态；批 5cine 曾把本段行为层整块丢失，「解析」点了没反应）：
-  // 解析 → queryDoubanByName → 背面预览翻面；分类判定（Jev→LLM）期间徽标骨架占位，出结果
-  // 就地换徽标（markup 单源 shared.formTagChipHtml）。判定不可用则骨架留空交给用户手点（不预选）；
-  // 查询失败也翻空背——背面只剩保存，走手动默认（电影/想看），不让添加流死在前置。
-  const flipCard = el.querySelector<HTMLElement>('.j-flip');
-  const backBox = el.querySelector<HTMLElement>('.j-back');
-  const parseBtn = el.querySelector<HTMLButtonElement>('.j-parse');
-  if (!editing && flipCard && backBox && parseBtn) {
-    const parseText = el.querySelector<HTMLElement>('.j-parse-text');
-    const closePickLists = () => backBox.querySelectorAll('.dm-pick-list').forEach((l) => l.classList.remove('is-open'));
-    const swapChip = (sel: string, html: string) => {
-      const chip = backBox.querySelector(sel);
-      if (chip) chip.outerHTML = html;
-    };
-    parseBtn.addEventListener('click', () => {
-      const name = (el.querySelector('.j-name') as HTMLInputElement).value.trim();
-      if (!name) { panelToast(sec, '请输入名称'); return; }
-      if (parseBtn.classList.contains('is-busy')) return;
-      parseBtn.classList.add('is-busy');
-      if (parseText) parseText.textContent = '解析中…';
-      void (async () => {
-        let q: DoubanQuery | null = null;
-        try {
-          const out = await queryDoubanByName(name, fetchDepsFromSettings(app));
-          if (out.ok) q = out.data;
-          else notice(out.reason === 'blocked' ? '豆瓣风控拦截，稍后再试解析' : out.reason === 'notfound' ? '豆瓣没搜到该名称，可翻面手动补全后保存' : '解析失败（网络异常）', 'error');
-        } catch {
-          notice('解析失败（网络异常）', 'error');
-        }
-        if (q) {
-          // 添加防重（票 306）：解析命中的豆瓣条目 sid 已在库 → 收场提示，不重复入库
-          // （同名的硬拦截 saveNew 本就有，这里兜「同名不同译/加过没记住」的情形）
-          const sid = extractDoubanSid(q.apizero?.doubanUrl || q.detailUrl);
-          const dup = sid ? M.items.find((x) => extractDoubanSid(x.doubanUrl) === sid) : undefined;
-          if (dup) {
-            close();
-            notice(`该条目已在库中：《${dup.name}》，不再重复添加`);
-            return;
-          }
-          const a = q.apizero;
-          const preview: FormPreviewData = {
-            posterUrl: q.posterUrl, title: q.title, typeTag: cur.tag,
-            genre: a?.genre ?? '', director: a?.director ?? '', actors: a?.actor ?? '',
-            region: a?.area ?? '', releaseDate: a?.year ?? '', duration: a?.duration ?? '',
-            doubanRating: a?.score ?? '', doubanUrl: a?.doubanUrl || q.detailUrl, hotComment: a?.shortComment ?? '',
-          };
-          const rangeVal = Number((el.querySelector('.j-range') as HTMLInputElement | null)?.value ?? 0);
-          const reviewVal = (el.querySelector('.j-review-t') as HTMLTextAreaElement | null)?.value.trim() ?? '';
-          backBox.innerHTML = formBackHtml(preview, {
-            typeTag: cur.tag, stText: cur.st, classifying: true,
-            rating: cur.st === '已看' ? rangeVal : 0,
-            review: cur.st === '已看' ? reviewVal : '',
-          });
-          void decideCinemaType({ title: q.title, isTv: a?.isTv ?? null, area: a?.area ?? null, genre: a?.genre ?? null, year: a?.year ?? null })
-            .catch(() => null)
-            .then((decided) => {
-              if (!decided || !backBox.isConnected) return;
-              cur.tag = decided;
-              swapChip('[data-pick="tag"]', formTagChipHtml(decided));
-            });
-        } else {
-          backBox.innerHTML = '';
-        }
-        flipCard.classList.add('is-flipped');
-      })().finally(() => {
-        parseBtn.classList.remove('is-busy');
-        if (parseText) parseText.textContent = '解析';
-      });
-    });
-    // 背面徽标下拉：点徽标开对应清单，点项回填 cur 并就地换徽标（tag/st 同一套 dm-pick 机制）；
-    // 状态改动同步正面 chips（j-save 读 cur，双面须一致）
-    backBox.addEventListener('click', (e) => {
-      const t = e.target as HTMLElement;
-      const pickBtn = t.closest('[data-pick]');
-      if (pickBtn) {
-        const kind = (pickBtn as HTMLElement).dataset.pick;
-        backBox.querySelectorAll('.dm-pick-list').forEach((l) => l.classList.toggle('is-open', l.getAttribute('data-pick-list') === kind));
-        return;
-      }
-      const tagItem = t.closest('[data-f-tag]') as HTMLElement | null;
-      if (tagItem) {
-        cur.tag = tagItem.dataset.fTag ?? cur.tag;
-        swapChip('[data-pick="tag"]', formTagChipHtml(cur.tag));
-        closePickLists();
-        return;
-      }
-      const stItem = t.closest('[data-f-st]') as HTMLElement | null;
-      if (stItem) {
-        cur.st = stItem.dataset.fSt ?? cur.st;
-        swapChip('[data-pick="st"]', formStChipHtml(cur.st));
-        el.querySelectorAll('[data-f-st]').forEach((x) => x.classList.toggle('is-on', (x as HTMLElement).dataset.fSt === cur.st));
-        syncEps();
-        syncChapters();
-        closePickLists();
-      }
-    });
-  }
+  // 编辑态单面直出：本地四组行的初值可见性
+  syncCountries();
+  syncGenres();
   syncEps();
+  syncChapters();
 }
 
-/** 小输入弹窗：自定义添加选项（票 294「＋」按钮共用；确认后回调，弹窗自身不落盘） */
-function promptOptionValue(sec: HTMLElement, title: string, onSubmit: (v: string) => void): void {
-  const { el, close } = ovl(sec, `<div class="cn-modal" style="max-width:280px;width:100%">
-    <div class="cn-modal-title">${esc(title)}</div>
-    <div class="f-field"><input class="f-input j-opt-name" placeholder="输入新选项名称"></div>
-    <div class="dm-actions"><button class="dm-btn j-cancel">取消</button><button class="dm-btn gold j-ok">确定</button></div>
-  </div>`, { sticky: true });
-  el.querySelector('.j-cancel')?.addEventListener('click', close);
-  const ok = () => {
-    const v = (el.querySelector('.j-opt-name') as HTMLInputElement).value.trim();
-    close();
-    if (v) onSubmit(v);
-  };
-  el.querySelector('.j-ok')?.addEventListener('click', ok);
-}
-
-interface FormPayload { name: string; tag: string; st: string; rating: number | null; date: string; review: string; country: string | null; genres: string[]; epsTotal: number | null; epsWatching: number | null; chTotal: number | null; chWatching: number | null }
-
-/** 追剧/追书进度提示（票 295/301）：正在看进度 ≥ 总量时随保存 toast 提醒，不自动改状态 */
-function catchUpSuffix(watching: number | null, total: number | null, unit: '集' | '章'): string {
-  return watching !== null && total !== null && total > 0 && watching >= total
-    ? ` · 已追平 ${total} ${unit}，可标记已看` : '';
-}
+/** 票 294/295/301（本地保留件）：国家单选 / 题材多选 / 集数两键 / 章节两键随表单走 */
+interface FormPayload { name: string; tag: string; st: string; rating: number | null; date: string; review: string; country: string | null; genres: string[]; epsTotal: number | null; epsWatching: number | null; chTotal: number | null; chWatching: number | null;
+  /** 解析阶段拿到的豆瓣字段（issue 395）：建档时一并写入，省掉落盘后重抓 */ douban?: DoubanQuery | null;
+  /** 解析期预览海报已落库的路径（issue 406 追加）：保存不再重复下载 */
+  posterRel?: string | null }
 
 /** 新增落盘（CM2：重名/落盘失败回退；created 域事件 + 抓取队列接管） */
-async function saveNew(sec: HTMLElement, p: FormPayload, app: App, close: () => void): Promise<void> {
+/** 表单游标：`el` = 弹窗层（保存后要按它折回卡片），`close` = 收层（issue 403 起成对传递——
+ *  只传 close 就折不出去了，那正是「保存后面板凭空消失」的由来） */
+interface FormHandle { el: HTMLElement; close: () => void }
+
+async function saveNew(p: FormPayload, app: App, form: FormHandle): Promise<void> {
+  // 非法字符校验（深审批A P3-7）：原只有编辑改名把关，新增建档裸放行——名称进文件名
+  // 《X》.md，含 / : 等直接建档失败或被 Obsidian 改名出「未识别文件」
+  if (hasIllegalNameChar(p.name)) {
+    notice(`${ILLEGAL_NAME_HINT}，请修改`, 'error');
+    return;
+  }
   const group = getGroupForTag(p.tag) ?? '其他';
-  const st = p.st === '想看' ? STATUS_WANT : p.st === '在看' ? STATUS_WATCHING : STATUS_WATCHED;
-  const it: CinemaItem = { file: null, name: p.name, typeTag: p.tag, group, status: st, rating: p.rating, watchDate: p.date, review: p.review, poster: null, genre: null, director: null, actors: null, region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: p.country, genres: p.genres, episodesTotal: episodesEligibleTag(p.tag) ? p.epsTotal : null, episodesWatching: episodesEligibleTag(p.tag) ? p.epsWatching : null, chaptersTotal: chaptersEligibleTag(p.tag) ? p.chTotal : null, chaptersWatching: chaptersEligibleTag(p.tag) ? p.chWatching : null, bookInfo: [], releaseDate: null, hotComment: null };
+  const st = statusNum(p.st);
+  const today = localNow().slice(0, 10);
+  const it: CinemaItem = { file: null, name: p.name, typeTag: p.tag, group, status: st, rating: p.rating, watchDate: p.date, wantDate: st === STATUS_WANT ? today : null, watchingDate: st === STATUS_WATCHING ? today : null, watchedDate: st === STATUS_WATCHED ? today : null, rewatches: [], lists: [], shelvedOnly: false, review: p.review, poster: null, genre: null, director: null, actors: null, region: null, year: null, releaseDate: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, hotComment: null, bookInfo: [], country: p.country, genres: p.genres, episodesTotal: episodesEligibleTag(p.tag) ? p.epsTotal : null, episodesWatching: episodesEligibleTag(p.tag) ? p.epsWatching : null, chaptersTotal: chaptersEligibleTag(p.tag) ? p.chTotal : null, chaptersWatching: chaptersEligibleTag(p.tag) ? p.chWatching : null };
   try {
     if (app.vault.getAbstractFileByPath(`${M.folderPath}/《${p.name}》.md`)) {
-      panelToast(sec, '已存在同名条目，请换个名称');
+      notice(DUP_NAME_HINT_FULL, 'warning');
       return;
     }
     M.items.unshift(it);
-    await persistItem(it, app);
-    emitDomainEvent('movie', { kind: 'created', name: p.name, status: st === STATUS_WANT ? 'want' : st === STATUS_WATCHING ? 'watching' : 'watched', rating: p.rating, review: p.review || null });
-    if (it.file && doubanEligibleTag(it.typeTag)) enqueueDoubanFetch(it.file, it.name);
-    close();
-    panelToast(sec, `已添加「${p.name}」${it.episodesWatching !== null || it.episodesTotal !== null ? catchUpSuffix(it.episodesWatching, it.episodesTotal, '集') : catchUpSuffix(it.chaptersWatching, it.chaptersTotal, '章')}`);
+    // 解析阶段已拿到海报与字段（issue 395）→ 保存时一并落库（海报下载进 vault + 属性写入）：
+    // 建档即「齐」，于是**不入队后台抓取、也不再有抓取通知与卡片 loading**（2026-09-21 用户拍板）。
+    // 只有真没落成海报（没解析 / 没网 / 写盘失败）才回退老路径交队列补齐。
+    // 预览期已下过（p.posterRel）直接用，不再重复下载。
+    const posterRel = p.posterRel ?? (p.douban?.posterUrl ? await downloadPreviewPoster(app, p.name, p.douban.posterUrl) : null);
+    await persistItem(it, app, undefined, p.douban, posterRel);
+    if (posterRel) it.poster = posterRel; // 内存同步：本次渲染即可见海报（盘上已写，重解析同值）
+    emitDomainEvent('movie', { kind: 'created', name: p.name, status: stToken(st), rating: p.rating, review: p.review || null });
+    // 票 293 起仅 电影/电视剧 入队（书籍/剧集细分走图书/追更链路，本地保留件）
+    if (it.file && !posterRel && doubanEligibleTag(it.typeTag)) enqueueDoubanFetch(it.file, it.name, 'movie');
+    notice(`已添加「${p.name}」${it.episodesWatching !== null || it.episodesTotal !== null ? catchUpSuffix(it.episodesWatching, it.episodesTotal, '集') : catchUpSuffix(it.chaptersWatching, it.chaptersTotal, '章')}`, 'success');
+    markCardFlash(itemKey(it), p.rating !== null && p.rating > 0); // 新卡落位闪（issue 403）
     renderAll(app);
+    foldOverlayToCard(form, itemKey(it)); // 折回新卡；键不在当前视图（被筛选滤掉）则即时关
   } catch (e) {
     if (!it.file) {
       const i = M.items.indexOf(it);
@@ -658,17 +2314,19 @@ async function saveNew(sec: HTMLElement, p: FormPayload, app: App, close: () => 
 }
 
 /** 编辑落盘：改名前置校验（非法字符/重名拦截）→ persistItem（rename + frontmatter tags）→ 域事件补发 */
-async function saveEdit(sec: HTMLElement, item: CinemaItem, p: FormPayload, app: App, close: () => void): Promise<void> {
+async function saveEdit(item: CinemaItem, p: FormPayload, app: App, form: FormHandle): Promise<void> {
   const group = getGroupForTag(p.tag) ?? '其他';
-  const st = p.st === '想看' ? STATUS_WANT : p.st === '在看' ? STATUS_WATCHING : STATUS_WATCHED;
-  const prev = { name: item.name, typeTag: item.typeTag, group: item.group, status: item.status, rating: item.rating, watchDate: item.watchDate, review: item.review, country: item.country, genres: [...item.genres] };
+  const st = statusNum(p.st);
+  // G7 快照回滚 + P3-11（深审批A）：filePath 单独记字符串——真机 renameFile 原地更新同一
+  // TFile 引用，比较对象路径（item.file === prev.file）永远相等，半失败检测必须走路径快照
+  const prev = { name: item.name, typeTag: item.typeTag, group: item.group, status: item.status, rating: item.rating, watchDate: item.watchDate, wantDate: item.wantDate, watchingDate: item.watchingDate, watchedDate: item.watchedDate, review: item.review, country: item.country, genres: [...item.genres], episodesTotal: item.episodesTotal, episodesWatching: item.episodesWatching, chaptersTotal: item.chaptersTotal, chaptersWatching: item.chaptersWatching, file: item.file, filePath: item.file?.path ?? null };
   if (p.name !== item.name) {
-    if (ILLEGAL_NAME_RE.test(p.name)) {
-      notice('名称含非法字符（\\ / : * ? " < > |），请修改', 'error');
+    if (hasIllegalNameChar(p.name)) {
+      notice(`${ILLEGAL_NAME_HINT}，请修改`, 'error');
       return;
     }
     if (app.vault.getAbstractFileByPath(`${M.folderPath}/《${p.name}》.md`)) {
-      panelToast(sec, '已存在同名条目，请换个名称');
+      notice(DUP_NAME_HINT_FULL, 'warning');
       return;
     }
   }
@@ -679,41 +2337,82 @@ async function saveEdit(sec: HTMLElement, item: CinemaItem, p: FormPayload, app:
   item.episodesWatching = episodesEligibleTag(p.tag) ? p.epsWatching : null;
   item.chaptersTotal = chaptersEligibleTag(p.tag) ? p.chTotal : null;
   item.chaptersWatching = chaptersEligibleTag(p.tag) ? p.chWatching : null;
+  // 状态日期（想看日期/在看日期/已看日期）：状态真变了才盖今天的章，原地编辑沿用原有
+  //（观影日期判据同款口径）。已看日期只增不删：已看→在看→再切回已看，记的仍是第一次到已看那天
+  if (st !== prev.status) {
+    if (st === STATUS_WANT) item.wantDate = localNow().slice(0, 10);
+    else if (st === STATUS_WATCHING) item.watchingDate = localNow().slice(0, 10);
+    else if (!item.watchedDate) item.watchedDate = localNow().slice(0, 10);
+  }
   try {
     await persistItem(item, app, { prevName: prev.name, prevTag: prev.typeTag });
     // 域事件补发（与快速标记 markStatus 同口径）：状态流转 + 评分变化 → 小橘行为流；
     // 「标记已看」改走本函数后由这里承接原 markStatus 的事件语义
-    const fromSt = prev.status === STATUS_WANT ? 'want' : prev.status === STATUS_WATCHING ? 'watching' : 'watched';
+    const fromSt = stToken(prev.status);
     if (st !== prev.status) {
-      const toSt = st === STATUS_WANT ? 'want' : st === STATUS_WATCHING ? 'watching' : 'watched';
+      const toSt = stToken(st);
       emitDomainEvent('movie', { kind: 'status', name: item.name, from: fromSt, to: toSt });
     }
     const prevRating = prev.rating && prev.rating > 0 ? prev.rating : null;
     if (item.rating !== null && item.rating > 0 && item.rating !== prevRating) {
       emitDomainEvent('movie', { kind: 'rated', name: item.name, fromRating: prevRating, toRating: item.rating });
     }
-    close();
-    panelToast(sec, `已保存「${p.name}」${item.episodesWatching !== null || item.episodesTotal !== null ? catchUpSuffix(item.episodesWatching, item.episodesTotal, '集') : catchUpSuffix(item.chaptersWatching, item.chaptersTotal, '章')}`);
-    renderAll(app);
+    // 影评写/改/删补发 review 域事件（深审批A P2-3）：契约（smartcat/movie-source.ts）与
+    // 文案层（movieReviewText）三方俱在唯缺 emitter。prev→new 无变化不发（改状态不改影评时零噪音）
+    const prevReview = prev.review || null;
+    const toReview = item.review || null;
+    if (prevReview !== toReview) {
+      emitDomainEvent('movie', { kind: 'review', name: item.name, fromReview: prevReview, toReview });
+    }
+    notice(`已保存「${p.name}」${item.episodesWatching !== null || item.episodesTotal !== null ? catchUpSuffix(item.episodesWatching, item.episodesTotal, '集') : catchUpSuffix(item.chaptersWatching, item.chaptersTotal, '章')}`, 'success');
+    // 评分变了才点亮星级（只改状态/影评时不给星级加戏）
+    markCardFlash(itemKey(item), item.rating !== null && item.rating > 0 && item.rating !== prev.rating);
+    renderAll(app);                       // 先刷：卡片就地换成新数据（issue 398「保存即齐」的数据侧）
+    foldOverlayToCard(form, itemKey(item)); // 再折回：面板按目标卡矩形收拢（issue 403）
   } catch (e) {
+    // 改名半失败回滚（深审批A P3-11）：renameFile 已成功、后续 processFrontMatter 失败 →
+    // 文件留在新路径而内存其余字段回旧值的不一致态。先尝试 renameFile 回旧路径；
+    // 回滚再失败 console 留痕 + renderAll 兜底（面板至少重刷到当前真实状态）
+    if (item.file && prev.filePath && item.file.path !== prev.filePath) {
+      try {
+        await app.fileManager.renameFile(item.file, prev.filePath);
+      } catch (re) {
+        console.error('回滚影视笔记改名失败:', re);
+        renderAll(app);
+      }
+    }
     Object.assign(item, prev);
     notifySaveError(e);
     console.error(e);
   }
 }
 
-// ---------- 弹窗：删除确认 ----------
+// ---------- 弹窗：删除确认（一致审查#1 收编 core/flow-dialog：全域最后一个自绘确认框退役） ----------
 
-function openConfirm(sec: HTMLElement, item: CinemaItem, app: App): void {
-  const { el, close } = ovl(sec, confirmModalHtml(item), { sticky: true });
-  mountIcons(el);
-  el.querySelector('.j-cancel')?.addEventListener('click', close);
-  el.querySelector('.j-del')?.addEventListener('click', async () => {
+/**
+ * 删除确认：走 core openFlowDialog（role=dialog/aria-modal、ESC/遮罩取消、焦点管理、
+ * danger 中性形制——焦点反落取消钮，回车不再直通删除）。皮肤类见 styles.css 的
+ * `#__shared_confirm_popup__.bz-cinema-flow-dialog` 映射段。
+ */
+function openConfirm(item: CinemaItem, app: App): void {
+  void openFlowDialog({
+    title: '删除影视',
+    // message 经 core escapeHtml（片名注入防护），\n 渲染为 <br> 分行
+    message: `确定删除「${item.name}」吗？\n将移入系统回收站，可在回收站恢复`,
+    // 流程框挂 document.body、不在面板树内：cn-skin 取午夜场调色板（菜单/抽屉皮肤同一通道），
+    // bz-cinema-flow-dialog = 本域确认框专属类；删除是危险主动作 → core 另挂 bz-flow-dialog--danger
+    className: 'cn-skin bz-cinema-flow-dialog',
+    actions: [
+      { label: '取消', value: 'cancel' },
+      { label: '删除', value: 'ok', cta: true, danger: true },
+    ],
+  }).then(async (v) => {
+    if (v !== 'ok') return;
     if (item.file) {
       try {
         await app.vault.trash(item.file, true);
       } catch (e) {
-        console.error('删除条目笔记失败:', e);
+        console.error('删除影视笔记失败:', e);
         notice('删除失败：文件可能被占用，请重试', 'error');
         return;
       }
@@ -724,8 +2423,7 @@ function openConfirm(sec: HTMLElement, item: CinemaItem, app: App): void {
     const idx = M.items.indexOf(item);
     if (idx > -1) M.items.splice(idx, 1);
     emitDomainEvent('movie', { kind: 'deleted', name: item.name });
-    close();
-    panelToast(sec, `已删除「${item.name}」`);
+    notice(`已删除「${item.name}」`, 'success');
     renderAll(app);
   });
 }
@@ -753,32 +2451,809 @@ function aiInput(): AiPageInput {
 // ---------- 渲染（布局胶水入参装配；vault 自动刷新与 M.renderFn 都走 renderAll） ----------
 
 function midnightInput(app: App): MidnightRenderInput {
+  const merge = mergeSeasonsOn();
+  const allCards = mergeSeasonCards(M.items, merge);
+  // 惰性构建（深审批A P3-14）：list 页不预算 AI 页大字符串——列表页每次标记/筛选/搜索整刷
+  // 都走这里，恒算纯浪费；list 视图的渲染胶水不读该字段，真进 ai 页才构建
+  const onList = M.view === 'list';
   return {
-    items: M.items,
-    list: getDisplayItems(),
+    allCards,
+    cards: mergeSeasonCards(getDisplayItems(), merge),
     view: {
       view: M.view,
       typeFilter: M.typeFilter,
       statusFilter: M.statusFilter,
       countryFilter: M.countryFilter,
+      listFilter: M.listFilter,
       sortMode: M.sortMode,
       searchKeyword: M.searchKeyword,
       multiSelect: M.multiSelect,
       selectedCount: M.selected.size,
     },
     cols: gridColumns(),
+    lists: allLists(M.items),
+    cn: countryTally(allCards),
     title: listTitle(),
     watchedCount: watchedCount(),
-    aiHtml: aiPageHtml(aiInput()),
+    aiHtml: onList ? '' : aiPageHtml(aiInput()),
     aiCount: M.aiResult && M.aiResult.length ? M.aiResult.length : null,
-    statHtml: buildAnalysisHTML(),
+    statHtml: onList ? '' : buildAnalysisHTML(),
     poster: (it) => posterUrl(it, app),
     fetching: (it) => isFetching(it.file?.path),
-    picked: (it) => M.selected.has(itemKey(it)),
+    picked: (e) => M.selected.has(itemKey(cardFace(e))),
   };
 }
 
-// ---------- 多选导出感想（票 296） ----------
+// ---------- 搜索（防抖；desk 部分刷新保焦点 / mob 全刷+回焦） ----------
+
+function onSearchInput(app: App, sec: HTMLElement, isMob: boolean, raw: string): void {
+  // 尾部 ✕ 显隐随词同步（效率#12 全域拍板：有词才现、清空即隐；mob 搜索框随壳常驻，
+  // 不随 renderAll 重建，显隐只能走行为层）
+  const clearBtn = sec.querySelector('[data-cinema-clear]') as HTMLElement | null;
+  if (clearBtn) clearBtn.hidden = !raw.trim();
+  if (M.searchDebounceTimer) clearTimeout(M.searchDebounceTimer);
+  M.searchDebounceTimer = setTimeout(() => {
+    M.searchKeyword = raw.trim();
+    M.view = 'list';
+    if (isMob) {
+      renderAll(app);
+      const el = sec.querySelector('.j-mq') as HTMLInputElement | null;
+      if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+    } else {
+      refreshDeskList(app, sec);
+    }
+  }, 300);
+}
+
+/** 清搜索词（搜索框 ESC 二段清词出口，深审批A P2-5）：清 M.searchKeyword + 取消防抖 +
+ *  刷新 + 焦点回框光标在尾（与 onSearchInput 的 mob 回焦样板同款；清词语义与
+ *  data-cinema-clear 出口的清词段一致——只清词不动类型/状态筛选） */
+function clearSearchKeyword(app: App, sec: HTMLElement, isMob: boolean): void {
+  if (M.searchDebounceTimer) clearTimeout(M.searchDebounceTimer);
+  M.searchDebounceTimer = null;
+  M.searchKeyword = '';
+  renderAll(app);
+  // 焦点回框（P2-5）：查询必须在 renderAll 之后——desk 框随整刷换血，取新元素才接得上焦。
+  // mob 框随壳常驻（不随 renderAll 重建），新值残留必须显式清 + ✕ 显隐同步
+  const el = sec.querySelector(isMob ? '.j-mq' : '.j-q') as HTMLInputElement | null;
+  if (el) { el.value = ''; el.focus(); }
+  const clearBtn = sec.querySelector('[data-cinema-clear]') as HTMLElement | null;
+  if (clearBtn) clearBtn.hidden = true;
+}
+
+/** 输入时只刷列表与计数（保焦点；空了整刷出空态，原型 refreshList 同语义） */
+function refreshDeskList(app: App, sec: HTMLElement): void {
+  const view = sec.querySelector('.j-view');
+  if (!view) { renderAll(app); return; }
+  const body = view.querySelector('.d-scroll');
+  const head = view.querySelector('.d-head');
+  const list = getDisplayItems();
+  if (!body || !head || !list.length) {
+    renderAll(app);
+    // 空态整刷重建了工具行（深审批A P2-4）：焦点跨过空态落到 body，用户接着输入无效——
+    // 对 .j-q 补回焦 + 光标到尾（mob 回焦样板同款）
+    const el = sec.querySelector('.j-q') as HTMLInputElement | null;
+    if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+    return;
+  }
+  const cards = mergeSeasonCards(list, mergeSeasonsOn());
+  const cnt = head.querySelector('.j-cnt');
+  if (cnt) cnt.textContent = `· ${cards.length} 部`;
+  const grid = body.querySelector('.grid');
+  if (grid) grid.innerHTML = cards.map((e) => cardEntryHtml(e, app)).join('');
+  mountIcons(sec);
+}
+
+// ---------- 事件绑定（sec 级委托一次；重渲染内容全覆盖） ----------
+
+/** 鼠标惯用件（悬浮 + 精指针）能力单判（gameshelf/ui.ts hoverCapable 同口径：'(hover: hover)
+ *  and (pointer: fine)'）：消费方一，季圆点悬浮换脸——触屏 tap 会发 mouseover 却不发
+ *  mouseout，换脸会滞留；消费方二，桌面右键菜单分流——触屏长按会同时发 pointerdown 与
+ *  contextmenu，按壳类近似「桌面=有鼠标」会让桌面宽度的触屏误弹鼠标菜单。core 尚无此口径
+ *  单源，与 gameshelf 各持一份（跨域提取涉两域，待收口批上提，不在本批白名单内动）。 */
+function hoverCapable(): boolean {
+  try {
+    return typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  } catch {
+    return false;
+  }
+}
+
+/** 方向键 → 网格坐标增量（键盘导航用） */
+const ARROW_DIR: Record<string, [number, number]> = {
+  ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
+};
+
+/** 网格内方向键的目标卡：几何最近法——前进方向上的投影必须为正，侧向偏移加权（×2）惩罚，
+ *  于是「右」优先同行右边那张、「下」优先下一行同列那张，而列数不必被读进来。
+ *  无几何（jsdom 全零矩形 / 卡片被隐藏）时返回 null。 */
+function nearestCardInDir(cur: HTMLElement, dx: number, dy: number): HTMLElement | null {
+  const grid = cur.closest<HTMLElement>('.grid, .m-grid');
+  if (!grid) return null;
+  const cr = cur.getBoundingClientRect();
+  if (!cr.width) return null;
+  const cx = cr.left + cr.width / 2;
+  const cy = cr.top + cr.height / 2;
+  let best: HTMLElement | null = null;
+  let bestScore = Infinity;
+  grid.querySelectorAll<HTMLElement>('.pcard[data-cinema-key]').forEach((el) => {
+    if (el === cur) return;
+    const r = el.getBoundingClientRect();
+    if (!r.width) return;
+    const px = r.left + r.width / 2;
+    const py = r.top + r.height / 2;
+    const ahead = (px - cx) * dx + (py - cy) * dy;
+    if (ahead <= 1) return;
+    const cross = Math.abs((px - cx) * dy) + Math.abs((py - cy) * dx);
+    const score = ahead + cross * 2;
+    if (score < bestScore) { bestScore = score; best = el; }
+  });
+  return best;
+}
+
+function bindMidnight(sec: HTMLElement, app: App): void {
+  const hoverable = hoverCapable();
+  // 季圆点悬浮预览（悬浮能力判定——hover 是鼠标惯用件，触屏 tap 会发 mouseover 却不发
+  // mouseout，换脸会滞留；旧按 .mob 壳近似「桌面=有鼠标」，桌面宽度的触屏（宽壳 + 无悬浮
+  // 能力）仍会粘脸，现与范式批 CSS @media (hover: hover) 全域口径对齐）。sec 级委托：网格
+  // 每次重渲染都换新卡片元素，逐个绑定会漏绑/泄漏。
+  // 呈报#14（C3）：圆点本体 6px，悬浮换脸经常点不中。外观一点不动（2026-09-18 拍板），
+  // 只放宽**委托目标**做等效热区——衬底/间隙也计入命中，落点不在圆点上时取几何最近的一枚
+  // （core .bz-touch-target 的 ::after 外扩范式是 pointer:coarse 档，圆点换脸是桌面 hover
+  // 主路径且外扩圆会盖住相邻圆点造成误换季，故走「委托改容器最近圆点匹配」这一路）。
+  const nearestSeasonDot = (target: EventTarget | null, e: MouseEvent): HTMLElement | null => {
+    const el = target as HTMLElement | null;
+    const box = el?.closest?.('.season-dots');
+    if (!box) return null;
+    const direct = el!.closest('.season-dots i') as HTMLElement | null;
+    if (direct) return direct;
+    let best: HTMLElement | null = null;
+    let bestDist = Infinity;
+    box.querySelectorAll<HTMLElement>('i').forEach((d) => {
+      const r = d.getBoundingClientRect();
+      const dx = e.clientX - (r.left + r.width / 2);
+      const dy = e.clientY - (r.top + r.height / 2);
+      const dist = dx * dx + dy * dy;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = d;
+      }
+    });
+    return best;
+  };
+  let peekedDot: HTMLElement | null = null; // 当前换脸中的圆点：同点不重刷（防 mousemove 反复重写 innerHTML 闪图）
+  /** 收掉当前换脸（离开圆点、以及开详情/合集前都要走它）。开弹窗前必须先收：
+   *  换脸途中正脸可能已被冻结成「刚才那一季」，而弹窗/飞行取的是静息态那一季的海报——
+   *  不收就会「看到 A、飞的是 B」。 */
+  const endPeek = (): void => {
+    if (!peekedDot) return;
+    restFace(peekedDot);
+    peekedDot = null;
+  };
+  const peekNearest = (e: MouseEvent): void => {
+    const dot = nearestSeasonDot(e.target, e);
+    if (dot === peekedDot) return;
+    // 换脸成功才记账：悬停「正脸那一季」的圆点时 peekSeasonDot 会把手上的换脸收掉并返回 false，
+    // 此时没有在途换脸可收，mouseout 也就不该再去 rest（记账成 true 会在离开时多收一次）
+    peekedDot = dot && peekSeasonDot(dot, app) ? dot : null;
+  };
+  if (hoverable) {
+    sec.addEventListener('mouseover', peekNearest);
+    sec.addEventListener('mousemove', peekNearest); // 衬底/间隙内滑行不换元素也跟进最近圆点
+    sec.addEventListener('mouseout', (e) => {
+      // 还在圆点容器内（圆点↔圆点、圆点↔衬底）交给 mouseover/mousemove 换脸，不打回静息态
+      const to = e.relatedTarget as HTMLElement | null;
+      if (to?.closest?.('.season-dots')) return;
+      endPeek();
+    });
+    bindCardTilt(sec); // 海报跟手倾斜（issue 409）：与换脸同一道悬停能力门控
+  }
+  // 深审批 B #4：卡片键盘可达——.pcard 已带 tabindex=0/role=button（shared.cardHtml），
+  // 聚焦后 Enter/Space 开详情（与 click 分支同一落点分流；对齐 review 域不可达卡整改范式）。
+  // sec 级委托同 click：网格每次重渲染换新元素，逐卡绑定会漏绑/泄漏。
+  sec.addEventListener('keydown', (e) => {
+    // 网格方向键导航（issue 403）：按**几何最近**移动焦点——左右 = 同行相邻，上下 = 下一行同列，
+    // 列数自适应（桌面 5 列 / 移动 3 列，以后改列数这里不用动）。无几何（jsdom / 面板隐藏）时
+    // 自然找不到候选，落回浏览器默认行为，不吞键。
+    const dir = ARROW_DIR[e.key];
+    if (dir && !e.isComposing) {
+      const cur = (e.target as HTMLElement | null)?.closest?.('.pcard[data-cinema-key]') as HTMLElement | null;
+      const next = cur ? nearestCardInDir(cur, dir[0], dir[1]) : null;
+      if (next) {
+        e.preventDefault();
+        next.focus();
+        next.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        return;
+      }
+    }
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const cardEl = (e.target as HTMLElement | null)?.closest?.('.pcard[data-cinema-key]') as HTMLElement | null;
+    if (!cardEl) return;
+    e.preventDefault(); // Space 兼作翻页键：开详情时吞掉滚动
+    endPeek();          // 换脸先收（弹窗海报取静息态那一季，见 endPeek 注释）
+    const key = cardEl.dataset.cinemaKey;
+    // 合并卡（剧集按季合并）：点开各季明细；其余走单条目详情（click 分支同构）
+    if (isSeriesKey(key)) openSeriesDetail(sec, key as string, app, { from: cardEl });
+    else {
+      const it = itemByKeyInState(key);
+      if (it) openDetail(sec, it, app, { from: cardEl }); // 键盘激活同样走共享元素过渡（起点 = 聚焦的卡）
+    }
+  });
+  sec.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    // AI 页按钮（开始/重试/换一批/加入想看）先行分流（页内与共享弹窗内同享）
+    const aiBtn = t.closest('[data-cinema-ai-start],[data-rec-add]') as HTMLElement | null;
+    if (aiBtn) {
+      if (aiBtn.hasAttribute('data-rec-add')) {
+        if (aiBtn.hasAttribute('disabled')) return;
+        const rec = M.aiResult?.[Number(aiBtn.dataset.recAdd)];
+        if (rec) void quickAddWant(app, rec.title || rec.name || '', rec.type || '');
+      } else {
+        if (M.aiBase) void runSimilarRecommend(M.aiBase, app);
+        else void runAIRecommend(app);
+      }
+      return;
+    }
+    const clear = t.closest('[data-cinema-clear]') as HTMLElement | null;
+    if (clear) {
+      // 打字后 300ms 内点 ✕：防抖必须连根取消——否则清理完的空搜索态会被旧词的回声重新滤回来
+      // （与 clearSearchKeyword 的清词段对齐；框值/状态词清空口径不变）
+      if (M.searchDebounceTimer) clearTimeout(M.searchDebounceTimer);
+      M.searchDebounceTimer = null;
+      M.typeFilter = null; M.statusFilter = null; M.countryFilter = null; M.searchKeyword = '';
+      // 效率#12 全域口径：✕ 点击 = 框值同清 + ✕ 即隐（mob 框常驻不随 renderAll 重建）
+      const inp = clear.closest('label')?.querySelector('input') as HTMLInputElement | null;
+      if (inp) inp.value = '';
+      (clear as HTMLElement).hidden = true;
+      renderAll(app);
+      return;
+    }
+    // 票 296：多选导出工具条（本地保留件）
+    const msel = t.closest('[data-cinema-multiselect]') as HTMLElement | null;
+    if (msel) {
+      M.multiSelect = true;
+      M.selected.clear();
+      M.view = 'list';
+      renderAll(app);
+      return;
+    }
+    // 票 306：查重/去重（工具行「查重复」按钮）
+    if (t.closest('[data-cinema-dedupe]')) { openDedupeDialog(sec, app); return; }
+    const mexit = t.closest('[data-cinema-multiselect-exit]') as HTMLElement | null;
+    if (mexit) {
+      M.multiSelect = false;
+      M.selected.clear();
+      renderAll(app);
+      return;
+    }
+    const mexp = t.closest('[data-cinema-export]') as HTMLElement | null;
+    if (mexp) { void exportReviews(sec, app); return; }
+    // 一键导入豆瓣片单：动作不是视图，不走 j-tool 的视图切换分流
+    if (t.closest('.j-import')) { openDoubanImport(sec, app); return; }
+    const tool = t.closest('.j-tool') as HTMLElement | null;
+    if (tool && tool.dataset.tool) {
+      // 进 ai 不动筛选状态：rail 高亮由渲染层按视图熄灭（render.ts listOn 门控），
+      // 返回列表时先前选中的筛选高亮原样恢复
+      M.view = M.view === tool.dataset.tool ? 'list' : (tool.dataset.tool as 'ai' | 'stat');
+      renderAll(app);
+      return;
+    }
+    // 观影志（yearbook 覆盖层，上游名「观影分析」）：独立全屏放映室（2026-09-21 用户拍板）
+    if (t.closest('[data-film-open]')) { openYearbookOverlay(app); return; }
+    const mb = t.closest('.j-mai,.j-mstat,.j-mclose') as HTMLElement | null;
+    if (mb) {
+      if (mb.classList.contains('j-mclose')) closeOverlay();
+      else if (mb.classList.contains('j-mstat')) {
+        // 本地「观影分析」统计页（ADR-0090 内嵌口径，票 294/296 并存件）：再点回列表
+        M.view = M.view === 'stat' ? 'list' : 'stat';
+        renderAll(app);
+      } else {
+        M.view = M.view === 'ai' ? 'list' : 'ai'; // 落域适配：再点回列表
+        renderAll(app);
+      }
+      return;
+    }
+    // AI 页返回钮（.sp-back 钮本体）→ 回列表。原先按 .j-back 匹配，而换面表单的背面容器
+    // 同名（.j-back）——点背面任何内容都会撞进来悄悄切视图（复审 P2②，2026-10-01 收窄）。
+    const back = t.closest('.sp-back') as HTMLElement | null;
+    if (back) { M.view = 'list'; renderAll(app); return; }
+    const railBtn = t.closest('[data-g],[data-s],[data-cn],[data-l]') as HTMLElement | null;
+    if (railBtn) {
+      M.view = 'list';
+      if (railBtn.dataset.g) {
+        M.typeFilter = railBtn.dataset.g === '全部' ? null : railBtn.dataset.g;
+        M.statusFilter = null;
+        // 「全部」= 清全部筛选（片单筛选亮着时「全部」不再高亮，点它必须回到真全部）
+        if (railBtn.dataset.g === '全部') M.listFilter = null;
+      } else if (railBtn.dataset.cn) {
+        // 票 294：国家筛选（'未填' = 国家为空桶；再点取消）
+        M.countryFilter = M.countryFilter === railBtn.dataset.cn ? null : railBtn.dataset.cn;
+      } else if (railBtn.dataset.l) {
+        // 片单行：与类型/状态叠加的第三维筛选，再点同一行取消
+        M.listFilter = M.listFilter === railBtn.dataset.l ? null : railBtn.dataset.l;
+      } else {
+        const s = railBtn.dataset.s ?? null;
+        M.statusFilter = M.statusFilter === s ? null : s;
+      }
+      renderAll(app);
+      return;
+    }
+    const chip = t.closest('.chip') as HTMLElement | null;
+    if (chip) {
+      M.view = 'list'; // chips 属列表视图：在 AI/分析页点 chips 必须回落列表（否则筛选生效但页面停在原视图，看着像「点了没反应」）
+      if (chip.dataset.c) {
+        const all = chip.dataset.c === 'all';
+        M.typeFilter = all ? null : chip.dataset.c;
+        M.statusFilter = null;
+        // 「全部」= 清全部筛选（与桌面 rail 同口径：国家/片单亮着时「全部」不再高亮）
+        if (all) { M.countryFilter = null; M.listFilter = null; }
+      } else if (chip.dataset.cn) {
+        // 票 294：国家筛选（再点取消）
+        M.countryFilter = M.countryFilter === chip.dataset.cn ? null : chip.dataset.cn;
+      } else {
+        const s = chip.dataset.s ?? null;
+        M.statusFilter = M.statusFilter === s ? null : s;
+      }
+      renderAll(app);
+      return;
+    }
+    const sortBtn = t.closest('.j-sort button') as HTMLElement | null;
+    if (sortBtn && sortBtn.dataset.k) {
+      M.sortMode = sortBtn.dataset.k as CinemaSortMode;
+      renderAll(app);
+      return;
+    }
+    const add = t.closest('[data-cinema-analysis-add],[data-cinema-add]') as HTMLElement | null;
+    if (add) { openForm(sec, null, app); return; }
+    const cardEl = t.closest('.pcard') as HTMLElement | null;
+    if (cardEl) {
+      endPeek(); // 换脸先收（飞行取的是静息态那一季的海报，见 endPeek 注释）
+      const key = cardEl.dataset.cinemaKey;
+      // 票 296：多选模式下点卡片=勾选/取消勾选（合并卡取正脸季为勾选对象，本地保留件）
+      if (M.multiSelect) {
+        const it = isSeriesKey(key)
+          ? (seriesCardByKey(key as string) ? cardFace(seriesCardByKey(key as string)!) : undefined)
+          : itemByKeyInState(key);
+        if (it) {
+          const k = itemKey(it);
+          if (M.selected.has(k)) M.selected.delete(k);
+          else M.selected.add(k);
+          renderAll(app);
+        }
+        return;
+      }
+      // 合并卡（剧集按季合并）：点开各季明细；其余走单条目详情
+      if (isSeriesKey(key)) openSeriesDetail(sec, key as string, app, { from: cardEl });
+      else {
+        const it = itemByKeyInState(key);
+        if (it) openDetail(sec, it, app, { from: cardEl }); // 海报从这张卡「抽出」飞入详情（issue 396）
+      }
+    }
+  });
+  sec.addEventListener('contextmenu', (e) => {
+    // 右键菜单是鼠标惯用件，分流走 hoverCapable（与季圆点悬浮同一出口，不再按 .mob 壳近似
+    // 「桌面=有鼠标」——桌面宽度的触屏长按会同时发 pointerdown 与 contextmenu，不分流就会
+    // 多弹一个鼠标菜单盖在抽屉上）；移动端长按手势走 core/dom.longPress。
+    if (!hoverCapable()) return;
+    const cardEl = (e.target as HTMLElement).closest('.pcard') as HTMLElement | null;
+    if (!cardEl) return;
+    e.preventDefault();
+    const key = cardEl.dataset.cinemaKey;
+    // 合并卡（剧集按季合并）：右键与普通卡同款浮层，动作集为片级（查看全部 + 片单归属，issue 535）
+    if (isSeriesKey(key)) {
+      const card = seriesCardByKey(key as string);
+      if (!card) return;
+      openItemMenu(e.clientX, e.clientY, toItemActions(seriesActs(card, sec, app)), true, MENU_SKIN);
+      resetItemMenuClickGuard();
+      return;
+    }
+    const it = itemByKeyInState(key);
+    if (!it) return;
+    // core 跟手菜单（防溢出定位/ESC/外部点击关闭/键盘导航由共享层承载）
+    openItemMenu(e.clientX, e.clientY, toItemActions(itemActions(it, sec, app)), true, MENU_SKIN);
+    // 右键时序会置位残余 click 抑制（Chromium：mousedown → contextmenu → mouseup 落在菜单外），
+    // 吞掉下一次左键（菜单项要点两次才生效）；右键无补发 click，直调后立即复位
+    resetItemMenuClickGuard();
+  });
+}
+
+// ---------- 壳选择 / 创建 / 渲染总入口 ----------
+
+/** 主面板桌面缩放边界（ADR-0084）：拖拽下限 / 硬上限，视口 92% 由 uiResizable 逐帧钳 */
+const PANEL = { MIN_W: 640, MIN_H: 440, MAX_W: 1280, MAX_H: 880 };
+/** 桌面拖动缩放句柄（ADR-0084/0094）：createOverlay 挂 / closeOverlay 摘（面板开关重建型） */
+let panelResizeDetach: { flush: () => void; detach: () => void } | null = null;
+
+export function createOverlay(app: App): void {
+  const overlay = document.createElement('div');
+  overlay.className = 'bz-panel-overlay';
+  const mobile = isMobileEnv();
+  overlay.innerHTML = mobile ? midnightMobHtml() : midnightDeskHtml();
+
+  document.body.appendChild(overlay);
+  topifyZ(overlay); // ADR-0067：显示即发号（谁后显示谁在上）
+  M.currentOverlay = overlay;
+  // 后台刷新（豆瓣补抓落盘 / vault 事件 / AI 流程）走 renderSoft：打字期间顺延，不抢焦点
+  M.renderFn = () => renderSoft(app);
+  const root = overlay.querySelector<HTMLElement>('[data-cinema-root]');
+  if (!root) return;
+  // 打开即入焦 + Tab 圈闭（呈报#13 F3+H3 全域范式，core trapPanelFocus 单源）
+  trapPanelFocus(root);
+  // 桌面拖动缩放（ADR-0084）：只挂桌面午夜场壳（mobile 壳恒真全屏不挂，root 取自 desk 分支）；
+  // 面板开关重建型，随 createOverlay 挂、closeOverlay 摘；persist 记忆键
+  // cinemaPanelWidth/Height（ADR-0094，core 工厂读写）
+  if (!mobile && !panelResizeDetach) {
+    panelResizeDetach = uiResizable(root, {
+      minW: PANEL.MIN_W, minH: PANEL.MIN_H,
+      maxW: PANEL.MAX_W, maxH: PANEL.MAX_H,
+      persist: panelSizePersist('cinemaPanelWidth', 'cinemaPanelHeight', PANEL.MIN_W, PANEL.MIN_H),
+    });
+  }
+  // 点遮罩 = 关闭主面板（桌面；移动全屏无遮罩）
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) closeOverlay();
+  });
+
+  bindMidnight(root, app);
+  // 搜索/滑杆输入（委托；input 冒泡）
+  root.addEventListener('input', (e) => {
+    M.lastInputAt = Date.now(); // 打字心跳：renderSoft 据此让路（含中文输入法组合期）
+    const t = e.target as HTMLElement;
+    if (t.classList.contains('j-q') || t.classList.contains('j-mq')) {
+      onSearchInput(app, root, t.classList.contains('j-mq'), (t as HTMLInputElement).value);
+    } else if (t.classList.contains('j-range')) {
+      const out = root.querySelector('.j-rval');
+      const r = Number((t as HTMLInputElement).value);
+      if (out) out.textContent = r.toFixed(1);
+      updateFormStars(t as HTMLInputElement, r);
+    }
+  });
+  // 搜索框 ESC 二段清词（深审批A P2-5，委托挂 root——搜索框随整刷重建，逐个绑会漏）：
+  // 有词时第一段 ESC 只清词（clearSearchKeyword），preventDefault + stopImmediatePropagation
+  // 阻断冒泡到 escManager 的关层链；无词放行——ESC 关弹窗/面板语义不变
+  root.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.isComposing || e.defaultPrevented) return;
+    const t = e.target as HTMLElement;
+    if (!(t.classList.contains('j-q') || t.classList.contains('j-mq'))) return;
+    if (!M.searchKeyword) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    clearSearchKeyword(app, root, t.classList.contains('j-mq'));
+  });
+
+  rebuildItems(app);
+  renderAll(app);
+}
+
+// ---------- 输入守护（打字不被整刷打断） ----------
+//
+// 起因：desk 的搜索框在 .j-view 内，renderAll 重写 .j-view 会连搜索框一起换血 →
+// 焦点丢失、未满防抖（300ms）的键入被渲染回退成旧 value；打开面板时 sweepDoubanFetch
+// 把缺海报/缺豆瓣链接的条目全入队，补抓每完成一条就整刷两次，于是「打几个字就失焦」。
+// 两层处理：
+// 1) 后台刷新走 renderSoft：打字静默期内顺延，等手停了再补刷；
+// 2) 任何整刷（含用户主动触发的）都过焦点守护：快照文本输入的标识/值/选区，渲染后原样落回。
+
+/** 打字静默期判定（ms）：距上次键入小于此值视为还在打字 */
+const TYPING_GUARD_MS = 400;
+/** 顺延渲染的补刷延迟（ms）：手停后多久补一次后台刷新 */
+const SOFT_RENDER_DELAY_MS = 400;
+
+let softRenderTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 文本输入判定（排除滑杆/勾选等不支持选区的输入类型） */
+function isTextField(el: Element | null): el is HTMLInputElement | HTMLTextAreaElement {
+  if (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement)) return false;
+  return !/^(range|checkbox|radio|button|submit|reset|file|color|image)$/i.test(el.type);
+}
+
+/** 稳定选择器（tag + 全量 class）——渲染后按同一标识找回同名输入框 */
+function focusSelector(el: HTMLElement): string | null {
+  const cls = Array.from(el.classList).filter((c) => /^[A-Za-z][\w-]*$/.test(c));
+  return cls.length ? `${el.tagName.toLowerCase()}.${cls.join('.')}` : null;
+}
+
+interface FocusSnap { sel: string; value: string; start: number | null; end: number | null }
+
+/** 渲染前快照：焦点在面板文本输入内才记；value 必记（防抖前的键入不能丢） */
+function snapshotFocus(root: HTMLElement): FocusSnap | null {
+  const el = document.activeElement;
+  if (!isTextField(el) || !root.contains(el)) return null;
+  const sel = focusSelector(el);
+  if (!sel) return null;
+  let start: number | null = null;
+  let end: number | null = null;
+  try { start = el.selectionStart; end = el.selectionEnd; } catch { /* number/email 等不支持选区 */ }
+  return { sel, value: el.value, start, end };
+}
+
+/** 渲染后落回：value 不同才回写（免打断输入法组合），再恢复焦点与光标位置 */
+function restoreFocus(root: HTMLElement, snap: FocusSnap | null): void {
+  if (!snap) return;
+  const el = root.querySelector(snap.sel);
+  if (!isTextField(el)) return; // 视图切换后目标输入框不存在（如切到 AI 页）：不抢焦点
+  if (el.value !== snap.value) el.value = snap.value;
+  el.focus();
+  if (snap.start !== null && snap.end !== null) {
+    try { el.setSelectionRange(snap.start, snap.end); } catch { /* 同上 */ }
+  }
+}
+
+/** 面板内是否还在打字（焦点在文本输入 + 距上次键入未过静默期） */
+function isTyping(root: HTMLElement): boolean {
+  if (!M.lastInputAt || Date.now() - M.lastInputAt >= TYPING_GUARD_MS) return false;
+  return isTextField(document.activeElement) && root.contains(document.activeElement);
+}
+
+function clearSoftRender(): void {
+  if (softRenderTimer) { clearTimeout(softRenderTimer); softRenderTimer = null; }
+}
+
+/** 面板根（渲染与开层入口通用前置）：面板未开或根缺失为 null */
+function cinemaRoot(): HTMLElement | null {
+  return M.currentOverlay?.querySelector<HTMLElement>('[data-cinema-root]') ?? null;
+}
+
+/**
+ * 后台刷新入口（M.renderFn / vault 自动刷新）：打字期间顺延，手停后补刷一次。
+ * 用户主动触发的渲染（点筛选、保存、搜索防抖）一律走 renderAll 立即渲染，不延后。
+ */
+export function renderSoft(app: App): void {
+  const root = cinemaRoot();
+  if (!root) return;
+  if (isTyping(root)) {
+    if (softRenderTimer) clearTimeout(softRenderTimer);
+    softRenderTimer = setTimeout(() => { softRenderTimer = null; renderAll(app); }, SOFT_RENDER_DELAY_MS);
+    return;
+  }
+  renderAll(app);
+}
+
+// ---------- 滑动高亮（侧栏 rail / 排序钮 j-sort；2026-09-21 用户拍板） ----------
+// 机制已收编 core/ui/slide-pill.ts：底片常驻选中项、悬停跟随、移开回落、渲染后落位不演滑行。
+// 与备忘录（侧栏场景 / 排序钮）共用同一套，禁止域内各写一份。
+
+/** 影院的两处底片挂载点：左栏 rail（类型/状态/片单/底部工具通吃）与排序钮 j-sort。
+ *  keys 里的 "l" 是 2026-10-01 补的：片单组是底片之后加的功能，行键 data-l 漏进 keys，
+ *  悬停跟随滑到片单行就断（用户反馈「跟随的背景色也要进片单」）；l 与 g/s/tool 同权——
+ *  都是「行键」，任取第一个非空即该项的稳定标识。 */
+const PILL_TARGETS: readonly BzSlidePillTarget[] = [
+  { box: ".d-rail", item: ".rail-item", keys: ["g", "s", "l", "tool", "k"], clip: ".rail-sec" },
+  { box: ".j-sort", item: "button", keys: ["k"] },
+];
+
+// ---------- 反馈与入口（issue 403）：星级点亮、落位闪、保存折回 ----------
+
+/** 表单评分预览：拖动滑杆时五颗星逐颗点亮。星数没变就不重写 DOM（0.1 步进里多数输入帧
+ *  星数相同），只在「新点亮了一颗」时补一次微弹；往回拖（星数减少）不弹——那是「减少」，
+ *  弹一下反而吵。 */
+function updateFormStars(range: HTMLInputElement, rating: number): void {
+  const box = range.closest('.f-range-row')?.querySelector<HTMLElement>('.j-stars');
+  if (!box) return;
+  const lit = starsLit(rating);
+  const before = Number(box.dataset.lit ?? '-1');
+  if (lit === before) return;
+  box.dataset.lit = String(lit);
+  box.innerHTML = starsHtml(rating);
+  if (before < 0 || lit <= before) return; // 首次渲染 / 往回拖
+  [...box.querySelectorAll<HTMLElement>('i.is-on')].slice(before).forEach((el) => {
+    if (typeof el.animate !== 'function') return;
+    try { el.animate([{ transform: 'scale(1.45)' }, { transform: 'none' }], { duration: MOTION.fast, easing: EASE.out }); } catch { /* 动画不可用：直达终态 */ }
+  });
+}
+
+/** 待闪的卡：保存 / 快速标记后登记，**下一次渲染**落地时消费一次。
+ *  键不在当前视图里就不闪——改完状态被筛掉时用户在看别处，闪给谁看。 */
+let pendingFlash: { key: string; stars: boolean } | null = null;
+function markCardFlash(key: string, stars = false): void { pendingFlash = { key, stars }; }
+
+/** 渲染后：给刚变更的卡落位闪（金边脉冲）+ 星级逐颗点亮——「就是这张变了」。 */
+function flushCardFlash(root: HTMLElement): void {
+  const p = pendingFlash;
+  pendingFlash = null;
+  if (!p) return;
+  const card = root.querySelector<HTMLElement>(`.pcard[data-cinema-key="${CSS.escape(p.key)}"]`);
+  const pw = card?.querySelector<HTMLElement>('.pw');
+  if (!card || !pw) return;
+  if (typeof pw.animate === 'function') {
+    try {
+      pw.animate([
+        { boxShadow: '0 0 0 0 rgba(224,170,75,0)' },
+        { boxShadow: '0 0 0 3px rgba(224,170,75,.55)' },
+        { boxShadow: '0 0 0 0 rgba(224,170,75,0)' },
+      ], { duration: MOTION.impulse, easing: EASE.out });
+    } catch { /* 动画不可用：跳过（卡本身已是新数据） */ }
+  }
+  if (!p.stars) return;
+  card.querySelectorAll<HTMLElement>('.pstars i.is-on').forEach((el, i) => {
+    if (typeof el.animate !== 'function') return;
+    try {
+      el.animate([{ opacity: .2, transform: 'scale(.7)' }, { opacity: 1, transform: 'none' }],
+        { duration: MOTION.move, delay: i * STAGGER, easing: EASE.out, fill: 'backwards' });
+    } catch { /* 同上 */ }
+  });
+}
+
+/** 表单保存后折回卡片（与共享元素返程同一语汇：整层 clip-path 收到目标卡矩形 + 遮罩淡出）。
+ *  目标卡按键在**新网格**里反查（所以调用点在 renderAll 之后）；查不到——改完状态被当前筛选
+ *  滤掉、或面板整刷没了——就直接关：折回一段看不见的动画没有意义。 */
+function foldOverlayToCard(form: { el: HTMLElement; close: () => void }, key: string): void {
+  const { el, close } = form;
+  const card = M.currentOverlay?.querySelector<HTMLElement>(`.pcard[data-cinema-key="${CSS.escape(key)}"]`);
+  const modal = el.querySelector<HTMLElement>('.cn-modal');
+  const r = card?.querySelector<HTMLElement>('.pw')?.getBoundingClientRect();
+  if (!modal || !r || r.width < 8 || typeof modal.animate !== 'function') { close(); return; }
+  const o = el.getBoundingClientRect();
+  const radius = parseFloat(getComputedStyle(modal).borderTopLeftRadius) || 12;
+  const a = playFold(el, radius, foldInsetOf(o, r), MOTION.base);
+  const done = (): void => close();
+  if (a) {
+    a.finished.then(done).catch(done);
+    window.setTimeout(done, MOTION.base + 400); // 兜底：动画事件丢失也必须收层
+  } else close();
+}
+
+// ---------- 网格重排动效（issue 402）：留下来的 FLIP、消失的留幽灵、新来的接力 ----------
+//
+// 网格是整写 innerHTML 的（renderMidnightDesk/Mob），排序 / 筛选 / 搜索 / 状态流转之后卡片
+// 会直接跳位——这是走查里最大的一块空白。三件套一次补齐，语义各不相同：
+//   留下来的卡：知道它从哪来 → 按稳定键配对补位（FLIP）
+//   消失的卡：渲染后就没了 → 按旧矩形留一枚幽灵淡出，让「筛掉了什么」可读
+//   新出现的卡：没有来处 → 前若干张接力淡入（只在内容身份变化时排，免得后台刷新整屏在闪）
+// 稳定键用 data-cinema-key（单条目 = 笔记名，合并卡 = series:<组>:<base>，季圆点换脸同键）。
+
+/** 网格卡片快照（键 → 矩形 + 海报图源；海报给离场幽灵用，取不到就只是块底色） */
+interface GridCardSnap { rect: DOMRect; src: string | null }
+
+/** 渲染前量一遍网格卡片。**只量不动**：渲染会把整片 DOM 换掉，量完就没机会了。 */
+function measureGridCards(root: HTMLElement): Map<string, GridCardSnap> {
+  const out = new Map<string, GridCardSnap>();
+  root.querySelectorAll<HTMLElement>('.pcard[data-cinema-key]').forEach((el) => {
+    const key = el.dataset.cinemaKey;
+    if (!key) return;
+    out.set(key, { rect: el.getBoundingClientRect(), src: el.querySelector('.pw img')?.getAttribute('src') ?? null });
+  });
+  return out;
+}
+
+/** 离场幽灵上限：超过就整体不演——那种规模本就是一屏换新，逐张淡出只会拖慢感知 */
+const GHOST_MAX = 40;
+/** 进场接力的张数上限（前 N 张，按 DOM 序） */
+const ENTER_MAX = 12;
+
+/** 内容身份（视图 / 分组 / 状态 / 排序 / 关键词）：只有它变了才排进场接力，
+ *  标星 / 队列回填 / 保存这类原地刷新不排（否则每次后台刷新整屏都在闪）。 */
+let lastViewIdentity: string | null = null;
+const viewIdentity = (): string =>
+  [M.view, M.typeFilter ?? '', M.statusFilter ?? '', M.sortMode, M.searchKeyword].join('|');
+
+/** 渲染后演网格动效。滚位恢复之后才跑——位移差要跟最终滚位一致，否则算出来的落差是假的。 */
+function playGridMotion(root: HTMLElement, before: Map<string, GridCardSnap>): void {
+  const identity = viewIdentity();
+  const identityChanged = identity !== lastViewIdentity;
+  lastViewIdentity = identity;
+  const grid = root.querySelector<HTMLElement>('.grid, .m-grid');
+  if (!grid) return;                                  // 不在网格页（ai / 分析 / 空态）
+  const frame = grid.getBoundingClientRect();
+  if (!frame.width || !frame.height) return;          // 无几何（测试环境 / 面板隐藏）：不演
+  const viewport = (grid.closest('.d-scroll, .m-scroll') ?? grid).getBoundingClientRect();
+  const near = (r: DOMRect): boolean => nearViewport(viewport, r);
+  const animate = (el: HTMLElement, frames: Keyframe[], opts: KeyframeAnimationOptions): Animation | null => {
+    if (typeof el.animate !== 'function') return null;
+    try { return el.animate(frames, opts); } catch { return null; } // 老宿主：直接落终态
+  };
+  const seen = new Set<string>();
+  let arrival = 0;
+  for (const el of grid.querySelectorAll<HTMLElement>('.pcard[data-cinema-key]')) {
+    const key = el.dataset.cinemaKey as string;
+    seen.add(key);
+    const prev = before.get(key);
+    if (prev) {
+      const now = el.getBoundingClientRect();
+      const dx = prev.rect.left - now.left;
+      const dy = prev.rect.top - now.top;
+      if ((Math.abs(dx) < 1 && Math.abs(dy) < 1) || (!near(now) && !near(prev.rect))) continue;
+      animate(el, [{ transform: `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)` }, { transform: 'none' }],
+        { duration: MOTION.move, easing: EASE.out });
+    } else if (identityChanged && arrival < ENTER_MAX) {
+      if (!near(el.getBoundingClientRect())) continue;
+      animate(el, [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }],
+        { duration: MOTION.base, delay: arrival * STAGGER, easing: EASE.out, fill: 'backwards' });
+      arrival++;
+    }
+  }
+  // 离场的：旧矩形处留一枚幽灵淡出（不吃事件、不随重排走；grid 是它的定位祖先）
+  const gone = [...before.entries()].filter(([k]) => !seen.has(k));
+  if (!gone.length || gone.length > GHOST_MAX) return;
+  for (const [, snap] of gone) {
+    if (!near(snap.rect)) continue;
+    const ghost = document.createElement('div');
+    ghost.className = 'cn-exit';
+    ghost.style.left = `${(snap.rect.left - frame.left).toFixed(1)}px`;
+    ghost.style.top = `${(snap.rect.top - frame.top).toFixed(1)}px`;
+    ghost.style.width = `${snap.rect.width.toFixed(1)}px`;
+    ghost.style.height = `${snap.rect.height.toFixed(1)}px`;
+    if (snap.src) {
+      const img = document.createElement('img');
+      img.alt = '';
+      img.src = snap.src;
+      ghost.appendChild(img);
+    }
+    grid.appendChild(ghost);
+    const drop = (): void => ghost.remove();
+    const a = animate(ghost, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(.96)' }],
+      { duration: MOTION.fast, easing: EASE.out });
+    if (a) {
+      a.finished.then(drop).catch(drop);
+      window.setTimeout(drop, MOTION.fast + 400); // 兜底：动画事件丢失也不能留下幽灵
+    } else drop();
+  }
+}
+
+/** 渲染总入口：按面板根的风格/端分发（vault 自动刷新与 M.renderFn 都走这里） */
+export function renderAll(app: App): void {
+  const root = cinemaRoot();
+  if (!root) return;
+  clearSoftRender(); // 已排期的顺延渲染作废，本次渲染已覆盖
+  const snap = snapshotFocus(root);
+  const beforeCards = measureGridCards(root); // 网格动效（issue 402）：渲染前量，渲染后就没机会了
+  // 滚位记忆（深审批A P2-6）：渲染整写 innerHTML 销毁滚动容器——标记/保存/筛选/队列完成
+  // 全跳顶。渲染前存 .d-scroll/.m-scroll 的 scrollTop、渲染后原值恢复（clipbook 会话内
+  // 滚位记忆同范式；视图切换时滚动容器换型，恢复自然 no-op）
+  const scrollMemo = new Map<string, number>();
+  for (const sel of ['.d-scroll', '.m-scroll']) {
+    const sc = root.querySelector(sel) as HTMLElement | null;
+    if (sc) scrollMemo.set(sel, sc.scrollTop);
+  }
+  const mob = root.classList.contains('mob');
+  const inp = midnightInput(app);
+  if (mob) {
+    renderMidnightMob(root, inp);
+    attachLongPress(root, app); // m-grid 卡片重渲染重建后重挂（原 mob 渲染胶水同语义）
+  } else renderMidnightDesk(root, inp);
+  for (const [sel, top] of scrollMemo) {
+    const sc = root.querySelector(sel) as HTMLElement | null;
+    if (sc) sc.scrollTop = top;
+  }
+  mountIcons(root);
+  syncSlidePills(root, PILL_TARGETS); // 底片跟着新选中项落位（渲染重写了 rail/排序钮的 innerHTML）
+  playGridMotion(root, beforeCards); // 滚位恢复之后再演：位移差要跟最终滚位一致
+  flushCardFlash(root); // 刚变更的那张卡闪一下（issue 403）
+  restoreFocus(root, snap);
+}
+
+export function closeOverlay(): void {
+  clearSoftRender(); // 面板已关：顺延渲染不再补，免留下野定时器
+  pendingFlash = null;      // 本次落位闪作废（面板都关了，没有卡可闪）
+  lastViewIdentity = null;  // 下次开面板按「内容身份变了」处理 → 首屏排进场接力
+  if (M.searchDebounceTimer) clearTimeout(M.searchDebounceTimer);
+  // 活跃弹窗层统一结算（深审批A P3-10 双保险之二）：closeOverlay 原来只移除面板树，
+  // 弹窗层（详情/表单/各季明细）的 ESC 句柄靠 el.isConnected 判死不主动注销——层表残留
+  // 堆积。这里遍历句柄补 unregister（close 幂等：句柄集先删后 remove，遍历副本安全）
+  for (const close of [...liveOvlCloses]) close();
+  closeItemMenu(); // 浮层（跟手菜单/抽屉）挂 body，不随面板移除 → 关面板时一并收掉
+  // 桌面缩放随面板销毁摘除（与 createOverlay 成对；detach 内含 flush，防抖尾值不丢）
+  panelResizeDetach?.detach();
+  panelResizeDetach = null;
+  if (M.currentOverlay) {
+    M.currentOverlay.remove();
+    M.currentOverlay = null;
+  }
+  M.renderFn = null;
+  M.view = 'list'; // 复位视图：重开回落列表页
+  M.multiSelect = false; // 票 296：多选模式不跨开合残留
+  M.selected.clear();
+}
+
+// ---------- 追剧/追书进度提示（票 295/301，本地保留件） ----------
+
+/** 正在看进度 ≥ 总量时随保存 toast 提醒，不自动改状态 */
+function catchUpSuffix(watching: number | null, total: number | null, unit: '集' | '章'): string {
+  return watching !== null && total !== null && total > 0 && watching >= total
+    ? ` · 已追平 ${total} ${unit}，可标记已看` : '';
+}
+
+// ---------- 多选导出感想（票 296，本地保留件） ----------
 
 /** 单条目感想卡（markdown）：名称/类型/国家/题材（书籍=体裁，票 299）/评分/观影日期/感想 */
 function reviewCardMd(it: CinemaItem): string {
@@ -803,7 +3278,7 @@ async function exportReviews(sec: HTMLElement, app: App): Promise<void> {
   if (!app.vault.getAbstractFileByPath(folder)) {
     await app.vault.createFolder(folder);
   }
-  const stamp = localNow().slice(0, 16).replace(/[-: ]/g, ''); // YYYYMMDDHHmmss（截到分）
+  const stamp = localNow().slice(0, 16).replace(/[-: ]/g, ''); // YYYYMMDDHHmm（截到分）
   let path = `${folder}/感想导出 ${stamp}.md`;
   let n = 2;
   while (app.vault.getAbstractFileByPath(path)) {
@@ -817,7 +3292,7 @@ async function exportReviews(sec: HTMLElement, app: App): Promise<void> {
   renderAll(app);
 }
 
-// ---------- 查重/去重（票 306） ----------
+// ---------- 查重/去重（票 306，本地保留件） ----------
 
 /** 查重裁决弹窗：findDuplicateGroups 出组 → 用户逐组单选保留项（默认=信息最全）→ 确认后
  *  逐条删除（vault.trash 回收站语义，与删除确认同款；G8 同款出队豆瓣抓取）。保留条缺失的
@@ -844,7 +3319,7 @@ function openDedupeDialog(sec: HTMLElement, app: App): void {
   }));
   const dropCount = groups.reduce((acc, g) => acc + g.members.length - 1, 0);
   const { el, close } = ovl(sec, dedupeModalHtml(groups.length, dropCount, vm), { sticky: true });
-  el.querySelector('.j-cancel')?.addEventListener('click', close);
+  el.querySelector('.j-cancel')?.addEventListener('click', () => close());
   el.querySelector('.j-dd-run')?.addEventListener('click', () => {
     void (async () => {
       let deleted = 0;
@@ -892,321 +3367,6 @@ export function runCinemaDedupe(app: App): void {
   const sec = M.currentOverlay?.querySelector<HTMLElement>('[data-cinema-root]');
   if (!sec) return;
   openDedupeDialog(sec, app);
-}
-
-// ---------- 搜索（防抖；desk 部分刷新保焦点 / mob 全刷+回焦） ----------
-
-function onSearchInput(app: App, sec: HTMLElement, isMob: boolean, raw: string): void {
-  if (M.searchDebounceTimer) clearTimeout(M.searchDebounceTimer);
-  M.searchDebounceTimer = setTimeout(() => {
-    M.searchKeyword = raw.trim();
-    M.view = 'list';
-    if (isMob) {
-      renderAll(app);
-      const el = sec.querySelector('.j-mq') as HTMLInputElement | null;
-      if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
-    } else {
-      refreshDeskList(app, sec);
-    }
-  }, 300);
-}
-
-/** 输入时只刷列表与计数（保焦点；空了整刷出空态，原型 refreshList 同语义） */
-function refreshDeskList(app: App, sec: HTMLElement): void {
-  const view = sec.querySelector('.j-view');
-  if (!view) { renderAll(app); return; }
-  const body = view.querySelector('.d-scroll');
-  const head = view.querySelector('.d-head');
-  const list = getDisplayItems();
-  if (!body || !head || !list.length) { renderAll(app); return; }
-  const cnt = head.querySelector('.j-cnt');
-  if (cnt) cnt.textContent = `· ${list.length} 部`;
-  const grid = body.querySelector('.grid');
-  if (grid) grid.innerHTML = list.map((it) => pcardHtml(it, posterUrl(it, app), isFetching(it.file?.path))).join('');
-  mountIcons(sec);
-}
-
-
-// ---------- 观影志（yearbook）：覆盖影院面板的一层（上游 ADR-0175；25 幕长片见 yearbook/） ----------
-
-let ybOvl: HTMLElement | null = null;
-let ybHandle: YbHandle | null = null;
-let ybSync: (() => void) | null = null; // 层框跟随面板矩形（窗 resize / 面板 resize）
-let ybRo: ResizeObserver | null = null;
-
-/** 层框 = 面板矩形（上游 ADR-0175）：几何与软横屏转置单源在 core/landscape（review/clipbook 同款）。
- *  基字号随层框派生（不再 vmin）——面板是固定尺寸，跟窗口跑会让真机与原型排成两个密度。 */
-function fitYbBox(box: HTMLElement, panel: HTMLElement | null): void {
-  const fit = fitRotatedBox(box, panel, isMobileEnv());
-  if (!fit || !panel) return; // 面板没几何（测试环境）：保持 CSS 兜底
-  const base = Math.max(12, Math.min(19, 12 * Math.min(fit.w / 900, fit.h / 620)));
-  box.style.fontSize = `${base.toFixed(2)}px`;
-  box.style.borderRadius = getComputedStyle(panel).borderTopLeftRadius || '';
-}
-
-/** 打开观影志：覆盖影院面板的一层（上游 2026-09-21 定版形态；批 5cine 收尾补票接线）。
- *  点框外（遮罩）＝关、ESC 同义；桌面不给关闭按钮，移动端面板满屏没有遮罩可点、按钮即出口。
- *  内容 = 25 幕长片（yearbook/），全部数据来自笔记 frontmatter 里的真实字段；
- *  一条影视都没有时给空态（带「添加影视」入口）。明暗跟随 Obsidian（styles.css 的 --yb-* 变量层）。
- *  翻幕：滚轮/方向键一滚一幕，翻到的那幕从头演一遍。
- *  本地并存：入口名「观影志」，本地既有「观影分析」统计页（票 294/296）原样保留，两入口并列。 */
-export function openYearbookOverlay(app: App): void {
-  if (ybOvl?.isConnected) { // 已开：不叠第二层，晃一下提示还在
-    const box = ybOvl.querySelector<HTMLElement>('.bz-yb-box');
-    if (box) { box.classList.remove('is-nudge'); void box.offsetWidth; box.classList.add('is-nudge'); }
-    return;
-  }
-  rebuildItems(app);
-  const data = deriveYb(M.items);
-  const panel = M.currentOverlay?.querySelector<HTMLElement>('[data-cinema-root]') ?? null;
-  const ovl = document.createElement('div');
-  ovl.className = 'bz-yb';
-  // 层根只当遮罩（透明、接「点框外」）；纸面与内容全在 .bz-yb-box 里，框即面板矩形。
-  // 固定层（导航点/遮片）放 .bz-yb-scroll 的兄弟位：box 不滚，翻到哪幕都常驻
-  ovl.innerHTML = `
-    <div class="bz-yb-box">
-      ${isMobileEnv() ? `<button class="bz-yb-close" data-yb-close title="关闭观影志" aria-label="关闭观影志">${iconSpan(ICON.close)}</button>` : ''}
-      ${data.total ? yearbookOpenHtml() : ''}
-      <div class="bz-yb-scroll">${data.total
-        ? yearbookHtml(data, (it) => posterUrl(it, app))
-        : `<div class="bz-yb-blank"><p>影院还是空的——先添一部，这一页才有得放。</p><button class="bz-btn" data-cinema-analysis-add type="button">添加影视</button></div>`}</div>
-      ${data.total ? yearbookFixedHtml() : ''}
-    </div>`;
-  document.body.appendChild(ovl);
-  mountIcons(ovl);
-  topifyZ(ovl); // 显示即发号（ADR-0067）：叠在影院面板/其它浮层之上，关掉即销号
-  ybOvl = ovl;
-  const box = ovl.querySelector<HTMLElement>('.bz-yb-box');
-  if (box) {
-    fitYbBox(box, panel);
-    ybSync = () => fitYbBox(box, panel);
-    window.addEventListener('resize', ybSync);
-    // 面板自身也会 resize（Obsidian 窗口变化 / 移动端旋屏）：跟它同步，别只在窗 resize 时对一次
-    if (typeof ResizeObserver === 'function' && panel) {
-      ybRo = new ResizeObserver(ybSync);
-      ybRo.observe(panel);
-    }
-  }
-  ovl.addEventListener('click', (e) => {
-    const t = e.target as HTMLElement;
-    // 空态里的「添加影视」：先收观影志再开表单（表单在面板层，留着会把它盖住）
-    if (t.closest('[data-cinema-analysis-add]')) { closeYearbookOverlay(); openAddModalDirect(app); return; }
-    if (t.closest('[data-yb-close]')) { closeYearbookOverlay(); return; }
-    if (!t.closest('.bz-yb-box')) closeYearbookOverlay(); // 点框外 = 遮罩，关掉露出影院面板
-  });
-  registerPanelEsc('cinema-yearbook', () => !!ybOvl?.isConnected, closeYearbookOverlay);
-  if (data.total) ybHandle = bindYearbook(ovl, data);
-}
-
-/** 关闭观影志：引擎先停（rAF/监听/观察者自灭），再摘层与几何跟随。幂等。 */
-export function closeYearbookOverlay(): void {
-  ybHandle?.stop();
-  ybHandle = null;
-  if (ybSync) { window.removeEventListener('resize', ybSync); ybSync = null; }
-  ybRo?.disconnect();
-  ybRo = null;
-  unregisterPanelEsc('cinema-yearbook');
-  ybOvl?.remove();
-  ybOvl = null;
-}
-
-// ---------- 事件绑定（sec 级委托一次；重渲染内容全覆盖） ----------
-
-function bindMidnight(sec: HTMLElement, app: App): void {
-  sec.addEventListener('click', (e) => {
-    const t = e.target as HTMLElement;
-    // AI 页按钮（开始/重试/换一批/加入想看）先行分流（页内与共享弹窗内同享）
-    const aiBtn = t.closest('[data-cinema-ai-start],[data-rec-add]') as HTMLElement | null;
-    if (aiBtn) {
-      if (aiBtn.hasAttribute('data-rec-add')) {
-        if (aiBtn.hasAttribute('disabled')) return;
-        const rec = M.aiResult?.[Number(aiBtn.dataset.recAdd)];
-        if (rec) void quickAddWant(app, rec.title || rec.name || '', rec.type || '');
-      } else {
-        if (M.aiBase) void runSimilarRecommend(M.aiBase, app);
-        else void runAIRecommend(app);
-      }
-      return;
-    }
-    const clear = t.closest('[data-cinema-clear]') as HTMLElement | null;
-    if (clear) {
-      M.typeFilter = null; M.statusFilter = null; M.countryFilter = null; M.searchKeyword = '';
-      renderAll(app);
-      return;
-    }
-    // 票 296：多选导出工具条
-    const msel = t.closest('[data-cinema-multiselect]') as HTMLElement | null;
-    if (msel) {
-      M.multiSelect = true;
-      M.selected.clear();
-      M.view = 'list';
-      renderAll(app);
-      return;
-    }
-    // 票 306：查重/去重（工具行「查重复」按钮）
-    if (t.closest('[data-cinema-dedupe]')) { openDedupeDialog(sec, app); return; }
-    const mexit = t.closest('[data-cinema-multiselect-exit]') as HTMLElement | null;
-    if (mexit) {
-      M.multiSelect = false;
-      M.selected.clear();
-      renderAll(app);
-      return;
-    }
-    const mexp = t.closest('[data-cinema-export]') as HTMLElement | null;
-    if (mexp) { void exportReviews(sec, app); return; }
-    // 观影志：桌面 rail / 移动 bar 的 data-film-open 按钮（与「观影分析」统计页并存）
-    if (t.closest('[data-film-open]')) { openYearbookOverlay(app); return; }
-    const tool = t.closest('.j-tool') as HTMLElement | null;
-    if (tool && tool.dataset.tool) {
-      // 进 ai/stat 不动筛选状态：rail 高亮由渲染层按视图熄灭（render.ts listOn 门控），
-      // 返回列表时先前选中的筛选高亮原样恢复
-      M.view = M.view === tool.dataset.tool ? 'list' : (tool.dataset.tool as 'ai' | 'stat');
-      renderAll(app);
-      return;
-    }
-    const mb = t.closest('.j-mai,.j-mstat,.j-mclose') as HTMLElement | null;
-    if (mb) {
-      if (mb.classList.contains('j-mclose')) closeOverlay();
-      else {
-        const v = mb.classList.contains('j-mai') ? 'ai' : 'stat';
-        M.view = M.view === v ? 'list' : v; // 落域适配：再点回列表
-        renderAll(app);
-      }
-      return;
-    }
-    const back = t.closest('.j-back') as HTMLElement | null;
-    if (back) { M.view = 'list'; renderAll(app); return; }
-    const railBtn = t.closest('[data-g],[data-s],[data-cn]') as HTMLElement | null;
-    if (railBtn) {
-      M.view = 'list';
-      if (railBtn.dataset.g) {
-        M.typeFilter = railBtn.dataset.g === '全部' ? null : railBtn.dataset.g;
-        M.statusFilter = null;
-      } else if (railBtn.dataset.cn) {
-        // 票 294：国家筛选（'未填' = 国家为空桶；再点取消）
-        M.countryFilter = M.countryFilter === railBtn.dataset.cn ? null : railBtn.dataset.cn;
-      } else {
-        const s = railBtn.dataset.s ?? null;
-        M.statusFilter = M.statusFilter === s ? null : s;
-      }
-      renderAll(app);
-      return;
-    }
-    const chip = t.closest('.chip') as HTMLElement | null;
-    if (chip) {
-      M.view = 'list'; // chips 属列表视图：在 AI/分析页点 chips 必须回落列表（否则筛选生效但页面停在原视图，看着像「点了没反应」）
-      if (chip.dataset.c) {
-        M.typeFilter = chip.dataset.c === 'all' ? null : chip.dataset.c;
-        M.statusFilter = null;
-      } else if (chip.dataset.cn) {
-        M.countryFilter = M.countryFilter === chip.dataset.cn ? null : chip.dataset.cn;
-      } else {
-        const s = chip.dataset.s ?? null;
-        M.statusFilter = M.statusFilter === s ? null : s;
-      }
-      renderAll(app);
-      return;
-    }
-    const sortBtn = t.closest('.j-sort button') as HTMLElement | null;
-    if (sortBtn && sortBtn.dataset.k) {
-      M.sortMode = sortBtn.dataset.k as CinemaSortMode;
-      renderAll(app);
-      return;
-    }
-    const add = t.closest('[data-cinema-analysis-add],[data-cinema-add]') as HTMLElement | null;
-    if (add) { openForm(sec, null, app); return; }
-    const cardEl = t.closest('.pcard') as HTMLElement | null;
-    if (cardEl) {
-      const it = itemByKeyInState(cardEl.dataset.cinemaKey);
-      if (!it) return;
-      // 票 296：多选模式下点卡片=勾选/取消勾选
-      if (M.multiSelect) {
-        const k = itemKey(it);
-        if (M.selected.has(k)) M.selected.delete(k);
-        else M.selected.add(k);
-        renderAll(app);
-        return;
-      }
-      openDetail(sec, it, app);
-    }
-  });
-  sec.addEventListener('contextmenu', (e) => {
-    // 桌面壳专属：右键菜单是鼠标惯用件。移动壳分流——触屏长按会同时发 pointerdown 与
-    // contextmenu，不分流就会多弹一个鼠标菜单盖在抽屉上；移动端长按手势走 core/dom.longPress。
-    if (sec.classList.contains('mob')) return;
-    const cardEl = (e.target as HTMLElement).closest('.pcard') as HTMLElement | null;
-    if (!cardEl) return;
-    e.preventDefault();
-    const it = itemByKeyInState(cardEl.dataset.cinemaKey);
-    if (!it) return;
-    // core 跟手菜单（防溢出定位/ESC/外部点击关闭/键盘导航由共享层承载）
-    openItemMenu(e.clientX, e.clientY, toItemActions(itemActions(it, sec, app)), true, MENU_SKIN);
-    // 右键时序会置位残余 click 抑制（Chromium：mousedown → contextmenu → mouseup 落在菜单外），
-    // 吞掉下一次左键（菜单项要点两次才生效）；右键无补发 click，直调后立即复位
-    resetItemMenuClickGuard();
-  });
-}
-
-// ---------- 壳选择 / 创建 / 渲染总入口 ----------
-
-export function createOverlay(app: App): void {
-  const overlay = document.createElement('div');
-  overlay.className = 'bz-panel-overlay';
-  const mobile = isMobileEnv();
-  overlay.innerHTML = mobile ? midnightMobHtml() : midnightDeskHtml();
-
-  document.body.appendChild(overlay);
-  topifyZ(overlay); // ADR-0067：显示即发号（谁后显示谁在上）
-  M.currentOverlay = overlay;
-  M.renderFn = () => renderAll(app);
-  const root = overlay.querySelector<HTMLElement>('[data-cinema-root]');
-  if (!root) return;
-  // 点遮罩 = 关闭主面板（桌面；移动全屏无遮罩）
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) closeOverlay();
-  });
-
-  bindMidnight(root, app);
-  // 搜索/滑杆输入（委托；input 冒泡）
-  root.addEventListener('input', (e) => {
-    const t = e.target as HTMLElement;
-    if (t.classList.contains('j-q') || t.classList.contains('j-mq')) {
-      onSearchInput(app, root, t.classList.contains('j-mq'), (t as HTMLInputElement).value);
-    } else if (t.classList.contains('j-range')) {
-      const out = root.querySelector('.j-rval');
-      if (out) out.textContent = Number((t as HTMLInputElement).value).toFixed(1);
-    }
-  });
-
-  rebuildItems(app);
-  renderAll(app);
-}
-
-/** 渲染总入口：按面板根的风格/端分发（vault 自动刷新与 M.renderFn 都走这里） */
-export function renderAll(app: App): void {
-  const overlay = M.currentOverlay;
-  if (!overlay) return;
-  const root = overlay.querySelector<HTMLElement>('[data-cinema-root]');
-  if (!root) return;
-  const inp = midnightInput(app);
-  if (root.classList.contains('mob')) {
-    renderMidnightMob(root, inp);
-    attachLongPress(root, app); // m-grid 卡片重渲染重建后重挂（原 mob 渲染胶水同语义）
-  } else renderMidnightDesk(root, inp);
-  mountIcons(root);
-}
-
-export function closeOverlay(): void {
-  if (M.searchDebounceTimer) clearTimeout(M.searchDebounceTimer);
-  closeItemMenu(); // 浮层（跟手菜单/抽屉）挂 body，不随面板移除 → 关面板时一并收掉
-  if (M.currentOverlay) {
-    M.currentOverlay.remove();
-    M.currentOverlay = null;
-  }
-  M.renderFn = null;
-  M.view = 'list'; // 复位视图：重开回落列表页
-  M.multiSelect = false; // 票 296：多选模式不跨开合残留
-  M.selected.clear();
 }
 
 // ---------- ESC（主面板；弹窗层各自注册更高优先级） ----------

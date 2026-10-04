@@ -11,6 +11,10 @@
  *   （display:none 容器 clientWidth=0 无法钳制，挂载时机不可靠），
  *   拖动后防抖 300ms save() 落盘；flush() 立即落尾值；detach 未落尾值
  *   立即补存（口径同 uiResizable / ADR-0094）。
+ * 意图宽 × 渲染宽分离（半屏挤压修复，口径同 uiResizable）：落盘与记忆
+ *   走意图宽 wantW（只钳 minLeft 下限，不掺容器宽度）；渲染时才按容器
+ *   可用宽钳制（clampW）——半屏下拖到容器上限，记下的仍是拖拽原始值，
+ *   恢复全屏后不被挤压小值锁死。
  * ============================================================ */
 import { swallowNextClick } from '../dom';
 
@@ -68,7 +72,11 @@ export function uiVSplitter(opts: BzVSplitterOpts): {
   let startW = 0;
 
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
-  let lastW = 0;
+  /** 意图宽（落盘口径）：只钳 minLeft 下限，不受容器可用宽污染——
+   *  半屏下拖到容器上限也不把挤压值写进记忆 */
+  let wantW = 0;
+  /** 最近一次实际应用的渲染宽（同值短路去重） */
+  let lastRender = 0;
   let restored = false;
 
   /** 当前容器可用宽度（分条自身占位扣除）；容器未就位返回 0 */
@@ -91,7 +99,6 @@ export function uiVSplitter(opts: BzVSplitterOpts): {
 
   const debSave = (w: number): void => {
     if (!persist?.save) return;
-    lastW = w;
     if (persistTimer !== null) clearTimeout(persistTimer);
     persistTimer = setTimeout(() => {
       persistTimer = null;
@@ -106,21 +113,26 @@ export function uiVSplitter(opts: BzVSplitterOpts): {
     const saved = persist.load();
     restored = true;
     if (saved != null && saved > 0) {
-      const w = clampW(saved);
+      wantW = Math.max(saved, minLeft); // 意图值只兜下限；容器挤压留给 clampW
+      const w = clampW(wantW);
       applyW(w);
-      lastW = w;
+      lastRender = w;
     }
   };
 
   const onDragMove = (e: MouseEvent): void => {
     if (!dragging) return;
     e.preventDefault();
-    const w = clampW(startW + (e.clientX - startX));
-    if (w === lastW) return;
+    const raw = startW + (e.clientX - startX);
+    // 意图值记原始拖拽值——必须先于渲染短路更新：触顶后继续拖时渲染宽恒等于
+    // lastRender，若短路先行 wantW 会停在首次触顶帧，落盘退化回容器上限（挤压渲染值）
+    wantW = Math.max(raw, minLeft);
+    debSave(wantW);
+    const w = clampW(raw); // 渲染照旧按容器钳（右栏弹性吸收不溢出）
+    if (w === lastRender) return;
+    lastRender = w;
     applyW(w);
-    lastW = w;
     if (opts.onChange) opts.onChange(w);
-    debSave(w);
   };
 
   const onMouseDown = (e: MouseEvent): void => {
@@ -151,7 +163,7 @@ export function uiVSplitter(opts: BzVSplitterOpts): {
     if (persistTimer === null) return;
     clearTimeout(persistTimer);
     persistTimer = null;
-    if (persist?.save && lastW > 0) persist.save(lastW);
+    if (persist?.save && wantW > 0) persist.save(wantW);
   };
 
   return {

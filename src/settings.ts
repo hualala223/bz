@@ -482,6 +482,9 @@ export default interface BzSettings {
   cinemaPosterFolder: string;
   /** 📺 剧集按季合并（上游 ADR-0168） */
   cinemaMergeSeasons: boolean;
+  /** 🪟 影院面板桌面拖拽尺寸记忆（ADR-0084/0094；意图值，0=未记过） */
+  cinemaPanelWidth: number;
+  cinemaPanelHeight: number;
   cinemaSortMode: string;
   cinemaStatusFilter: string;
   cinemaGridColumns: string;
@@ -707,6 +710,8 @@ export const DEFAULT_SETTINGS: BzSettings = {
   cinemaFolderPath: '我的/娱乐',
   cinemaPosterFolder: '',
   cinemaMergeSeasons: true,
+  cinemaPanelWidth: 0,
+  cinemaPanelHeight: 0,
   cinemaSortMode: 'date',
   cinemaStatusFilter: '',
   cinemaGridColumns: '5',

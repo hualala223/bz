@@ -35,9 +35,15 @@
   --gold:#e0aa4b;--ink:#ece5d3;--ink-2:#a89f8a;--ink-3:#7a7261;--line:#2e2a20;--panel:#161410;--chip:#221f17;--star:#e0aa4b;
 }
 .bz-cinema--midnight {
-   width:900px;height:620px;flex:none;background:var(--panel);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;position:relative;
+   width:900px;height:620px;max-width:calc(100vw - 32px);max-height:92vh;flex:none;background:var(--panel);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;position:relative;
   box-shadow:0 14px 44px #0004,0 2px 8px #0002;border:1px solid var(--line);
 }
+/* 视口钳制（ADR-0084 拖拽缩放配套）：900×620 只是默认态，小视口下不越屏——
+   拖拽后的内联宽高仍由 uiResizable 逐帧钳视口 92%，此处兜 CSS 默认态；
+   移动 .mob 满屏壳（styles.css「午夜场 · 移动端」节）不重置 max 会反被钳小，此处清掉。
+   （选择器特意带空格：mobile-3fix-guard 守卫按无空格字面量取满屏声明块，
+   此条必须排在其后且不得被该字面量命中） */
+.bz-cinema--midnight.mob {max-width:none;max-height:none}
 .bz-cinema--midnight::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,transparent,var(--gold) 30%,var(--gold) 70%,transparent);z-index:5}
 .bz-cinema--midnight .d-body{flex:1;display:flex;min-height:0}
 .bz-cinema--midnight .d-rail{width:176px;flex:none;border-right:1px solid var(--line);display:flex;flex-direction:column;padding:18px 0 var(--bz-space-md);background:var(--panel)}
@@ -65,6 +71,16 @@
 .bz-cinema--midnight .d-head .add{margin-left:auto;display:flex;align-items:center;gap:6px;background:var(--gold);color:#fff;border:0;border-radius:var(--bz-radius-sm);padding:7px 14px;font-size:12.5px;cursor:pointer;font-family:inherit;letter-spacing:.08em}
 .bz-cinema--midnight .d-head .add:hover{filter:brightness(1.08)}
 .bz-cinema--midnight .d-head .add svg{width:13px;height:13px}
+/* 「导入片单」图标钮（跟在「添加影片」后面，2026-10-01 从 rail-foot 左下角移来）：
+   30×30 与添加钮同高；形制贴 m-tool/sp-back 一脉（线框幽灵钮，hover 亮色+chip 底）。
+   贴右定位的 margin-left:auto 在添加钮上，本钮随后、占最右角。
+   .bz-ic 容器与 svg 同尺寸钉死——同 m-tool 注释：容器随宿主字号漂移会让图标偏心 */
+.bz-cinema--midnight .d-head .imp{flex:none;width:30px;height:30px;padding:0;border:1px solid var(--line);background:none;border-radius:var(--bz-radius-sm);color:var(--ink-3);cursor:pointer;display:grid;place-items:center;font-family:inherit}@media (hover: hover) {
+
+.bz-cinema--midnight .d-head .imp:hover{color:var(--ink);background:var(--chip)}
+}
+.bz-cinema--midnight .d-head .imp svg{width:14px;height:14px}
+.bz-cinema--midnight .d-head .imp .bz-ic{width:14px;height:14px}
 .bz-cinema--midnight .d-tools{flex:none;display:flex;align-items:center;gap:10px;padding:var(--bz-space-md) 20px}
 .bz-cinema--midnight .d-search{flex:1;display:flex;align-items:center;gap:var(--bz-space-sm);border:1px solid var(--line);border-radius:var(--bz-radius-sm);padding:6px var(--bz-space-md);color:var(--ink-3);font-size:12.5px;background:var(--panel)}
 .bz-cinema--midnight .d-search svg{width:13px;height:13px;flex:none}
@@ -90,6 +106,9 @@
 .bz-cinema--midnight .d-tools .j-multi{flex:none}
 .bz-cinema--midnight .pcard.is-picked .pw{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold)}
 .bz-cinema--midnight .pcard.is-picked .pname::after{content:' ✓';color:var(--gold)}
+/* 重温「N刷」角标（frontmatter「重看」数组）：右上角与左上状态角标错开；金字压深色底衬
+   （海报深浅不一，思路同季圆点底衬——坐在图片上，固定不随主题翻转） */
+.bz-cinema--midnight .badge--re{left:auto;right:7px;background:rgba(0,0,0,.55);color:var(--star);border:1px solid rgba(214,178,106,.45)}
 .bz-cinema--midnight .pname{font-size:12.5px;font-weight:600;color:var(--ink);margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bz-cinema--midnight .pmeta{font-size:var(--bz-font-caption);color:var(--ink-3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bz-cinema--midnight .pstars{font-size:10.5px;color:var(--star);margin-top:3px;letter-spacing:1px}
@@ -105,7 +124,7 @@
 .bz-cinema--midnight .m-head h2{font-family:"Noto Serif SC",SimSun,serif;font-size:var(--bz-font-title);letter-spacing:.1em;color:var(--ink);margin:0}
 .bz-cinema--midnight .m-head .cnt{font-size:11.5px;color:var(--ink-3)}
 .bz-cinema--midnight .m-acts{margin-left:auto;display:flex;gap:var(--bz-space-sm);align-items:center}
-/* 右上角钮组（m-acts：＋ / AI / 分析 / ✕）图标精确居中——两处必须钉死，只作用于本组：
+/* 右上角钮组（m-acts：＋ / 导入 / AI / 分析 / ✕）图标精确居中——两处必须钉死，只作用于本组：
    ① 按钮 padding:0：宿主 app.css 裸 button 基线带 padding（手机 var(--bz-space-xs) var(--bz-space-md)、平板
       `.is-tablet button:not(.clickable-icon)` var(--bz-space-xs) 20px），不钉死时 30px 的 border-box
       会被撑到 34~42px，右侧钮组行就散了。带 !important 是因宿主那条特异性 (0,2,1)
@@ -135,7 +154,9 @@
 /* ---------- 午夜场 · 弹窗与子页面（完整功能版；视觉语言延续探索稿：纸白/金/衬线） ---------- */
 /* 覆盖层：absolute 挂在面板根内（桌面 900×620 与移动 .mob 各自 contained） */
 .bz-cinema--midnight .cn-ovl{position:absolute;inset:0;z-index:50;background:rgba(20,16,8,.45);display:flex;align-items:center;justify-content:center;padding:20px}
-.bz-cinema--midnight .cn-modal{background:var(--panel);border:1px solid var(--line);border-radius:var(--bz-radius-md);box-shadow:0 18px 48px #0005,0 2px 10px #0003;padding:18px 20px;max-width:min(430px,100%);max-height:100%;overflow-y:auto;position:relative}
+/* 滚动链收口（复审 P1②）：卡片自己就是滚动层，滚到底不能把滚动链递给背后页面（原来面板
+   列表会跟着滚）；换面层 `.cn-ovl--flip` 同段另有同款声明。 */
+.bz-cinema--midnight .cn-modal{background:var(--panel);border:1px solid var(--line);border-radius:var(--bz-radius-md);box-shadow:0 18px 48px #0005,0 2px 10px #0003;padding:18px 20px;max-width:min(430px,100%);max-height:100%;overflow-y:auto;overscroll-behavior:contain;position:relative}
 .bz-cinema--midnight .cn-modal-title{font-family:"Noto Serif SC",SimSun,serif;font-size:var(--bz-font-title);font-weight:700;letter-spacing:.08em;color:var(--ink);margin-bottom:var(--bz-space-md);padding-right:var(--bz-space-xl)}
 /* 详情弹窗 */
 .bz-cinema--midnight .dm-head{display:flex;gap:14px;align-items:flex-start}
@@ -146,13 +167,118 @@
 .bz-cinema--midnight .dm-chip{font-size:10.5px;padding:2px 9px;border-radius:99px;color:#fff;letter-spacing:.06em}
 .bz-cinema--midnight .dm-stars{font-size:var(--bz-font-meta);color:var(--star);letter-spacing:1px}
 .bz-cinema--midnight .dm-rating{font-size:var(--bz-font-label);font-weight:700;color:var(--ink)}
-.bz-cinema--midnight .dm-date{font-size:var(--bz-font-caption);color:var(--ink-3)}
+/* 状态日期徽标（想看/在看/已看三段 · 连接）：段多时可整体换行、段内也准拆（日期带空格可断） */
+.bz-cinema--midnight .dm-date{font-size:var(--bz-font-caption);color:var(--ink-3);max-width:100%}
 .bz-cinema--midnight .dm-review{font-size:12.5px;color:var(--ink-2);line-height:1.85;margin-top:10px;text-align:justify}
+/* 重温记录详情件：徽标行「N 刷」描边 chip（透明底金字，别压过类型/状态实心 chip）+
+   重温微时间线（竖线节点：首看金点带标签、重温灰点逐条）+「重映厅」金实底 chip（系统片单语义） */
+.bz-cinema--midnight .dm-chip--re{background:transparent;color:var(--star);border:1px solid rgba(214,178,106,.45)}
+/* 归入片单弹层（cn-modal--listpick）：海报缩略头部带（dm-head 微缩同语言：图左 + kicker/片名右）
+   + checkbox 片单行（描边空框 → 选中金底深勾，成员计数右推）+ 底部新建行（暗底输入聚焦金描边
+   + 金实底小钮）。全 token 取色，亮/暗主题各自成立。
+   节奏（2026-09-30 用户反馈「太紧凑」）：宽 300、pad 18、行高与间距全面放宽 */
+.bz-cinema--midnight .cn-modal--listpick{width:300px;max-height:74%;display:flex;flex-direction:column;gap:16px;padding:18px 18px 16px}
+.bz-cinema--midnight .lp-head{display:flex;gap:13px;align-items:center;min-width:0}
+.bz-cinema--midnight .lp-poster{width:44px;height:62px;border-radius:7px;overflow:hidden;background:var(--chip);flex:none}
+.bz-cinema--midnight .lp-poster img{width:100%;height:100%;object-fit:cover;display:block}
+.bz-cinema--midnight .lp-head-txt{display:flex;flex-direction:column;gap:4px;min-width:0}
+.bz-cinema--midnight .lp-kicker{font-size:10.5px;color:var(--gold);letter-spacing:.22em}
+.bz-cinema--midnight .lp-name{font-size:14.5px;font-weight:600;color:var(--ink);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.bz-cinema--midnight .lp-body{overflow-y:auto;display:grid;gap:7px;min-height:0}
+.bz-cinema--midnight .lp-empty{font-size:12px;color:var(--ink-3);padding:12px 2px 6px}
+.bz-cinema--midnight .lp-item{display:flex;align-items:center;gap:10px;padding:10px 13px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--ink-2);font-size:13px;cursor:pointer;text-align:left;font-family:inherit;transition:border-color var(--cn-m-fast) ease,background var(--cn-m-fast) ease,color var(--cn-m-fast) ease}
+
+.bz-cinema--midnight .lp-item .lp-check{width:16px;height:16px;border-radius:5px;border:1px solid var(--line);color:transparent;flex:none;display:inline-flex;align-items:center;justify-content:center;transition:background var(--cn-m-fast) ease,border-color var(--cn-m-fast) ease,color var(--cn-m-fast) ease}
+.bz-cinema--midnight .lp-item .lp-check svg{width:11px;height:11px}
+.bz-cinema--midnight .lp-item .lp-label{flex:1;min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.5;word-break:break-all}
+.bz-cinema--midnight .lp-item .lp-label .j-lp-edit{width:100%;background:var(--chip);border:1px solid var(--gold);border-radius:6px;padding:2px 6px;color:var(--ink);font-size:12px;font-family:inherit;outline:none}
+.bz-cinema--midnight .lp-item .lp-rename{flex:none;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;color:var(--ink-3);cursor:pointer}
+
+.bz-cinema--midnight .lp-item .lp-rename svg{width:12px;height:12px}
+@media (hover: hover) {
+.bz-cinema--midnight .lp-item .lp-rename:hover{background:var(--chip);color:var(--gold)}
+}
+.bz-cinema--midnight .lp-item .lp-n{font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.bz-cinema--midnight .lp-item.is-on{color:var(--ink);border-color:var(--gold);background:rgba(224,170,75,.08)}
+.bz-cinema--midnight .lp-item.is-on .lp-check{background:var(--gold);border-color:var(--gold);color:#161410}
+.bz-cinema--midnight .lp-new{display:flex;gap:8px;align-items:center;border-top:1px solid var(--line);padding-top:14px}
+.bz-cinema--midnight .lp-new input{flex:1;min-width:0;background:var(--chip);border:1px solid var(--line);border-radius:10px;padding:8px 12px;color:var(--ink);font-size:12.5px;font-family:inherit;outline:none;transition:border-color var(--cn-m-fast) ease}
+.bz-cinema--midnight .lp-new input::placeholder{color:var(--ink-3)}
+.bz-cinema--midnight .lp-new input:focus{border-color:var(--gold)}
+.bz-cinema--midnight .lp-add{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--gold);background:var(--gold);color:#161410;border-radius:10px;padding:8px 14px;font-size:12.5px;cursor:pointer;font-family:inherit;flex:none}
+
+.bz-cinema--midnight .lp-add svg{width:12px;height:12px}
+@media (hover: hover) {
+.bz-cinema--midnight .lp-item:hover{background:var(--chip)}
+.bz-cinema--midnight .lp-add:hover{filter:brightness(1.08)}
+}
+.bz-cinema--midnight .dm-chip--shelf{background:rgba(214,178,106,.16);color:var(--star);border:1px solid rgba(214,178,106,.45)}
+.bz-cinema--midnight .dm-tl{margin-top:12px;border-left:1px solid var(--chip);padding-left:14px;display:grid;gap:6px}
+.bz-cinema--midnight .dm-tl-row{display:flex;align-items:baseline;gap:8px;font-size:11px;color:var(--ink-3);position:relative}
+.bz-cinema--midnight .dm-tl-row i{width:5px;height:5px;border-radius:50%;background:var(--ink-3);position:absolute;left:-16.5px;top:3px}
+.bz-cinema--midnight .dm-tl-row.is-first{color:var(--ink-2)}
+.bz-cinema--midnight .dm-tl-row.is-first i{background:var(--gold);box-shadow:0 0 0 3px rgba(214,178,106,.18)}
+.bz-cinema--midnight .dm-tl-row .tag{font-size:10.5px;color:var(--gold);letter-spacing:.08em}
 .bz-cinema--midnight .dm-sec{font-size:10.5px;letter-spacing:.3em;color:var(--ink-3);margin:14px 0 6px;padding-top:10px;border-top:1px dashed var(--line)}
 .bz-cinema--midnight .dm-kv{display:flex;gap:10px;padding:3px 0;font-size:var(--bz-font-meta);line-height:1.6}
 .bz-cinema--midnight .dm-kv-k{color:var(--ink-3);flex:none;min-width:88px}
 .bz-cinema--midnight .dm-kv-v{color:var(--ink);word-break:break-all}
 .bz-cinema--midnight .dm-kv-v a{color:var(--gold);text-decoration:none}
+/* 热门短评（451/687 有值）：引文式左侧竖线，长评收 3 行 + 展开钮（行为层 data-dm-fold 接线） */
+.bz-cinema--midnight .dm-quote{font-size:12.5px;color:var(--ink-2);line-height:1.85;text-align:justify;border-left:2px solid var(--line);padding-left:10px}
+.bz-cinema--midnight .dm-quote.is-fold{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+/* 背面可点下拉（issue 395）：徽标点击展候选，选中即回填并重渲染（重渲染自带收起）。
+   .dm-pick-list 有 display:flex，[hidden] 的默认 display:none 会被盖掉，故显式兜一道。 */
+.bz-cinema--midnight button.dm-chip{border:none;cursor:pointer;font-family:inherit}
+/* 分类判定中的占位骨架（2026-09-21）：先占位、出结果再填值——不预告默认值，避免「先看到一个错值再变」。
+   徽标不带小三角（同日拍板）：能点就够了，不加装饰性指示。 */
+.bz-cinema--midnight .dm-chip--pick.is-pending{display:inline-flex;align-items:center;background:var(--chip);
+  border:1px solid var(--line);padding:3px 10px}
+@keyframes cnSkel{0%,100%{opacity:.3}50%{opacity:.9}}
+.bz-cinema--midnight .dm-skel{display:inline-block;width:32px;height:9px;border-radius:99px;background:var(--ink-3);
+  animation:cnSkel 1.1s ease-in-out infinite}
+/* 海报占位（仅表单背面）：未加载完脉动，img 加载完加 is-ready 淡入并停动画。
+   只挂 .form-face--back 作用域——详情弹窗的海报没有 onload 接线，全域加会一直脉动。 */
+@keyframes cnPosterPulse{0%,100%{background-color:var(--chip)}50%{background-color:var(--line)}}
+.bz-cinema--midnight .form-face--back .dm-poster{animation:cnPosterPulse 1.4s ease-in-out infinite}
+.bz-cinema--midnight .form-face--back .dm-poster.is-ready{animation:none}
+.bz-cinema--midnight .form-face--back .dm-poster img{opacity:0;transition:opacity var(--cn-m-base) ease}
+.bz-cinema--midnight .form-face--back .dm-poster.is-ready img{opacity:1}
+/* 解析按钮的转圈 */
+@keyframes cnSpin{to{transform:rotate(360deg)}}
+.bz-cinema--midnight .f-spin{display:none;width:11px;height:11px;flex:none;box-sizing:border-box;
+  border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:cnSpin .7s linear infinite}
+.bz-cinema--midnight .j-parse.is-parsing .f-spin{display:inline-block}
+.bz-cinema--midnight .dm-pick-item{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);
+  background:var(--panel);border-radius:99px;padding:4px 10px;font-size:11.5px;color:var(--ink-2);
+  cursor:pointer;font-family:inherit}
+/* 候选清单的展开/收起过渡定义在文件末「影院全域动效」段（.is-open 类控制，不再用 hidden 瞬切） */
+.bz-cinema--midnight .dm-pick-item .dot{width:6px;height:6px;border-radius:50%}
+.bz-cinema--midnight .dm-pick-item.is-on{border-color:var(--gold);color:var(--ink);font-weight:600}
+.bz-cinema--midnight .dm-fold{margin-top:6px;padding:0;border:0;background:none;font-size:var(--bz-font-caption);color:var(--gold);cursor:pointer}
+/* 合并卡详情（issue 376）：片名后的「共 N 季」+ 条目行（各季在前、特别篇顺其后，点某行进该条详情）。
+   动作行不放——找同类/编辑/删除都作用在一篇笔记上，合集级无处落地（ADR-0168）；
+   分节小标题与操作提示 2026-09-20 按用户要求去掉（.dm-hint 随之退役）。 */
+.bz-cinema--midnight .dm-n{color:var(--gold);font-size:var(--bz-font-meta);font-weight:600;margin-left:6px;letter-spacing:.04em}
+/* 条目列：头部与首行的间隔由自己给（原由被去掉的小标题 border-top + margin 顶着，首行会贴住头部） */
+.bz-cinema--midnight .s-list{margin-top:14px}
+.bz-cinema--midnight .s-row{display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px dashed var(--line);border-radius:6px;cursor:pointer}@media (hover: hover) {
+
+.bz-cinema--midnight .s-row:hover{background:var(--chip)}
+}
+.bz-cinema--midnight .s-row:last-child{border-bottom:0}
+.bz-cinema--midnight .s-thumb{width:30px;height:43px;border-radius:4px;overflow:hidden;flex:none;background:var(--chip);border:1px solid var(--line)}
+.bz-cinema--midnight .s-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.bz-cinema--midnight .s-thumb .ph{width:100%;height:100%;display:grid;place-items:center;font-family:"Noto Serif SC",serif;font-size:13px;color:var(--ink-3)}
+.bz-cinema--midnight .s-mid{flex:1;min-width:0}
+.bz-cinema--midnight .s-name{font-size:12.5px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bz-cinema--midnight .s-sub{font-size:var(--bz-font-caption);color:var(--ink-3);margin-top:2px;font-variant-numeric:tabular-nums}
+.bz-cinema--midnight .s-chip{font-size:var(--bz-font-caption);padding:2px 8px;border-radius:99px;color:#fff;letter-spacing:.08em;flex:none}
+/* 季行「N刷」徽章：与卡片角标/详情 chip 同款配色语言（透明底金字描边），缀在状态 chip 后 */
+.bz-cinema--midnight .s-chip--re{background:transparent;color:var(--star);border:1px solid rgba(214,178,106,.45)}
+.bz-cinema--midnight .s-rate{font-size:var(--bz-font-meta);font-weight:700;color:var(--star);flex:none;min-width:30px;text-align:right;font-variant-numeric:tabular-nums}
+.bz-cinema--midnight .s-rate.none{color:var(--ink-3);font-weight:400}@media (hover: hover) {
+
 .bz-cinema--midnight .dm-kv-v a:hover{text-decoration:underline}
 .bz-cinema--midnight .dm-actions{display:flex;justify-content:flex-end;gap:var(--bz-space-sm);margin-top:var(--bz-space-lg)}
 .bz-cinema--midnight .dm-btn{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:none;border-radius:var(--bz-radius-sm);padding:7px 13px;font-size:var(--bz-font-meta);color:var(--ink-2);cursor:pointer;font-family:inherit}
@@ -164,6 +290,8 @@
 .bz-cinema--midnight .dm-btn svg{width:12px;height:12px}
 /* 表单弹窗 */
 .bz-cinema--midnight .f-field{margin-bottom:var(--bz-space-md)}
+/* 名称联想（issue 498）：uiSuggest 浮层 (.bz-popover) 绝对定位于字段内，锚容器须 relative */
+.bz-cinema--midnight .f-field--name{position:relative}
 .bz-cinema--midnight .f-label{display:block;font-size:var(--bz-font-caption);letter-spacing:.14em;color:var(--ink-3);margin-bottom:5px}
 .bz-cinema--midnight .f-input{width:100%;border:1px solid var(--line);border-radius:var(--bz-radius-sm);background:var(--panel);color:var(--ink);font-size:12.5px;font-family:inherit;padding:7px 11px;outline:none}
 .bz-cinema--midnight .f-input:focus{border-color:var(--gold);box-shadow:0 0 0 2px #c9992f22}
@@ -173,6 +301,90 @@
 .bz-cinema--midnight .f-choice-btn .dot{width:6px;height:6px;border-radius:50%}
 .bz-cinema--midnight .f-choice-btn.is-on{background:var(--gold);border-color:var(--gold);color:#fff;font-weight:600}
 .bz-cinema--midnight .f-choice-btn.is-on .dot{outline:1.5px solid #fff}
+/* ── 添加影视：双面卡片换面（issue 395；2026-10-01 撤 3D 后重做）——正面名称+状态 → 解析 →
+     换到背面看全部信息。原「3D 翻页」（perspective + rotateY keyframes + 中段抬升 + 光照遮罩）
+     整段退役：用户反馈 3D 翻转让整个弹窗看起来失真。
+     2026-10-01 用户点题「高级的动画」后按入场编排重做——高级感来自每一拍都有出处，而不是更大的动作：
+     ① 正面 .16s 快出（淡出 + 上移）给背面腾位；
+     ② 背面延迟 .06s 起手，按**详情弹窗同款 cnModalIn** 浮现——弹窗出场怎么演，换面就怎么演；
+     ③ 背面内容按 **cnRiseIn 阶梯**分段接力（.03s 步进、上限 .27s，issue 401 口径原样复用），
+        信息逐段显影而不是整块砸下来；
+     ④ 金色微光一次性扫过卡面收口（impulse 档，与解析中 chip 的流光同源）。
+     全程只有 opacity/transform，行为层只切 is-flipped 一个类。
+     结构照旧：两面 grid 同格叠放（容器高度 = 较高面），换面期间零重排（原论证保留）；
+     时长/曲线纪律由 motion-ledger.test.ts 钉死（delay 走接力轴，不算时长）。 */
+.bz-cinema--midnight .cn-modal--flip{margin:auto;
+  /* 纯外壳容器：卡片外观（底/边/圆角/阴影/内距）全部下放到两面。
+     overflow 必须 visible：卡片阴影会超出容器，裁掉就成了被切碎的碎片。
+     margin:auto 负责垂直居中——flex 居中在「背面比视口高」时会把顶部推出可视区且滚不到，
+     auto 外边距在溢出方向退化为 0，滚动条能从头滚起（2026-09-21 用户要求去掉顶部锚定）。 */
+  background:none;border:none;box-shadow:none;padding:0;max-height:none;overflow:visible}
+/* 两面用 grid 叠在**同一格**（1/1）：容器高度自动 = 较高那一面，于是换面全程零重排。
+   原先靠行为层量高 + height 过渡补齐，每帧都要重排整个弹窗（含 flex 遮罩重新居中、滚动区重算），
+   首帧必然顿一下——这才是「翻转时卡顿」的根因，不是 3D 本身（2026-09-21 定位）。
+   两面都在行内居中 → 可见面绝不会因为另一面变高而被推移；居中方案同 margin:auto 的论证。 */
+.bz-cinema--midnight .form-flip{position:relative;display:grid}
+.bz-cinema--midnight .form-face{grid-area:1/1;align-self:center;position:relative;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--bz-radius-md);
+  box-shadow:0 18px 48px #0005,0 2px 10px #0003;padding:18px 20px}
+/* 换面（单向：正面 → 背面；2026-09-21 去掉「返回」后没有反向路径）。
+   正面：.16s 淡出上移；visibility 走同长离散过渡——可见性离散插值在 progress<1 时仍算
+   visible、末尾才 hidden，所以淡出全程可读，静止后又从 Tab 序与点击命中里退出。
+   背面：基础态隐形；is-flipped 起手 .06s 后浮现（cnModalIn 给曲线与位移）。
+   入场期不可点（复审 P1①）：背面 pointer-events 基础态 none，is-flipped 上挂一条离散过渡
+   把放开时刻定到入场毕——.34s = .06s 延迟 + .28s 浮现，之前点卡片不落到任何控件上
+   （否则透明期的保存钮、徽标会被误点）；正面 is-flipped 起手即 pointer-events:none，
+   淡出的 .16s 里点它也不会二次触发解析。allow-discrete 是离散属性过渡的开关，旧引擎
+   不认时退化成「立刻可点」，与改前等同、无回归。
+   **两态必须成对**（复审 P0）：基础态的 none 会被 is-flipped 规则一并命中，放行必须显式
+   写 pointer-events:auto——漏了它 computed 恒为 none，换面后整面永远点不动（jsdom 没有
+   命中测试拦不住，ui.test.ts 样式契约守卫按两态文案钉死）。
+   overflow:hidden：裁微光扫过的光带（光带比卡面宽，不裁会飞出圆角）。 */
+.bz-cinema--midnight .form-face--front{transition:opacity var(--cn-m-fast) ease,transform var(--cn-m-fast) ease,visibility var(--cn-m-fast) linear}
+.bz-cinema--midnight .form-face--back{opacity:0;visibility:hidden;overflow:hidden;pointer-events:none}
+.bz-cinema--midnight .form-flip.is-flipped .form-face--front{opacity:0;visibility:hidden;transform:translateY(-6px);pointer-events:none}
+.bz-cinema--midnight .form-flip.is-flipped .form-face--back{opacity:1;visibility:visible;pointer-events:auto;
+  transition:pointer-events;transition-delay:.34s;transition-behavior:allow-discrete;
+  animation:cnModalIn var(--cn-m-base) var(--cn-e-out) both;animation-delay:.06s}
+/* 背面内容分段接力（复用详情弹窗 cnRiseIn——同一种「信息逐段显影」语言）。
+   槽位按 .j-back 子元素序号手排（正文里 2/3 是两个 pick-list，被排除）：dm-head 与背面
+   同起手 .06s，「豆瓣信息」段头 .09s，信息行 .12–.30s 逐行升入，余下段收 .30s，保存条压轴 .33s。
+   （2026-10-01 复审 P2①：原阶梯 9 号位后就齐发 .24s，满数据六块同刻太夯；行阶梯延两档。）
+   pick-list 必须排除：收起态靠 opacity:0 + max-height:0，接力动画的 forwards 填充会把它的
+   opacity 钉死在 1，展开/收起的淡入就废了。 */
+.bz-cinema--midnight .form-flip.is-flipped .form-face--back .j-back > :not(.dm-pick-list),
+.bz-cinema--midnight .form-flip.is-flipped .form-face--back > .dm-actions{animation:cnRiseIn var(--cn-m-base) var(--cn-e-out) both}
+.bz-cinema--midnight .form-flip.is-flipped .form-face--back .j-back > :nth-child(1){animation-delay:.06s}
+.bz-cinema--midnight .form-flip.is-flipped .form-face--back .j-back > :nth-child(4){animation-delay:.09s}
+.bz-cinema--midnight .form-flip.is-flipped .form-face--back .j-back > :nth-child(5){animation-delay:.12s}
+.bz-cinema--midnight .form-flip.is-flipped .form-face--back .j-back > :nth-child(6){animation-delay:.15s}
+.bz-cinema--midnight .form-flip.is-flipped .form-face--back .j-back > :nth-child(7){animation-delay:.18s}
+.bz-cinema--midnight .form-flip.is-flipped .form-face--back .j-back > :nth-child(8){animation-delay:.21s}
+.bz-cinema--midnight .form-flip.is-flipped .form-face--back .j-back > :nth-child(9){animation-delay:.24s}
+.bz-cinema--midnight .form-flip.is-flipped .form-face--back .j-back > :nth-child(10){animation-delay:.27s}
+.bz-cinema--midnight .form-flip.is-flipped .form-face--back .j-back > :nth-child(n+11){animation-delay:.30s}
+.bz-cinema--midnight .form-flip.is-flipped .form-face--back > .dm-actions{animation-delay:.33s}
+/* 收口微光：一道金色斜光一次性扫过背面（冲量档 = 「表单换面这类一次性状态切换」的定档所在）。
+   光带走 transform（台账只许 transform/opacity），46% 宽、两端透明羽化；delay .12s 与接力波
+   同起，扫过时内容正在逐段显影；扫完停在 opacity:0（forwards），不扰后续操作。 */
+.bz-cinema--midnight .form-face--back::after{content:'';position:absolute;top:0;bottom:0;left:0;width:46%;
+  pointer-events:none;opacity:0;transform:translateX(-110%);
+  background:linear-gradient(105deg,transparent 12%,#c9992f2e 50%,transparent 88%)}
+@keyframes cnSheen{0%{opacity:0;transform:translateX(-110%)}18%{opacity:1}72%{opacity:1}100%{opacity:0;transform:translateX(240%)}}
+.bz-cinema--midnight .form-flip.is-flipped .form-face--back::after{animation:cnSheen var(--cn-m-impulse) var(--cn-e-move) both;animation-delay:.12s}
+/* 换面弹窗：垂直居中（2026-09-21 用户要求）。上下留 6vh：背面比视口高时由本层滚动——
+   滚动不装在面上（面内 overflow 会把卡片高度钳在滚动区里）。
+   overscroll-behavior:contain：滚到两端不把滚动链递给背后页面（遮罩区的滚轮由行为层
+   整段拦截，见 ui.ts ovl 的 wheel 守卫）。 */
+.bz-cinema--midnight .cn-ovl.cn-ovl--flip{padding-top:6vh;padding-bottom:6vh;overflow-y:auto;overscroll-behavior:contain}
+/* 解析中：全部分类 chip 的边框走流光扫过（2026-09-21 用户点名「所有分类的边框变成流动的特效」） */
+@keyframes cnFormScan{from{background-position:200% 50%}to{background-position:-200% 50%}}
+.bz-cinema--midnight .f-choice-btn.is-scanning{
+  border-color:transparent;
+  background-image:linear-gradient(90deg,var(--line) 0%,var(--gold) 45%,var(--gold) 55%,var(--line) 100%);
+  background-size:200% 100%;
+  animation:cnFormScan 1.3s linear infinite;
+}
 .bz-cinema--midnight .f-range-row{display:flex;align-items:center;gap:var(--bz-space-md)}
 .bz-cinema--midnight .f-range{flex:1;-webkit-appearance:none;appearance:none;height:4px;border-radius:99px;background:var(--chip);outline:none}
 .bz-cinema--midnight .f-range::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:var(--gold);cursor:pointer;border:2px solid var(--panel);box-shadow:0 1px 4px #0003}
@@ -199,6 +411,42 @@
 .bz-cinema--midnight .cn-confirm p{font-size:var(--bz-font-label);color:var(--ink);margin-top:10px;line-height:1.6}
 .bz-cinema--midnight .cn-confirm-sub{font-size:var(--bz-font-caption);color:var(--ink-3);margin-top:var(--bz-space-sm)}
 .bz-cinema--midnight .cn-confirm .dm-actions{justify-content:center;margin-top:var(--bz-space-lg)}
+/* 删除确认流程框（core/flow-dialog 收编，一致审查#1：全域最后一个自绘确认框退役）。
+   行为层 openConfirm 传 className: 'cn-skin bz-cinema-flow-dialog'。为什么必须是这两个类：
+     · `cn-skin` = 午夜场调色板（本文件开头）：core 流程框挂 document.body、不在面板树内，
+       缺它下面所有变量解析失败（跟手菜单/底部抽屉皮肤同一通道）；
+     · `bz-cinema-flow-dialog` = 本域确认框专属类，承载下面这套取值。
+   取值照抄同域弹窗 .cn-modal（纸白底/墨线描边/大阴影），让「删除影视」确认框读起来就是
+   午夜场弹窗那张纸。结构与几何仍由 core 壳承担（.bz-overlay-popup 消费的 --bz-* token 起底），
+   这里只覆写颜色观感，故选择器结构与 favorites/belongings 域皮同款（id 契约映射）。 */
+#__shared_confirm_popup__.bz-cinema-flow-dialog {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 18px 48px #0005, 0 2px 10px #0003;
+}
+#__shared_confirm_popup__.bz-cinema-flow-dialog h4 {
+  font-family: "Noto Serif SC", SimSun, serif;
+  letter-spacing: .08em;
+  color: var(--ink);
+}
+#__shared_confirm_popup__.bz-cinema-flow-dialog p {
+  color: var(--ink);
+}
+/* 按钮：对齐同域弹窗 .dm-btn（墨线描边/无底/次级墨字）。删除主钮在危险态由 core 的
+   .bz-flow-dialog--danger 降为中性次级形制，本域按 .dm-btn.danger 口径把文字色交给域内
+   危险色惯例 #b3402a（午夜场调色板无 --danger token）；常态 (2,1,0) 规则天然被
+   core 危险规则 (2,2,0) 压住，危险覆写状态限定 .bz-flow-dialog--danger。 */
+#__shared_confirm_popup__.bz-cinema-flow-dialog #__shared_confirm_cancel__,
+#__shared_confirm_popup__.bz-cinema-flow-dialog #__shared_confirm_ok__ {
+  border-color: var(--line);
+  background: none;
+  color: var(--ink-2);
+}
+#__shared_confirm_popup__.bz-cinema-flow-dialog.bz-flow-dialog--danger #__shared_confirm_ok__ {
+  border-color: var(--line);
+  background: none;
+  color: #b3402a;
+}
 /* ---------- 统一浮层皮肤（core/item-actions：跟手菜单 .bz-item-menu / 底部抽屉 .bz-item-sheet） ----------
    移动端抽屉与跟手菜单的**手势与实现**统一走共享层（core/dom.longPress + core/item-actions：
    防穿透/下滑关闭/ESC/外部点击关闭/键盘导航全由 core 承载）；本域只提供皮肤类，保持午夜场观感。
@@ -288,6 +536,7 @@
 .bz-cinema--midnight .top-val{flex:none;color:var(--gold);font-weight:700;font-variant-numeric:tabular-nums}
 .bz-cinema--midnight .cn-empty{padding:18px 0;text-align:center;font-size:11.5px;color:var(--ink-3);letter-spacing:.1em}
 /* 空态 / toast */
+/* 空态（面板 toast 已收编 core notice 单源，一致审查#2：自绘通道与样式段退役） */
 .bz-cinema--midnight .cn-empty-page{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--bz-space-sm);color:var(--ink-3)}
 .bz-cinema--midnight .cn-empty-page .big{font-family:"Noto Serif SC",SimSun,serif;font-size:var(--bz-font-emphasis);letter-spacing:.3em;color:var(--ink-2)}
 .bz-cinema--midnight .cn-toast{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:80;background:var(--ink);color:var(--panel);font-size:var(--bz-font-meta);padding:var(--bz-space-sm) var(--bz-space-lg);border-radius:99px;box-shadow:0 6px 20px #0004;animation:cn-toast-in var(--bz-dur-base) ease}
@@ -453,11 +702,7 @@
    ==================================================================== */
 /* 面板壳 = style section 直挂 .bz-panel-overlay，margin:auto 复用 overlay 居中链 */
 .bz-panel-overlay > .bz-cinema--midnight,
-.bz-panel-overlay > .bz-cinema--gazette,
-.bz-panel-overlay > .bz-cinema--booth,
-.bz-panel-overlay > .bz-cinema--midnight.mob,
-.bz-panel-overlay > .bz-cinema--gazette.mob,
-.bz-panel-overlay > .bz-cinema--booth.mob { margin: auto; }
+.bz-panel-overlay > .bz-cinema--midnight.mob { margin: auto; }
 
 /* 移动壳真全屏：不走 overlay 居中链（memo 同款，issue 266）。
    overlay（components.css）是 100vh 布局视口（fixed+inset:0 不随键盘/原生栏收缩），
@@ -466,9 +711,7 @@
    （用户真机反馈 2026-09-10）。改顶部对齐：底边落在可视视口下沿（键盘/原生栏之上），
    与 memo 的 align-self:flex-start 完全同款。 */
 @media (max-width: 768px) {
-  .bz-panel-overlay > .bz-cinema--midnight.mob,
-  .bz-panel-overlay > .bz-cinema--gazette.mob,
-  .bz-panel-overlay > .bz-cinema--booth.mob { margin: 0; align-self: flex-start; }
+  .bz-panel-overlay > .bz-cinema--midnight.mob { margin: 0; align-self: flex-start; }
 }
 
 /* ====================================================================
@@ -476,6 +719,30 @@
    ==================================================================== */
 .bz-cinema--midnight .pw-fetch{position:absolute;inset:0;z-index:3;display:grid;place-items:center;background:#0006}
 .bz-cinema--midnight .pw-spin{width:20px;height:20px;border:3px solid var(--chip);border-top-color:var(--gold);border-radius:50%;animation:cn-spin .8s linear infinite}
+
+/* ====================================================================
+   深审批 B（视图层与样式）：静态内联视觉收编（ADR-0020）+ 搜索 ✕ + mob 空态容器。
+   值零改动（探索稿 1:1 不破）；动态行为性样式（badge/dot/display 切换）豁免留内联。
+   ==================================================================== */
+/* 卡片未评分（原 .pstars 内联 opacity:.35 平移） */
+.bz-cinema--midnight .pstars .star-none{opacity:.35}
+/* 详情/合并卡详情弹窗宽（原 cn-modal 内联 max-width:400px;width:100% 平移；
+   特异性高于 .cn-modal 基类的 max-width:min(430px,100%)，视觉不变） */
+.bz-cinema--midnight .cn-modal--detail{max-width:400px;width:100%}
+/* 详情弹窗简介段（原内联三连 font-size/line-height/color/text-align 平移） */
+.bz-cinema--midnight .dm-synopsis{font-size:12px;line-height:1.8;color:var(--ink-2);text-align:justify}
+/* 搜索框尾 ✕ 一键清词（深审批 B #3，clipbook 效率#12 定稿范式；委托走 data-cinema-clear
+   既有清空出口。有词才显示：desk 模板条件挂 hidden，mob 由 renderMidnightMob 随词同步） */
+.bz-cinema--midnight .q-clear{flex:none;width:18px;height:18px;padding:0;border:0;border-radius:50%;background:none;color:var(--ink-3);cursor:pointer;display:grid;place-items:center;font-family:inherit}@media (hover: hover) {
+
+.bz-cinema--midnight .q-clear:hover{color:var(--ink);background:var(--chip)}
+}
+.bz-cinema--midnight .q-clear svg{width:11px;height:11px}
+/* hidden 属性兜底：display:grid 会压掉 UA 的 [hidden] 显示 */
+.bz-cinema--midnight .q-clear[hidden]{display:none}
+/* mob 列表空态：m-scroll 常态是块级滚动容器，空态页（.cn-empty-page flex:1）要撑满居中
+   → 空态时容器转 flex（与 desk .d-main 的 flex 列同效；jsdom 无布局值依赖） */
+.bz-cinema--midnight .m-scroll.cn-mempty{display:flex;flex-direction:column}
 
 /* ══════════════════════════════════════════════════════════════════════════
    观影志接线补票：上游 42c00d1d 的 .bz-yb 段整段落位（批 5cine 收尾遗漏，随 yearbook/ 六件同源）。
@@ -486,13 +753,135 @@
   --cn-m-fast:.16s;    /* 微反馈：hover / 按下 / 底色 / 高亮滑行 */
   --cn-m-move:.2s;     /* 空间位移：海报飞行、FLIP 让位、面板撑开与折回、涟漪 */
   --cn-m-base:.28s;    /* 揭示：面板入场、下拉展开、内容接力、海报淡入、卡片抬升与推近 */
-  --cn-m-impulse:.74s; /* 冲量：表单翻转这类一次性状态切换 */
+  --cn-m-impulse:.74s; /* 冲量：表单换面这类一次性状态切换 */
   --cn-e-out:cubic-bezier(.22,.82,.3,1);   /* 揭示：先快后缓、末尾收势 */
   --cn-e-move:cubic-bezier(.34,.06,.16,1); /* 迁移与冲量：起手重、收尾干脆 */
 }
 /* 空态：影院还没有条目时的滚动口内居中（上游无此两条，本地补齐排版） */
 .bz-yb-blank{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:1.2em;text-align:center;color:rgb(var(--yb-dim-rgb))}
 .bz-yb-blank p{margin:0;font-size:1.16em}
+/* 口径：**不做 prefers-reduced-motion 分支**（issue 400）。与共享元素（396）、滑动高亮（398）、
+   涟漪（399）三处已拍板口径一致。不只是「求一致」——用户本人机器恒报 reduce（Windows 关窗口动画，
+   core/styles.css 有实证），该媒体查询分不清「我关了系统动画」与「我想要更少的动效」，
+   表达不了意图：真要给「少动效」一个出口，走设置项（见 issue 400 遗留），不放媒体查询。
+   功能性指示（转圈 / 骨架 / 脉冲）本来就不降级，不受本条影响。 */
+
+/* ── 弹窗：遮罩淡入 + 面板由 .96 缩放上浮（原来弹窗是硬切进来的） ── */
+@keyframes cnOvlIn{from{opacity:0}to{opacity:1}}
+@keyframes cnModalIn{from{opacity:0;transform:translateY(12px) scale(.962)}to{opacity:1;transform:none}}
+.bz-cinema--midnight .cn-ovl{animation:cnOvlIn var(--cn-m-move) ease both}
+.bz-cinema--midnight .cn-modal{animation:cnModalIn var(--cn-m-base) var(--cn-e-out) both}
+
+/* ── 详情弹窗：面板浮起后内容分段接力（信息块多，逐段出现比整块砸下来耐看）──
+   阶梯排到第 10 块（issue 401）：直接子元素 = 头部 + 每一条豆瓣信息行，一部片常有八九块，
+   原来 n+6 起全部 .25s 齐发，后半段接力感荡然无存；步进收到 .03s、上限 .27s。 */
+@keyframes cnRiseIn{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+.bz-cinema--midnight .cn-modal--detail > *{animation:cnRiseIn var(--cn-m-base) var(--cn-e-out) both}
+.bz-cinema--midnight .cn-modal--detail > *:nth-child(2){animation-delay:.03s}
+.bz-cinema--midnight .cn-modal--detail > *:nth-child(3){animation-delay:.06s}
+.bz-cinema--midnight .cn-modal--detail > *:nth-child(4){animation-delay:.09s}
+.bz-cinema--midnight .cn-modal--detail > *:nth-child(5){animation-delay:.12s}
+.bz-cinema--midnight .cn-modal--detail > *:nth-child(6){animation-delay:.15s}
+.bz-cinema--midnight .cn-modal--detail > *:nth-child(7){animation-delay:.18s}
+.bz-cinema--midnight .cn-modal--detail > *:nth-child(8){animation-delay:.21s}
+.bz-cinema--midnight .cn-modal--detail > *:nth-child(9){animation-delay:.24s}
+.bz-cinema--midnight .cn-modal--detail > *:nth-child(n+10){animation-delay:.27s}
+
+/* ── 卡片：整卡抬升 + 海报轻微推近，两者同期（issue 401：原来抬 .pw 而片名不动、
+   抬升 .28s / 推近 .44s 两条时长）；按下回弹也落在整卡上。
+   跟手倾斜（issue 409）也走这一条 transform：角度由行为层写 `--tlt-*` 变量（默认 0 度 = 恒等变换），
+   写变量而不是 inline transform——抬升与回弹才不会整条被顶掉。 ── */
+.bz-cinema--midnight .pcard{--tlt-x:0deg; --tlt-y:0deg; --tlt-lift:0px; --tlt-scale:1;
+  transform:perspective(900px) rotateX(var(--tlt-x)) rotateY(var(--tlt-y)) translateY(var(--tlt-lift)) scale(var(--tlt-scale));
+  transition:transform var(--cn-m-base) var(--cn-e-out)}
+/* 跟手期间收短到 fast 档：base 档跟不住指针；离手回落仍走 base（类摘掉即恢复） */
+.bz-cinema--midnight .pcard.is-tilt{transition:transform var(--cn-m-fast) var(--cn-e-out)}
+.bz-cinema--midnight .pw{transition:box-shadow var(--cn-m-base),border-color var(--cn-m-fast)}
+.bz-cinema--midnight .pw img{transition:transform var(--cn-m-base) var(--cn-e-out)}
+@media (hover: hover) {
+  .bz-cinema--midnight .pcard:hover{--tlt-lift:-6px}
+  .bz-cinema--midnight .pcard:hover .pw{border-color:var(--gold);
+    box-shadow:0 16px 34px #00000052,0 3px 9px #0003}
+  .bz-cinema--midnight .pcard:hover .pw img{transform:scale(1.045)}
+}
+.bz-cinema--midnight .pcard:active{--tlt-lift:-2px; --tlt-scale:.986}
+
+/* ── 按钮与可选项：hover 有微光、按下有回弹（原来只有颜色变化，点击缺手感） ── */
+.bz-cinema--midnight .dm-btn,
+.bz-cinema--midnight .f-choice-btn,
+.bz-cinema--midnight .dm-pick-item,
+.bz-cinema--midnight .ai-start,
+.bz-cinema--midnight .rec-add,
+.bz-cinema--midnight .seg button,
+.bz-cinema--midnight .rail-item,
+.bz-cinema--midnight .d-head .imp,
+.bz-cinema--midnight .m-tool,
+.bz-cinema--midnight .sp-back{transition:color var(--cn-m-fast),border-color var(--cn-m-fast),background var(--cn-m-fast),transform var(--cn-m-fast),filter var(--cn-m-fast)}
+.bz-cinema--midnight .dm-btn:active,
+.bz-cinema--midnight .f-choice-btn:active,
+.bz-cinema--midnight .dm-pick-item:active,
+.bz-cinema--midnight .ai-start:active,
+.bz-cinema--midnight .rec-add:active,
+.bz-cinema--midnight .seg button:active{transform:scale(.955)}
+
+/* ── 下拉候选：展开不再「啪」地出现（原先是 hidden 瞬切，没有中间态）──
+   收起态用 max-height:0 + opacity:0 + overflow:hidden，展开走 .is-open 类；
+   边框/内距/外边距一并过渡，否则盒子会先撑开再淡入。 */
+.bz-cinema--midnight .dm-pick-list{display:flex;flex-wrap:wrap;gap:6px;
+  max-height:0;opacity:0;overflow:hidden;padding:0 10px;margin-top:0;border:1px solid transparent;
+  border-radius:var(--bz-radius-sm);background:var(--chip);
+  transition:max-height var(--cn-m-base) var(--cn-e-out),opacity var(--cn-m-move) ease,
+    padding var(--cn-m-base) var(--cn-e-out),margin-top var(--cn-m-base),border-color var(--cn-m-base)}
+.bz-cinema--midnight .dm-pick-list.is-open{max-height:280px;opacity:1;padding:8px 10px;margin-top:8px;border-color:var(--line)}
+
+/* ── 反馈与入口（issue 403）── */
+/* 星级元素化：逐颗点亮要有可动画的「颗」（文本内容不变，仍是 ★★★☆☆） */
+.bz-cinema--midnight .pstars i{display:inline-block;font-style:normal}
+/* 表单评分星预览：拖动滑杆时逐颗点亮，与卡片同一份星口径（shared.starsHtml） */
+.bz-cinema--midnight .f-stars{flex:none;min-width:54px;color:var(--star);font-size:12px;letter-spacing:1px;text-align:right}
+.bz-cinema--midnight .f-stars i{display:inline-block;font-style:normal}
+/* 键盘焦点环：.pcard 早就带 tabindex/role=button，但纯键盘浏览看不见焦点（无障碍缺口）。
+   焦点环落在海报上，与 hover 的金边同一处，避免两套「选中」视觉。 */
+.bz-cinema--midnight .pcard:focus-visible{outline:none}
+.bz-cinema--midnight .pcard:focus-visible .pw{border-color:var(--gold);box-shadow:0 0 0 2px #c9992f66,0 10px 24px #0004}
+/* 详情海报可点看大图（core 灯箱） */
+.bz-cinema--midnight .cn-modal--detail .dm-poster{cursor:zoom-in}
+
+/* ── 网格重排（issue 402）：网格做幽灵的定位祖先；离场幽灵停在旧矩形处淡出 ──
+   幽灵不吃事件、不参与布局（绝对定位），渲染后由行为层补进来、动画收尾自清。 */
+.bz-cinema--midnight .grid,
+.bz-cinema--midnight .m-grid{position:relative}
+.bz-cinema--midnight .cn-exit{position:absolute;pointer-events:none;overflow:hidden;
+  border-radius:9px;background:var(--chip);border:1px solid var(--line)}
+.bz-cinema--midnight .cn-exit img{width:100%;height:100%;object-fit:cover;display:block}
+
+/* ── 列表行与分析统计条：hover 的底色也是渐入，不是瞬变 ── */
+.bz-cinema--midnight .s-row{transition:background var(--cn-m-fast)}
+
+/* 本段**没有** prefers-reduced-motion 块（issue 400 拍板：不做分支，理由见段首台账）。 */
+
+/* ══════════════════════════════════════════════════════════════════════════
+   详情弹窗共享元素过渡（issue 396）：点卡片 → 海报「抽出」飞到详情海报位 →
+   面板从海报处撑开。几何逐次不同，飞行与撑开都走行为层 WAAPI（时长与曲线见段首台账，
+   取值在 src/cinema/motion.ts）；这里只做两件事：压掉会被飞行对不上的既有入场，与克隆件外观。
+   本段必须排在全域动效段之后——对 .cn-modal 的 animation:none 靠「更晚出现」取胜。 */
+
+/* fly 通道压掉面板整体入场（cnModalIn）：面板在飞行期间整体隐藏，入场动画
+   在藏着的间隙里播完等于白播，落地时反而会把海报从落点上挪走 */
+.bz-cinema--midnight .cn-modal--fly{animation:none}
+/* 内容接力（cnRiseIn）同样压掉：dm-head 里的海报必须原地等克隆落地，
+   其余段交给 clip-path 的撑开去揭示——两层位移动效叠在一起会互相打架。
+   接力规则带 :nth-child（权重 0,3,0），这里补上 .cn-modal--detail 凑到同权重、并排在更后：
+   两条入场语法的从属关系由选择器写清楚，不再用 !important 硬压（issue 401）。 */
+.bz-cinema--midnight .cn-modal--fly.cn-modal--detail > *{animation:none}
+/* 克隆海报：目标尺寸的独立合成层，transform 动画全程不触布局。
+   z-index 高过 .cn-ovl（50）：返程克隆挂共享宿主（display:contents，坐标系=面板根），
+   而合集弹窗还开着时克隆与弹窗层同处一个层叠上下文——压在弹窗下就看不见海报飞回行里；
+   去程克隆挂在遮罩层内部（遮罩 z-index 自成层叠上下文），值大小不影响它的相对次序。 */
+.bz-cinema--midnight .cn-fly{position:absolute;left:0;top:0;z-index:60;pointer-events:none;overflow:hidden;
+  background:var(--chip);box-shadow:0 14px 34px #0006;will-change:transform}
+.bz-cinema--midnight .cn-fly img{width:100%;height:100%;object-fit:cover;display:block}
+
 /* ══════════════════════════════════════════════════════════════════════════
    观影志（.bz-yb，2026-09-22 全新设计）——独立全屏长片，25 幕，一幕一屏。
 
@@ -1067,8 +1456,7 @@
 .yb-mx-rows span{opacity:0}
 
 /* ── 25 落款 ── */
-.yb-colo{position:absolute; inset:0; display:flex; flex-direction:column; justify-content:center; gap:1.8em}
-.yb-colo{justify-content:center; align-items:center}
+.yb-colo{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1.8em}
 /* 最后一页只有四格大字，居中一行；单位在数字下方（小字但成组，不散排） */
 .yb-colo-grid{display:grid; grid-template-columns:repeat(4,auto); gap:4.4em; justify-content:center;
   align-items:end; width:100%}
@@ -1078,18 +1466,6 @@
 .yb-colo-grid .yb-kv > span{display:block; margin-top:.6em; font-size:.88em;
   color:rgb(var(--yb-dim-rgb)); letter-spacing:.06em}
 .yb-colo-grid .yb-kv:nth-child(3) .yb-flap:not(.is-lit){background:rgb(var(--yb-red-rgb))}
-.yb-colo-line{margin:0; font-family:var(--yb-serif); font-size:1.3em; letter-spacing:.03em;
-  padding-top:1em; border-top:1px solid var(--yb-line); transform-origin:left center}
-.yb-colo-fields{display:flex; flex-wrap:wrap; gap:.5em}
-.yb-field{font-size:.8em; letter-spacing:.06em; padding:.28em .7em; border-radius:999px;
-  color:rgb(var(--yb-dim-rgb)); background:var(--yb-card); opacity:0}
-.yb-colo-act{display:flex; align-items:center; gap:1.4em; opacity:0}
-.yb-btn{font:inherit; font-size:.94em; letter-spacing:.1em; cursor:pointer; padding:.5em 1.4em; border-radius:999px;
-  color:var(--yb-paper); background:rgb(var(--yb-ink-rgb)); border:none;
-  transition:transform var(--cn-m-fast),opacity var(--cn-m-fast)}
-@media (hover:hover){ .yb-btn:hover{transform:translateY(-1px)} }
-.yb-btn:active{transform:scale(.97)}
-.yb-colo-note{font-size:.8em; color:rgb(var(--yb-faint-rgb)); letter-spacing:.04em}
 
 /* ── 过片：换幕时两片纸从上下合到中线（留一道朱红细缝），合上那一帧完成换幕 ──
    时长走台账：合 = fast（要对齐滚轮的手速），开 = move。 */
@@ -1171,3 +1547,27 @@
 .bz-yb-box.is-rot90 .yb-rail{right:auto; left:.5em}
 .bz-yb-box.is-rot90 .yb-attl{top:20%}
 .bz-yb-box.is-rot90 .yb-arc{bottom:-42em; --arc-r:44em}
+.bz-yb-box.is-rot90 .yb-arc{bottom:-42em; --arc-r:44em}
+
+/* 一键导入豆瓣片单弹层（cn-modal--dimp）：两段式（输入态：链接框 + 金钮；结果态：统计行 +
+   条目列表 + 归入行 + 导入钮）。2026-10-01 用户反馈两轮：删说明段（Cookie 前提由抓取失败
+   的提示兜底）、整块标题（金 kicker 头）不要、去「返回重填」钮（重来一次 = 关掉重开）、
+   「归入片单」行补齐对齐样式；片单名默认值由抓取端 title 提供。全 token 取色 */
+.bz-cinema--midnight .cn-modal--dimp{width:300px;max-height:74%;display:flex;flex-direction:column;gap:14px;padding:18px 18px 16px}
+.bz-cinema--midnight .dimp-stage{display:flex;flex-direction:column;gap:10px;min-height:0}
+.bz-cinema--midnight .dimp-stage[hidden]{display:none}
+.bz-cinema--midnight .dimp-stage .j-dimp-url{width:100%;background:var(--chip);border:1px solid var(--line);border-radius:10px;padding:9px 12px;color:var(--ink);font-size:12.5px;font-family:inherit;outline:none;transition:border-color var(--cn-m-fast) ease}
+.bz-cinema--midnight .dimp-stage .j-dimp-url:focus{border-color:var(--gold)}
+.bz-cinema--midnight .dimp-stage .j-dimp-url::placeholder{color:var(--ink-3)}
+.bz-cinema--midnight .dimp-stat{font-size:12px;color:var(--ink-2);letter-spacing:.02em}
+.bz-cinema--midnight .dimp-list{overflow-y:auto;display:grid;gap:5px;min-height:0;max-height:260px;padding:2px}
+.bz-cinema--midnight .dimp-row{display:flex;align-items:center;gap:9px;padding:7px 11px;border-radius:9px;border:1px solid var(--line);font-size:12.5px;color:var(--ink)}
+.bz-cinema--midnight .dimp-row.is-inlib{color:var(--ink-3)}
+.bz-cinema--midnight .dimp-row .lp-label{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bz-cinema--midnight .dimp-tag{font-size:10.5px;letter-spacing:.06em;flex:none;padding:1px 8px;border-radius:99px;border:1px solid var(--line);color:var(--ink-3)}
+.bz-cinema--midnight .dimp-row:not(.is-inlib) .dimp-tag{border-color:var(--gold);color:var(--gold)}
+.bz-cinema--midnight .dimp-newlist{display:flex;align-items:center;gap:10px}
+.bz-cinema--midnight .dimp-newlist label{flex:none;font-size:12.5px;color:var(--ink-2)}
+.bz-cinema--midnight .dimp-newlist input{flex:1;min-width:0;background:var(--chip);border:1px solid var(--line);border-radius:10px;padding:8px 12px;color:var(--ink);font-size:12.5px;font-family:inherit;outline:none;transition:border-color var(--cn-m-fast) ease}
+.bz-cinema--midnight .dimp-newlist input::placeholder{color:var(--ink-3)}
+.bz-cinema--midnight .dimp-newlist input:focus{border-color:var(--gold)}

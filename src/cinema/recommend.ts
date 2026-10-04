@@ -72,17 +72,21 @@ const RECOMMEND_ASK = 20;
 const RECOMMEND_TAKE = 5;
 const FOLLOWUP_ASK = 10;
 
-/** 构建推荐提示词（2026-09-11 方案 A：不再打包全量片名做排除清单——
- *  prompt 只发正向信号（画像 + 最近已看），要求多给（20 部按匹配度排序），
- *  「不荐库内已有」职责移到结果层去重；token 从库规模线性降为常量级） */
-export function buildRecommendPrompt(profile: any, recent: string[]): string {
-  return `你是资深影视推荐官。用户已看 ${profile.total} 部影视，以下是其口味画像（个人评分1~10加权统计，数值为加权分）：
+/** 两个提示词共用的画像头（推荐/补问同一段字节；改文案两边同步变） */
+const profileSection = (profile: any, recent: string[]): string =>
+  `你是资深影视推荐官。用户已看 ${profile.total} 部影视，以下是其口味画像（个人评分1~10加权统计，数值为加权分）：
 品类分布：${profile.groups.join('、') || '无'}
 类型偏好：${profile.genres.join('、') || '无'}
 导演偏好：${profile.directors.join('、') || '无'}
 主演偏好：${profile.actors.join('、') || '无'}
 地区偏好：${profile.regions.join('、') || '无'}
-最近看的10部：${recent.join('；')}
+最近看的10部：${recent.join('；')}`;
+
+/** 构建推荐提示词（2026-09-11 方案 A：不再打包全量片名做排除清单——
+ *  prompt 只发正向信号（画像 + 最近已看），要求多给（20 部按匹配度排序），
+ *  「不荐库内已有」职责移到结果层去重；token 从库规模线性降为常量级） */
+export function buildRecommendPrompt(profile: any, recent: string[]): string {
+  return `${profileSection(profile, recent)}
 
 请基于画像推荐 ${RECOMMEND_ASK} 部用户可能喜欢的影视（电影/电视剧/短剧/书籍/动漫/纪录片/公开课均可），按与口味的匹配度从高到低排序。推荐理由必须具体引用画像中的偏好信号（如"你偏爱X导演的Y风格"）。只推荐真实存在的影视，避免编造。
 
@@ -92,13 +96,7 @@ export function buildRecommendPrompt(profile: any, recent: string[]): string {
 /** 补问提示词（方案 A 第二轮）：只排除「已经推荐过的名字」（≤20 个，常量级），
  *  在库去重仍由结果层承担；凑不满 5 部就按实际所得展示 */
 export function buildFollowupPrompt(profile: any, recent: string[], excludeNames: string[]): string {
-  return `你是资深影视推荐官。用户已看 ${profile.total} 部影视，以下是其口味画像（个人评分1~10加权统计，数值为加权分）：
-品类分布：${profile.groups.join('、') || '无'}
-类型偏好：${profile.genres.join('、') || '无'}
-导演偏好：${profile.directors.join('、') || '无'}
-主演偏好：${profile.actors.join('、') || '无'}
-地区偏好：${profile.regions.join('、') || '无'}
-最近看的10部：${recent.join('；')}
+  return `${profileSection(profile, recent)}
 
 刚才已经向你推荐过以下影片（不要重复推荐）：${excludeNames.join('、')}
 
@@ -172,47 +170,55 @@ export function parseRecommendJson(raw: string): any[] | null {
   }
 }
 
-/** 加入想看（AI 推荐条目 → 建笔记，评分 -1） */
-export async function quickAddWant(app: App, name: string, type: string): Promise<void> {
+/** 加入想看（AI 推荐条目 → 建笔记，状态键想看） */
+export async function quickAddWant(app: App, name: string, type: string, opts?: { silent?: boolean; sid?: string }): Promise<boolean> {
+  // 返回「是否实际建档」——批量导入按它汇总（跳过/失败为 false，调用方区分口径）
+  // silent（豆瓣片单批量导入用）：不出逐条 toast、不逐条刷新——调用方统一统计 + 最后一次刷
+  const quiet = !!opts?.silent;
   const trimmedName = typeof name === 'string' ? name.trim() : '';
   if (!trimmedName) {
-    notice('推荐条目缺少片名，已跳过加入想看');
-    return;
+    if (!quiet) notice('推荐条目缺少片名，已跳过加入想看');
+    return false;
   }
   // 非法字符校验（深审批A P3-7）：名称进文件名《X》.md，AI 返回的 title 不受控
   if (hasIllegalNameChar(trimmedName)) {
-    notice(`${ILLEGAL_NAME_HINT}，已跳过加入想看`, 'error');
-    return;
+    if (!quiet) notice(`${ILLEGAL_NAME_HINT}，已跳过加入想看`, 'error');
+    return false;
   }
   const tag = GROUP_DEFAULT_TAG[type] || '电影';
   let folderObj = app.vault.getAbstractFileByPath(M.folderPath);
   if (!folderObj) await app.vault.createFolder(M.folderPath);
   const filePath = `${M.folderPath}/《${trimmedName}》.md`;
-  if (app.vault.getAbstractFileByPath(filePath)) {
-    notice(`影视「${trimmedName}」已在库中`);
-    return;
+  const dup = app.vault.getAbstractFileByPath(filePath);
+  if (dup) {
+    if (!quiet) notice(`影视「${trimmedName}」已在库中`);
+    return false;
   }
   const now = localNow();
-  // 观影日期加双引号（深审批A P3-8）：裸日期被真机 YAML 解析成 timestamp（Moment 对象）→ 英文星期
+  // 观影日期加双引号（深审批A P3-8）：裸日期被真机 YAML 解析成 timestamp（Moment 对象）→ 英文星期；
+  // 状态单源键「状态」（评分编码 -1 已退役）
   const content = `---
 tags:
 - ${tag}
+状态: 想看
 观影日期: "${now}"
-评分: -1
+想看日期: "${now.slice(0, 10)}"
 海报: 
 ---
 `;
   try {
     const f = await app.vault.create(filePath, content);
-    notice(`已加入想看：「${trimmedName}」`, 'success'); // 引号形制与全域一致（深审批A P3-16）
+    if (!quiet) notice(`已加入想看：「${trimmedName}」`, 'success'); // 引号形制与全域一致（深审批A P3-16）
     // 事件补发（smartcat 行为流观察；ADR-0087 cinema 接管）：created want
     emitDomainEvent('movie', { kind: 'created', name: trimmedName, status: 'want', rating: null, review: null });
     // 入抓取队列（ADR-0113）：卡片 loading 反馈，无通知；票 293 起仅 电影/电视剧 入队
-    if (doubanEligibleTag(tag)) enqueueDoubanFetch(f, trimmedName);
-    refreshDataAndView(app);
+    if (doubanEligibleTag(tag)) enqueueDoubanFetch(f, trimmedName, 'movie', opts?.sid); // 片单导入携带 sid：队列直取 queryDoubanBySid（省一次名称检索）
+    if (!quiet) refreshDataAndView(app); // silent：调用方批量收尾统一刷
+    return true;
   } catch (e) {
     notifySaveError(e, '加入想看');
     console.error(e);
+    return false;
   }
 }
 

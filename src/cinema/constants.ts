@@ -3,16 +3,26 @@
  */
 /**
  * 状态枚举：想看=0 / 在看=1 / 已看=2（面板筛选/徽标等消费口径）。
- * 注意与「评分编码」是两套数值（错位勿混）：评分 -1=想看 / 0=在看 / >0=已看，
- * 评分 → 状态枚举的推断在 data.ts parseMovieFile（rating === -1/0/其余）。
+ * 状态落盘单源键「状态」（想看/在看/已看，2026-09-30 拍板）：评分编码 -1/0 已退役，
+ * 兼容推断已随退役收尾移除（2026-10-03）——无「状态」键一律按已看（parseMovieFile）。
  */
 export const STATUS_WANT = 0;
 export const STATUS_WATCHING = 1;
 export const STATUS_WATCHED = 2;
 
+/** 刷数口径（唯一真理）：首看占 1 刷 + 重温次数。卡片「N刷」角标 / 详情「N 刷」徽标 /
+ *  重温通知共用——禁各处再拼第二套算法。放 constants（shared.ts 纯层白名单内可值导入） */
+export function rewatchCount(it: { rewatches: string[] }): number {
+  return 1 + it.rewatches.length;
+}
+
+/** 内置片单：重温候补架（「想重温」语义归堆，不动三状态机——就是一枚预置片单）。
+ *  恒排片单枚举首位、侧栏固定显示、详情弹窗出专属 chip；不可在片单弹层里删除 */
+export const REWATCH_SHELF = '重映厅';
+
 /**
  * 默认评分（编辑窗预填默认分；10 分制中点 5）。
- * 评分编码口径（≠上方状态枚举）：-1=想看 / 0=在看 / >0（或无评分）=已看，
+ * 评分口径（编码退役后）：只有 >0 是真分值（想看/在看/未评分在内存与盘上都不再占 -1/0），
  * 消费推断唯一落点 data.ts parseMovieFile。
  */
 export const DEFAULT_RATING = 5;

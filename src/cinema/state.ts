@@ -31,6 +31,29 @@ export interface CinemaItem {
   watchDate: string | null;
   rating: number | null;
   status: number;
+  /** 进入「想看」的日期（frontmatter「想看日期」，YYYY-MM-DD；想看建档 / 状态切回想看时记）。
+   *  与观影日期分工：三状态各记各的到达日，旧笔记无键 = null 不显示 */
+  wantDate: string | null;
+  /** 进入「在看」的日期（frontmatter「在看日期」，YYYY-MM-DD；标记在看 / 编辑切在看时记） */
+  watchingDate: string | null;
+  /** 到「已看」的日期（frontmatter「已看日期」，YYYY-MM-DD；编辑切已看时记）。
+   *  **与观影日期分工**（2026-10-01 拍板，issue 536）：观影日期是**排序时间戳**——建档/编辑/标记在看
+   *  都会刷它，所以它不能当「看过」的凭据（用户报的幽灵节点：一条刚导入的在看条目，时间线里凭空
+   *  多出一行「已看」，日期就是入库日）。凡是要表达「哪天看的」（详情时间线的已看/首看节点、
+   *  合集行副行、年书各轴），一律读本键。
+   *  只增不删（同另两个状态日期）；旧笔记无键 = 读取层在已看态回落观影日期（data.ts 单点兜底）。 */
+  watchedDate: string | null;
+  /** 重温时刻列表（frontmatter「重看」数组，每项一次重温；2026-09-30 起记日期+时刻，旧档 date-only 照旧；建档/编辑不写此键）。
+   *  「N 刷」口径唯一落点 rewatchCount（constants），卡片角标 / 详情徽标 / 重温通知共用 */
+  rewatches: string[];
+  /** 自建片单（frontmatter「片单」数组；建档/编辑不写，归入/移出时落盘）。
+   *  含内置片单「重映厅」（constants REWATCH_SHELF）。侧栏片单区 / 片单筛选 / 归入弹层消费 */
+  lists: string[];
+  /** 片单收纳（frontmatter「片单收纳」= true）：豆瓣片单一键导入的新片专属——只在其
+   *  片单里呈现，不混入正常影视视图（全部/类型/状态/搜索都排除，片单筛选命中时显示）。
+   *  状态离开「想看」（标记在看/已看，persistItem 汇合）即摘除——用户开始正式管理就回归
+   *  正常视图。在库旧档归片单不打此标，一切照旧 */
+  shelvedOnly: boolean;
   poster: string | null;
   review: string | null;
   genre: string | null;
@@ -72,11 +95,13 @@ export type CinemaSortMode = 'date' | 'created' | 'rating';
 export interface CinemaState {
   currentOverlay: HTMLElement | null;
   items: CinemaItem[];
-  /** 当前筛选：type=组（null=全部）、status=状态（null=全部）、country=国家（null=全部/'未填'） */
+  /** 当前筛选：type=组（null=全部）、status=状态（null=全部）、country=国家（null=全部/'未填'）、list=片单（null=全部；与类型/状态叠加） */
   typeFilter: string | null;
   statusFilter: string | null;
   /** 国家筛选：null=全部；'未填'=只看国家为空的条目；其余=精确匹配（票 294） */
   countryFilter: string | null;
+  /** 片单筛选：null=全部；其余=片单名精确匹配（上游 535，与类型/状态叠加） */
+  listFilter: string | null;
   /** 排序模式 */
   sortMode: CinemaSortMode;
   /** 当前视图：list / ai */
@@ -108,6 +133,7 @@ export const M: CinemaState = {
   typeFilter: null,
   countryFilter: null,
   statusFilter: null,
+  listFilter: null,
   sortMode: 'date',
   view: 'list',
   searchKeyword: '',
@@ -132,9 +158,11 @@ export function resetCinemaState(): void {
   M.typeFilter = null;
   M.countryFilter = null;
   M.statusFilter = null;
+  M.listFilter = null;
   M.sortMode = 'date';
   M.view = 'list';
   M.searchKeyword = '';
+  if (M.searchDebounceTimer) clearTimeout(M.searchDebounceTimer); // 悬挂防抖真定时器必须清（只置 null = 定时器仍在，到点把旧词写回搜索态）
   M.searchDebounceTimer = null;
   M.lastInputAt = 0;
   M.appRef = null;

@@ -1,20 +1,23 @@
 /**
  * 影院（cinema）入口/目录回落 + 事件补发测试（ADR-0087 接管旧 movie 域）
- * - ensureCinema：cinemaFolderPath 显式配置生效；缺省回落「我的/娱乐」
+ * - ensureCinema：cinemaFolderPath 显式配置生效；缺省回落「我的/影视」
  * - quickAddWant：发 movie:created(want) 域事件（smartcat 行为流依赖）+ 建笔记 + 入抓取队列
  * - runAIRecommend / 快速状态窗 / 删除等事件补发由 ui.test / recommend.test 覆盖
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { MockVault, mockAppWithVault } from '../mock-vault';
 import { resetObsidianMocks } from '../mock-obsidian-entry';
 import { setApp } from '../../src/core/app';
 import { setSettingsProvider } from '../../src/core/settings-provider';
 import { onDomainEvent, clearDomainEvents } from '../../src/core/domain-bus';
+import { registerPanelEsc, unregisterPanelEsc } from '../../src/core/esc-manager';
 import { getNoticeMessages, clearNotices } from '../mock-obsidian-entry';
 import { M, resetCinemaState } from '../../src/cinema/state';
 import { ensureCinema, unloadCinema, applyDefaultView, openCinema, openCinemaAnalysis } from '../../src/cinema';
+import { closeYearbookOverlay } from '../../src/cinema/ui';
+import { rebuildItems } from '../../src/cinema/data';
 import { quickAddWant } from '../../src/cinema/recommend';
-import { configureFetchQueue, isFetching, shutdownDoubanQueue } from '../../src/cinema/douban-queue';
+import { configureFetchQueue, enqueueDoubanFetch, isFetching, shutdownDoubanQueue } from '../../src/cinema/douban-queue';
 
 function makeApp(vault: MockVault) {
   const app = mockAppWithVault(vault);
@@ -122,7 +125,7 @@ describe('cinema quickAddWant 事件补发（movie:created want）', () => {
 
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ kind: 'created', name: '新片', status: 'want', rating: null });
-    expect((vault.files as any).get('我的/娱乐/《新片》.md')).toContain('评分: -1');
+    expect((vault.files as any).get('我的/娱乐/《新片》.md')).toContain('状态: 想看');
     // 进度零通知（ADR-0113）：反馈只在卡片 loading，未配置 CLI 时队列静默禁用
     expect(document.querySelector('.bz-notice--progress')).toBeNull();
     off();
@@ -186,6 +189,70 @@ describe('cinema 打开面板触发豆瓣抓取队列（ADR-0113）', () => {
     configureFetchQueue({ fetch, gapMs: 0, refreshDelayMs: 0 });
     openCinemaAnalysis(app);
     await new Promise((r) => setTimeout(r, 25));
-    expect(fetched).toHaveLength(1);
+    expect(fetched).toHaveLength(0);
+    expect(document.querySelector('.bz-yb'), '观影分析层开了').toBeTruthy();
+    expect(document.querySelector('[data-cinema-root]'), '面板在层下待命').toBeTruthy();
+    expect(document.querySelector('.bz-yb-box'), '纸面在层框里（框 = 面板矩形）').toBeTruthy();
+    closeYearbookOverlay();
+    expect(document.querySelector('.bz-yb'), '关层即回影院面板').toBeNull();
+  });
+});
+
+describe('cinema 卸载清理（unloadCinema，审查批 C 补断言）', () => {
+  beforeEach(() => {
+    resetObsidianMocks();
+    resetCinemaState();
+    clearDomainEvents();
+    clearNotices();
+    shutdownDoubanQueue();
+    unregisterPanelEsc('bz-cinema'); // 清前序用例可能残留的 ESC 层，保证断言从净态出发
+    document.body.innerHTML = '';
+    M.folderPath = '我的/影视';
+  });
+  afterEach(() => {
+    unloadCinema();
+    shutdownDoubanQueue();
+    unregisterPanelEsc('bz-cinema');
+    setSettingsProvider(() => ({} as any));
+  });
+
+  it('卸载三态：overlay 摘除 / renderFn 置空 / 队列与去重集清空', () => {
+    const vault = new MockVault();
+    vault.files.set('我的/影视/《卸载片》.md', '---\ntags: [电影]\n状态: 想看\n---');
+    const app = makeApp(vault);
+    const overlay = document.createElement('div');
+    M.currentOverlay = overlay;
+    document.body.appendChild(overlay);
+    M.renderFn = vi.fn();
+    rebuildItems(app);
+    const file = M.items[0].file!;
+    // 抓取中态（悬挂执行器，永不返回）：卸载必须撤 loading、清队列与去重
+    configureFetchQueue({ gapMs: 0, refreshDelayMs: 0, fetch: () => new Promise(() => {}) });
+    expect(enqueueDoubanFetch(file, '卸载片')).toBe(true);
+    expect(isFetching(file.path)).toBe(true);
+
+    unloadCinema();
+
+    // 态1 overlay 摘除：引用清空 + DOM 摘除（局部引用防 M 置空后断言空转）
+    expect(M.currentOverlay).toBeNull();
+    expect(overlay.isConnected).toBe(false);
+    // 态2 renderFn 置空（resetCinemaState 兜渲染句柄失效）
+    expect(M.renderFn).toBeNull();
+    // 态3 队列与去重集清空：pending 撤销（loading 退）+ attempted 清空（同会话可重新入队）
+    expect(isFetching(file.path)).toBe(false);
+    expect(enqueueDoubanFetch(file, '卸载片')).toBe(true);
+  });
+
+  it('卸载注销面板 ESC 层（批C）：同 id 重新注册可生效，ESC 到达新层', () => {
+    const vault = new MockVault();
+    const app = makeApp(vault);
+    ensureCinema(app); // ui.registerEscapeHandler → registerPanelEsc('bz-cinema')
+    unloadCinema(); // 修复前：ESC 层残留在 panelEscHandles，重启用后同 id 注册被幂等静默吞
+    const closeSpy = vi.fn();
+    // 槽位已清 → 本调用注册新层；修复前静默 no-op，下方 ESC 到不了 closeSpy
+    registerPanelEsc('bz-cinema', () => true, closeSpy);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+    unregisterPanelEsc('bz-cinema'); // 清理本用例注册的层
   });
 });

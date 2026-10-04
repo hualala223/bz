@@ -2,7 +2,7 @@
  * bz 组件库 · 输入联想（src/core/ui/suggest.ts）
  * uiSuggest：input 锚定的联想候选下拉（.bz-popover）。
  * 视觉 = 样式库 .bz-popover 族（不新造类）；交互 = 三域先例收敛
- *   （belongings 分类 / favorites 关联笔记 / todo 脚本·课程联想，issue 203）：
+ *   （belongings 分类 / favorites 关联笔记 / memo 脚本·课程联想，issue 203）：
  *   聚焦/输入惰性弹出（issue 202 拍板：默认不弹）→ 现值子串过滤（上限 max）
  *   → 点选/回车回填并回调 → 外点收起 → Esc 只收下拉不穿表单。
  * 前提：anchor 须位于 position:relative 容器内（如 .bz-field）——浮层
@@ -50,7 +50,16 @@ export function uiSuggest(opts: BzSuggestOpts): {
     const cur = anchor.value.trim();
     const q = cur.toLowerCase();
     const matched = opts.source()
-      .filter((s) => (!opts.excludeCurrent || s !== cur) && (!q || s.toLowerCase().includes(q)))
+      .filter((s) => {
+        if (opts.excludeCurrent && s === cur) return false;
+        if (!q) return true;
+        // 自定义匹配谓词（issue 498）：source 层做了归一化检索的调用方传同口径判定，
+        // 否则原串 includes 会把归一命中误滤掉；命中即不再走 keywordsOf
+        if (opts.matchOf) return opts.matchOf(s, cur);
+        if (s.toLowerCase().includes(q)) return true;
+        // 额外搜索关键词（issue 488）：别名命中也算匹配（搜「充电宝」出「移动电源」）
+        return opts.keywordsOf?.(s)?.some((k) => k.toLowerCase().includes(q)) ?? false;
+      })
       .slice(0, max);
     if (!matched.length) { close(); return; } // 无匹配即收（不开空壳）
     layer.replaceChildren();
@@ -73,6 +82,13 @@ export function uiSuggest(opts: BzSuggestOpts): {
       const label = document.createElement('span');
       label.textContent = opts.labelOf ? opts.labelOf(raw) : raw;
       b.appendChild(label);
+      const hint = opts.hintOf?.(raw);
+      if (hint) {
+        const h = document.createElement('span');
+        h.className = 'bz-suggest-hint';
+        h.textContent = hint;
+        b.appendChild(h);
+      }
       b.addEventListener('click', () => pick(raw));
       layer!.appendChild(b);
     });
@@ -111,8 +127,12 @@ export function uiSuggest(opts: BzSuggestOpts): {
       e.preventDefault();
     } else if (e.key === 'Enter') {
       const on = layer.querySelector<HTMLElement>('.bz-popover-item.is-on');
-      if (on) pick(on.dataset.value as string);
-      e.preventDefault();
+      if (on) {
+        pick(on.dataset.value as string);
+        e.preventDefault();
+      }
+      // 无 is-on 高亮项（效率整改 12）：放行 Enter 不 preventDefault，交还宿主表单默认
+      // 行为（回车提交）——否则联想层开着时回车被吞且什么都不发生，表单像卡了
     } else if (e.key === 'Escape') {
       close();
       e.stopPropagation(); // 只收下拉，不穿 escManager/表单层

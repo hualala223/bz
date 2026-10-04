@@ -558,6 +558,30 @@ textarea.bz-input { height: auto; min-height: 80px; padding: 8px 10px; line-heig
 }
 .bz-lightbox-close:hover { background: rgba(255, 255, 255, 0.24); }
 .bz-lightbox-close .bz-ic { width: 16px; height: 16px; }
+/* 翻图箭头（多图模式）：两侧居中，首末位禁用（不循环） */
+.bz-lightbox-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--bz-on-overlay, #fff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.bz-lightbox-prev { left: 16px; }
+.bz-lightbox-next { right: 16px; }
+.bz-lightbox-nav[disabled] { opacity: 0.25; cursor: default; }
+@media (hover: hover) {
+
+.bz-lightbox-nav:hover { background: rgba(255, 255, 255, 0.24); }
+.bz-lightbox-nav[disabled]:hover { background: rgba(255, 255, 255, 0.12); }
+}
+.bz-lightbox-nav .bz-ic { width: 20px; height: 20px; }
 .bz-lightbox-media {
   max-width: min(900px, 92vw);
   max-height: 78vh;
@@ -1170,6 +1194,8 @@ textarea.bz-input { height: auto; min-height: 80px; padding: 8px 10px; line-heig
 .bz-popover-item .bz-ic { width: 13px; height: 13px; color: var(--bz-text-3); flex-shrink: 0; }
 .bz-popover-item.is-on .bz-ic { color: var(--bz-brand); }
 .bz-popover-empty { padding: 10px; font-size: var(--bz-font-caption); color: var(--bz-text-3); text-align: center; }
+/* 候选副文本（hintOf，issue 488）：行尾小字弱化，压一行不撑高 */
+.bz-suggest-hint { margin-left: auto; font-size: var(--bz-font-caption); color: var(--bz-text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; max-width: 45%; }
 
 /* ═══════════ J. 进度条 .bz-progress ═══════════
    track + i 填充基元。现状：4 域同形制
@@ -2495,6 +2521,28 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
   opacity: 0.92;
 }
 .bz-lockscreen-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+/* 次按钮（可选，opts.cancel）：与主按钮同排、样式从简——破坏性动作仍然只由主按钮承担 */
+.bz-lockscreen-cancel {
+  flex: none;
+  padding: 10px 16px;
+  border-radius: var(--bz-radius-sm);
+  border: 1px solid var(--ls-line);
+  background: transparent;
+  color: var(--ls-muted);
+  font-size: var(--bz-font-label);
+  cursor: pointer;
+}
+@media (hover: hover) {
+
+.bz-lockscreen-cancel:hover {
+  color: var(--ls-ink);
+  border-color: var(--ls-ink);
+}
+}
+.bz-lockscreen-cancel:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }

@@ -439,7 +439,9 @@ function renderRow(
     case 'button': {
       vm.ctrlHtml = rowBtnHtml(row.buttonText, row.cta);
       el.innerHTML = rowHtml(vm);
-      el.querySelector<HTMLElement>('.bz-sp-btn')!.addEventListener('click', () => row.onClick(ctx));
+      const btn = el.querySelector<HTMLButtonElement>('.bz-sp-btn')!;
+      if (row.disabled === true) btn.disabled = true; // 在线资源「已下载/等待核对」等：状态未到不可点（点击监听仍挂，禁用态由浏览器拦截）
+      btn.addEventListener('click', () => row.onClick(ctx));
       break;
     }
     case 'info': {

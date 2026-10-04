@@ -8,7 +8,7 @@
  */
 export * from './shared';
 export {
-  midnightDeskHtml, midnightMobHtml, railHtml, chipsHtml,
+  midnightDeskHtml, midnightMobHtml, railHtml, chipsHtml, countryTally,
   emptyPageHtml, spHeadHtml, listHeadHtml, listToolsHtml,
   renderMidnightDesk, renderMidnightMob,
   type MidnightRenderInput,

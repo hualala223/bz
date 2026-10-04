@@ -2,8 +2,9 @@
  * 影院（cinema）域数据层：扫描笔记 → 条目；排序（观影日期倒序）；筛选
  */
 import type { App, TFile } from 'obsidian';
-import { ALL_TAGS, getGroupSafe, LEGACY_TAG_MAP, STATUS_WANT, STATUS_WATCHING, STATUS_WATCHED } from './constants';
+import { ALL_TAGS, getGroupSafe, LEGACY_TAG_MAP, REWATCH_SHELF, STATUS_WATCHED, STATUS_WANT, STATUS_WATCHING } from './constants';
 import { extractMovieName } from './douban-fetcher';
+import { statusNum } from './shared';
 import type { CinemaItem } from './state';
 import { M } from './state';
 
@@ -14,6 +15,30 @@ export function normalizeTags(raw: unknown): string[] {
   if (Array.isArray(raw)) return raw.map((t) => String(t));
   if (typeof raw === 'string' && raw) return [raw];
   return [];
+}
+
+/** frontmatter `重看` → string[]（重温时刻列表，新档日期+时刻、旧档 date-only；兼容数组 / 单字符串 / 缺失，口径同 normalizeTags）。
+ *  建档/编辑不写此键——只有「重温 +1」与未来的删除入口落盘，旧笔记无键照旧 */
+export function normalizeRewatches(raw: unknown): string[] {
+  return normalizeTags(raw).filter(Boolean);
+}
+
+/** frontmatter `片单` → string[]（自建片单；兼容数组 / 单字符串 / 缺失，口径同 normalizeTags）。
+ *  归入/移出弹层落盘，建档/编辑不写此键 */
+export function normalizeLists(raw: unknown): string[] {
+  return normalizeTags(raw).filter(Boolean);
+}
+
+/** 片单枚举（侧栏 / 归入弹层消费）：内置「重映厅」恒首位，其余按成员数降序、同数按名称。
+ *  纯函数显式入参（原型侧/纯层同源可用）；空片单不出现（没有成员就没有枚举） */
+export function allLists(items: CinemaItem[]): string[] {
+  const count = new Map<string, number>();
+  for (const it of items) for (const name of it.lists) count.set(name, (count.get(name) ?? 0) + 1);
+  const rest = [...count.entries()]
+    .filter(([name]) => name !== REWATCH_SHELF)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([name]) => name);
+  return count.has(REWATCH_SHELF) ? [REWATCH_SHELF, ...rest] : rest;
 }
 
 /** 解析单条笔记（frontmatter → CinemaItem）；无 frontmatter 返回 null */
@@ -44,16 +69,20 @@ export function parseMovieFile(file: TFile, app: App): CinemaItem | null {
 
   const watchDate = fm['观影日期']?.toString() ?? null;
   const rawRating = fm['评分'];
-  const rating =
+  const ratingNum =
     rawRating === undefined || rawRating === null || rawRating === ''
       ? null
       : Number(rawRating);
 
-  // 状态由评分推断：-1=想看 / 0=在看 / 其余（>0 或无评分）=已看
-  let status: number;
-  if (rating === -1) status = STATUS_WANT;
-  else if (rating === 0) status = STATUS_WATCHING;
-  else status = STATUS_WATCHED;
+  // 状态单源键「状态」：评分只当分值，不承担状态语义。评分编码 -1/0 于 2026-09-30 退役，
+  // 兼容期结束（2026-10-03 拍板）：旧档评分推断与 -1/0 清洗移除——【上游】库已全量迁移且零残留。
+  // 本地差异（票 309 兼容层）：本地库未跑过状态键迁移，旧档无「状态」键时仍按编码推断
+  // （-1=想看 / 0=在看 / 其余=已看，ours 原口径）；带「状态」键的新档直读，非法值仍落已看。
+  const stRaw = typeof fm['状态'] === 'string' ? (fm['状态'] as string).trim() : '';
+  const status = stRaw
+    ? statusNum(stRaw)
+    : ratingNum === -1 ? STATUS_WANT : ratingNum === 0 ? STATUS_WATCHING : STATUS_WATCHED;
+  const rating = ratingNum;
 
   return {
     file,
@@ -63,6 +92,17 @@ export function parseMovieFile(file: TFile, app: App): CinemaItem | null {
     watchDate,
     rating,
     status,
+    // 状态日期（想看日期/在看日期）：旧笔记无键 = null，不参与显示
+    wantDate: fm['想看日期']?.toString() ?? null,
+    watchingDate: fm['在看日期']?.toString() ?? null,
+    // 已看日期（issue 536）只读新键；非已看态无键自然为 null——一条没看过的条目不许凭空出「已看」日
+    // （幽灵节点教训保留）。本地差异（票 310）：上游已删「观影日期」回落（其库 665 篇已看笔记均已带新键、
+    // 零回填），本地库未批量回写（兼容性冻结，票 309 裁决），故保留**仅已看态**的观影日期回落——
+    // 老已看档显示不回退，想看/在看档绝不凭空出已看日。
+    watchedDate: fm['已看日期']?.toString() ?? (status === STATUS_WATCHED ? fm['观影日期']?.toString() ?? null : null),
+    rewatches: normalizeRewatches(fm['重看']),
+    lists: normalizeLists(fm['片单']),
+    shelvedOnly: fm['片单收纳'] === true,
     // 海报（票 301）：书籍笔记封面写 fm「封面」（无「海报」键），读侧兜底拾取
     poster: fm['海报']?.toString() || fm['封面']?.toString() || null,
     review: fm['影评']?.toString() ?? null,
@@ -184,7 +224,7 @@ export function sortByCreatedDesc(list: CinemaItem[]): CinemaItem[] {
   });
 }
 
-/** 按评分倒序：已看（评分>0）降序；未看（-1/0/无评分）排最后（其内部按日期倒序） */
+/** 按评分倒序：已看（评分>0）降序；未看（未评分/想看/在看）排最后（其内部按日期倒序） */
 export function sortByRatingDesc(list: CinemaItem[]): CinemaItem[] {
   return [...list].sort((a, b) => {
     const ar = a.rating && a.rating > 0 ? a.rating : -1;
@@ -201,11 +241,16 @@ export function applySortMode(list: CinemaItem[], mode: string): CinemaItem[] {
   return sortByDateDesc(list);
 }
 
-/** 当前筛选（类型/状态/搜索）+ 当前排序模式（先筛选后排序，保证列表正确） */
+/** 当前筛选（类型/状态/片单/搜索）+ 当前排序模式（先筛选后排序，保证列表正确） */
 export function getDisplayItems(): CinemaItem[] {
   let list = [...M.items];
   if (M.typeFilter) list = list.filter((it) => it.group === M.typeFilter);
-  if (M.statusFilter) list = list.filter((it) => it.status === (M.statusFilter === '想看' ? STATUS_WANT : M.statusFilter === '在看' ? STATUS_WATCHING : STATUS_WATCHED));
+  const sf = M.statusFilter;
+  if (sf) list = list.filter((it) => it.status === statusNum(sf));
+  if (M.listFilter) list = list.filter((it) => it.lists.includes(M.listFilter as string));
+  // 片单收纳条目只在片单视图出现（2026-09-30 拍板：一键导入不混入正常影视视图）——
+  // 无片单筛选时（全部/类型/状态/搜索）整体排除
+  else list = list.filter((it) => !it.shelvedOnly);
   // 票 294：国家筛选（'未填' = 只看国家为空的条目）
   if (M.countryFilter === '未填') list = list.filter((it) => !it.country);
   else if (M.countryFilter) list = list.filter((it) => it.country === M.countryFilter);

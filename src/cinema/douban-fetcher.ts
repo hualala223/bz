@@ -7,7 +7,8 @@
  * 全空且有路被拦 → blocked、全空无拦 → notfound
  * → **ApiZero 豆瓣电影信息接口**（评分/导演/主演/类型/地区/片长首选 + 上映日期←year/热门短评，
  * key 设置项）→ rexxar 演职员兜底（缺导演/主演或需编剧时）；
- * 海报走豆瓣（检索路提 URL → upgradePosterUrl 高清 → writeBinary 写盘）。
+ * 海报走豆瓣（检索路提 URL / sid 直取走 rexxar subject 详情 → upgradePosterUrl 高清 →
+ * writeBinary 写盘）。
  * 豆瓣详情页 HTML 退役；移动端同源可用。
  * 写回口径（审查 C8/C9 拍板）：除豆瓣链接（修正脏值）外一律「缺失才填」——已有值
  * （含用户手工修正）不覆盖；ApiZero 逗号列表值写入前归一化为消费端的 ` / ` 切分口径（C2）。
@@ -15,18 +16,18 @@
  */
 import type { App, TFile } from 'obsidian';
 import { stripMdExt } from '../core/ui/str';
+// YAML 值序列化单源 core/utils（含特殊字符/空格双引号包裹并转义；换行先行单行化——
+// 审查 C3：裸 \n/\r 进 frontmatter 会破坏 YAML 解析、影片从面板消失）
 import { yamlScalarOf } from '../core/utils';
 import { ILLEGAL_NAME_RE_GLOBAL } from './constants';
 
 /** 海报目录（对齐 CLI config 默认值） */
 export const POSTER_FOLDER = 'CONFIG/MOVIE POSTER';
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
-
 // ---------- 依赖注入 ----------
 
 export type HttpGet = (url: string, headers?: Record<string, string>) => Promise<string | null>;
-export type DownloadBinary = (url: string, headers?: Record<string, string>) => Promise<ArrayBuffer | null>;
+type DownloadBinary = (url: string, headers?: Record<string, string>) => Promise<ArrayBuffer | null>;
 
 export interface DoubanFetchDeps {
   httpGet: HttpGet;
@@ -55,7 +56,7 @@ export function extractMovieName(filename: string): string {
   return m ? m[1] : basename;
 }
 
-export interface DoubanSearchResult {
+interface DoubanSearchResult {
   title: string;
   detailUrl: string;
   posterUrl: string;
@@ -166,14 +167,16 @@ export function searchPageLooksBlocked(html: string | null): boolean {
 
 /** 单路检索探测结果：hit = 命中结果；empty = 服务端正常应答但无结果（可能是软拒绝，
  *  交下一路）；blocked = 明确被拦（null/非 JSON/风控页）。任一路网络异常上抛 → network（C6） */
-export type SearchProbe =
+type SearchProbe =
   | { kind: 'hit'; results: DoubanSearchResult[] }
   | { kind: 'empty' }
   | { kind: 'blocked' };
 
-/** 纯函数：s_ratio_poster → l_ratio_poster（高清） */
+/** 纯函数：海报规格升到 l（原图档）——s_ratio_poster / m_ratio_poster → l_ratio_poster。
+ *  s 来自 suggest（缩略）、m 来自 rexxar subject 的 pic.large，两路都要能升到同一张图；
+ *  无该片段的 URL（如 `large/public/p*.jpg`）原样返回，无害。 */
 export function upgradePosterUrl(url: string): string {
-  return url.replace('s_ratio_poster', 'l_ratio_poster');
+  return url.replace(/[sm]_ratio_poster/, 'l_ratio_poster');
 }
 
 /** 纯函数：列表值归一化（审查 C2）——ApiZero 的 actor/genre/director/area 是逗号分隔，
@@ -189,7 +192,7 @@ export function extractSid(detailUrl: string): string | null {
   return m ? m[1] : null;
 }
 
-export interface CelebritiesInfo {
+interface CelebritiesInfo {
   directors: string;
   writers: string;
   casts: string;
@@ -211,7 +214,7 @@ export function parseCelebrities(data: any): { directors: string; writers: strin
 
 // ---------- ApiZero 客户端 ----------
 
-export interface ApizeroInfo {
+interface ApizeroInfo {
   name: string;
   year: string;
   score: string;
@@ -281,13 +284,49 @@ export async function fetchCelebrities(sid: string, httpGet: HttpGet, cookie?: s
   return null;
 }
 
+/** 纯函数：rexxar subject 详情 JSON → 海报 URL（pic.large 优先、pic.normal 兜底，
+ *  再退 cover_url）。404 体（traversal_error）/非 JSON/无 pic → 空串。
+ *  只认 http(s) 开头的真地址：畸形 JSON 可能给字符串哨兵（"0"/"null"），照单收下会让
+ *  下游拿它当 URL 去下载——预览卡换了个注定失败的图源，队列还会把它记成 network 失败
+ *  反复重抓。 */
+export function parseRexxarSubjectPic(json: string | null): string {
+  if (!json) return '';
+  try {
+    const d = JSON.parse(json);
+    // 逐个候选过守卫（不用 `||` 链）：哨兵占了 pic.large 时不该连带丢掉正常的 pic.normal
+    for (const c of [d?.pic?.large, d?.pic?.normal, d?.cover_url]) {
+      if (typeof c === 'string' && /^https?:\/\//.test(c)) return c;
+    }
+    return '';
+  } catch {
+    return '';
+  }
+}
+
+/** rexxar subject 详情取海报 URL（issue 540）：sid 直取路径的补图腿。
+ *  ApiZero 接口不返回海报，名称索引命中后跳过三路检索就再没有别的图源——预览卡与后台抓取
+ *  都只能停在骨架 / 缺图。按 sid 精确取（不依赖名称匹配，比回流按名检索更准也更省）；
+ *  movie 接口对剧集 sid 也返回数据（实测），故先 movie 后 tv 兜底——与 fetchCelebrities
+ *  的 404 探测同款。任何异常/空 → 空串（图缺就缺，不抬走整条解析）。 */
+export async function fetchSubjectPoster(sid: string, httpGet: HttpGet, cookie?: string): Promise<string> {
+  for (const type of ['movie', 'tv'] as const) {
+    const headers: Record<string, string> = { Referer: `https://m.douban.com/movie/subject/${sid}/` };
+    if (cookie) headers.Cookie = cookie;
+    try {
+      const url = parseRexxarSubjectPic(await httpGet(`https://m.douban.com/rexxar/api/v2/${type}/${sid}`, headers));
+      if (url) return url;
+    } catch { /* 异常/空 → 换下一类型 */ }
+  }
+  return '';
+}
+
 export type DoubanFetchOutcome =
   | { ok: true; skipped?: boolean }
   | { ok: false; reason: 'blocked' | 'notfound' | 'network' | 'write' };
 
 /** 字段值形态：string = 已有则原地更新；{ value, ifMissing } = 仅当字段缺失时写入（审查
  *  C8/C9 拍板口径：防重抓覆盖用户手工修正，缺失才填） */
-export type FmFieldSpec = string | { value: string; ifMissing: boolean };
+type FmFieldSpec = string | { value: string; ifMissing: boolean };
 
 /** frontmatter 更新（纯函数，照搬 note-processor updateFrontmatterFields 的行级口径）：
  *  string 字段已有则原地更新、新字段插到 tags 列表后；ifMissing 字段已有则跳过；空值跳过。
@@ -299,7 +338,7 @@ export function updateFrontmatterFields(content: string, fields: Record<string, 
     const fmLines = ['---'];
     for (const [k, spec] of Object.entries(fields)) {
       const v = typeof spec === 'string' ? spec : spec.value;
-      if (v) fmLines.push(`${k}: ${formatYamlValue(v)}`);
+      if (v) fmLines.push(`${k}: ${yamlScalarOf(v)}`);
     }
     fmLines.push('---');
     return fmLines.join('\n') + '\n' + content;
@@ -328,7 +367,7 @@ export function updateFrontmatterFields(content: string, fields: Record<string, 
   const newLines: string[] = [];
   for (const [key, spec] of Object.entries(fields)) {
     const val = typeof spec === 'string' ? spec : spec.value;
-    if (!val || val === '') continue;
+    if (!val) continue;
     if (existingKeys.has(key)) {
       // 缺失才填（C8/C9）：已有**非空**值不动，保留用户手改与存量；
       // 空值键（如模板预置的 `海报:`）视为缺失照写——否则属性永不回填，
@@ -337,23 +376,16 @@ export function updateFrontmatterFields(content: string, fields: Record<string, 
       const lineKey = existingKeys.get(key)!;
       for (let i = 0; i < lines.length; i++) {
         if (lines[i].match(new RegExp(`^${lineKey}:`))) {
-          lines[i] = `${lineKey}: ${formatYamlValue(val)}`;
+          lines[i] = `${lineKey}: ${yamlScalarOf(val)}`;
           break;
         }
       }
     } else {
-      newLines.push(`${key}: ${formatYamlValue(val)}`);
+      newLines.push(`${key}: ${yamlScalarOf(val)}`);
     }
   }
   if (newLines.length > 0) lines.splice(insertIdx, 0, ...newLines);
   return header + lines.join('\n') + footer + rest;
-}
-
-/** YAML 值序列化：含特殊字符/空格双引号包裹并转义。
- *  换行先行单行化（审查 C3）：裸 \n/\r 进 frontmatter 会破坏 YAML 解析、影片从面板消失。
- *  一致#1 收编：转义单源 core/utils（escapeYamlText），条件包裹策略保留在本地（两出口一原语） */
-function formatYamlValue(val: string): string {
-  return yamlScalarOf(val);
 }
 
 /** 正文 frontmatter 后插入海报 embed（纯函数，照搬 insertPosterEmbed；已存在跳过）。
@@ -402,10 +434,19 @@ export type DoubanQueryOutcome =
 
 // ---------- 检索三路（ADR-0178：suggest → rexxar search → 搜索页） ----------
 
+/** 检索公共头：各路自带业务 Referer（withLang = 附 Accept-Language）；配了 Cookie 就带
+ *  （登录态提高过风控率——单一写点，三路共用） */
+function doubanHeaders(referer: string, deps: DoubanFetchDeps, withLang = false): Record<string, string> {
+  const headers: Record<string, string> = withLang
+    ? { Referer: referer, 'Accept-Language': 'zh-CN,zh;q=0.9' }
+    : { Referer: referer };
+  if (deps.doubanCookie) headers.Cookie = deps.doubanCookie;
+  return headers;
+}
+
 /** 三路单发：suggest 补全（主路，JSON、信息全）。软拒绝（200+空数组）归 empty 交下一路 */
 async function probeSuggest(name: string, deps: DoubanFetchDeps): Promise<SearchProbe> {
-  const headers: Record<string, string> = { Referer: 'https://movie.douban.com/', 'Accept-Language': 'zh-CN,zh;q=0.9' };
-  if (deps.doubanCookie) headers.Cookie = deps.doubanCookie;
+  const headers = doubanHeaders('https://movie.douban.com/', deps, true);
   const json = await deps.httpGet(`https://movie.douban.com/j/subject_suggest?q=${encodeURIComponent(name)}`, headers);
   if (suggestLooksBlocked(json)) return { kind: 'blocked' };
   const results = parseSuggestResults(json!);
@@ -414,8 +455,7 @@ async function probeSuggest(name: string, deps: DoubanFetchDeps): Promise<Search
 
 /** 三路单发：rexxar 移动搜索（二路；与 suggest 频控池独立，实测 suggest 全空时仍命中） */
 async function probeRexxarSearch(name: string, deps: DoubanFetchDeps): Promise<SearchProbe> {
-  const headers: Record<string, string> = { Referer: 'https://m.douban.com/movie/' };
-  if (deps.doubanCookie) headers.Cookie = deps.doubanCookie;
+  const headers = doubanHeaders('https://m.douban.com/movie/', deps);
   const json = await deps.httpGet(`https://m.douban.com/rexxar/api/v2/search?q=${encodeURIComponent(name)}&count=5`, headers);
   if (!json) return { kind: 'blocked' };
   const results = parseRexxarSearch(json);
@@ -424,12 +464,22 @@ async function probeRexxarSearch(name: string, deps: DoubanFetchDeps): Promise<S
 
 /** 三路单发：搜索页 HTML（末路兜底；体积大、风控面最宽，仅供最后一级） */
 async function probeSearchPage(name: string, deps: DoubanFetchDeps): Promise<SearchProbe> {
-  const headers: Record<string, string> = { Referer: 'https://movie.douban.com/', 'Accept-Language': 'zh-CN,zh;q=0.9' };
-  if (deps.doubanCookie) headers.Cookie = deps.doubanCookie;
+  const headers = doubanHeaders('https://movie.douban.com/', deps, true);
   const html = await deps.httpGet(`https://www.douban.com/search?cat=1002&q=${encodeURIComponent(name)}`, headers);
   if (searchPageLooksBlocked(html)) return { kind: 'blocked' };
   const results = parseSearchResults(html!);
   return results.length > 0 ? { kind: 'hit', results } : { kind: 'empty' };
+}
+
+/** rexxar 演职员兜底：ApiZero 缺导演/主演时补（口径同 fetchNoteDouban C9）。
+ *  异常收口（评审 P1-2）：rexxar 腿网络异常不抬走整体——字段缺就缺，解析照常成功 */
+async function celebritiesIfMissing(sid: string, az: ApizeroInfo | null, deps: DoubanFetchDeps): Promise<CelebritiesInfo | null> {
+  try {
+    if (!az || !az.director || !az.actor) return await fetchCelebrities(sid, deps.httpGet, deps.doubanCookie);
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 /**
@@ -461,12 +511,42 @@ export async function queryDoubanByName(name: string, deps: DoubanFetchDeps): Pr
   // 字段：ApiZero 首选（key 未配/失败 → null，交 rexxar 兜底）
   let az: ApizeroInfo | null = null;
   if (deps.apizeroKey) az = await fetchApizeroInfo(sid, deps.apizeroKey, deps.httpGet);
-  // rexxar 演职员兜底：ApiZero 拿不到导演/主演时补（口径同 fetchNoteDouban C9）
-  let celebrities: CelebritiesInfo | null = null;
-  if (!az || !az.director || !az.actor) {
-    celebrities = await fetchCelebrities(sid, deps.httpGet, deps.doubanCookie);
-  }
+  const celebrities = await celebritiesIfMissing(sid, az, deps);
   return { ok: true, data: { title: first.title, detailUrl: first.detailUrl, sid, posterUrl: first.posterUrl, apizero: az, celebrities } };
+}
+
+/**
+ * 带 sid 直取（issue 498 / ADR-0210）：本地名称索引命中后跳过三路检索，ApiZero 按 ID 拿字段。
+ * 与 queryDoubanByName 的字段段完全同构（ApiZero → 缺导演/主演时 rexxar celebrities 兜底），
+ * 差异只有两点：sid 来自索引而非检索产物；海报 URL 由 **rexxar subject 详情**补
+ * （issue 540——ApiZero 无此字段，原来落到 `posterUrl = ''`，预览卡永远停在骨架、
+ * 片单导入的条目也永远缺图，且队列按「缺海报」反复重抓；补图腿失败仍是空串，
+ * 由保存/队列路径兜底，不抬走整条解析）。
+ * ApiZero 不可用（key 未配/额度尽/网络空文）→ `{ ok: false, reason: 'notfound' }`，
+ * 调用方（queryDoubanForPreview）据此回落按名全链，不在本层静默吞掉。
+ */
+export async function queryDoubanBySid(sid: string, name: string, deps: DoubanFetchDeps): Promise<DoubanQueryOutcome> {
+  let az: ApizeroInfo | null = null;
+  try {
+    az = deps.apizeroKey ? await fetchApizeroInfo(sid, deps.apizeroKey, deps.httpGet) : null;
+  } catch {
+    return { ok: false, reason: 'network' };
+  }
+  if (!az) return { ok: false, reason: 'notfound' };
+  const celebrities = await celebritiesIfMissing(sid, az, deps);
+  // 补图腿串行在字段之后（不并发：同域两次请求，避频控；一次 RTT 在解析流程里无感）
+  const posterUrl = await fetchSubjectPoster(sid, deps.httpGet, deps.doubanCookie);
+  return {
+    ok: true,
+    data: {
+      title: az.name || name,
+      detailUrl: `https://movie.douban.com/subject/${sid}/`,
+      sid,
+      posterUrl,
+      apizero: az,
+      celebrities,
+    },
+  };
 }
 
 /**
@@ -507,7 +587,9 @@ export async function downloadPosterToVault(
  * 写回经 vault.process：字段一律「缺失才填」并基于回调内 fresh 内容复核（C8），
  * 抓取期间用户手改不会被覆盖。
  */
-export async function fetchNoteDouban(app: App, file: TFile, deps: DoubanFetchDeps): Promise<DoubanFetchOutcome> {
+export async function fetchNoteDouban(app: App, file: TFile, deps: DoubanFetchDeps, sid?: string): Promise<DoubanFetchOutcome> {
+  // sid（豆瓣片单导入携带）：直取 queryDoubanBySid 跳过名称三路检索——与表单解析的
+  // sid 直取同口径（issue 498），少一次检索请求也少一路误配风险
   const name = extractMovieName(file.name);
   let content: string;
   try {
@@ -515,19 +597,21 @@ export async function fetchNoteDouban(app: App, file: TFile, deps: DoubanFetchDe
   } catch {
     return { ok: false, reason: 'network' };
   }
-  const hasPoster = !!(fieldValue(content, '海报'));
+  // 海报只读一次：hasPoster 与下面的相对路径同源（同快照，读两次白读）
+  let posterRelative = fieldValue(content, '海报');
+  const hasPoster = !!posterRelative;
   const doubanUrlRaw = fieldValue(content, '豆瓣链接');
   const hasDoubanInfo = !!doubanUrlRaw && /^https?:\/\//.test(doubanUrlRaw);
   if (hasPoster && hasDoubanInfo) return { ok: true, skipped: true };
 
-  // 1. 查询（suggest 检索 + 字段；与表单「解析」共用 queryDoubanByName，单源不裂）
-  const q = await queryDoubanByName(name, deps);
+  // 1. 查询（suggest 检索 + 字段；与表单「解析」共用查询链，单源不裂；有 sid 直取）
+  const q = sid ? await queryDoubanBySid(sid, name, deps) : await queryDoubanByName(name, deps);
   if (!q.ok) return { ok: false, reason: q.reason };
-  const { detailUrl, posterUrl, sid, apizero: az, celebrities: cel } = q.data;
+  // 参数 sid 仅用于查询前分流（直取 vs 按名检索）；命中后的链接/字段同源，不解构冗余键
+  const { detailUrl, posterUrl, apizero: az, celebrities: cel } = q.data;
 
   // 2. 海报（无海报时：高清 URL → 二进制 → 写盘 → frontmatter + 正文 embed）。
   //  保存目录/下载失败语义都在 downloadPosterToVault 里（与表单保存同一份实现）
-  let posterRelative = fieldValue(content, '海报');
   if (!hasPoster && posterUrl) {
     const dl = await downloadPosterToVault(name, posterUrl, deps);
     if (!dl.ok) return { ok: false, reason: dl.reason };
@@ -598,4 +682,115 @@ export function fmTags(content: string): string[] {
 
 export function noteEpisodesEligible(content: string): boolean {
   return fmTags(content).some((t) => episodesEligibleTag(t));
+}
+
+// ==================== 豆瓣片单导入（一键批量建档） ====================
+
+/** 片单条目（解析产物）：豆瓣条目 sid + 片名原文 */
+export interface DoubanListEntry { sid: string; name: string }
+
+/**
+ * 片名清洗：豆瓣列表页片名常是「中文名 Foreign Name」形态，导入建档只留中文名
+ * （2026-09-30 拍板）。按空格切 token 后从尾部剥「不含 CJK 的连续 token 段」：
+ *   - 整名没有任何 CJK → 原样（纯外文名不动）
+ *   - 尾段是纯数字（「银翼杀手 2049」「终结者 2018」）视作中文名一部分，不剥
+ *   - 剥之前必须存在含 CJK 的 token
+ * 「奥本海默 Oppenheimer」→「奥本海默」、「谍影重重 The Bourne Identity」→
+ * 「谍影重重」；原名在前（「E.T. 外星人」）、中文名自带拉丁（「头文字D」）不动。
+ */
+export function stripForeignName(name: string): string {
+  const trimmed = name.replace(/\s+/g, ' ').trim();
+  const tokens = trimmed.split(' ').filter(Boolean);
+  if (tokens.length < 2) return trimmed;
+  const hasCJK = (t: string): boolean => /[\u3400-\u9fff\uf900-\ufaff\u3000-\u303f\uff00-\uffef]/.test(t);
+  if (!tokens.some(hasCJK)) return trimmed;
+  let end = tokens.length;
+  while (end > 1 && !hasCJK(tokens[end - 1]) && !/^[\d.．、-]+$/.test(tokens[end - 1])) end--;
+  return end === tokens.length ? trimmed : tokens.slice(0, end).join(' ');
+}
+
+/**
+ * 片单页 HTML → 条目列表（纯函数，测试可直接喂 HTML）。
+ * 兼容豆瓣两类真实形态（doulist 豆列的条目链接**不带** title 属性，片名只在
+ * 链接文本里——2026-09-30 真机 doulist 导入抓到 0 条的根因）：
+ *   - wish/collect 主页收藏页：`<a href="…/subject/N/" title="片名">…</a>`
+ *   - doulist 豆列：          `<a href="…/subject/N/">片名</a>`
+ * title 属性优先、缺失回落链接文本；片名过 stripForeignName 只留中文名。
+ * 同一片在页面里出现多次（海报链接 + 文字链接）按 sid 去重保序。空结果 = 抓不到
+ * （风控/需登录/链接不对，由调用方分流提示）。
+ */
+export function parseDoubanListHtml(html: string): DoubanListEntry[] {
+  const out: DoubanListEntry[] = [];
+  const seen = new Set<string>();
+  const unescape = (t: string): string =>
+    t.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, '\'');
+  const re = /movie\.douban\.com\/subject\/(\d+)\/"[^>]*?(?:\stitle="([^"]*)")?[^>]*>([^<]{0,200})</g;
+  for (let m = re.exec(html); m; m = re.exec(html)) {
+    const sid = m[1];
+    const name = stripForeignName(unescape((m[2] ?? m[3] ?? '')));
+    if (!name || seen.has(sid)) continue;
+    seen.add(sid);
+    out.push({ sid, name });
+  }
+  return out;
+}
+
+/**
+ * 片单名提取（首页 `<title>`）：doulist 的 title 即豆列名；wish 页是「XXX 的想看」
+ * 形态——都可直接当导入片单的默认名（弹层里可改）。取不到回落空串（调用方给默认值）。
+ */
+export function extractListTitle(html: string): string {
+  const raw = /<title>([^<]*)<\/title>/i.exec(html)?.[1] ?? '';
+  return raw
+    .replace(/&amp;/g, '&')
+    .replace(/\s*[-–—]\s*豆瓣\s*$/, '')
+    .replace(/\s*\(豆瓣\)\s*$/i, '')
+    .trim();
+}
+
+/** 翻页上限（防死循环/防风控激怒）：240 部 ≈ 豆瓣 wish 页 16 页，远超正常片单规模 */
+const DOUBAN_LIST_MAX_PAGES = 16;
+
+/** 流式抓取的逐页回调：batch = 本页新解析条目（已清洗/去重），totalSoFar = 累计 */
+export type DoubanListPageCb = (batch: DoubanListEntry[], totalSoFar: number) => void;
+
+/**
+ * 抓取整个豆瓣片单（翻页聚合，**流式**——onPage 每页回调一次，调用方可增量渲染，
+ * 不必等全部抓完）：wish / doulist 等 subject 列表页按 `start=` 递进。
+ * 停页条件不假设每页条数（wish 25/页、doulist 20/页不等）：**本页解析为空即停**
+ * （到底/需登录/风控拦截页都表现为空），**本页无新 sid 也停**（翻过界豆瓣回落
+ * 末页内容，继续翻只会原地打转）。cookie 可选（个人页登录态；公开豆列不填）。
+ * 返回条目全集、片单名（首页 title 提取）与「是否疑似被拦」。
+ */
+export async function fetchDoubanList(base: string, httpGet: HttpGet, cookie?: string, onPage?: DoubanListPageCb): Promise<{ entries: DoubanListEntry[]; firstPageEmpty: boolean; listTitle: string }> {
+  const sep = base.includes('?') ? '&' : '?';
+  const headers = cookie?.trim() ? { Cookie: cookie.trim() } : undefined;
+  const all: DoubanListEntry[] = [];
+  const seen = new Set<string>();
+  let firstPageEmpty = false;
+  let listTitle = '';
+  for (let start = 0; start < DOUBAN_LIST_MAX_PAGES * 25; start += 25) {
+    let html: string | null = null;
+    try {
+      html = await httpGet(`${base}${sep}start=${start}`, headers);
+    } catch {
+      break; // 网络失败：交已抓到的部分（可能是翻页中途断），抓不到就空
+    }
+    const page = html ? parseDoubanListHtml(html) : [];
+    if (start === 0) {
+      listTitle = html ? extractListTitle(html) : '';
+      if (page.length === 0) firstPageEmpty = true;
+    }
+    if (page.length === 0) break;
+    const fresh: DoubanListEntry[] = [];
+    for (const e of page) {
+      if (seen.has(e.sid)) continue;
+      seen.add(e.sid);
+      all.push(e);
+      fresh.push(e);
+    }
+    if (fresh.length && onPage) onPage(fresh, all.length);
+    if (fresh.length === 0) break; // 翻过界：豆瓣回落末页内容，无新条目即到底
+  }
+  return { entries: all, firstPageEmpty, listTitle };
 }

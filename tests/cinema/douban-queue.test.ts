@@ -356,9 +356,9 @@ describe('豆瓣抓取队列·frontmatter 契约', () => {
   it('pcardHtml fetching：海报遮罩 spinner 只在抓取中渲染', () => {
     const it: CinemaItem = {
       file: null, name: 'X', typeTag: '电影', group: '电影', watchDate: null, rating: null,
-      status: 2, poster: null, review: null, genre: null, director: null, actors: null,
-      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null,
-      duration: null, seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, chaptersTotal: null, chaptersWatching: null, bookInfo: [],
+      status: 2, wantDate: null, watchingDate: null, watchedDate: null, rewatches: [], lists: [], shelvedOnly: false, poster: null, review: null, genre: null, director: null, actors: null,
+      region: null, year: null, releaseDate: null, doubanRating: null, doubanUrl: null, synopsis: null,
+      duration: null, seasonText: null, hotComment: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, chaptersTotal: null, chaptersWatching: null, bookInfo: [],
     };
     expect(pcardHtml(it, null, true)).toContain('pw-fetch');
     expect(pcardHtml(it, null, false)).not.toContain('pw-fetch');
@@ -380,8 +380,8 @@ describe('G8：删除影片出队豆瓣抓取队列', () => {
   });
 
   function seedTwo(vault: MockVault) {
-    vault.files.set('我的/娱乐/《甲》.md', '---\ntags: [电影]\n评分: -1\n---');
-    vault.files.set('我的/娱乐/《乙》.md', '---\ntags: [电影]\n评分: -1\n---');
+    vault.files.set('我的/娱乐/《甲》.md', '---\ntags: [电影]\n状态: 想看\n---');
+    vault.files.set('我的/娱乐/《乙》.md', '---\ntags: [电影]\n状态: 想看\n---');
     const app = mockAppWithVault(vault);
     rebuildItems(app);
     return M.items.slice();
@@ -439,5 +439,58 @@ describe('G8：删除影片出队豆瓣抓取队列', () => {
     dequeueDoubanFetch(a.file!.path); // 删除（出队 + cancelled + attempted 清除）
     // 同名重建（路径相同）再入队：修复前 attempted 残留 → 永不补抓
     expect(enqueueDoubanFetch(a.file!, '甲')).toBe(true);
+  });
+
+  it('批C回归：删过未入队影片不留 cancelled 残留——同名重建后真失败必须记失败通知（不被豁免）', async () => {
+    const vault = new MockVault();
+    const [a] = seedTwo(vault);
+    configureFetchQueue({ ...TEST_HOOKS, fetch: async () => ({ ok: false, reason: 'notfound' }) });
+    // 删除一部**从未入队**的影片（openConfirm → dequeueDoubanFetch；队列/去重无条目可清）
+    dequeueDoubanFetch(a.file!.path);
+    // 同名重建（同路径）入队 → 首次抓取失败
+    expect(enqueueDoubanFetch(a.file!, '甲')).toBe(true);
+    await settle();
+    // 修复前：dequeue 无条件记 cancelled、enqueue 不清残留 → pump 把真失败当「在抓被删」静默吞。
+    // G8 豁免只该覆盖「在抓被删」那一次，重建后的条目是活条目，失败必须聚合计入通知
+    expect(hasNotice(/豆瓣信息获取失败/)).toBe(true);
+    expect(getNoticeMessages().some((m) => m.includes('甲'))).toBe(true);
+  });
+
+  it('审计#12（issue 337）：抓取目标被插件外删除 → 写回前守卫静默出队，零通知，同名重建可重抓', async () => {
+    const vault = new MockVault();
+    const [a] = seedTwo(vault);
+    const path = a.file!.path;
+    M.appRef = mockAppWithVault(vault); // 守卫读 M.appRef.vault 存在性（G8 路径之外的删除）
+    const fetched: string[] = [];
+    configureFetchQueue({
+      ...TEST_HOOKS,
+      fetch: async (file) => {
+        fetched.push(file.path);
+        return okOutcome();
+      },
+    });
+    expect(enqueueDoubanFetch(a.file!, '甲')).toBe(true);
+    vault.files.delete(path); // 抓取期间被插件外删除（不经 dequeueDoubanFetch，取消集合不含它）
+    await settle();
+    expect(fetched).toEqual([path]); // 抓取照跑，守卫在写回前接住
+    expect(getNoticeMessages()).toEqual([]); // 静默：不进失败聚合（外部删除是用户意图，文案「会自动重试」对它不成立）
+    expect(isFetching(path)).toBe(false);
+    // attempted 已清：同名重建（同路径）可重新入队补抓（对齐 G8/C10 语义）
+    vault.files.set(path, '---\ntags: [电影]\n状态: 想看\n---');
+    const rebuilt = M.appRef!.vault.getAbstractFileByPath(path) as any;
+    expect(enqueueDoubanFetch(rebuilt, '甲')).toBe(true);
+  });
+
+  it('审计#12 对照：文件存在时守卫不误伤，写回照常零通知', async () => {
+    const vault = new MockVault();
+    const [a] = seedTwo(vault);
+    M.appRef = mockAppWithVault(vault);
+    const { fetched, fetch } = makeSuccessFetch(vault);
+    configureFetchQueue({ ...TEST_HOOKS, fetch });
+    expect(enqueueDoubanFetch(a.file!, '甲')).toBe(true);
+    await settle();
+    expect(fetched).toEqual([a.file!.path]);
+    expect(vault.files.get(a.file!.path)).toContain('豆瓣链接');
+    expect(getNoticeMessages()).toEqual([]);
   });
 });

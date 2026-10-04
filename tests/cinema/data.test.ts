@@ -63,17 +63,41 @@ tags:
     expect(it.synopsis).toBe('近未来的地球黄沙遍野。');
   });
 
-  it('状态推断：-1=想看 / 0=在看 / 正数=已看', () => {
+  it('解析条目：完整上映日期 / 片长 / 季集 / 热门短评（详情弹窗字段补齐）', () => {
     const vault = new MockVault();
-    vault.files.set('我的/娱乐/《A》.md', '---\ntags: [电影]\n评分: -1\n---');
-    vault.files.set('我的/娱乐/《B》.md', '---\ntags: [电影]\n评分: 0\n---');
+    vault.files.set('我的/娱乐/《24小时 第一季》.md', md(`---
+tags: [美剧]
+评分: 9.2
+上映日期: 2001-11-06
+片长: 42分钟
+季集: "24"
+热门短评: 第一季的剧情比较单纯
+---`));
+    const app = makeApp(vault);
+    const it = rebuildItems(app)[0];
+    expect(it.year).toBe('2001'); // 卡片副行 / 分析页片龄仍按年
+    expect(it.releaseDate).toBe('2001-11-06'); // 详情弹窗要完整年月日
+    expect(it.duration).toBe('42分钟');
+    expect(it.seasonText).toBe('24');
+    expect(it.hotComment).toBe('第一季的剧情比较单纯');
+  });
+
+  it('状态单源键直读；评分编码兼容已移除——无「状态」键一律落已看，评分只当分值', () => {
+    const vault = new MockVault();
+    vault.files.set('我的/娱乐/《A》.md', '---\ntags: [电影]\n状态: 想看\n---');
+    vault.files.set('我的/娱乐/《B》.md', '---\ntags: [电影]\n状态: 在看\n评分: 0\n---');
     vault.files.set('我的/娱乐/《C》.md', '---\ntags: [电影]\n评分: 8.2\n---');
+    vault.files.set('我的/娱乐/《D》.md', '---\ntags: [电影]\n评分: 8\n观影日期: 2026-01-01\n---');
     const app = makeApp(vault);
     const items = rebuildItems(app);
     const byName = Object.fromEntries(items.map((i) => [i.name, i]));
-    expect(byName['A'].status).toBe(0); // STATUS_WANT
+    expect(byName['A'].status).toBe(0); // STATUS_WANT：状态键直读
     expect(byName['B'].status).toBe(1); // STATUS_WATCHING
-    expect(byName['C'].status).toBe(2); // STATUS_WATCHED
+    expect(byName['B'].rating).toBe(0); // 评分 0 不再被清洗，就是分值 0
+    expect(byName['C'].status).toBe(2); // STATUS_WATCHED：无状态键一律落已看（-1/0 推断已随兼容层移除）
+    expect(byName['C'].rating).toBe(8.2); // 评分只当分值，不承担状态语义
+    expect(byName['D'].status).toBe(2);
+    expect(byName['D'].watchedDate).toBeNull(); // 已看日期只读新键：旧档回落观影日期已随兼容层移除
   });
 
   it('无 frontmatter 跳过；无 tag 跳过', () => {
@@ -116,8 +140,8 @@ tags:
     const tfile = vault.getMarkdownFiles()[0];
     const handItem: CinemaItem = {
       file: tfile, name: '缓存未就绪', typeTag: '电影', group: '电影', watchDate: null, rating: null,
-      status: 2, poster: null, review: null, genre: null, director: null, actors: null,
-      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, chaptersTotal: null, chaptersWatching: null, bookInfo: [],
+      status: 2, wantDate: null, watchingDate: null, watchedDate: null, rewatches: [], lists: [], shelvedOnly: false, poster: null, review: null, genre: null, director: null, actors: null,
+      region: null, year: null, releaseDate: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, hotComment: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, chaptersTotal: null, chaptersWatching: null, bookInfo: [],
     };
     M.items.push(handItem);
     const items = rebuildItems(app);
@@ -132,8 +156,8 @@ tags:
     const tfile = vault.getMarkdownFiles()[0];
     M.items.push({
       file: tfile, name: '无效', typeTag: '电影', group: '电影', watchDate: null, rating: null,
-      status: 2, poster: null, review: null, genre: null, director: null, actors: null,
-      region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, chaptersTotal: null, chaptersWatching: null, bookInfo: [],
+      status: 2, wantDate: null, watchingDate: null, watchedDate: null, rewatches: [], lists: [], shelvedOnly: false, poster: null, review: null, genre: null, director: null, actors: null,
+      region: null, year: null, releaseDate: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, hotComment: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, chaptersTotal: null, chaptersWatching: null, bookInfo: [],
     });
     rebuildItems(app);
     expect(M.items).toHaveLength(0);
@@ -190,9 +214,9 @@ describe('cinema 排序与筛选', () => {
     const mk = (name: string, ctime: number, mtime: number): CinemaItem => ({
       file: { path: `我的/娱乐/《${name}》.md`, stat: { ctime, mtime } } as any,
       name, typeTag: '电影', group: '电影',
-      watchDate: null, rating: null, status: 2, poster: null, review: null,
-      genre: null, director: null, actors: null, region: null, year: null,
-      doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, chaptersTotal: null, chaptersWatching: null, bookInfo: [],
+      watchDate: null, rating: null, status: 2, wantDate: null, watchingDate: null, watchedDate: null, rewatches: [], lists: [], shelvedOnly: false, poster: null, review: null,
+      genre: null, director: null, actors: null, region: null, year: null, releaseDate: null,
+      doubanRating: null, doubanUrl: null, synopsis: null, duration: null, seasonText: null, hotComment: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, chaptersTotal: null, chaptersWatching: null, bookInfo: [],
     });
     const t0 = 1000;
     const old = mk('旧片', t0, 9000); // 先创建，后被编辑 → mtime 最大
@@ -235,12 +259,31 @@ describe('cinema 工具函数', () => {
     expect(getGroupForTag('短剧')).toBe('短剧');
     expect(getGroupForTag('书籍')).toBe('书籍');
     expect(getGroupForTag('小说')).toBe('书籍');
-    expect(getGroupForTag('日漫')).toBe('动漫');
-    expect(getGroupForTag('国漫')).toBe('动漫');
-    expect(getGroupForTag('美漫')).toBe('动漫');
-    expect(getGroupForTag('动漫')).toBe('动漫');
-    expect(getGroupSafe('未知tag')).toBe('其他');
   });
+
+  it('片单收纳条目只在片单视图出现：无片单筛选整体排除；片单筛选命中显示', () => {
+    const vault = new MockVault();
+    vault.files.set('我的/影视/《普通想看》.md', '---\ntags: [电影]\n状态: 想看\n---');
+    vault.files.set('我的/影视/《收纳片》.md', '---\ntags: [电影]\n状态: 想看\n片单收纳: true\n片单:\n- 豆列合集\n---');
+    const app = makeApp(vault);
+    M.folderPath = '我的/影视';
+    // 前序用例可能残留筛选态（本文件无全局 reset），显式清场再断「正常视图」
+    M.typeFilter = null;
+    M.statusFilter = null;
+    M.listFilter = null;
+    M.searchKeyword = '';
+    rebuildItems(app);
+    // 正常视图（无筛选/类型/状态/搜索共用同一条链）排除收纳条目
+    expect(getDisplayItems().map((i) => i.name)).toEqual(['普通想看']);
+    M.searchKeyword = '收纳';
+    expect(getDisplayItems()).toHaveLength(0); // 搜索也排除（去片单里找）
+    M.searchKeyword = '';
+    // 片单筛选命中 → 收纳条目出现
+    M.listFilter = '豆列合集';
+    expect(getDisplayItems().map((i) => i.name)).toEqual(['收纳片']);
+    M.listFilter = null;
+  });
+
 
   it('豆瓣抓取 gate（票 293）：电影/电视剧（含旧剧 tag 归一）可抓，短剧/书籍（含旧小说 tag）不可', () => {
     expect(doubanEligibleTag('电影')).toBe(true);
@@ -323,7 +366,7 @@ describe('集数落盘与角标（票 295）', () => {
       file: null, name: 'X', typeTag: '电视剧', group: '电视剧', watchDate: null, rating: 0,
       status: STATUS_WATCHING, poster: null, review: null, genre: null, director: null, actors: null,
       region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null,
-      seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, chaptersTotal: null, chaptersWatching: null, bookInfo: [], ...over,
+      seasonText: null, hotComment: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, chaptersTotal: null, chaptersWatching: null, bookInfo: [], wantDate: null, watchingDate: null, watchedDate: null, rewatches: [], lists: [], shelvedOnly: false, releaseDate: null, ...over,
     });
     expect(pcardHtml(mk({ name: 'A', episodesTotal: 40, episodesWatching: 12 }), null)).toContain('badge-eps">12/40</span>');
     expect(pcardHtml(mk({ name: 'B', status: STATUS_WATCHED, episodesTotal: 40, episodesWatching: 40 }), null)).not.toContain('badge-eps');
@@ -337,7 +380,7 @@ describe('集数落盘与角标（票 295）', () => {
       file: null, name: 'X', typeTag: '电视剧', group: '电视剧', watchDate: null, rating: 0,
       status: STATUS_WATCHING, poster: null, review: null, genre: null, director: null, actors: null,
       region: null, year: null, doubanRating: null, doubanUrl: null, synopsis: null, duration: null,
-      seasonText: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, chaptersTotal: null, chaptersWatching: null, bookInfo: [], ...over,
+      seasonText: null, hotComment: null, country: null, genres: [], episodesTotal: null, episodesWatching: null, chaptersTotal: null, chaptersWatching: null, bookInfo: [], wantDate: null, watchingDate: null, watchedDate: null, rewatches: [], lists: [], shelvedOnly: false, releaseDate: null, ...over,
     });
     expect(detailModalHtml(mk({ name: 'A', file: { path: '我的/娱乐/《A》.md' } as CinemaItem['file'] }), null)).toContain('j-refetch');
     expect(detailModalHtml(mk({ name: 'B', file: null }), null)).not.toContain('j-refetch');

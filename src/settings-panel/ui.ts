@@ -63,6 +63,10 @@ const schemaLoaders: Record<string, () => Promise<SettingsSchema>> = {
       desc: '检查各域数据文件能否解析、字段漂移与孤儿条目（只读体检，可修复项一键清理）',
       onClick: () => void openDataCheckup(getApp()),
     });
+    // 「在线资源」组排最后（上游 2026-09-27 拍板，ADR-0203；ADR-0205 回归通用声明行）：
+    // 行集合由下载清单驱动（ADR-0207），更新日志/手册/索引等下载状态机；下载只听用户的（半自动铁则）
+    const { onlineResourcesGroup } = await import('./online-resources');
+    schema.groups.push(await onlineResourcesGroup());
     return schema;
   },
   ai: async () => {

@@ -4,19 +4,23 @@
  * 本文件只写「午夜场」这一布局的排布差异（gazette/booth 风格延后，清单与设置键已备）。
  * 纯层契约同 shared：禁 obsidian/core 服务、禁模块级可变状态（数据与视图状态显式入参）、
  * 图标 `<i data-lucide>` 占位。jsdom 无布局值依赖（本层不读 offsetWidth 等布局口径）。
+ * 本地嫁接件（上游无，批 5cine/票 294/296/301 与上游吸收批 4 融合）：娱乐正名壳、
+ * 国家组（rail+chips，票 294）、观影分析内嵌视图（statHtml/watchedCount，ADR-0090 融合裁决，
+ * 上游为覆盖层）、多选勾选（multiBar/picked，票 296）。
  */
 import { esc, iconSpan } from '../../../core/ui/str';
 import { GROUP_ORDER } from '../../constants';
 import {
   ICON, ST_COLOR, statusText, typeColor,
-  pcardHtml, viewFiltered, multiBarHtml,
+  cardHtml, cardStatus, cardInList, viewFiltered, multiBarHtml,
   type CinemaView,
 } from '../../shared';
+import { cardFace, cardGroup, type CardEntry } from '../../seasons';
 import type { CinemaItem } from '../../state';
 
 // ---------- 壳骨架 ----------
 
-/** desk 壳（900×620：左侧栏 + 主视图；j-groups/j-status/j-view 为渲染挂点） */
+/** desk 壳（900×620：左侧栏 + 主视图；j-groups/j-countries/j-status/j-lists/j-view 为渲染挂点） */
 export function midnightDeskHtml(): string {
   return `<section class="bz-cinema--midnight" data-cinema-root="midnight">
     <div class="d-body">
@@ -29,6 +33,7 @@ export function midnightDeskHtml(): string {
           <div class="j-countries"></div>
           <div class="rail-label" style="padding-top:14px">状 态</div>
           <div class="j-status"></div>
+          <div class="j-lists"></div>
         </div>
         <div class="rail-foot">
           <button class="rail-item j-tool" data-tool="ai">${iconSpan(ICON.ai)}AI 荐片</button>
@@ -46,15 +51,16 @@ export function midnightMobHtml(): string {
   return `<section class="mob bz-cinema--midnight bz-panel-mtop" data-cinema-root="midnight">
     <div class="m-head"><h2 class="j-mtitle">全部</h2><span class="cnt j-mcnt"></span>
       <span class="m-acts">
-        <button class="add j-madd" data-cinema-add title="添加条目">${iconSpan(ICON.add)}</button>
-        <button class="m-tool j-mai" title="AI 荐片">${iconSpan(ICON.ai)}</button>
-        <button class="m-tool j-yb" data-film-open title="观影志">${iconSpan(ICON.eye)}</button>
-        <button class="m-tool j-mstat" title="观影分析">${iconSpan(ICON.stat)}</button>
-        <button class="m-tool j-mclose" title="关闭">${iconSpan(ICON.close)}</button>
+        <button class="add j-madd bz-touch-target bz-touch-target--lg" data-cinema-add title="添加影片">${iconSpan(ICON.add)}</button>
+        <button class="m-tool j-import bz-touch-target bz-touch-target--lg" title="导入片单">${iconSpan(ICON.import)}</button>
+        <button class="m-tool j-mai bz-touch-target bz-touch-target--lg" title="AI 荐片">${iconSpan(ICON.ai)}</button>
+        <button class="m-tool j-yb bz-touch-target bz-touch-target--lg" data-film-open title="观影志">${iconSpan(ICON.eye)}</button>
+        <button class="m-tool j-mstat bz-touch-target bz-touch-target--lg" title="观影分析">${iconSpan(ICON.stat)}</button>
+        <button class="m-tool j-mclose bz-touch-target bz-touch-target--lg" title="关闭">${iconSpan(ICON.close)}</button>
       </span>
     </div>
     <div class="m-chips j-chips"></div>
-    <label class="m-search">${iconSpan(ICON.search)}<input class="j-mq" placeholder="搜索条目…"></label>
+    <label class="m-search">${iconSpan(ICON.search)}<input class="j-mq" placeholder="搜索片名、类型、导演、主演、影评…"><button type="button" class="q-clear" data-cinema-clear title="清空搜索" aria-label="清空搜索" hidden>${iconSpan(ICON.close)}</button></label>
     <div class="m-scroll j-mview"></div>
   </section>`;
 }
@@ -64,58 +70,108 @@ export function midnightMobHtml(): string {
 const railRow = (on: boolean, attr: string, color: string, name: string, n: number) =>
   `<button class="rail-item${on ? ' is-on' : ''}" ${attr}><span class="dot" style="background:${color}"></span>${esc(name)}<span class="n">${n}</span></button>`;
 
-/** 侧栏 rail（类型 + 国家 + 状态三组；计数来自全量条目快照）。
+/** 国家组点数（票 294，卡片口径）：合并卡任一成员命中即计入该国；全体成员都没填计入「未填」桶 */
+export function countryTally(cards: CardEntry[]): { names: string[]; empty: number } {
+  const cn: Record<string, number> = {};
+  let empty = 0;
+  const members = (e: CardEntry): CinemaItem[] =>
+    e.kind === 'series' ? [...e.seasons.map((s) => s.item), ...e.specials] : [e.item];
+  for (const e of cards) {
+    const ms = members(e);
+    const hit = new Set<string>();
+    let noCountry = true;
+    for (const m of ms) {
+      if (m.country) { hit.add(m.country); noCountry = false; }
+    }
+    if (noCountry) empty++;
+    for (const name of hit) cn[name] = (cn[name] || 0) + 1;
+  }
+  return { names: Object.keys(cn), empty };
+}
+
+/** 侧栏 rail（类型 + 国家 + 状态 + 片单四组；计数 = **卡片**数——合并开后「剧集 9」与网格 9 张卡对得上，
+ *  不是「库里 33 个季笔记」那种点了对不上的数）。
+ *  **片单筛选生效时，类型组 / 状态组两组的基数收窄到该片单**（issue 535，见下方 scope 注）；
+ *  「全部」与片单组各行不受影响。
  *  国家组（票 294）：只列数据里出现过的国家 + 「未填」桶（有条目没填国家才出现）。
+ *  片单组（j-lists）：内置「重映厅」+ 自建片单，成员计数同卡片口径（合并卡任一成员命中算）；
+ *  无任何片单时整组不出。金色圆点与「全部」同源（片单无类型色语义）。
  *  ai/stat 页 rail 整体熄灭（含「全部」）——它是列表视图的筛选控件，非列表页不表达选中 */
-export function railHtml(items: CinemaItem[], view: CinemaView): { groups: string; countries: string; status: string } {
+export function railHtml(cards: CardEntry[], view: CinemaView, lists: string[] = [], cn?: { names: string[]; empty: number }): { groups: string; countries: string; status: string; lists: string } {
   const listOn = view.view === 'list';
+  // 选中片单时，类型组 / 状态组计数改以**该片单的卡片集**为基数（issue 535，2026-10-01 拍板）：
+  // 侧栏数字得跟网格对得上——「片单·漫威」下点「电影 3」就该看到 3 张。
+  // 「全部」保持库内总数（它是回主视图的出口）；片单组各行保持各自成员数（本就是清单级计数，
+  // 若也收敛成本片单与各片单的交集，其余行会整排归零，看着像坏了）。
+  const scope = view.listFilter ? cards.filter((e) => cardInList(e, view.listFilter as string)) : cards;
   const g: Record<string, number> = {};
   const c: Record<string, number> = { 想看: 0, 在看: 0, 已看: 0 };
-  const cn: Record<string, number> = {};
-  let cnEmpty = 0;
-  items.forEach((it) => {
-    g[it.group] = (g[it.group] || 0) + 1;
-    c[statusText(it.status)]++;
-    if (it.country) cn[it.country] = (cn[it.country] || 0) + 1;
-    else cnEmpty++;
-  });
-  let groups = railRow(listOn && !view.typeFilter && !view.statusFilter && !view.countryFilter, 'data-g="全部"', 'var(--gold)', '全部', items.length);
+  scope.forEach((e) => { const grp = cardGroup(e); g[grp] = (g[grp] || 0) + 1; c[statusText(cardStatus(e))]++; });
+  let groups = railRow(listOn && !view.typeFilter && !view.statusFilter && !view.countryFilter && !view.listFilter, 'data-g="全部"', 'var(--gold)', '全部', cards.length);
   for (const name of GROUP_ORDER) {
-    groups += railRow(listOn && view.typeFilter === name && !view.statusFilter && !view.countryFilter, `data-g="${name}"`, typeColor(name), name, g[name] || 0);
+    groups += railRow(listOn && view.typeFilter === name && !view.statusFilter, `data-g="${name}"`, typeColor(name), name, g[name] || 0);
   }
   let countries = '';
-  for (const name of Object.keys(cn)) {
-    countries += railRow(listOn && view.countryFilter === name, `data-cn="${esc(name)}"`, 'var(--gold)', name, cn[name]);
-  }
-  if (cnEmpty > 0) {
-    countries += railRow(listOn && view.countryFilter === '未填', 'data-cn="未填"', '#8a8578', '未填', cnEmpty);
+  if (cn) {
+    for (const name of cn.names) {
+      countries += railRow(listOn && view.countryFilter === name, `data-cn="${esc(name)}"`, 'var(--gold)', name, scope.filter((e) => cardMembersInCountry(e, name)).length);
+    }
+    if (cn.empty > 0) {
+      countries += railRow(listOn && view.countryFilter === '未填', 'data-cn="未填"', '#8a8578', '未填', scope.filter((e) => cardMembersAllUncountry(e)).length);
+    }
   }
   let status = '';
   for (const s of ['想看', '在看', '已看'] as const) {
     status += railRow(listOn && view.statusFilter === s, `data-s="${s}"`, ST_COLOR[s], s, c[s]);
   }
-  return { groups, countries, status };
+  let listsHtml = '';
+  if (lists.length) {
+    listsHtml = '<div class="rail-label" style="padding-top:14px">片 单</div>';
+    for (const name of lists) {
+      const n = cards.filter((e) => cardInList(e, name)).length;
+      listsHtml += railRow(listOn && view.listFilter === name, `data-l="${esc(name)}"`, 'var(--gold)', name, n);
+    }
+  }
+  return { groups, countries, status, lists: listsHtml };
 }
 
-/** 移动端筛选 chips（全部/类型/国家/状态横滑条；国家只列数据里出现过的 + 未填桶，票 294；
- *  ai/stat 页同 rail 口径整体熄灭） */
-export function chipsHtml(view: CinemaView, items: CinemaItem[] = []): string {
+/** 卡片是否命中国家（任一成员命中即算，票 294 与卡片口径的交点） */
+function cardMembersInCountry(e: CardEntry, country: string): boolean {
+  const ms = e.kind === 'series' ? [...e.seasons.map((s) => s.item), ...e.specials] : [e.item];
+  return ms.some((m) => m.country === country);
+}
+
+/** 卡片是否全体成员都没填国家（「未填」桶口径） */
+function cardMembersAllUncountry(e: CardEntry): boolean {
+  const ms = e.kind === 'series' ? [...e.seasons.map((s) => s.item), ...e.specials] : [e.item];
+  return ms.every((m) => !m.country);
+}
+
+/** 移动端筛选 chips（全部/类型/国家/状态/片单横滑条；ai/stat 页同 rail 口径整体熄灭）。
+ *  片单组（上游 2026-09-30 补）：桌面侧栏片单区的移动端等价物，书签图标区分类型/状态，
+ *  `data-l` 由全端筛选委托（ui.ts railBtn 分支）接管，与桌面同一套切换语义。
+ *  国家组（票 294）：桌面 rail 国家区的移动端等价物，`data-cn` 同一委托。
+ *  `bz-touch-target--lg`：触屏（pointer:coarse）::after 外扩热区（core 单源，视觉零改动，
+ *  绝对定位外扩不触发横滑容器额外滚动宽度；desk 的 rail/seg 等鼠标惯用件不挂）。 */
+export function chipsHtml(view: CinemaView, lists: string[] = [], cn?: { names: string[]; empty: number }): string {
   const listOn = view.view === 'list';
-  let html = `<button class="chip${listOn && !view.typeFilter && !view.statusFilter && !view.countryFilter ? ' is-on' : ''}" data-c="all">${iconSpan(ICON.grid)}全部</button>`;
+  let html = `<button class="chip bz-touch-target--lg${listOn && !view.typeFilter && !view.statusFilter && !view.countryFilter && !view.listFilter ? ' is-on' : ''}" data-c="all">${iconSpan(ICON.grid)}全部</button>`;
   for (const name of GROUP_ORDER) {
-    html += `<button class="chip${listOn && view.typeFilter === name && !view.statusFilter && !view.countryFilter ? ' is-on' : ''}" data-c="${name}">${name}</button>`;
+    html += `<button class="chip bz-touch-target--lg${listOn && view.typeFilter === name && !view.statusFilter ? ' is-on' : ''}" data-c="${name}">${name}</button>`;
   }
-  const cn = new Set<string>();
-  let cnEmpty = false;
-  items.forEach((it) => { if (it.country) cn.add(it.country); else cnEmpty = true; });
-  for (const name of cn) {
-    html += `<button class="chip${listOn && view.countryFilter === name ? ' is-on' : ''}" data-cn="${esc(name)}">${esc(name)}</button>`;
-  }
-  if (cnEmpty) {
-    html += `<button class="chip${listOn && view.countryFilter === '未填' ? ' is-on' : ''}" data-cn="未填">未填</button>`;
+  if (cn) {
+    for (const name of cn.names) {
+      html += `<button class="chip bz-touch-target--lg${listOn && view.countryFilter === name ? ' is-on' : ''}" data-cn="${esc(name)}">${esc(name)}</button>`;
+    }
+    if (cn.empty > 0) {
+      html += `<button class="chip bz-touch-target--lg${listOn && view.countryFilter === '未填' ? ' is-on' : ''}" data-cn="未填">未填</button>`;
+    }
   }
   for (const s of ['想看', '在看', '已看'] as const) {
-    html += `<button class="chip${listOn && view.statusFilter === s ? ' is-on' : ''}" data-s="${s}">${s}</button>`;
+    html += `<button class="chip bz-touch-target--lg${listOn && view.statusFilter === s ? ' is-on' : ''}" data-s="${s}">${s}</button>`;
+  }
+  for (const name of lists) {
+    html += `<button class="chip bz-touch-target--lg${listOn && view.listFilter === name ? ' is-on' : ''}" data-l="${esc(name)}">${iconSpan(ICON.shelf)}${esc(name)}</button>`;
   }
   return html;
 }
@@ -130,46 +186,60 @@ export function emptyPageHtml(filtered: boolean): string {
 
 /** ai/stat 页头（返回钮 + 标题 + 计数） */
 export function spHeadHtml(title: string, cnt: string): string {
-  return `<div class="sp-head"><button class="sp-back j-back">${iconSpan(ICON.back)}</button><span class="sp-title">${esc(title)}</span><span class="sp-cnt j-spcnt">${cnt}</span></div>`;
+  return `<div class="sp-head"><button class="sp-back">${iconSpan(ICON.back)}</button><span class="sp-title">${esc(title)}</span><span class="sp-cnt j-spcnt">${cnt}</span></div>`;
 }
 
 /** 渲染输入快照（一次渲染的全部数据与回调，显式入参——纯层禁读模块态） */
 export interface MidnightRenderInput {
-  /** 全量条目（rail/chips 计数口径） */
-  items: CinemaItem[];
-  /** 当前展示列表（筛选 + 排序后） */
-  list: CinemaItem[];
+  /** 全量卡片条目（rail/chips 计数口径；合并开启时剧集多季合一张） */
+  allCards: CardEntry[];
+  /** 当前展示卡片条目（筛选 + 排序 + 按季合并后，与网格逐张对应） */
+  cards: CardEntry[];
   /** 视图状态快照 */
   view: CinemaView;
   /** 网格每行列数（插件读设置钳制，壳给演示值） */
   cols: number;
+  /** 片单枚举（侧栏片单组；data.allLists 产物，重映厅恒首位） */
+  lists: string[];
+  /** 国家组点数（票 294；countryTally 产物，rail/chips 共用） */
+  cn: { names: string[]; empty: number };
   /** 列表标题（组 + 状态叠加口径，listTitle） */
   title: string;
-  /** 已看部数（分析页头计数） */
+  /** 已看部数（分析页头计数，本地内嵌分析视图用） */
   watchedCount: number;
   /** AI 荐片页 HTML（shared aiPageHtml 产物） */
   aiHtml: string;
   /** AI 结果部数（页头计数；null = 无结果） */
   aiCount: number | null;
-  /** 观影分析页 HTML（analysis.buildAnalysisHTML / 壳自绘演示统计） */
+  /** 观影分析页 HTML（本地 analysis.buildAnalysisHTML 产物，ADR-0090 内嵌口径） */
   statHtml: string;
   /** 海报资源解析（插件 vault resourcePath，壳给演示字段直读） */
   poster: (it: CinemaItem) => string | null;
   /** 后台抓取中（插件 douban-queue pending 集合，壳给演示 false） */
   fetching?: (it: CinemaItem) => boolean;
   /** 多选模式下该卡是否已勾选（票 296，壳给演示 false） */
-  picked?: (it: CinemaItem) => boolean;
+  picked?: (e: CardEntry) => boolean;
 }
 
-/** 列表视图头 + 工具行（d-head/d-tools；添加钮钩子 data-cinema-add） */
+/** 卡片条目 → HTML（正脸解析留在渲染层：合并卡拿 face 季的海报与抓取态） */
+function cardsHtml(cards: CardEntry[], inp: MidnightRenderInput): string {
+  return cards.map((e) => {
+    const face = cardFace(e);
+    return cardHtml(e, inp.poster(face), inp.fetching?.(face) ?? false, inp.picked?.(e) ?? false);
+  }).join('');
+}
+
+/** 列表视图头 + 工具行（d-head/d-tools；添加钮钩子 data-cinema-add）。
+ *  导入片单图标钮排在「添加影片」后面（上游 2026-10-01 拍板：原来压在侧栏左下角落
+ *  rail-foot 里与 AI/分析两个视图工具混排，不好看；挪到「添加」旁的图标动作位） */
 export function listHeadHtml(inp: MidnightRenderInput): string {
-  return `<div class="d-head"><h2 class="j-title">${esc(inp.title)}</h2><span class="cnt j-cnt">· ${inp.list.length} 部</span>
-    <button class="add j-add" data-cinema-add>${iconSpan(ICON.add)}添加条目</button></div>`;
+  return `<div class="d-head"><h2 class="j-title">${esc(inp.title)}</h2><span class="cnt j-cnt">· ${inp.cards.length} 部</span>
+    <button class="add j-add" data-cinema-add>${iconSpan(ICON.add)}添加影片</button><button class="imp j-import" title="导入片单">${iconSpan(ICON.import)}</button></div>`;
 }
 export function listToolsHtml(view: CinemaView): string {
   // 票 296：多选模式下工具行替换为勾选工具条（导出/退出）
   if (view.multiSelect) return multiBarHtml(view);
-  return `<div class="d-tools"><label class="d-search">${iconSpan(ICON.search)}<input class="j-q" placeholder="搜索条目（名称、类型、感想）..." value="${esc(view.searchKeyword)}"></label>
+  return `<div class="d-tools"><label class="d-search">${iconSpan(ICON.search)}<input class="j-q" placeholder="搜索片名、类型、导演、主演、影评…" value="${esc(view.searchKeyword)}"><button type="button" class="q-clear" data-cinema-clear title="清空搜索" aria-label="清空搜索"${view.searchKeyword ? '' : ' hidden'}>${iconSpan(ICON.close)}</button></label>
     <div class="seg j-sort">${([['date', '最近观看'], ['created', '加入先后'], ['rating', '按评分']] as const).map(([k, l]) => `<button data-k="${k}" class="${view.sortMode === k ? 'is-on' : ''}">${l}</button>`).join('')}</div>
     <button class="dm-btn j-multi" data-cinema-multiselect>多选</button><button class="dm-btn j-dd" data-cinema-dedupe>查重复</button></div>`;
 }
@@ -178,25 +248,29 @@ export function listToolsHtml(view: CinemaView): string {
 
 /** desk 渲染：侧栏 rail + 主视图（list/ai/stat 按视图状态装配） */
 export function renderMidnightDesk(root: HTMLElement, inp: MidnightRenderInput): void {
-  const rail = railHtml(inp.items, inp.view);
+  const rail = railHtml(inp.allCards, inp.view, inp.lists, inp.cn);
   const groupsEl = root.querySelector('.j-groups');
   const countriesEl = root.querySelector('.j-countries');
   const statusEl = root.querySelector('.j-status');
+  const listsEl = root.querySelector('.j-lists');
   if (groupsEl) groupsEl.innerHTML = rail.groups;
   if (countriesEl) countriesEl.innerHTML = rail.countries;
   if (statusEl) statusEl.innerHTML = rail.status;
+  if (listsEl) listsEl.innerHTML = rail.lists;
   const view = root.querySelector('.j-view');
   if (!view) return;
   const v = inp.view;
+  // 底片（滑动高亮）的回落目标是 `.is-on` 项：AI 荐片页把入口点亮，底片就常驻在它身上
+  // （原来这两页 rail 整体熄灭、底片没有目标而隐去；观影分析盖住面板，不需要停留点）
+  root.querySelectorAll<HTMLElement>('.rail-foot .j-tool')
+    .forEach((b) => b.classList.toggle('is-on', (v.view === 'ai' && b.dataset.tool === 'ai') || (v.view === 'stat' && b.dataset.tool === 'stat')));
   if (v.view === 'ai') {
     view.innerHTML = spHeadHtml('AI 荐片', inp.aiCount ? `· ${inp.aiCount} 部` : '') + `<div class="sp-body">${inp.aiHtml}</div>`;
   } else if (v.view === 'stat') {
     view.innerHTML = spHeadHtml('观影分析', `· ${inp.watchedCount} 部已看`) + `<div class="sp-body">${inp.statHtml}</div>`;
   } else {
-    const pick = (it: CinemaItem) => inp.picked?.(it) ?? false;
-    const cards = inp.list.map((it) => pcardHtml(it, inp.poster(it), inp.fetching?.(it) ?? false, pick(it))).join('');
-    const body = inp.list.length
-      ? `<div class="d-scroll"><div class="grid" style="grid-template-columns:repeat(${inp.cols},1fr)">${cards}</div></div>`
+    const body = inp.cards.length
+      ? `<div class="d-scroll"><div class="grid" style="grid-template-columns:repeat(${inp.cols},1fr)">${cardsHtml(inp.cards, inp)}</div></div>`
       : emptyPageHtml(viewFiltered(v));
     view.innerHTML = listHeadHtml(inp) + listToolsHtml(v) + body;
   }
@@ -209,22 +283,30 @@ export function renderMidnightMob(root: HTMLElement, inp: MidnightRenderInput): 
   const titleEl = root.querySelector('.j-mtitle');
   const cntEl = root.querySelector('.j-mcnt');
   if (titleEl) titleEl.textContent = t;
-  if (cntEl) cntEl.textContent = v.view === 'list' ? `· ${inp.list.length}` : '';
+  if (cntEl) cntEl.textContent = v.view === 'list' ? `· ${inp.cards.length}` : '';
+  // 深审批 B #2/#3：搜索框值回显（mob 壳是静态 input，重开面板按旧词过滤而框空白 = 隐形筛选；
+  // 与 desk 的 value 绑定同源口径，保「会话内搜索词存续」语义）+ 尾 ✕ 显隐随词同步（有词才显示）
+  const q = root.querySelector<HTMLInputElement>('.j-mq');
+  if (q && q.value !== v.searchKeyword) q.value = v.searchKeyword;
+  const qClear = root.querySelector<HTMLElement>('.m-search .q-clear');
+  if (qClear) qClear.hidden = !v.searchKeyword;
   const mv = root.querySelector<HTMLElement>('.j-mview');
   if (mv) {
     if (v.view === 'list') {
-      mv.className = 'm-scroll j-mview';
+      // 深审批 B #1：空态分支与 desk 同构（筛选无命中 / 空库两态）——此前 mob 恒渲染 m-grid，
+      // 空库或无命中整片空白。清词/清筛按钮走 data-cinema-clear 委托（ui.ts 全端已生效）。
+      // 空态时容器转 flex（.cn-mempty），空态页才能撑满垂直居中。
+      mv.className = inp.cards.length ? 'm-scroll j-mview' : 'm-scroll j-mview cn-mempty';
       // 票 296：多选模式在网格上方叠勾选工具条
       const bar = v.multiSelect ? multiBarHtml(v) : '';
-      mv.innerHTML = `${bar}<div class="m-grid">${inp.list.map((it) => pcardHtml(it, inp.poster(it), inp.fetching?.(it) ?? false, inp.picked?.(it) ?? false)).join('')}</div>`;
-    } else if (v.view === 'ai') {
-      mv.className = 'sp-body j-mview';
-      mv.innerHTML = inp.aiHtml;
+      mv.innerHTML = inp.cards.length
+        ? `${bar}<div class="m-grid">${cardsHtml(inp.cards, inp)}</div>`
+        : emptyPageHtml(viewFiltered(v));
     } else {
       mv.className = 'sp-body j-mview';
-      mv.innerHTML = inp.statHtml;
+      mv.innerHTML = v.view === 'ai' ? inp.aiHtml : inp.statHtml;
     }
   }
   const chips = root.querySelector('.j-chips');
-  if (chips) chips.innerHTML = chipsHtml(v, inp.items);
+  if (chips) chips.innerHTML = chipsHtml(v, inp.lists, inp.cn);
 }

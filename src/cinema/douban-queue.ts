@@ -15,7 +15,7 @@ import { tryGetSettings } from '../core/settings-provider';
 import { M } from './state';
 import { doubanEligibleTag, getGroupSafe } from './constants';
 import { rebuildItems } from './data';
-import { fetchNoteDouban, queryDoubanByName, downloadPosterToVault, type DoubanFetchDeps, type DoubanFetchOutcome, type DoubanQueryOutcome } from './douban-fetcher';
+import { fetchNoteDouban, queryDoubanByName, queryDoubanBySid, downloadPosterToVault, fetchDoubanList, type DoubanListEntry, type DoubanListPageCb, type DoubanFetchDeps, type DoubanFetchOutcome, type DoubanQueryOutcome } from './douban-fetcher';
 import { fetchMdBookDouban } from '../bookshelf/douban-fetcher';
 
 /** 查询结果类型再导出：测试注入 `configureFetchQueue({ preview })` 时要用 */
@@ -35,10 +35,13 @@ interface QueueEntry {
   file: TFile;
   name: string;
   kind: DoubanQueueKind;
+  /** 豆瓣片单导入携带的条目 sid：执行时直取 queryDoubanBySid（与表单解析 sid 直取同口径，
+   *  省一次名称三路检索）。sweep/重试等路径没有 sid，留空走按名检索 */
+  sid?: string;
 }
 
-/** 执行器抽象（测试注入点）：抓单条笔记，返回抓取结果。kind 供注入方感知种类（可忽略） */
-export type FetchNote = (file: TFile, name: string, kind: DoubanQueueKind) => Promise<DoubanFetchOutcome>;
+/** 执行器抽象（测试注入点）：抓单条笔记，返回抓取结果。kind/sid 供注入方感知（可忽略） */
+export type FetchNote = (file: TFile, name: string, kind: DoubanQueueKind, sid?: string) => Promise<DoubanFetchOutcome>;
 
 const queue: QueueEntry[] = [];
 /** 卡片 loading 驱动：抓取中的笔记路径 → 入队时刻（时限兜底用，见 isFetching） */
@@ -107,20 +110,27 @@ export function fetchDepsFromSettings(app: App): DoubanFetchDeps {
   };
 }
 
-/** 表单「解析」查询器类型（测试注入面） */
-export type PreviewQuery = (app: App, name: string) => Promise<DoubanQueryOutcome>;
+/** 表单「解析」查询器类型（测试注入面）。sid 可选：本地名称索引命中时携带（issue 498） */
+type PreviewQuery = (app: App, name: string, sid?: string) => Promise<DoubanQueryOutcome>;
 /** 测试注入：解析查询器（默认走真 queryDoubanByName） */
 let previewFn: PreviewQuery | null = null;
 
 /** 表单「解析」入口（issue 395）：按片名查询豆瓣字段。
  *  复用队列的 deps 组装（ApiZero Key / 豆瓣 Cookie / requestUrl 通道）——单一来源，
- *  表单不自己拼一份 HTTP 层。 */
-export async function queryDoubanForPreview(app: App, name: string): Promise<DoubanQueryOutcome> {
-  return previewFn ? previewFn(app, name) : queryDoubanByName(name, fetchDepsFromSettings(app));
+ *  表单不自己拼一份 HTTP 层。
+ *  sid 直取（issue 498 / ADR-0210）：名称索引命中时携带 sid，跳过三路检索直接
+ *  ApiZero 按 ID 取；**失败回落按名全链**（key 缺失/额度尽/网络抖动都不该让
+ *  索引命中反而比手输多绕一步），回落语义与无 sid 完全一致。 */
+export async function queryDoubanForPreview(app: App, name: string, sid?: string): Promise<DoubanQueryOutcome> {
+  if (!previewFn && sid) {
+    const bySid = await queryDoubanBySid(sid, name, fetchDepsFromSettings(app));
+    if (bySid.ok) return bySid;
+  }
+  return previewFn ? previewFn(app, name, sid) : queryDoubanByName(name, fetchDepsFromSettings(app));
 }
 
 /** 保存海报的注入面（测试用；默认走真下载） */
-export type PreviewPosterSave = (app: App, name: string, posterUrl: string) => Promise<string | null>;
+type PreviewPosterSave = (app: App, name: string, posterUrl: string) => Promise<string | null>;
 /** 测试注入：保存海报落库（默认走真 downloadPosterToVault） */
 let posterFn: PreviewPosterSave | null = null;
 
@@ -163,7 +173,7 @@ export function isFetching(path: string | null | undefined): boolean {
 }
 
 /** 入队（会话内去重）；全平台启用（ADR-0129：requestUrl 移动端可用）。返回是否真入队 */
-export function enqueueDoubanFetch(file: TFile | null, name: string, kind: DoubanQueueKind = 'movie'): boolean {
+export function enqueueDoubanFetch(file: TFile | null, name: string, kind: DoubanQueueKind = 'movie', sid?: string): boolean {
   if (!file) return false;
   const key = file.path;
   // G8 豁免只在「在抓被删」那一次：dequeue（删除）会无条件记 cancelled，删过**未入队**的
@@ -174,7 +184,7 @@ export function enqueueDoubanFetch(file: TFile | null, name: string, kind: Douba
   attempted.add(key);
   pending.set(key, Date.now());
   waitAhead.set(key, queue.length); // push 前长度 = 前方条目数（快照，见 isFetching C7）
-  queue.push({ file, name, kind });
+  queue.push({ file, name, kind, sid });
   void pump();
   return true;
 }
@@ -214,7 +224,7 @@ async function runOne(entry: QueueEntry): Promise<DoubanFetchOutcome> {
   const fn = fetchFn ?? defaultFetchNote;
   try {
     return await Promise.race([
-      fn(entry.file, entry.name, entry.kind),
+      fn(entry.file, entry.name, entry.kind, entry.sid),
       new Promise<DoubanFetchOutcome>((resolve) => setTimeout(() => resolve({ ok: false, reason: 'network' }), FETCH_TIMEOUT_MS)),
     ]);
   } catch {
@@ -223,7 +233,7 @@ async function runOne(entry: QueueEntry): Promise<DoubanFetchOutcome> {
 }
 
 /** 默认执行器：组装设置依赖跑插件内抓取（书籍 → 图书链路，Q14） */
-async function defaultFetchNote(file: TFile, _name: string, kind: DoubanQueueKind): Promise<DoubanFetchOutcome> {
+async function defaultFetchNote(file: TFile, _name: string, kind: DoubanQueueKind, sid?: string): Promise<DoubanFetchOutcome> {
   const app = M.appRef;
   if (!app) return { ok: false, reason: 'network' };
   const deps = fetchDepsFromSettings(app);
@@ -232,7 +242,7 @@ async function defaultFetchNote(file: TFile, _name: string, kind: DoubanQueueKin
     // BookFetchOutcome 与 DoubanFetchOutcome 结构同构
     return fetchMdBookDouban(app, file, deps);
   }
-  return fetchNoteDouban(app, file, deps);
+  return fetchNoteDouban(app, file, deps, sid);
 }
 
 async function pump(): Promise<void> {
@@ -353,4 +363,18 @@ export function shutdownDoubanQueue(): void {
   blockedNames = [];
   blockedEntries = [];
   pumping = false;
+}
+
+/** 豆瓣片单导入（一键批量建档的抓取端）：复用队列 HTTP 通道与设置里的豆瓣 Cookie
+ *  （fetchDepsFromSettings 单源——导入不自己拼第二份 HTTP 层，同 queryDoubanForPreview 口径）。
+ *  firstPageEmpty = 首页就没解析出条目（个人收藏页缺登录态 / 风控拦截 / 链接不对），
+ *  调用方据此分流提示。 */
+let listFetchFn: ((app: App, base: string, onPage?: DoubanListPageCb) => Promise<{ entries: DoubanListEntry[]; firstPageEmpty: boolean; listTitle: string }>) | null = null;
+/** 测试注入：片单抓取（默认走真 fetchDoubanList + 队列 HTTP 通道，同 previewFn 模式） */
+export function configureDoubanListFetch(fn: NonNullable<typeof listFetchFn> | null): void { listFetchFn = fn; }
+
+export async function fetchDoubanListForImport(app: App, base: string, onPage?: DoubanListPageCb): Promise<{ entries: DoubanListEntry[]; firstPageEmpty: boolean; listTitle: string }> {
+  if (listFetchFn) return listFetchFn(app, base);
+  const deps = fetchDepsFromSettings(app);
+  return fetchDoubanList(base, deps.httpGet, deps.doubanCookie || undefined, onPage);
 }

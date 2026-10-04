@@ -47,6 +47,10 @@ const WHITELIST: Array<{ file: RegExp; reason: string; /** 防回归哨兵：预
     sentinel: true,
   },
   {
+    file: /^src\/core\/self-update\.ts$/,
+    reason: '自更新（2026-09-26）：覆盖插件目录 main.js/styles.css/manifest.json 三件套，升级协议自有顺序，非域数据文件',
+  },
+  {
     file: /^src\/encrypt\/data\.ts$/,
     reason: 'D2 已收编域：.safe.enc/staging 密文走 adapter 自有原子写协议（tmp 写成后替换，防半截密文）；解密产出 md/附件为用户文档写',
   },
@@ -110,6 +114,8 @@ const WHITELIST: Array<{ file: RegExp; reason: string; /** 防回归哨兵：预
     file: /^src\/auto-summary\/processor\.ts$/,
     reason: '剪藏 frontmatter md 写回：写前重读最新内容仅合并目标字段（P1-21 防盲写），md 文件操作不套 json 原语（D3 拍板保留）',
   },
+  // 467：src/people/datasource.ts 的 writeBinary 豁免随「头像入库明文目录」一并退役——
+  // 头像现在作为密文附件进保库记录（写路径全在 SafeManager 内，encrypt/data.ts 自有豁免）。
 ];
 
 /** 读真实 src（POSIX 相对路径，src/ 前缀） */
