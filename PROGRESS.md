@@ -1017,3 +1017,15 @@
 - [x] 数据红线核对：dock 全部数据在工具目录与插件 data.json，零 vault 内新数据文件；登记表只存「bz 相关的最小集」（ADR-0235 决策），不触冻结域、不触 AI/小橘设置板块
 - [x] 归档 ADR-0235~0238 进 upstream-yeshimei；CONTEXT 词条（工具坞/声明文件/信任签名/自动化规则表）；AGENTS 域数 25→26、命令数 80→81（直达命令运行时注册不占表计数）
 - [x] 门禁：worktree tsc 0 错 + dock 目标面 218 测试一次全绿 + 全量 4419 绿（291 文件）→ master ff 合并 → 全量复测同绿 → pnpm run build 部署
+
+### 票 313 — 上游吸收批 6：面板能力三件（源 yeshimei/bz issue 331/492-sp-res/423，2026-10-04）
+
+- [x] 数据源凭据组：主设置页新增「数据源凭据」组（语音转写后），三行单行掩码（secret：password 掩码+眼睛切明文，2026-09-23 用户口径）绑定**本地既有键** cinemaApizeroKey/cinemaDoubanCookie/bilibiliCookie 零迁移；B站行带「从 CLI 导入」（读 ~/.bilibili-cookies.json，桌面端判定 isDesktopShell）
+- [x] secret 行型：core TextRow 加 secret 修饰；shared textInputHtml 掩码+眼睛 markup；renderer 眼睛切换接线；settings-panel/styles.css 掩码样式——本地形制（text 行 + secret 旗标）承载上游 GS3 档位
+- [x] 面板拖拽缩放（492-sp-res，ADR-0084/0094）：PANEL 边界常量 + createOverlay width min(1080px,94vw)/maxWidth 放宽 + mountPanelResize/unmountPanelResize（hide 软关即摘、cleanup 销毁摘、open 软重开重挂）+ settingsPanelWidth/Height 两键——core uiResizable/panelSizePersist 批 4 已入库直接接线
+- [x] 面板 AI 域五组形制：ai 加载器五取（🤖 AI/Embedding/JEV/语音转写/数据源凭据，全为本地主 schema 既有/新增组）——「⚠️ 设置页 AI 板块内容零改动」（ADR-0121-3），仅面板聚合视图扩容
+- [x] 动作后回填（issue 423 锚）：ctx.refresh 钩子三层（core SettingsRowContext + renderer makeCtx + schema onPick 消费）；button 行 await+refresh；text 行 regRefresh 无条件登记程序化回填不置脏
+- [x] 三条暂缓 skip 全部兑现归零（凭据组/拖拽缩放×2/Embedding 回填）；两条手误即改（secret 三元误伤数字行、button onClick 首参即 ctx）
+- [x] 本地契约协调：凭据组无 icon（「区块标题平铺形态」契约优先，面板无 icon 组照常渲染）；EMOJI_RE 断言限定头行+导航（本地「📂 数据存储路径」组名前缀为既有形态）
+- [x] 归档 ADR-0180（凭据单行掩码用户裁决）；存量归档欠账（上游 239 篇 vs 本地 42 篇）记入未随批
+- [x] 门禁：worktree tsc 0 错 + 全量 4423 绿（BZ_TEST_MAX_WORKERS=8 限流，douban-queue 两条为已知超卖抖动、单跑恒绿）→ master ff 合并 → 复测同绿 → 构建部署
