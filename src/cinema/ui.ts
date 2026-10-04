@@ -649,15 +649,15 @@ export function openAddModalDirect(app: App): void {
 function watchedCount(): number {
   return M.items.filter((it) => it.status === STATUS_WATCHED).length;
 }
-/** 列表标题 = 筛选名（片单 + 组 + 国家 + 状态叠加；全空回落「全部」） */
+/** 列表标题 = 筛选名（片单前缀 + 组 + 国家 + 状态叠加；本地「全部 · X」格式，票 294 断言锚） */
 function listTitle(): string {
-  const parts = [
-    M.listFilter ? `片单·${M.listFilter}` : '',
-    M.typeFilter || '',
-    M.countryFilter ? (M.countryFilter === '未填' ? '国家未填' : M.countryFilter) : '',
-    M.statusFilter || '',
-  ].filter(Boolean);
-  return parts.join(' · ') || '全部';
+  const head = [M.listFilter ? `片单·${M.listFilter}` : '', M.typeFilter || '全部']
+    .filter(Boolean)
+    .join(' · ');
+  let t = head;
+  if (M.countryFilter) t += ` · ${M.countryFilter === '未填' ? '国家未填' : M.countryFilter}`;
+  if (M.statusFilter) t += ` · ${M.statusFilter}`;
+  return t;
 }
 
 /** 面板内 toast（原型 .cn-toast 同构；无面板时回落 core notice） */

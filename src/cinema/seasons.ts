@@ -18,7 +18,10 @@
 import type { CinemaItem } from './state';
 
 /** 参与合并的组（电影/纪录片/公开课不参与——它们没有「季」语义） */
-const MERGE_GROUPS: readonly string[] = ['剧集', '动漫'];
+// 票 293 本地口径：上游「剧集」组在本地拆为「电视剧 / 短剧」（constants.TYPE_GROUPS 同源）。
+// 历史缺陷修正（票 309 审计）：残留上游命名导致合并卡对本地数据（group=电视剧）从不生效；
+// 短剧是否入合并组待用户裁决，暂不纳入（原「剧集」语义 = 长剧）。
+const MERGE_GROUPS: readonly string[] = ['电视剧', '动漫'];
 
 /** 中文数字（一~九） */
 const CN_NUM: Record<string, number> = { 零: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };

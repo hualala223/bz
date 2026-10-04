@@ -380,8 +380,11 @@ export function seriesDetailModalHtml(card: SeriesCard, posterOf: (it: CinemaIte
 }
 
 /** 组 → 细分 tag 映射（表单 choices 用；与原型 GROUP_SUBS 同序） */
+/** 组 → 细分 tag 映射（表单 choices 用；与原型 GROUP_SUBS 同序）。
+ *  键集合必须覆盖 GROUP_ORDER 全部顶级类型（票 293 七项 + 其他；其他不入表单不查此表）——
+ *  批 5cine 曾被上游版覆盖成「剧集」口径，formAllTags 查到 undefined 当场崩（编辑/添加表单全灭），勿再回退 */
 export const GROUP_SUBS_OF: Record<string, string[]> = {
-  电影: [], 剧集: ['国产剧', '美剧', '英剧', '德剧', '日剧', '韩剧', '哥伦比亚剧'], 动漫: ['日漫', '国漫', '美漫'], 纪录片: [], 公开课: ['公开课'],
+  电影: [], 电视剧: [], 短剧: [], 书籍: [], 动漫: [], 纪录片: [], 公开课: ['公开课', 'TED'],
 };
 
 /** 表单可选类型（组顺序展开细分；「其他」不入表单） */
@@ -615,12 +618,14 @@ export function seriesSheetHeadHtml(card: SeriesCard, posterUrl: string | null):
 
 // ===== 本地保留件（上游无；票 294/295/296/306 与融合批带入） =====
 
+/** 多选导出工具条（票 296；desk 工具行与 mob 列表顶部共用；动作接线留行为层） */
 export function multiBarHtml(view: Pick<CinemaView, 'selectedCount'>): string {
   return `<div class="cn-multibar"><span class="mb-cnt">已选 ${view.selectedCount} 条</span>
     <button class="dm-btn gold mb-export" data-cinema-export>导出感想</button>
     <button class="dm-btn mb-exit" data-cinema-multiselect-exit>退出多选</button></div>`;
 }
 
+/** 选项池 chips 行（国家/题材共用；单选/多选由 data-fc-mode 决定；行尾「＋」= 自定义添加，票 294） */
 export function optionChipsHtml(options: string[], selected: string[], attr: string, multi: boolean): string {
   const chips = options.map((v) => {
     const on = selected.includes(v);
