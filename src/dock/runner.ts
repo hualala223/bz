@@ -1,0 +1,370 @@
+/**
+ * dock 执行层：工具启动（`core/external-tool.ts` 的调用方）。
+ *
+ * 两条铁律落在这里：
+ *  1) **只有已信任的命令才会被执行**（spec D7）。但**读声明不受信任门限** —— 声明是文件、
+ *     读它不执行任何东西，所以顺序是「先看清它会跑什么，再决定信不信任」。原先靠
+ *     `<cmd> --manifest` 自描述时做不到这一点（要读清单就得先执行），D4 修订后成立。
+ *  2) **bz 不写运行记录**（spec D8/D9）。本模块只负责「启动 + 把 stdout 的四行协议转给 UI +
+ *     报告终结结果」；记录由工具自己写。这也意味着**跑一次若工具自己不落账，就没账**
+ *     —— 这是 D9 的直接后果，不是缺陷。
+ *
+ * **在场 / 离场由「谁启动」定，不由「自动 / 手动」定**（D1 修订后尤其要记牢）：bz 亲手拉起的
+ * 都走本模块 —— 无论用户点的，还是调度器按节奏自动触发的，**都是在场**，都有实时流、都能停止。
+ * 唯一不经过本模块的是**离场**形态（系统计划任务在 Obsidian 关着时跑）：bz 不是父进程，没有
+ * 实时流，只能事后读运行记录。所以「有没有实时进度」的判据是**这个运行是不是 bz 拉的**
+ * （在不在 `liveRunsAll()` 里），而不是它声明的是自动还是手动。UI 上绝不能给没被 bz 拉起的
+ * 运行画假进度条。
+ *
+ * 依赖注入缝：`setDockRuntimeDeps({ cp })` 供评审壳/测试塞入假 `child_process`
+ * （与 `runExternalTool` 的 `deps.cp` 同形）—— 插件侧恒为 null，走真身。
+ */
+
+import type { App } from 'obsidian';
+import { notify } from '../core/notice';
+import {
+  runExternalTool,
+  type ExternalToolDeps,
+  type ExternalToolHandle,
+  type ExternalToolOutcome,
+  type ExternalToolSpec,
+} from '../core/external-tool';
+import {
+  buildArgs,
+  type DockErrorKind,
+  type DockManifest,
+  type DockParam,
+  type DockProgress,
+  type DockRunStep,
+} from './schema';
+import type { DockToolEntry } from './data';
+import { runsPathFor, type ResolvedRun } from './declaration';
+
+/** 注入缝（插件侧 null = 真身） */
+let deps: ExternalToolDeps | undefined;
+
+/** 注入执行依赖（评审壳/测试用；传 undefined 复原真身） */
+export function setDockRuntimeDeps(d: ExternalToolDeps | undefined): void {
+  deps = d;
+}
+
+// ==================== 运行环境 ====================
+
+/**
+ * vault 根路径（绝对）。
+ *
+ * Obsidian 的类型里 `app.vault.adapter` 没有这个面，所以只能窄取；收在这一个函数里，
+ * 免得每个调用点各写一遍 `as unknown as {...}` 长链（那种链一改就散架，还盖住了真正的意图）。
+ */
+function vaultBasePath(app: App): string | undefined {
+  const adapter = (app.vault as unknown as { adapter?: { getBasePath?: () => string } }).adapter;
+  try {
+    return adapter?.getBasePath?.();
+  } catch {
+    return undefined;
+  }
+}
+
+/** 工具的运行环境（规格见 spec §4.3）——**是便利，不是契约**：约定路径才是硬约定 */
+export function dockEnvOf(
+  entry: DockToolEntry,
+  app: App,
+  trigger: 'auto' | 'manual' = 'manual',
+): Record<string, string> {
+  const vaultPath = vaultBasePath(app);
+  const env: Record<string, string> = {
+    BZ_DOCK_CONTRACT: '1',
+    BZ_DOCK_TOOL: entry.id,
+    // 本次是 bz 按节奏自动触发（auto）还是用户手动（manual）—— 工具据此给记录标 `trigger`。
+    // 工具**不需要**猜：bz 是父进程，它最清楚这次是被谁拉起来的。
+    BZ_DOCK_TRIGGER: trigger,
+    // 记录就写在工具目录里（与声明、参数值同一层）—— 路径从声明文件位置推出来，天然是绝对值。
+    // 从前这里是「vault 根 + vault 内相对路径」，而工具进程的 cwd 是它自己的目录，相对路径
+    // 会被解析到那儿去（记录写进了 `<工具目录>/CONFIG/...`，bz 在 vault 里找不到）。
+    BZ_DOCK_RUNS_FILE: runsPathFor(entry.path),
+  };
+  if (vaultPath) env.BZ_DOCK_VAULT = vaultPath.replace(/[\\/]+$/, '');
+  return env;
+}
+
+// ==================== 在场运行 ====================
+
+/** 一次在场运行的内存态（**不持久化** —— ADR-0218 已拍 bz 的队列内存化） */
+export interface DockLiveRun {
+  toolId: string;
+  startedAt: string;
+  steps: DockRunStep[];
+  progress: DockProgress;
+  infos: unknown[];
+  result: unknown;
+  /** 原始输出尾部（诊断用；不入运行记录） */
+  rawTail: string[];
+  handle: ExternalToolHandle;
+  done: Promise<DockRunOutcome>;
+}
+
+export interface DockRunOutcome {
+  ok: boolean;
+  stopped: boolean;
+  code: number | null;
+  stderr: string;
+  error: Error | null;
+  /** bz 侧推断的失败分类（工具自己的记录里那份才是权威） */
+  kind: DockErrorKind;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+}
+
+export interface DockRunCallbacks {
+  onStep?(text: string): void;
+  onProgress?(phase: string | null, pct: number | null): void;
+  onInfo?(data: Record<string, unknown>): void;
+  onResult?(data: Record<string, unknown>): void;
+  /** 权威终结包（四行协议 + 过程态都在里面） */
+  onDone?(outcome: DockRunOutcome, run: DockLiveRun): void;
+}
+
+/** 在场运行中的会话（toolId → 内存态）—— 面板重建后可重新挂上，不丢进度 */
+const live = new Map<string, DockLiveRun>();
+
+/**
+ * 上一次现场运行的原始输出尾部（toolId → 尾部若干行）。
+ *
+ * rawTail 只活在运行期间：一结束现场态就被清掉，工具要是没写运行记录，跑完什么痕迹都不剩
+ * （stderr 尾巴只在失败时有）。这里把尾部留一份在内存里给详情页回看，**下次运行覆盖**；
+ * 只进内存、不落盘 —— 「不存 stdout 原文」的口径（D12）指的是运行记录，这里同样不破。
+ */
+const lastRawTails = new Map<string, string[]>();
+
+/** 详情页回看用：该工具上一次现场运行的原始输出尾部；这个会话里还没在场地跑过 = undefined */
+export function lastRawTailOf(toolId: string): string[] | undefined {
+  return lastRawTails.get(toolId);
+}
+
+/** 当前是否在跑（UI 用） */
+export function liveRunOf(toolId: string): DockLiveRun | undefined {
+  return live.get(toolId);
+}
+
+/**
+ * 全部**在场**运行（面板顶层进度条的数据源），按启动时刻升序 —— 先跑的在前，堆叠顺序稳定。
+ *
+ * 这里只会出现在场运行：自动化工具是**离场**跑（bz 不是它的父进程，拿不到任何实时进度），
+ * 所以它永远不在这个清单里。这条不是实现细节，是 UI 约束（见本文件顶部说明与 spec §7）——
+ * 谁在这上面加「离场进度」就是在骗人。
+ */
+export function liveRunsAll(): DockLiveRun[] {
+  const at = (r: DockLiveRun): number => {
+    const t = Date.parse(r.startedAt);
+    return Number.isFinite(t) ? t : 0;
+  };
+  return Array.from(live.values()).sort((a, b) => at(a) - at(b));
+}
+
+/** 停止在跑的工具（幂等） */
+export function stopRun(toolId: string): void {
+  live.get(toolId)?.handle.stop();
+}
+
+/**
+ * 启动一个工具（**在场**形态）。
+ *
+ * 前置条件由调用方保证（声明里有 `run`、已信任、桌面端）；`values` 是用户在参数表单里填的值，
+ * 经 `buildArgs` 拼成 `--key=value`（值另有一份落在工具目录的 `data.json`，
+ * 那是 bz 的账本，下发通道始终是命令行）。`secret` 类型照发给工具，但**不落任何 bz 侧记录**。
+ */
+/** `runTool` 的可选开关 */
+export interface DockRunOpts {
+  /** 谁触发的这次运行（注入给工具的 `BZ_DOCK_TRIGGER`）；缺省 `manual` */
+  trigger?: 'auto' | 'manual';
+}
+
+/**
+ * 启动一个工具（**在场**形态）。
+ *
+ * 前置条件由调用方保证（声明里有 `run`、已信任、桌面端）；`values` 是用户在参数表单里填的值，
+ * 经 `buildArgs` 拼成 `--key=value`（值另有一份落在工具目录的 `data.json`，
+ * 那是 bz 的账本，下发通道始终是命令行）。`secret` 类型照发给工具，但**不落任何 bz 侧记录**。
+ *
+ * `opts.trigger` 区分「用户手动点」与「调度器按节奏拉起」—— 只影响注入给工具的那个环境变量
+ * （工具据此给记录标 `trigger`）；对 bz 而言两者都是在场运行，走同一条路。
+ */
+export function runTool(
+  app: App,
+  entry: DockToolEntry,
+  launch: ResolvedRun,
+  manifest: Pick<DockManifest, 'params'> | null,
+  values: Record<string, unknown>,
+  cb: DockRunCallbacks = {},
+  opts: DockRunOpts = {},
+): DockLiveRun {
+  const startedAtDate = new Date();
+  const startedAt = startedAtDate.toISOString();
+
+  const rawTail: string[] = [];
+  const spec: ExternalToolSpec = {
+    cmd: launch.cmd,
+    args: [...launch.args, ...buildArgs(manifest ?? { params: [] }, values)],
+    shell: launch.shell,
+    cwd: launch.cwd,
+    env: dockEnvOf(entry, app, opts.trigger ?? 'manual'),
+  };
+
+  const steps: DockRunStep[] = [];
+  const infos: unknown[] = [];
+  let result: unknown;
+  const myProgress: DockProgress = { phase: null, pct: null };
+
+  const handle = runExternalTool(
+    spec,
+    {
+      onStep: (text) => {
+        steps.push({ text, at: new Date().toISOString(), status: 'ok' });
+        cb.onStep?.(text);
+      },
+      onProgress: (phase, pct) => {
+        myProgress.phase = phase;
+        myProgress.pct = pct;
+        cb.onProgress?.(phase, pct);
+      },
+      onInfo: (data) => {
+        infos.push({ at: new Date().toISOString(), data });
+        cb.onInfo?.(data);
+      },
+      onResult: (data) => {
+        result = data;
+        cb.onResult?.(data);
+      },
+      onRaw: (t) => {
+        rawTail.push(t);
+        if (rawTail.length > 200) rawTail.shift();
+      },
+    },
+    deps,
+  );
+
+  const run = {
+    toolId: entry.id,
+    startedAt,
+    steps,
+    progress: myProgress,
+    infos,
+    result,
+    rawTail,
+    handle,
+    done: undefined as unknown as Promise<DockRunOutcome>,
+  } as DockLiveRun;
+
+  run.done = handle.done.then((o) => {
+    const finishedAt = new Date().toISOString();
+    const outcome: DockRunOutcome = {
+      ok: o.ok,
+      stopped: o.stopped,
+      code: o.code,
+      stderr: o.stderr,
+      error: o.error,
+      kind: classify(o),
+      startedAt,
+      finishedAt,
+      durationMs: new Date(finishedAt).getTime() - startedAtDate.getTime(),
+    };
+    live.delete(entry.id);
+    if (rawTail.length) lastRawTails.set(entry.id, rawTail.slice(-50)); // 尾部留给详情页回看
+    cb.onDone?.(outcome, run);
+    return outcome;
+  });
+
+  live.set(entry.id, run);
+  return run;
+}
+
+/**
+ * 终结结果 → 失败分类。
+ * 注意：这是 bz 侧的**推断**，供在场运行时立刻给出可操作提示；权威分类在工具自己写的
+ * 运行记录里（`error.kind`）。两者不一致时以记录为准 —— 工具比 bz 更知道自己死在哪儿。
+ */
+function classify(o: ExternalToolOutcome): DockErrorKind {
+  if (o.stopped) return 'aborted';
+  if (o.ok) return 'unknown';
+  if (o.code === null) return 'config'; // 压根没起来 = 命令/工作目录配错了
+  return 'unknown';
+}
+
+/** 状态文案（不带 emoji；通知正文口径） */
+export function statusText(status: string): string {
+  switch (status) {
+    case 'ok':
+      return '成功';
+    case 'failed':
+      return '失败';
+    case 'stopped':
+      return '已中止';
+    case 'timeout':
+      return '超时';
+    case 'running':
+      return '运行中';
+    default:
+      return status;
+  }
+}
+
+/** 失败分类的可操作提示（「汇报完成情况」真正值钱的地方） */
+export function errorHint(kind: DockErrorKind): string {
+  switch (kind) {
+    case 'auth':
+      return '登录态已失效，去重新导出凭据（cookie / token）';
+    case 'network':
+      return '网络不通，检查代理或稍后重试';
+    case 'config':
+      return '命令或参数配错了，检查工具的命令路径与工作目录';
+    case 'timeout':
+      return '执行超时，可能是网络慢或任务量变大';
+    case 'aborted':
+      return '被手动中止';
+    default:
+      return '查看运行记录里的 stderr 尾部定位';
+  }
+}
+
+/** 给一次在场运行收个尾巴（成功/失败/中止各一条通知；失败那条带上「怎么办」） */
+export function notifyRunOutcome(
+  name: string,
+  outcome: DockRunOutcome,
+  onView?: () => void,
+): void {
+  const secs = (outcome.durationMs / 1000).toFixed(outcome.durationMs < 10000 ? 1 : 0);
+  const action = onView ? { label: '查看', onClick: onView } : undefined;
+  if (outcome.ok) {
+    notify(`${name} 完成（${secs} 秒）`, { type: 'success', action });
+    return;
+  }
+  if (outcome.stopped) {
+    notify(`${name} 已中止`, { type: 'warning', action });
+    return;
+  }
+  // 分类提示比「失败了」有用得多：`config` 直接指向「命令/目录配错了」
+  notify(`${name} 失败：${errorHint(outcome.kind)}`, { type: 'error', action });
+}
+
+/**
+ * 参数表单初值 = 声明的默认值，叠加**已存的值**（已存的赢 —— 用户填过的不能被默认值盖回去）。
+ *
+ * 只取声明里出现过的 key：设置文件是手可改的，里面可能留着声明里已经删掉的参数，
+ * 那些值不下发、也不显示（否则等于给工具发它不认的参数）。
+ */
+export function initialValuesOf(
+  params: readonly DockParam[] | undefined,
+  stored: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const p of params ?? []) {
+    if (p.default !== undefined) out[p.key] = p.default;
+    else if (p.type === 'bool') out[p.key] = false;
+    else if (p.type === 'multichoice') out[p.key] = [];
+  }
+  for (const p of params ?? []) {
+    if (Object.prototype.hasOwnProperty.call(stored, p.key)) out[p.key] = stored[p.key];
+  }
+  return out;
+}

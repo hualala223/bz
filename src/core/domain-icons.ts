@@ -50,6 +50,9 @@ export const DOMAIN_ICONS: Readonly<Record<string, string>> = {
   'password-vault': 'key',
   smartcat: 'cat',
   knowledge: 'list-video',
+  // 工具坞（dock 域）：外部工具的登记/启动/观测台（与 `square-terminal` 的「终端」语义错开，
+  // 用「插槽/坞」语义的 container）
+  dock: 'container',
   // 命令专属域
   'settings-panel': 'settings-2',
   // 面板清单内原硬编码域（上游图标单源收敛随批收编）：news=剪藏本订阅未读流、quiz=做题家

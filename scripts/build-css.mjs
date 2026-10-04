@@ -50,6 +50,8 @@ const SOURCES = [
   // 与既有节无选择器冲突；域间次序不影响其它域。
   "src/home/styles.css",
   "src/checkup/styles.css",
+  // 工具坞（dock 域，ADR-0235）：外部工具的登记/启动/观测台（卡片墙）
+  "src/dock/styles.css",
   "src/diary-wall/styles.css",
   "src/settings-panel/styles.css",
   "src/reading-report/styles.css",

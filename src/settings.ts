@@ -5,6 +5,9 @@
  * 默认值均提取自各脚本源码 settings.options.defaultValue。
  */
 
+// 工具坞（dock 域）登记条目类型 —— **type-only**：类型层引用，运行时零依赖（不拖 dock 侧的 core/storage）
+import type { DockToolEntry, DockToolRunState } from './dock/data';
+
 export default interface BzSettings {
   // ===== 🤖 AI 全局（Q3 语义，spec「AI 全局」）=====
   /** AI 服务商：deepseek / opencode-go / zhipu / siliconflow / volcano-ark */
@@ -30,6 +33,22 @@ export default interface BzSettings {
   volcanoArkApiKey: string;
   /** 火山方舟可选模型（留空 doubao-seed-1-6-flash-250828；ep-xxx 接入点 ID 也填这里） */
   volcanoArkModel: string;
+
+  // ===== 🧰 工具坞（dock 域，2026-10-04：外部工具的登记、启动、观测）=====
+  /** 外部工具登记表 —— 「要执行什么」的**唯一真理源**，也是本插件权限最高的数据。
+   *  只存在插件设置（`.obsidian/plugins/bz/data.json`，不随 vault 分享）里：若允许从 vault
+   *  内文件读，「打开别人给的 vault」就等于「在他机器上执行任意命令」（ADR-0235 决策）。
+   *  管理入口 = 工具坞面板内的「添加工具」（不走设置页行编辑）。 */
+  dockTools: DockToolEntry[];
+  /** 🔔 漏跑提醒（默认开）：工具自己声明了节奏、而当天该有记录却没有时，标红之外再发一条通知。
+   *  只有**声明了节奏**才判；声明缺失时退回「只展示最后运行时间」，不猜（ADR-0235 决策 D11）。 */
+  dockNotifyMissed: boolean;
+  /** 🚀 自动运行（默认开，ADR-0236）：Obsidian 启动就绪后，bz 亲自按各工具声明的节奏触发它 ——
+   *  到点跑、该跑没跑就补跑、失败提醒。关掉 = 全部退回「只手点」。移动端恒不生效（起不了进程）。 */
+  dockAutoRun: boolean;
+  /** bz 侧自动运行台账（每工具：最近一次尝试 / 连续失败数 / 是否熔断暂停）。
+   *  **不是**工具的运行记录 —— 那份归工具自己写（D8/D9）；这里只是 bz 的调度账（`DockToolRunState`）。 */
+  dockRunState: Record<string, DockToolRunState>;
 
   // ===== 📂 数据存储路径（ADR-0009 共享数据路径）=====
   /** 共享 JSON 数据目录（memo/belongings/passwords/favorites/review/quiz/闪念 meta+vec 统一存放） */
@@ -626,6 +645,12 @@ export const DEFAULT_SETTINGS: BzSettings = {
   siliconflowModel: '',
   volcanoArkApiKey: '',
   volcanoArkModel: '',
+
+  // 工具坞（dock 域）：空登记表起步（面板内添加）；漏跑提醒默认开；bz 自动运行默认开（ADR-0236）
+  dockTools: [],
+  dockNotifyMissed: true,
+  dockAutoRun: true,
+  dockRunState: {},
 
   // 共享数据路径（ADR-0009）
   storagePath: 'CONFIG/STORAGE',

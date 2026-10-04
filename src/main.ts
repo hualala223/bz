@@ -82,6 +82,19 @@ import { openDiaryWall, unloadDiaryWall } from './diary-wall';
 import { applyDirectories as applyWallDirectories } from './diary-wall/config';
 import { openSettingsPanel, unloadSettingsPanel } from './settings-panel';
 import { openDataCheckup, unloadDataCheckup } from './checkup';
+
+import { DOMAIN_ICONS } from './core/domain-icons';
+// 工具坞（dock 域，ADR-0235 + ADR-0236：外部工具的标准接口 + 集中观测台 + **bz 调度**；
+// 不关心工具是什么。调度只在桌面端、且在 Obsidian 开着的期间生效）
+import {
+  openDock,
+  unloadDock,
+  startDockScheduler,
+  stopDockScheduler,
+  runToolDirect,
+  dockToolLabel,
+  readToolEntries,
+} from './dock';
 // 日常收集（collect 域，issue 246：QuickAdd「日常收集」宏换血进插件）
 import {
   openCollectPanel, openCollectCapture, openCategoryCapture, captureSelection,
@@ -107,6 +120,9 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-diary-activity-capture', name: '日常行为记录', icon: 'footprints', callback: () => openActivityCapture() },
   // 数据体检（checkup 域，D4：全插件数据只读巡检）
   { id: 'bz-data-checkup-open', name: '数据体检', icon: 'stethoscope', callback: () => void openDataCheckup(getApp()) },
+  // 工具坞（dock 域，ADR-0235 + ADR-0236：外部工具的登记 / 启动 / 回显 / 留痕 / **调度**；
+  // 面板是唯一入口，自动化工具由调度器在启动就绪后按节奏触发）
+  { id: 'bz-dock-open', name: '工具坞', icon: DOMAIN_ICONS.dock, callback: () => openDock(getApp()) },
   // 设置面板（settings-panel 域，ADR-0080：全域设置聚合入口，与既有设置架构并存不替换）
   { id: 'bz-settings-panel-open', name: '设置面板', icon: 'settings-2', callback: () => openSettingsPanel(getApp()) },
   // 待办（todo 域，上游 ADR-0092：memo.json 唯一属主）
@@ -326,6 +342,23 @@ export default class BzPlugin extends Plugin {
       this.registeredCommandIds.push(c.id);
     }
 
+    // 已登记工具的直达运行命令（bz-dock-run-<工具id>；ADR-0235 原列「缓做」，后拍板补上）：
+    // 每个启用的工具注册一条、可挂快捷键，不打开面板直接跑（门槛与面板同口径，见 dock 域
+    // runToolDirect；未信任时命令里弹既有信任确认，D7 语义不变）。登记在这里读的是启动
+    // 快照 —— 之后导入 / 移除 / 停用的工具**重启后生效**：Obsidian 命令表没有安全的运行时
+    // 增删口子，为「改完立刻生效」开动态注册的复杂度不值得。
+    for (const entry of readToolEntries()) {
+      if (entry.enabled === false) continue; // 停用的不注册（命令面板里也不出现）
+      const cmdId = `bz-dock-run-${entry.id}`;
+      (this.app as any).commands.addCommand({
+        id: cmdId,
+        name: `运行工具：${dockToolLabel(entry)}`,
+        icon: DOMAIN_ICONS.dock,
+        callback: () => void runToolDirect(getApp(), entry.id),
+      });
+      this.registeredCommandIds.push(cmdId); // 卸载随 registeredCommandIds 一并摘除
+    }
+
     // 附件搬移：入口页磁贴自动播种（desktop+mobile 末尾，幂等）
     void ensureAttachSeed(this.app);
 
@@ -386,6 +419,9 @@ export default class BzPlugin extends Plugin {
       } else if (normalizeSmartcatOffMode(this.settings.smartcatOffMode) === 'hide') {
         void ensureSmartCat(this.app, { startHidden: true });
       }
+      // 工具坞调度（ADR-0236）：就绪后延迟首跑、之后轮询兜到点触发；只在桌面端起。
+      // 传卸载旗标进去 —— 插件禁用后到点的定时器必须短路，不能幽灵运行（同 C13）。
+      startDockScheduler(this.app, () => this.unloaded);
     });
     // 手势触发（设置页可配，默认关闭）
     this.syncGestures();
@@ -439,6 +475,10 @@ export default class BzPlugin extends Plugin {
     unloadDiaryWall();
     unloadSettingsPanel();
     unloadDataCheckup();
+    // 工具坞（dock 域，ADR-0235 + ADR-0236：调度器先停机（清定时器 + 复位会话态）——
+    // 先于 unloadDock，免得停表前又 tick 一轮去碰已拆的面板；再清面板 DOM + esc 注销 + 会话态复位）
+    stopDockScheduler();
+    unloadDock();
     // 日常收集（collect 域）：面板 DOM + ESC 层（未初始化时幂等空清理）
     unloadCollect();
     // 域事件总线收口：摘除 vault 订阅点 + 清空全部域事件订阅（总线为进程内单例，随插件卸载全量清空）
