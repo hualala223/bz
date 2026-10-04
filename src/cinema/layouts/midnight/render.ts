@@ -51,7 +51,7 @@ export function midnightMobHtml(): string {
   return `<section class="mob bz-cinema--midnight bz-panel-mtop" data-cinema-root="midnight">
     <div class="m-head"><h2 class="j-mtitle">全部</h2><span class="cnt j-mcnt"></span>
       <span class="m-acts">
-        <button class="add j-madd bz-touch-target bz-touch-target--lg" data-cinema-add title="添加影片">${iconSpan(ICON.add)}</button>
+        <button class="add j-madd bz-touch-target bz-touch-target--lg" data-cinema-add title="添加条目">${iconSpan(ICON.add)}</button>
         <button class="m-tool j-import bz-touch-target bz-touch-target--lg" title="导入片单">${iconSpan(ICON.import)}</button>
         <button class="m-tool j-mai bz-touch-target bz-touch-target--lg" title="AI 荐片">${iconSpan(ICON.ai)}</button>
         <button class="m-tool j-yb bz-touch-target bz-touch-target--lg" data-film-open title="观影志">${iconSpan(ICON.eye)}</button>
@@ -60,7 +60,7 @@ export function midnightMobHtml(): string {
       </span>
     </div>
     <div class="m-chips j-chips"></div>
-    <label class="m-search">${iconSpan(ICON.search)}<input class="j-mq" placeholder="搜索片名、类型、导演、主演、影评…"><button type="button" class="q-clear" data-cinema-clear title="清空搜索" aria-label="清空搜索" hidden>${iconSpan(ICON.close)}</button></label>
+    <label class="m-search">${iconSpan(ICON.search)}<input class="j-mq" placeholder="搜索条目（片名、类型、导演、主演、影评…）"><button type="button" class="q-clear" data-cinema-clear title="清空搜索" aria-label="清空搜索" hidden>${iconSpan(ICON.close)}</button></label>
     <div class="m-scroll j-mview"></div>
   </section>`;
 }
@@ -234,12 +234,12 @@ function cardsHtml(cards: CardEntry[], inp: MidnightRenderInput): string {
  *  rail-foot 里与 AI/分析两个视图工具混排，不好看；挪到「添加」旁的图标动作位） */
 export function listHeadHtml(inp: MidnightRenderInput): string {
   return `<div class="d-head"><h2 class="j-title">${esc(inp.title)}</h2><span class="cnt j-cnt">· ${inp.cards.length} 部</span>
-    <button class="add j-add" data-cinema-add>${iconSpan(ICON.add)}添加影片</button><button class="imp j-import" title="导入片单">${iconSpan(ICON.import)}</button></div>`;
+    <button class="add j-add" data-cinema-add>${iconSpan(ICON.add)}添加条目</button><button class="imp j-import" title="导入片单">${iconSpan(ICON.import)}</button></div>`;
 }
 export function listToolsHtml(view: CinemaView): string {
   // 票 296：多选模式下工具行替换为勾选工具条（导出/退出）
   if (view.multiSelect) return multiBarHtml(view);
-  return `<div class="d-tools"><label class="d-search">${iconSpan(ICON.search)}<input class="j-q" placeholder="搜索片名、类型、导演、主演、影评…" value="${esc(view.searchKeyword)}"><button type="button" class="q-clear" data-cinema-clear title="清空搜索" aria-label="清空搜索"${view.searchKeyword ? '' : ' hidden'}>${iconSpan(ICON.close)}</button></label>
+  return `<div class="d-tools"><label class="d-search">${iconSpan(ICON.search)}<input class="j-q" placeholder="搜索条目（片名、类型、导演、主演、影评…）" value="${esc(view.searchKeyword)}"><button type="button" class="q-clear" data-cinema-clear title="清空搜索" aria-label="清空搜索"${view.searchKeyword ? '' : ' hidden'}>${iconSpan(ICON.close)}</button></label>
     <div class="seg j-sort">${([['date', '最近观看'], ['created', '加入先后'], ['rating', '按评分']] as const).map(([k, l]) => `<button data-k="${k}" class="${view.sortMode === k ? 'is-on' : ''}">${l}</button>`).join('')}</div>
     <button class="dm-btn j-multi" data-cinema-multiselect>多选</button><button class="dm-btn j-dd" data-cinema-dedupe>查重复</button></div>`;
 }

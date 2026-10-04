@@ -1609,7 +1609,7 @@ export function openRandomMovie(app: App): void {
   const want = M.items.filter((it) => it.status === STATUS_WANT);
   const pool = want.length ? want : M.items;
   if (!pool.length) {
-    notice('影院里还没有片子可抽');
+    notice('娱乐里还没有条目可抽');
     return;
   }
   const it = pool[Math.floor(Math.random() * pool.length)];
@@ -1620,7 +1620,7 @@ export function openRandomMovie(app: App): void {
   const root = cinemaRoot();
   if (!root) return;
   openDetail(root, it, app);
-  notice(want.length ? `抽到「${it.name}」` : `想看清单空着，从全部影视里抽到「${it.name}」`, 'success');
+  notice(want.length ? `抽到「${it.name}」` : `想看清单空着，从全部条目里抽到「${it.name}」`, 'success');
 }
 
 // ---------- 观影分析：覆盖影院面板的一层（ADR-0175；25 幕长片见 yearbook/） ----------
@@ -1708,7 +1708,7 @@ export function closeYearbookOverlay(): void {
 // ---------- 弹窗：添加 / 编辑表单 ----------
 
 /** 重名文案单源（issue 394）：按钮态用短句，拦截 notice 用完整句 */
-const DUP_NAME_HINT = '已存在同名影视';
+const DUP_NAME_HINT = '已存在同名条目';
 const DUP_NAME_HINT_FULL = `${DUP_NAME_HINT}，请换个名称`;
 
 /** 重名判据单源（issue 394）：新增时比对全库、编辑时排除自身原名。
@@ -1999,7 +1999,7 @@ function openForm(sec: HTMLElement, item: CinemaItem | null, app: App, presetSt?
       refreshFormState();
       notice(
         q.reason === 'blocked' ? '豆瓣搜索被风控，稍后再试'
-          : q.reason === 'notfound' ? '豆瓣没有找到这部影视'
+          : q.reason === 'notfound' ? '豆瓣没有找到这个条目'
             : '网络不畅，未能获取豆瓣信息',
         'warning',
       );
@@ -2377,7 +2377,7 @@ async function saveEdit(item: CinemaItem, p: FormPayload, app: App, form: FormHa
       try {
         await app.fileManager.renameFile(item.file, prev.filePath);
       } catch (re) {
-        console.error('回滚影视笔记改名失败:', re);
+        console.error('回滚条目笔记改名失败:', re);
         renderAll(app);
       }
     }
@@ -2396,7 +2396,7 @@ async function saveEdit(item: CinemaItem, p: FormPayload, app: App, form: FormHa
  */
 function openConfirm(item: CinemaItem, app: App): void {
   void openFlowDialog({
-    title: '删除影视',
+    title: '删除条目',
     // message 经 core escapeHtml（片名注入防护），\n 渲染为 <br> 分行
     message: `确定删除「${item.name}」吗？\n将移入系统回收站，可在回收站恢复`,
     // 流程框挂 document.body、不在面板树内：cn-skin 取午夜场调色板（菜单/抽屉皮肤同一通道），
@@ -2412,7 +2412,7 @@ function openConfirm(item: CinemaItem, app: App): void {
       try {
         await app.vault.trash(item.file, true);
       } catch (e) {
-        console.error('删除影视笔记失败:', e);
+        console.error('删除条目笔记失败:', e);
         notice('删除失败：文件可能被占用，请重试', 'error');
         return;
       }

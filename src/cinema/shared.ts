@@ -249,6 +249,9 @@ const HOT_FOLD_MIN = 120;
 export function detailModalHtml(it: CinemaItem, posterUrl: string | null): string {
   const badge = (color: string, text: string) => `<span class="dm-chip" style="background:${color}">${esc(text)}</span>`;
   const rows: [string, string][] = ([
+    // 票 294/299（本地保留件）：国家与题材（书籍=体裁）两行在豆瓣字段之前
+    ['国家', it.country ?? ''],
+    [genreLabel(it.group), (it.genres ?? []).join('、')],
     ['类型', it.genre ?? ''],
     ['导演', it.director ?? ''],
     ['主演', it.actors ?? ''],
@@ -417,14 +420,14 @@ export function formModalHtml(opts: { editing: boolean; name: string; typeTag: s
   const chField = `<div class="f-field j-chapters" style="display:none"><span class="f-label">章 节</span>
       <div class="f-eps-row"><label>正在看 <input type="number" min="0" class="f-input j-ch-watching" value="${opts.chWatching ?? ''}"></label><label>总章节数 <input type="number" min="0" class="f-input j-ch-total" value="${opts.chTotal ?? ''}"></label></div></div>`;
   // f-field--name：联想下拉（issue 498 uiSuggest）的定位锚——浮层绝对定位于本字段内，须 relative
-  const nameField = `<div class="f-field f-field--name"><span class="f-label">名 称</span><input class="f-input j-name" value="${esc(opts.name)}" placeholder="影视名称"></div>`;
+  const nameField = `<div class="f-field f-field--name"><span class="f-label">名 称</span><input class="f-input j-name" value="${esc(opts.name)}" placeholder="条目名称"></div>`;
   const stField = `<div class="f-field"><span class="f-label">状 态</span><div class="f-choice j-sts">${formChoicesHtml(['想看', '在看', '已看'], initSt, 'f-st')}</div></div>`;
   const ratingField = `<div class="f-field j-rating" style="display:${initSt === '已看' ? '' : 'none'}"><span class="f-label">评 分</span>
       <div class="f-range-row"><input type="range" class="f-range j-range" min="1" max="10" step="0.1" value="${opts.rating}"><span class="f-range-val j-rval">${Number(opts.rating).toFixed(1)}</span><span class="f-stars j-stars" data-lit="${starsLit(opts.rating)}">${starsHtml(opts.rating)}</span></div></div>`;
   const reviewField = `<div class="f-field j-review" style="display:${initSt === '已看' ? '' : 'none'}"><span class="f-label">影 评</span><textarea class="f-input j-review-t" placeholder="写点什么…">${esc(opts.review)}</textarea></div>`;
   if (editing) {
     return `<div class="cn-modal" style="width:100%">
-    <div class="cn-modal-title">编辑影视</div>
+    <div class="cn-modal-title">编辑条目</div>
     ${nameField}
     <div class="f-field"><span class="f-label">类 型</span><div class="f-choice j-tags">${formChoicesHtml(formAllTags(), opts.typeTag, 'f-tag')}</div></div>
     ${countryField}${genreField}${stField}${ratingField}${reviewField}${epsField}${chField}
@@ -436,7 +439,7 @@ export function formModalHtml(opts: { editing: boolean; name: string; typeTag: s
   return `<div class="cn-modal cn-modal--flip" style="width:100%">
     <div class="form-flip j-flip">
       <div class="form-face form-face--front">
-        <div class="cn-modal-title">添加影视</div>
+        <div class="cn-modal-title">添加条目</div>
         ${nameField}${stField}${ratingField}${reviewField}
         <div class="dm-actions"><button class="dm-btn gold j-parse"><span class="f-spin"></span><span class="j-parse-text">解析</span></button></div>
       </div>
