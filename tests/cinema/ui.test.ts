@@ -59,24 +59,24 @@ afterEach(() => { configureFetchQueue({ preview: null }); });
 
 function seedVault(): { vault: MockVault; app: ReturnType<typeof mockAppWithVault> } {
   const vault = new MockVault();
-  vault.files.set('我的/影视/《星际穿越》.md', md(`---
+  vault.files.set('我的/娱乐/《星际穿越》.md', md(`---
 tags: [电影]
 评分: 9.6
 观影日期: 2026-08-01
 影评: 爱是穿越维度的唯一力量
 导演: 诺兰
 ---`));
-  vault.files.set('我的/影视/《绝命毒师 第一季》.md', md(`---
+  vault.files.set('我的/娱乐/《绝命毒师 第一季》.md', md(`---
 tags: [美剧]
 评分: 9.4
 观影日期: 2026-07-01
 ---`));
-  vault.files.set('我的/影视/《瑞克和莫蒂》.md', md(`---
+  vault.files.set('我的/娱乐/《瑞克和莫蒂》.md', md(`---
 tags: [美漫]
 状态: 在看
 观影日期: 2026-06-01
 ---`));
-  vault.files.set('我的/影视/《想看片》.md', md(`---
+  vault.files.set('我的/娱乐/《想看片》.md', md(`---
 tags: [电影]
 状态: 想看
 观影日期: 2026-05-01
@@ -315,17 +315,17 @@ describe('cinema 风格化面板（issue 236）', () => {
   // 2026-10-03 用户点名：**未评分**的条目打开编辑面板，评分滑杆直接拿「豆瓣评分」当默认值
   it('编辑弹窗评分预填：未评分回落豆瓣分、已评分保我的原值、豆瓣分不可用才落默认分', async () => {
     const { app, vault } = seedVault();
-    vault.files.set('我的/影视/《未评文艺片》.md', md(`---
+    vault.files.set('我的/娱乐/《未评文艺片》.md', md(`---
 tags: [电影]
 状态: 已看
 豆瓣评分: 8.7
 ---`));
-    vault.files.set('我的/影视/《已评片》.md', md(`---
+    vault.files.set('我的/娱乐/《已评片》.md', md(`---
 tags: [电影]
 评分: 6.5
 豆瓣评分: 9.1
 ---`));
-    vault.files.set('我的/影视/《豆瓣无分》.md', md(`---
+    vault.files.set('我的/娱乐/《豆瓣无分》.md', md(`---
 tags: [电影]
 状态: 已看
 豆瓣评分: 0
@@ -370,8 +370,8 @@ tags: [电影]
     const item = M.items.find((i) => i.name === '星际穿越')!;
     expect(item.status).toBe(0); // STATUS_WANT
     expect(item.rating).toBe(null); // 评分编码退役：想看不占 -1，评分归 null
-    expect(vault.files.get('我的/影视/《星际穿越》.md')).toContain('状态: 想看');
-    expect(vault.files.get('我的/影视/《星际穿越》.md')).not.toContain('评分:');
+    expect(vault.files.get('我的/娱乐/《星际穿越》.md')).toContain('状态: 想看');
+    expect(vault.files.get('我的/娱乐/《星际穿越》.md')).not.toContain('评分:');
     // 落盘触发自动刷新重解析（同链路 rebuildItems）：状态键想看，不再弹回在看
     rebuildItems(app);
     expect(M.items.find((i) => i.name === '星际穿越')!.status).toBe(0);
@@ -389,8 +389,8 @@ tags: [电影]
     expect(form.querySelector('[data-f-st="想看"]')?.classList.contains('is-on')).toBe(true); // 默认想看
     (form.querySelector('.j-name') as HTMLInputElement).value = '想看新片';
     clickEl(form.querySelector('.j-save'));
-    await vi.waitFor(() => expect(vault.files.has('我的/影视/《想看新片》.md')).toBe(true));
-    expect(vault.files.get('我的/影视/《想看新片》.md')).toContain('状态: 想看');
+    await vi.waitFor(() => expect(vault.files.has('我的/娱乐/《想看新片》.md')).toBe(true));
+    expect(vault.files.get('我的/娱乐/《想看新片》.md')).toContain('状态: 想看');
     expect(M.items.find((i) => i.name === '想看新片')!.status).toBe(0); // STATUS_WANT
     rebuildItems(app);
     expect(M.items.find((i) => i.name === '想看新片')!.status).toBe(0); // 重解析仍是想看
@@ -1455,7 +1455,7 @@ describe('cinema 剧集按季合并（issue 376）', () => {
     resetObsidianMocks();
     resetCinemaState();
     clearDomainEvents();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     document.body.innerHTML = '';
   });
   afterEach(() => {
@@ -1469,24 +1469,24 @@ describe('cinema 剧集按季合并（issue 376）', () => {
   /** 老友记三季（已看/在看/想看）+ 一部电影 = 4 篇笔记 */
   function seedSeasons(): { app: ReturnType<typeof mockAppWithVault> } {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《老友记 第一季》.md', md(`---
+    vault.files.set('我的/娱乐/《老友记 第一季》.md', md(`---
 tags: [美剧]
 评分: 9.2
 观影日期: 2026-06-18
 主演: 詹妮弗·安妮斯顿
 导演: 大卫·克拉尼
 ---`));
-    vault.files.set('我的/影视/《老友记 第二季》.md', md(`---
+    vault.files.set('我的/娱乐/《老友记 第二季》.md', md(`---
 tags: [美剧]
 状态: 在看
 观影日期: 2026-08-18
 ---`));
-    vault.files.set('我的/影视/《老友记 第三季》.md', md(`---
+    vault.files.set('我的/娱乐/《老友记 第三季》.md', md(`---
 tags: [美剧]
 状态: 想看
 观影日期:
 ---`));
-    vault.files.set('我的/影视/《奥本海默》.md', md(`---
+    vault.files.set('我的/娱乐/《奥本海默》.md', md(`---
 tags: [电影]
 评分: 9
 观影日期: 2026-09-01
@@ -1582,9 +1582,9 @@ tags: [电影]
   /** 老友记两季（已看 9.2 / 在看）+ 电影版特别篇 = 3 篇笔记 → 合并后 1 张合集卡 */
   function seedSpecial(): { app: ReturnType<typeof mockAppWithVault> } {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《老友记 第一季》.md', md('---\ntags: [美剧]\n评分: 9.2\n观影日期: 2026-06-18\n---'));
-    vault.files.set('我的/影视/《老友记 第二季》.md', md('---\ntags: [美剧]\n状态: 在看\n观影日期: 2026-08-18\n---'));
-    vault.files.set('我的/影视/《老友记：重聚特辑》.md', md('---\ntags: [电影]\n评分: 8.6\n观影日期: 2026-09-19\n---'));
+    vault.files.set('我的/娱乐/《老友记 第一季》.md', md('---\ntags: [美剧]\n评分: 9.2\n观影日期: 2026-06-18\n---'));
+    vault.files.set('我的/娱乐/《老友记 第二季》.md', md('---\ntags: [美剧]\n状态: 在看\n观影日期: 2026-08-18\n---'));
+    vault.files.set('我的/娱乐/《老友记：重聚特辑》.md', md('---\ntags: [电影]\n评分: 8.6\n观影日期: 2026-09-19\n---'));
     const app = makeApp(vault);
     ensureCinema(app);
     rebuildItems(app);
@@ -1818,9 +1818,9 @@ tags: [电影]
     // 「层下是不是静息态那一季」就成了空断言——这正是本次要钉的那个 bug。
     const vault = new MockVault();
     const P = 'CONFIG/MOVIE POSTER';
-    vault.files.set('我的/影视/《老友记 第一季》.md', md(`---\ntags: [美剧]\n评分: 9.0\n观影日期: 2026-01-01\n海报: ${P}/s1.jpg\n---`));
-    vault.files.set('我的/影视/《老友记 第二季》.md', md(`---\ntags: [美剧]\n评分: 9.2\n观影日期: 2026-02-01\n海报: ${P}/s2.jpg\n---`));
-    vault.files.set('我的/影视/《老友记 第三季》.md', md(`---\ntags: [美剧]\n评分: 9.5\n观影日期: 2026-03-01\n海报: ${P}/s3.jpg\n---`));
+    vault.files.set('我的/娱乐/《老友记 第一季》.md', md(`---\ntags: [美剧]\n评分: 9.0\n观影日期: 2026-01-01\n海报: ${P}/s1.jpg\n---`));
+    vault.files.set('我的/娱乐/《老友记 第二季》.md', md(`---\ntags: [美剧]\n评分: 9.2\n观影日期: 2026-02-01\n海报: ${P}/s2.jpg\n---`));
+    vault.files.set('我的/娱乐/《老友记 第三季》.md', md(`---\ntags: [美剧]\n评分: 9.5\n观影日期: 2026-03-01\n海报: ${P}/s3.jpg\n---`));
     for (const f of ['s1', 's2', 's3']) vault.files.set(`${P}/${f}.jpg`, '<binary>');
     const orig = vault.getAbstractFileByPath.bind(vault);
     (vault as any).getAbstractFileByPath = (p: string) => (p.startsWith(P + '/')
@@ -1964,8 +1964,8 @@ tags: [电影]
     setSettingsProvider(() => ({ cinemaMergeSeasons: true } as any));
     Platform.isMobile = true;
     const vault = new MockVault();
-    vault.files.set('我的/影视/《老友记 第一季》.md', md('---\ntags: [美剧]\n评分: 9.2\n观影日期: 2026-06-18\n---'));
-    vault.files.set('我的/影视/《老友记 第二季》.md', md('---\ntags: [美剧]\n状态: 在看\n观影日期: 2026-08-18\n---'));
+    vault.files.set('我的/娱乐/《老友记 第一季》.md', md('---\ntags: [美剧]\n评分: 9.2\n观影日期: 2026-06-18\n---'));
+    vault.files.set('我的/娱乐/《老友记 第二季》.md', md('---\ntags: [美剧]\n状态: 在看\n观影日期: 2026-08-18\n---'));
     const app = makeApp(vault);
     ensureCinema(app);
     rebuildItems(app);
@@ -1991,7 +1991,7 @@ describe('深审批A：写路径与 ui 行为回归', () => {
     resetObsidianMocks();
     resetCinemaState();
     clearDomainEvents();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     document.body.innerHTML = '';
   });
   afterEach(() => {
@@ -2016,8 +2016,8 @@ describe('深审批A：写路径与 ui 行为回归', () => {
     clickEl(form.querySelector('.j-parse'));
     await vi.waitFor(() => expect(form.querySelector('.form-flip')?.classList.contains('is-flipped')).toBe(true));
     clickEl(form.querySelector('.j-save'));
-    await vi.waitFor(() => expect(vault.files.has('我的/影视/《多行影评片》.md')).toBe(true));
-    const content0 = vault.files.get('我的/影视/《多行影评片》.md')!;
+    await vi.waitFor(() => expect(vault.files.has('我的/娱乐/《多行影评片》.md')).toBe(true));
+    const content0 = vault.files.get('我的/娱乐/《多行影评片》.md')!;
     // P3-8：建档日期双引号（裸日期真机被 YAML 解析成 timestamp → Moment → 英文星期）
     expect(content0).toContain('观影日期: "');
     expect(parseFrontmatter(content0), '建档 frontmatter 应可解析').toBeTruthy();
@@ -2031,14 +2031,14 @@ describe('深审批A：写路径与 ui 行为回归', () => {
     clickEl(form.querySelector('[data-f-st="已看"]'));
     (form.querySelector('.j-review-t') as HTMLTextAreaElement).value = '第一幕: 开场\n第二幕: 高潮 #好';
     clickEl(form.querySelector('.j-save'));
-    await vi.waitFor(() => expect(vault.files.get('我的/影视/《多行影评片》.md')!.includes('第一幕')).toBe(true));
-    const content = vault.files.get('我的/影视/《多行影评片》.md')!;
+    await vi.waitFor(() => expect(vault.files.get('我的/娱乐/《多行影评片》.md')!.includes('第一幕')).toBe(true));
+    const content = vault.files.get('我的/娱乐/《多行影评片》.md')!;
     const fm = parseFrontmatter(content);
     expect(fm, 'frontmatter 应可解析（多行/含「: 」影评不再写破 YAML）').toBeTruthy();
     expect(fm!['影评']).toBe('第一幕: 开场\n第二幕: 高潮 #好');
     // 模拟重开面板（清内存从盘解析）：破 FM 下真机影片黏性消失、sweep 永不补抓
     resetCinemaState();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     rebuildItems(app);
     const it = M.items.find((i) => i.name === '多行影评片');
     expect(it, '重建后影片应可见').toBeTruthy();
@@ -2060,7 +2060,7 @@ describe('深审批A：写路径与 ui 行为回归', () => {
     expect(item.status).toBe(1); // STATUS_WATCHING
     // 旧缺陷：表单强置 review='' + persistItem delete fm['影评'] → 影评静默清空
     expect(item.review).toBe('爱是穿越维度的唯一力量');
-    expect(vault.files.get('我的/影视/《星际穿越》.md')).toContain('影评: 爱是穿越维度的唯一力量');
+    expect(vault.files.get('我的/娱乐/《星际穿越》.md')).toContain('影评: 爱是穿越维度的唯一力量');
     // 已看态影评框清空 → 保存 = 显式删除（FM 影评键移除）
     clickEl(pcardByName(root, '星际穿越'));
     clickEl((root.querySelector('.cn-modal') as HTMLElement).querySelector('.j-edit'));
@@ -2069,7 +2069,7 @@ describe('深审批A：写路径与 ui 行为回归', () => {
     (form.querySelector('.j-review-t') as HTMLTextAreaElement).value = '';
     clickEl(form.querySelector('.j-save'));
     await vi.waitFor(() => expect(M.items.find((i) => i.name === '星际穿越')!.review).toBe(''));
-    expect(vault.files.get('我的/影视/《星际穿越》.md')).not.toContain('影评');
+    expect(vault.files.get('我的/娱乐/《星际穿越》.md')).not.toContain('影评');
   });
 
   // P2-3：影评写/改/删补发 review 域事件（契约与文案层俱在唯缺 emitter）；无变化不发
@@ -2165,12 +2165,12 @@ describe('深审批A：写路径与 ui 行为回归', () => {
     (form.querySelector('.j-name') as HTMLInputElement).value = '非法/片名';
     clickEl(form.querySelector('.j-save'));
     await vi.waitFor(() => expect(hasNotice(/非法字符/)).toBe(true));
-    expect(vault.files.has('我的/影视/《非法/片名》.md')).toBe(false);
+    expect(vault.files.has('我的/娱乐/《非法/片名》.md')).toBe(false);
     expect(root.querySelector('.cn-modal .j-name'), '弹窗留在原地').toBeTruthy();
     // quickAddWant 入口（AI title 不受控）
     await quickAddWant(app, '坏:名字', '电影');
     expect(hasNotice(/非法字符/)).toBe(true);
-    expect(vault.files.has('我的/影视/《坏:名字》.md')).toBe(false);
+    expect(vault.files.has('我的/娱乐/《坏:名字》.md')).toBe(false);
   });
 
   // P3-9：openDouban 走 core openExternalUrl 单源（私有裸 window.open + try/catch 退役）
@@ -2217,11 +2217,11 @@ describe('深审批A：写路径与 ui 行为回归', () => {
     clickEl(form.querySelector('.j-save'));
     await vi.waitFor(() => expect(spy).toHaveBeenCalled());
     await new Promise((r) => setTimeout(r, 0));
-    expect(vault.files.has('我的/影视/《瑞克和莫蒂》.md'), '改名应回滚到旧路径').toBe(true);
-    expect(vault.files.has('我的/影视/《瑞克和莫蒂 第二季》.md')).toBe(false);
+    expect(vault.files.has('我的/娱乐/《瑞克和莫蒂》.md'), '改名应回滚到旧路径').toBe(true);
+    expect(vault.files.has('我的/娱乐/《瑞克和莫蒂 第二季》.md')).toBe(false);
     const it = M.items.find((i) => i.name === '瑞克和莫蒂');
     expect(it, '内存条目应回滚旧名').toBeTruthy();
-    expect(it!.file?.path).toBe('我的/影视/《瑞克和莫蒂》.md');
+    expect(it!.file?.path).toBe('我的/娱乐/《瑞克和莫蒂》.md');
     expect(hasNotice(/保存失败/)).toBe(true);
   });
 
@@ -2239,10 +2239,10 @@ describe('深审批A：写路径与 ui 行为回归', () => {
     nameInput.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', bubbles: true, cancelable: true }));
     // 第一次 Enter 只解析翻面、不落盘
     await vi.waitFor(() => expect(form.querySelector('.form-flip')?.classList.contains('is-flipped')).toBe(true));
-    expect(vault.files.has('我的/影视/《回车新片》.md')).toBe(false);
+    expect(vault.files.has('我的/娱乐/《回车新片》.md')).toBe(false);
     // 翻面后 Enter = 保存
     nameInput.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', bubbles: true, cancelable: true }));
-    await vi.waitFor(() => expect(vault.files.has('我的/影视/《回车新片》.md')).toBe(true));
+    await vi.waitFor(() => expect(vault.files.has('我的/娱乐/《回车新片》.md')).toBe(true));
     // 影评 textarea 聚焦时 Ctrl+Enter 恒提交（纯 Enter 换行不拦由 core 契约保证）。
     // 等上一个弹窗真正关闭再开新的：saveNew 落盘后还有 close/renderAll 若干微任务，
     // 抢在这之前开新表单会 querySelector 到旧弹窗（本用例是唯一连续两次打开表单的）
@@ -2283,7 +2283,7 @@ describe('cinema 详情弹窗字段（片长 / 季集 / 完整上映日期 / 热
     resetObsidianMocks();
     resetCinemaState();
     clearDomainEvents();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     document.body.innerHTML = '';
   });
   afterEach(() => {
@@ -2296,7 +2296,7 @@ describe('cinema 详情弹窗字段（片长 / 季集 / 完整上映日期 / 热
   /** 造一部带全套豆瓣字段的剧集并开详情弹窗 */
   function openDetailOf(hot: string): HTMLElement {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《24小时 第一季》.md', md(`---
+    vault.files.set('我的/娱乐/《24小时 第一季》.md', md(`---
 tags: [美剧]
 评分: 9.2
 观影日期: 2026-04-25
@@ -2355,7 +2355,7 @@ describe('cinema 搜索框输入守护（后台整刷不打断打字）', () => 
     resetObsidianMocks();
     resetCinemaState();
     clearDomainEvents();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     document.body.innerHTML = '';
   });
   afterEach(() => {
@@ -2415,7 +2415,7 @@ describe('cinema 详情弹窗字段（片长 / 季集 / 完整上映日期 / 热
     resetObsidianMocks();
     resetCinemaState();
     clearDomainEvents();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     document.body.innerHTML = '';
   });
   afterEach(() => {
@@ -2428,7 +2428,7 @@ describe('cinema 详情弹窗字段（片长 / 季集 / 完整上映日期 / 热
   /** 造一部带全套豆瓣字段的剧集并开详情弹窗 */
   function openDetailOf(hot: string): HTMLElement {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《24小时 第一季》.md', md(`---
+    vault.files.set('我的/娱乐/《24小时 第一季》.md', md(`---
 tags: [美剧]
 评分: 9.2
 观影日期: 2026-04-25
@@ -2487,7 +2487,7 @@ describe('cinema 合并卡行序（各季 + 特别篇统一按上映日期升序
     resetObsidianMocks();
     resetCinemaState();
     clearDomainEvents();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     document.body.innerHTML = '';
   });
   afterEach(() => {
@@ -2500,25 +2500,25 @@ describe('cinema 合并卡行序（各季 + 特别篇统一按上映日期升序
   it('季与特别篇同一口径：按上映日期升序，最早的在前（不再先排季后排特别篇）', () => {
     setSettingsProvider(() => ({ cinemaMergeSeasons: true } as any));
     const vault = new MockVault();
-    vault.files.set('我的/影视/《老友记 第一季》.md', md(`---
+    vault.files.set('我的/娱乐/《老友记 第一季》.md', md(`---
 tags: [美剧]
 评分: 9.2
 观影日期: 2026-06-18
 上映日期: 1995-09-21
 ---`));
-    vault.files.set('我的/影视/《老友记 第二季》.md', md(`---
+    vault.files.set('我的/娱乐/《老友记 第二季》.md', md(`---
 tags: [美剧]
 状态: 在看
 观影日期: 2026-08-18
 上映日期: 1996-09-19
 ---`));
-    vault.files.set('我的/影视/《老友记 幕后1994》.md', md(`---
+    vault.files.set('我的/娱乐/《老友记 幕后1994》.md', md(`---
 tags: [电影]
 评分: 7
 观影日期: 2026-09-20
 上映日期: 1994-05-01
 ---`));
-    vault.files.set('我的/影视/《老友记 重聚特辑》.md', md(`---
+    vault.files.set('我的/娱乐/《老友记 重聚特辑》.md', md(`---
 tags: [电影]
 评分: 8.6
 观影日期: 2026-09-19
@@ -2547,7 +2547,7 @@ describe('cinema 添加影视：解析即落盘，不再后台抓取（issue 397
     resetObsidianMocks();
     resetCinemaState();
     clearDomainEvents();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     document.body.innerHTML = '';
     shutdownDoubanQueue(); // 队列状态（pending/attempted）跨用例复位，命中判定才确定
   });
@@ -2594,8 +2594,8 @@ describe('cinema 添加影视：解析即落盘，不再后台抓取（issue 397
     clickEl(form.querySelector('.j-parse'));
     await vi.waitFor(() => expect(form.querySelector('.form-flip')?.classList.contains('is-flipped')).toBe(true));
     clickEl(form.querySelector('.j-save'));
-    await vi.waitFor(() => expect(vault.files.has('我的/影视/《海报片》.md')).toBe(true));
-    const content = vault.files.get('我的/影视/《海报片》.md')!;
+    await vi.waitFor(() => expect(vault.files.has('我的/娱乐/《海报片》.md')).toBe(true));
+    const content = vault.files.get('我的/娱乐/《海报片》.md')!;
     const fm = parseFrontmatter(content);
     expect(fm?.['海报']).toBe('海报/海报片_1.jpg'); // 海报进属性（不再等后台抓）
     expect(content).toContain('![[海报/海报片_1.jpg]]'); // 正文 embed 与抓取路径同款
@@ -2622,9 +2622,9 @@ describe('cinema 添加影视：解析即落盘，不再后台抓取（issue 397
     clickEl(form.querySelector('.j-parse'));
     await vi.waitFor(() => expect(form.querySelector('.form-flip')?.classList.contains('is-flipped')).toBe(true));
     clickEl(form.querySelector('.j-save'));
-    await vi.waitFor(() => expect(vault.files.has('我的/影视/《海报片》.md')).toBe(true));
-    expect(parseFrontmatter(vault.files.get('我的/影视/《海报片》.md')!)?.['海报']).toBeFalsy();
-    await vi.waitFor(() => expect(fetched).toContain('我的/影视/《海报片》.md')); // 回退：仍交后台抓
+    await vi.waitFor(() => expect(vault.files.has('我的/娱乐/《海报片》.md')).toBe(true));
+    expect(parseFrontmatter(vault.files.get('我的/娱乐/《海报片》.md')!)?.['海报']).toBeFalsy();
+    await vi.waitFor(() => expect(fetched).toContain('我的/娱乐/《海报片》.md')); // 回退：仍交后台抓
   });
 
   /** 预览海报的索引滞后（真机回归）：`downloadPosterToVault` 走 `adapter.writeBinary` 裸写——
@@ -2667,7 +2667,7 @@ describe('cinema 滑动高亮：侧栏与排序钮（issue 397）', () => {
     resetObsidianMocks();
     resetCinemaState();
     clearDomainEvents();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     document.body.innerHTML = '';
     shutdownDoubanQueue();
   });
@@ -2844,7 +2844,7 @@ describe('影院动效整合（issue 400-403）', () => {
       ['剧甲', '美剧', 9.1], ['剧乙', '美剧', 8.3], ['剧丙', '美剧', 7.7], ['剧丁', '美剧', 6.6],
     ];
     rows.forEach(([name, tag, r], i) => {
-      vault.files.set(`我的/影视/《${name}》.md`,
+      vault.files.set(`我的/娱乐/《${name}》.md`,
         md(`---\ntags: [${tag}]\n评分: ${r}\n观影日期: 2026-0${i + 1}-01\n---`));
     });
     const app = makeApp(vault);
@@ -2858,7 +2858,7 @@ describe('影院动效整合（issue 400-403）', () => {
   function seedWithPoster(): { app: ReturnType<typeof mockAppWithVault> } {
     const vault = new MockVault();
     const posterPath = 'CONFIG/MOVIE POSTER/a.jpg';
-    vault.files.set('我的/影视/《星际穿越》.md', md('---\ntags: [电影]\n评分: 9.6\n观影日期: 2026-08-01\n海报: ' + posterPath + '\n---'));
+    vault.files.set('我的/娱乐/《星际穿越》.md', md('---\ntags: [电影]\n评分: 9.6\n观影日期: 2026-08-01\n海报: ' + posterPath + '\n---'));
     vault.files.set(posterPath, '<binary>');
     const orig = vault.getAbstractFileByPath.bind(vault);
     (vault as any).getAbstractFileByPath = (p: string) => (p === posterPath
@@ -2874,7 +2874,7 @@ describe('影院动效整合（issue 400-403）', () => {
     resetObsidianMocks();
     resetCinemaState();
     clearDomainEvents();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     document.body.innerHTML = '';
     shutdownDoubanQueue();
   });
@@ -2950,7 +2950,7 @@ describe('影院动效整合（issue 400-403）', () => {
     installAnimate();
     const hot = '一'.repeat(200);
     const vault = new MockVault();
-    vault.files.set('我的/影视/《长评片》.md', md(`---
+    vault.files.set('我的/娱乐/《长评片》.md', md(`---
 tags: [电影]
 评分: 8.1
 观影日期: 2026-03-01
@@ -3111,7 +3111,7 @@ describe('影院覆盖层与跟手（issue 409）', () => {
     resetObsidianMocks();
     resetCinemaState();
     clearDomainEvents();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     document.body.innerHTML = '';
     setSettingsProvider(() => ({}) as any);
   });
@@ -3220,7 +3220,7 @@ describe('影院覆盖层与跟手（issue 409）', () => {
 describe('一键导入豆瓣片单', () => {
   function seedOne(): { app: ReturnType<typeof mockAppWithVault>; vault: MockVault } {
     const vault = new MockVault();
-    vault.files.set('我的/影视/《奥德赛》.md', md('---\ntags: [电影]\n评分: 8\n观影日期: 2026-09-01\n---'));
+    vault.files.set('我的/娱乐/《奥德赛》.md', md('---\ntags: [电影]\n评分: 8\n观影日期: 2026-09-01\n---'));
     const app = makeApp(vault);
     ensureCinema(app);
     rebuildItems(app);
@@ -3303,7 +3303,7 @@ describe('面板拖拽缩放 + 尺寸记忆（ADR-0084/0094）', () => {
     resetObsidianMocks();
     resetCinemaState();
     clearDomainEvents();
-    M.folderPath = '我的/影视';
+    M.folderPath = '我的/娱乐';
     document.body.innerHTML = '';
   });
   afterEach(() => {
@@ -3354,7 +3354,7 @@ describe('重温 +1：时刻粒度 + 重映厅自动移出', () => {
   /** 备好一部挂在重映厅的已看片（星际穿越 fixture：评分 9.6 已看、无「重看」键） */
   async function seedOnShelf() {
     const { app, vault } = seedVault();
-    const file = vault.getAbstractFileByPath('我的/影视/《星际穿越》.md');
+    const file = vault.getAbstractFileByPath('我的/娱乐/《星际穿越》.md');
     await app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => { fm['片单'] = ['重映厅']; });
     rebuildItems(app);
     createOverlay(app);
@@ -3368,7 +3368,7 @@ describe('重温 +1：时刻粒度 + 重映厅自动移出', () => {
     clickEl(pcardByName(root, '星际穿越'));
     clickEl((root.querySelector('.cn-modal') as HTMLElement).querySelector('.j-rewatch'));
     await vi.waitFor(() => expect(hasNotice(/记下第 2 刷/)).toBe(true)); // rewatchCount 口径 = 首看 + 重温数
-    const fm = vault.files.get('我的/影视/《星际穿越》.md') as string;
+    const fm = vault.files.get('我的/娱乐/《星际穿越》.md') as string;
     expect(fm).not.toContain('片单');
     expect(fm).toMatch(/重看: \[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]/); // 时刻粒度（mock 序列化为流式数组）
     expect(item.lists).toEqual([]);
@@ -3417,7 +3417,7 @@ describe('片单动作与计数（issue 535）', () => {
    *  extra 按季追加 frontmatter 行（要在进面板之前就有片单归属时用） */
   function seedSeries(extra: Record<string, string> = {}): { vault: MockVault; app: ReturnType<typeof mockAppWithVault> } {
     const vault = new MockVault();
-    const put = (file: string, body: string): void => { vault.files.set(`我的/影视/${file}`, md(body)); };
+    const put = (file: string, body: string): void => { vault.files.set(`我的/娱乐/${file}`, md(body)); };
     put('《老友记 第一季》.md', `---\ntags: [美剧]\n评分: 9.0\n观影日期: 2026-01-18\n${extra.s1 ?? ''}---`);
     put('《老友记 第二季》.md', `---\ntags: [美剧]\n评分: 9.2\n观影日期: 2026-02-18\n${extra.s2 ?? ''}---`);
     put('《老友记 第三季》.md', `---\ntags: [美剧]\n评分: 9.4\n观影日期: 2026-03-18\n${extra.s3 ?? ''}---`);
@@ -3430,7 +3430,7 @@ describe('片单动作与计数（issue 535）', () => {
 
   it('条目在片单里 → 抽屉多出「移出<片单名>」；重映厅不重复出（它已有专用 toggle 行）', () => {
     const { app, vault } = seedVault();
-    vault.files.set('我的/影视/《星际穿越》.md', md(`---
+    vault.files.set('我的/娱乐/《星际穿越》.md', md(`---
 tags: [电影]
 评分: 9.6
 观影日期: 2026-08-01
@@ -3453,7 +3453,7 @@ tags: [电影]
 
   it('点「移出<片单名>」→ 该片单从 frontmatter 摘掉（唯一片单 → 删键）', async () => {
     const { app, vault } = seedVault();
-    vault.files.set('我的/影视/《星际穿越》.md', md(`---
+    vault.files.set('我的/娱乐/《星际穿越》.md', md(`---
 tags: [电影]
 评分: 9.6
 观影日期: 2026-08-01
@@ -3465,7 +3465,7 @@ tags: [电影]
     const root = document.querySelector('[data-cinema-root]') as HTMLElement;
     clickEl(menuButton(openMenu(root, '星际穿越'), '移出诺兰补完计划'));
     await vi.waitFor(() => expect(hasNotice(/已把「星际穿越」移出「诺兰补完计划」/)).toBe(true));
-    expect(vault.files.get('我的/影视/《星际穿越》.md')).not.toContain('片单');
+    expect(vault.files.get('我的/娱乐/《星际穿越》.md')).not.toContain('片单');
     expect(listsOf('星际穿越')).toEqual([]);
   });
 
@@ -3508,8 +3508,8 @@ tags: [电影]
   it('合并卡未看、成员也不在架 → 无重映厅行（沿用单条目已看门控）', () => {
     setSettingsProvider(() => ({ cinemaMergeSeasons: true } as any));
     const vault = new MockVault();
-    vault.files.set('我的/影视/《老友记 第一季》.md', md('---\ntags: [美剧]\n状态: 在看\n观影日期: 2026-01-18\n---'));
-    vault.files.set('我的/影视/《老友记 第二季》.md', md('---\ntags: [美剧]\n状态: 在看\n观影日期: 2026-02-18\n---'));
+    vault.files.set('我的/娱乐/《老友记 第一季》.md', md('---\ntags: [美剧]\n状态: 在看\n观影日期: 2026-01-18\n---'));
+    vault.files.set('我的/娱乐/《老友记 第二季》.md', md('---\ntags: [美剧]\n状态: 在看\n观影日期: 2026-02-18\n---'));
     const app = makeApp(vault);
     ensureCinema(app);
     rebuildItems(app);
@@ -3522,8 +3522,8 @@ tags: [电影]
     setSettingsProvider(() => ({ cinemaMergeSeasons: true } as any));
     const { app } = (() => {
       const vault = new MockVault();
-      vault.files.set('我的/影视/《老友记 第一季》.md', md('---\ntags: [美剧]\n状态: 在看\n观影日期: 2026-01-18\n片单:\n- 重映厅\n---'));
-      vault.files.set('我的/影视/《老友记 第二季》.md', md('---\ntags: [美剧]\n状态: 在看\n观影日期: 2026-02-18\n---'));
+      vault.files.set('我的/娱乐/《老友记 第一季》.md', md('---\ntags: [美剧]\n状态: 在看\n观影日期: 2026-01-18\n片单:\n- 重映厅\n---'));
+      vault.files.set('我的/娱乐/《老友记 第二季》.md', md('---\ntags: [美剧]\n状态: 在看\n观影日期: 2026-02-18\n---'));
       const app = makeApp(vault);
       ensureCinema(app);
       rebuildItems(app);
@@ -3563,13 +3563,13 @@ tags: [电影]
   it('选中片单 → 类型组与状态组计数以该片单为准；「全部」与片单行不受影响；点「全部」回主视图', () => {
     const vault = new MockVault();
     const put = (file: string, tags: string, rating: string, lists = ''): void => {
-      vault.files.set(`我的/影视/${file}`, md(`---\ntags: [${tags}]\n评分: ${rating}\n观影日期: 2026-08-01\n${lists}---`));
+      vault.files.set(`我的/娱乐/${file}`, md(`---\ntags: [${tags}]\n评分: ${rating}\n观影日期: 2026-08-01\n${lists}---`));
     };
     const inList = '片单:\n- 诺兰补完计划\n';
     put('《星际穿越》.md', '电影', '9.6', inList);
     put('《盗梦空间》.md', '电影', '9.2', inList);
     put('《绝命毒师》.md', '美剧', '9.4');
-    vault.files.set('我的/影视/《想看片》.md', md(`---\ntags: [电影]\n状态: 想看\n观影日期: 2026-08-01\n---`));
+    vault.files.set('我的/娱乐/《想看片》.md', md(`---\ntags: [电影]\n状态: 想看\n观影日期: 2026-08-01\n---`));
     const app = makeApp(vault);
     ensureCinema(app);
     rebuildItems(app);
@@ -3613,7 +3613,7 @@ describe('已看日期（issue 536）', () => {
   beforeEach(() => { resetObsidianMocks(); resetCinemaState(); document.body.innerHTML = ''; });
   afterEach(() => { closeOverlay(); });
 
-  const fmOf = (vault: MockVault, name: string): string => vault.files.get(`我的/影视/《${name}》.md`) ?? '';
+  const fmOf = (vault: MockVault, name: string): string => vault.files.get(`我的/娱乐/《${name}》.md`) ?? '';
 
   it('标记在看 → 只写观影日期与在看日期，绝不落已看日期（幽灵已看行的源头）', async () => {
     const { app, vault } = seedVault();
@@ -3666,7 +3666,7 @@ describe('已看日期（issue 536）', () => {
     expect(byName('想看片')).toBeNull();
 
     // 显式键优先：看过又退回想看的条目，历史照样在
-    vault.files.set('我的/影视/《退回想看的老片》.md', md(`---
+    vault.files.set('我的/娱乐/《退回想看的老片》.md', md(`---
 tags: [电影]
 状态: 在看
 观影日期: 2026-10-01 20:00:00
@@ -3687,7 +3687,7 @@ tags: [电影]
     const form = root.querySelector('.cn-modal') as HTMLElement;
     (form.querySelector('.j-name') as HTMLInputElement).value = '手动已看片';
     clickEl(form.querySelector('.j-save'));
-    await vi.waitFor(() => expect(vault.files.has('我的/影视/《手动已看片》.md')).toBe(true));
+    await vi.waitFor(() => expect(vault.files.has('我的/娱乐/《手动已看片》.md')).toBe(true));
     const fm = fmOf(vault, '手动已看片');
     expect(fm).toContain('状态: 已看');
     expect(fm).toMatch(/已看日期: "\d{4}-\d{2}-\d{2}"/);
