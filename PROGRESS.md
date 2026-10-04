@@ -979,3 +979,18 @@
 - [x] Embedding 组：模型行 + 获取已装模型按钮（拉本机 Ollama /api/tags）+ Ollama 本地 URL 行 + 启用重排/重排模型两行（visibleWhen qwen3 embedding，config.rerankActive 同门判据）——panel.ts 注释记载的「迁 AI 面板」目的地此票落位；换模型走 needsModelRebuild 自动重建（F2 口径：默认仍 bge-m3，不碰 .vec 布局）
 - [x] 豆瓣 Cookie 核对：本地 cinemaDoubanCookie 键/行/消费链俱全，无缺口
 - [x] 门禁：tsc --noEmit 0；vitest 全量 3963 全绿；构建部署于合并后统一执行
+
+### 票 308 — 上游吸收批 3：轻量独立九件（源 yeshimei/bz 42c00d1d..98f9bf73，2026-10-04）
+
+- [x] 口径：上游差量盘点三口径交叉（提交日志 628 条 + 文件树差 + 关键词落点）；冻结域（diary/review）与在线资源体系（RSS 源库/皮肤云端/名称索引等远端依赖件）与 people 脸谱域按裁决排除
+- [x] Jev 博查服务商 + 密钥/模型按服务商分存（jevApiKeys/jevModels，旧键 onload 迁移）+ LLM/JEV 密钥行「测试」钮三态（settings-btn-state 助手，busy/ok/fail，复原柄按元素分账）（430/433/434）
+- [x] clipbook 划选工具框移动端下方优先（系统选择菜单恒在选区上方）+ 移除「复制 Markdown」；定位算式抽纯函数 selbar-place 单源（047b3f67）
+- [x] 二脑重排双通道二选一（rerankChannel 单源 +「重排走 Jev」开关 + rerank-jev noul 批问失败回余弦）+ 收口批（上限 50 整列同尺/迟到轮不回填/移动端同尺 relevancePct/search 取消不降级）（431/429）
+- [x] 建链一趟式：findCandidates 显式 skipRerank 不再白跑重排；知识盒「确认写入」接住在途轮不再重跑（541）
+- [x] 转写 LLM 校对开关（asrLlmProofread 缺省关，「语音转写」新组；知识盒「分块润色」退役换校对，失败原文直出）（518）
+- [x] belongings emoji 映射表退役（445 条），splitEmojiCategory 拆 category.ts 纯函数；迁移只剥前缀不再补 icon，遗留分类原样显示 emoji（477）
+- [x] 小橘消息池 AI 动态池化：静态语料 437 条退役，AI 按特性快照现写现囤、用一条删一条，水位+冷却+日上限三重节流（493）
+- [x] 顺手修复存量暗病：isQwen3Embedding8b 正则  被历史工具写成真实退格符（0x08）致 8B 判定恒 false——重排在本地从未真实激活
+- [x] 未随批：上游 lucide- 前缀兜底（本地无 catpicker 模块，属 478 分类表捆绑线）；444 转写引擎选择行（本地无 SenseVoice/faster-whisper 基建）；脸谱两处校对消费（people 域未吸收）
+- [x] 归档上游 issues 9 篇 / ADR 7 篇进 upstream-yeshimei；CONTEXT.md 词条（消息池/重排通道/LLM 校对/建链一趟式）
+- [x] 门禁：tsc --noEmit；vitest 全量；构建部署于合并后统一执行
