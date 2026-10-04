@@ -994,3 +994,16 @@
 - [x] 未随批：上游 lucide- 前缀兜底（本地无 catpicker 模块，属 478 分类表捆绑线）；444 转写引擎选择行（本地无 SenseVoice/faster-whisper 基建）；脸谱两处校对消费（people 域未吸收）
 - [x] 归档上游 issues 9 篇 / ADR 7 篇进 upstream-yeshimei；CONTEXT.md 词条（消息池/重排通道/LLM 校对/建链一趟式）
 - [x] 门禁：tsc --noEmit；vitest 全量；构建部署于合并后统一执行
+
+### 票 309/310/311 — 上游吸收批 4：在线资源基建 + 影院豆瓣批（源 yeshimei/bz 98f9bf73 单点，2026-10-04）
+
+- [x] 口径：worktree `wt-up-batch4` 隔离（主仓零接触），交接文档 `.scratch/upstream-batch4-handoff.md`；冻结域（diary/review）、people 脸谱域、508 信封、539 日记半边、RSS 黄页/路由、分类表资产层、手册/更新日志弹窗、通知页并回、皮肤云端 UI 行按裁决排除（各自后续批次）
+- [x] 票 309 在线资源基建（480/494/490；ADR-0203/0205/0207）：core 六新件 download-manifest/remote-asset/remote-base/sha256/self-update/skin-pack（skin-pack 搁置态无 UI 行）；settings-panel「在线资源」组裁剪版（豆瓣索引行在，皮肤聚合行/归物分类表/RSS 黄页 DESC_EXTRAS 摘除随后续批）；settings-schema ButtonRow+disabled；main.ts self-update/manifest 启动链
+- [x] 票 310/311 影院批（498/503/530/535/536 影院半边/535 系/539 影院半边/540/432；ADR-0177/0178/0210）：ui.ts/shared.ts/midnight render 以上游 98f9bf73 为骨架重建；本地件重嫁接全保留（292 娱乐正名壳、293 入队门控+七项版 GROUP_SUBS_OF、294 国家组、295/301 集数章节、296 多选导出、301 重抓、306 查重、分析内嵌 statHtml ADR-0090、观影志并存 mob 6 钮、panelToast）；新功能并入（豆瓣名称索引联想+sid 直取、片单体系+流式导入、重映厅、已看日期、添加换面重做、评分预填、首屏壳绘+输入守护、滑动底片、grid 动效）
+- [x] 数据兼容裁决（票 536）：加「已看日期」键+写侧落键，**无批量回写**；读侧双守门（已看态回落观影日期；无「状态」键按评分编码推断）——上游「评分编码兼容移除」以本地兼容层替代
+- [x] 审计批（用户质询「本地特意修改是否被改掉」后全量核查）：GROUP_SUBS_OF 崩溃级回归（误取上游「剧集」键版）修复+守卫测试 group-subs-guard；MERGE_GROUPS 历史缺陷修正 ['电视剧','动漫']；票 292 正名 14 处归位
+- [x] 收尾对账（52 失败 → 全绿）产品侧回归修复：票 295 详情卡集数/章节 kv 行嫁接回 shared.ts；panelToast 本地通道还原 9 处（保存/改名/删除/标记/校验流，上游流保持 notice 双通道）；hoverCapable 无 matchMedia 回落壳类（桌面右键菜单测试环境恒闭）；AI 页入口点亮仅 ai（分析页 rail 熄灭，票 271 口径）；unloadCinema 注销 bz-cinema ESC 层（批 C 审计口径）
+- [x] 收尾对账测试侧：settings-panel theirs 断言本地重锚（mock 根因 beforeAll 同步真实 schema；域清单 17/18、AI 单组「🤖 AI」、路径行 bz-sp-chip/bz-sp-btn 契约、移动端独立弹窗架构、图标单源收编 news/quiz 两键）；凭据组/拖拽缩放 492-sp-res/Embedding 行三处注明暂缓 skip；影院 seed 补「类型」字段、flow-dialog 删除确认改写、日期引号放宽、「剧集」→「电视剧」组键
+- [x] 存量腐烂顺手修复：review-fix-clip2-ui1 C1/C14 seed 日期改相对天数（写死 9 月日期随时间流逝撞 30 天保留策略被清——**master 上同为存量失败**，本批合并后即修复）；C8 序随日期倒序调位
+- [x] 归档上游 issues 11 篇 / ADR 6 篇进 upstream-yeshimei；CONTEXT.md 词条（在线资源组/下载清单/豆瓣名称索引/片单/重映厅/已看日期）
+- [x] 门禁：worktree tsc 0 错 + vitest 全量 4201 绿（4 暂缓 skip）→ master ff 合并 → 全量复测 4201 绿 → pnpm run build 部署
