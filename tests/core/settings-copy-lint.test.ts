@@ -94,7 +94,7 @@ describe('全量 schema 文案 lint（注册表：LINT_TARGETS）', () => {
     ]);
     expect(rows[1].desc).toBe('留空则自动回退读取外部配置密钥'); // ticket 100 冻结文案
     expect(rows[3].desc).toBe('在订阅官网获取后填入这里'); // ticket 100 冻结文案
-    const storageRow = schema.groups[3].rows[0] as { name: string; desc?: string }; // Embedding/JEV 插入后移位
+    const storageRow = schema.groups[4].rows[0] // 语音转写组（ADR-0222）插入后数据存储后移 as { name: string; desc?: string }; // Embedding/JEV 插入后移位
     expect(storageRow.name).toBe('数据存储路径');
     expect(storageRow.desc).toBe('全部 JSON 数据文件统一存放的目录');
   });
