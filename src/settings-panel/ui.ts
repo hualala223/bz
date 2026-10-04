@@ -16,14 +16,14 @@ import type { App } from 'obsidian';
 import { createOverlay, topifyZ } from '../core/dom';
 import { escManager } from '../core/esc-manager';
 import { isMobileEnv, applyMobileWindowFullscreen } from '../core/mobile';
-import { tryGetSettings, getSettings, saveSettings } from '../core/settings-provider';
+import { tryGetSettings, getSettings, saveSettings, panelSizePersist } from '../core/settings-provider';
 import type { SettingsSchema } from '../core/settings-schema';
 import { DOMAIN_ICONS } from '../core/domain-icons';
 import { mountIcons } from '../core/ui/icons';
 import { renderPanelSchema } from './renderer';
 import { notice } from '../core/notice';
 import { getApp } from '../core/app';
-import { uiIconBtn, uiEmpty } from '../core/ui';
+import {uiIconBtn, uiEmpty, uiResizable} from '../core/ui';
 import {
   deskShellHtml, navSecHtml, navItemHtml, pageHeadHtml, loadingHtml,
   mobShellHtml, mobItemHtml, mobRowHitHtml, mobModalShellHtml, mobSecHtml, mobEmptyHtml,
@@ -70,9 +70,12 @@ const schemaLoaders: Record<string, () => Promise<SettingsSchema>> = {
     return schema;
   },
   ai: async () => {
+    // 面板 AI 域五组形制（票 313 融合，上游 issue 422/331/444）：LLM + Embedding + JEV +
+    // 语音转写 + 数据源凭据——全部为本地主 schema 既有组，按名五取（⚙️ 页同数据源）
     const { mainSettingsSchema } = await import('../core/settings-main-schema');
     const full = mainSettingsSchema();
-    return { groups: full.groups.filter((g) => g.name === '🤖 AI') };
+    const want = ['🤖 AI', 'Embedding', 'JEV', '语音转写', '数据源凭据'];
+    return { groups: full.groups.filter((g) => want.includes(g.name)) };
   },
   appearance: async () => (await import('./schema')).appearanceSettingsSchema(),
   diary: async () => (await import('../diary/ui/panel')).diarySettingsSchema(),
@@ -228,6 +231,10 @@ function visibleItemCount(schema: SettingsSchema): number {
 
 /* ==================== 面板 UI（桌面 B + 移动 M1） ==================== */
 
+/** 主面板拖拽缩放口径（ADR-0084，492-sp-res）：下限挡住左导航 + 右内容双栏塌缩，上限留视口余量；
+ *  视口 92% 逐帧钳制在 core uiResizable 内，此处只给硬边界 */
+const PANEL = { MIN_W: 760, MIN_H: 520, MAX_W: 1280, MAX_H: 900 };
+
 export class SettingsPanelUI {
   private mask: HTMLElement | null = null;
   private popup: HTMLElement | null = null;
@@ -254,17 +261,40 @@ export class SettingsPanelUI {
       topifyZ(this.mask, this.popup);
       this.mask.style.display = 'block';
       this.popup.style.display = 'flex';
+      this.mountPanelResize(); // 桌面拖拽缩放重挂（hide 软关时已摘，ADR-0084/0094）
       if (deep && isMobileEnv()) void this.openMobileDomain(deep);
       return;
     }
     this.build(deep);
   }
 
+  private panelResizeDetach: { detach: () => void; flush: () => void } | null = null;
+
+  /** 挂桌面拖拽缩放（492-sp-res，ADR-0084/0094）：记忆值 load() 有值即套内联宽高 */
+  private mountPanelResize(): void {
+    if (isMobileEnv() || this.panelResizeDetach || !this.popup) return;
+    this.panelResizeDetach = uiResizable(this.popup, {
+      minW: PANEL.MIN_W, minH: PANEL.MIN_H,
+      maxW: PANEL.MAX_W, maxH: PANEL.MAX_H,
+      persist: panelSizePersist('settingsPanelWidth', 'settingsPanelHeight', PANEL.MIN_W, PANEL.MIN_H),
+    });
+  }
+
+  /** 摘拖拽缩放（hide 软关与 cleanup 销毁共用；persist 未落盘的防抖尾值由 detach 立即补存） */
+  private unmountPanelResize(): void {
+    if (!this.panelResizeDetach) return;
+    this.panelResizeDetach.detach();
+    this.panelResizeDetach = null;
+  }
+
   private build(deep?: DomainDef): void {
     const { mask, popup } = createOverlay({
       maskId: 'bz-settings-panel-mask',
       popupId: 'bz-settings-panel-popup',
-      maxWidth: 1080, // 与 .bz-sp-desk 定稿宽 min(1080px, 94vw) 同源
+      // 内联几何与 .bz-sp-desk 对齐：默认宽与定稿同源 min(1080px, 94vw)；maxWidth 放宽到
+      // PANEL.MAX_W——留 1080 会把拖大后的内联宽钳死，缩放形同虚设（492-sp-res）
+      width: 'min(1080px, 94vw)',
+      maxWidth: PANEL.MAX_W,
       onMaskClick: () => this.hide(),
     });
     this.mask = mask;
@@ -277,6 +307,7 @@ export class SettingsPanelUI {
       if (deep) void this.openMobileDomain(deep);
     } else {
       this.buildDesktop(popup);
+      this.mountPanelResize(); // 桌面拖拽缩放挂载（492-sp-res）
     }
     // 打开即预加载全部域 schema（徽标回填 + 零项域按端从列表剔除，两端共用）
     void this.preloadAllBadges();
@@ -653,11 +684,13 @@ export class SettingsPanelUI {
   }
 
   hide(): void {
+    this.unmountPanelResize(); // 软关即摘缩放句柄（常驻面板，重开 open/build 补挂；ADR-0084）
     if (this.mask) this.mask.style.display = 'none';
     if (this.popup) this.popup.style.display = 'none';
   }
 
   cleanup(): void {
+    this.unmountPanelResize(); // 缩放句柄随销毁摘除（popup 将移除，句柄不得跨实例残留）
     if (this.escHandle) {
       this.escHandle.unregister();
       this.escHandle = null;

@@ -148,8 +148,11 @@ describe('设置面板（settings-panel）', () => {
     expect(iconOf('pomodoro')).toBe('timer'); // 番茄钟（工具组首位）
     expect(iconOf('smartcat')).toBe('cat'); // 小橘陪伴猫（工具组，issue 194 转可见）
     expect(iconOf('encrypt')).toBe('lock'); // 保险库（安全组）
-    // 无 emoji 图标残留（头行/列表/徽标全文本或 lucide）
-    expect(popup.textContent).not.toMatch(EMOJI_RE);
+    // 无 emoji 图标残留（头行/导航/徽标全文本或 lucide；窗体正文除外——本地「📂 数据存储路径」
+    // 组名前缀为既有形态，票 308 settings-copy-lint 冻结，平铺标题不走图标位）
+    const headEl = popup.querySelector('.bz-sp-head');
+    const navText = [...popup.querySelectorAll('.bz-sp-nav-item')].map((n) => n.textContent).join('');
+    expect((headEl?.textContent ?? '') + navText).not.toMatch(EMOJI_RE);
     ui.cleanup();
   });
 
@@ -199,10 +202,12 @@ describe('设置面板（settings-panel）', () => {
     aiItem.click();
     await waitGroups(popup, 1);
     groups = popup.querySelectorAll('.bz-sp-group');
-    // 本地口径：AI 域 = 单组「🤖 AI」（上游 LLM/Embedding/JEV/语音转写/凭据五组形制不随批；
-    // Embedding/JEV/语音转写在本地 ⚙️ 主设置页为独立组，面板 ai 加载器只取「🤖 AI」组）
-    expect(groups.length).toBe(1);
-    expect([...groups].map((g) => g.querySelector('.bz-sp-group-name')!.textContent)).toEqual(['🤖 AI']);
+    // 本地口径（票 313 融合）：AI 域五组 = 本地主 schema 既有组五取（LLM/Embedding/JEV/
+    // 语音转写 + 数据源凭据——凭据组为本批新增，键全为本地既有键）
+    expect(groups.length).toBe(5);
+    expect([...groups].map((g) => g.querySelector('.bz-sp-group-name')!.textContent)).toEqual([
+      '🤖 AI', 'Embedding', 'JEV', '语音转写', '数据源凭据',
+    ]);
     expect(popup.querySelectorAll('.bz-sp-set-row').length).toBeGreaterThan(0);
     ui.cleanup();
   });
@@ -291,9 +296,9 @@ describe('设置面板（settings-panel）', () => {
     expect(panelState.aiThinkingOverrides).toEqual({ 'zhipu-plan': 'max' });
   });
 
-  it.skip('桌面端：AI 域数据源凭据组——三行统一单行掩码，B站行带「从 CLI 导入」按钮', async () => {
-    // 【暂缓】凭据组（ApiZero Key/B站 Cookie/豆瓣 Cookie）系上游数据源凭据能力，本批未吸收
-    // （本地无对应 schema 行）；随后续凭据吸收批落地后去掉 skip，即为本用例验收。
+  it('桌面端：AI 域数据源凭据组——三行统一单行掩码，B站行带「从 CLI 导入」按钮', async () => {
+    // 票 313 融合落地：数据源凭据组入本地主 schema，三行绑定本地既有键
+    // （cinemaApizeroKey/cinemaDoubanCookie/bilibiliCookie，零迁移）；本用例即验收。
     // stub 桌面端判定 + CLI 凭据文件（schema 以 window.require 判定桌面端 ADR-0133 口径；
     // 导入读 ~/.bilibili-cookies.json 的 { cookie } 字段）
     (window as unknown as { require?: unknown }).require = (mod: string) => {
@@ -330,7 +335,9 @@ describe('设置面板（settings-panel）', () => {
       // 行内按钮在输入框左侧（2026-09-08 拍板口径；secret 行 actions 与 text 行同口径）
       const biliCtrl = bili!.querySelector('.bz-sp-set-ctrl')!;
       expect(biliCtrl.querySelector('.bz-sp-btn')?.textContent).toBe('从 CLI 导入');
-      expect(biliCtrl.firstElementChild!.classList.contains('bz-sp-btn')).toBe(true);
+      // 本地 secret 行：按钮插在掩码包裹层内、输入框之前（insertBefore(input)）
+      expect(biliCtrl.querySelector('.bz-sp-secret > .bz-sp-btn')).toBeTruthy();
+      expect(biliCtrl.querySelector('.bz-sp-secret input')?.classList.contains('bz-sp-secret-input')).toBe(true);
       // ApiZero Key 行无行内按钮
       expect(apizero!.querySelector('.bz-sp-btn')).toBeNull();
       // 点「从 CLI 导入」→ 写入绑定并回填输入框显示（动作回填经 displaySetters 程序化写值，不置脏）
@@ -353,12 +360,12 @@ describe('设置面板（settings-panel）', () => {
     // 「📂 数据存储路径」组无 icon 字段不渲染图标位；上游外观/通知组并回不随批
     let icons = [...popup.querySelectorAll('.bz-sp-group-icon')].map((i) => i.getAttribute('data-icon'));
     expect(icons).toEqual(['cloud-download']);
-    // AI 域单组「🤖 AI」，组定义未声明图标 → 无分组卡图标
+    // AI 域五组（票 313）：本地主 schema 组均无 icon（区块标题平铺形态契约），分组卡无图标位
     const aiItem = Array.from(popup.querySelectorAll('.bz-sp-nav-item')).find(
       (el) => el.textContent?.includes('AI')
     ) as HTMLElement;
     aiItem.click();
-    await waitGroups(popup, 1);
+    await waitGroups(popup, 5);
     icons = [...popup.querySelectorAll('.bz-sp-group-icon')].map((i) => i.getAttribute('data-icon'));
     expect(icons).toEqual([]);
     ui.cleanup();
@@ -378,9 +385,8 @@ describe('设置面板（settings-panel）', () => {
     ui.cleanup();
   });
 
-  it.skip('面板拖拽缩放 + 尺寸记忆（ADR-0084/0094）：有记忆值时打开即套用内联宽高，软关重开重挂套新值', () => {
-    // 【暂缓】面板拖拽缩放+尺寸记忆系上游 492-sp-res 能力（settingsPanelWidth/Height 键本地不存在），
-    // 本地面板定宽 90%；随 492-sp-res 吸收批落地后去掉 skip，即为本用例验收。
+  it('面板拖拽缩放 + 尺寸记忆（ADR-0084/0094）：有记忆值时打开即套用内联宽高，软关重开重挂套新值', () => {
+    // 票 313 融合落地（492-sp-res）：PANEL 边界 + panelSizePersist 记忆 + uiResizable 挂载即套用。
     // 记忆值取在 jsdom 视口（1024×768）92% 渲染钳制线以内——断言的是「意图值直出内联」，
     // 视口钳制是 core uiResizable 自己的语义（tests/core 已锁），此处不掺
     panelState.settingsPanelWidth = 900;
@@ -402,8 +408,8 @@ describe('设置面板（settings-panel）', () => {
     ui.cleanup();
   });
 
-  it.skip('面板拖拽缩放：无记忆值 → 不写 px 内联（默认宽走 build 对齐后的壳参数，高走 CSS）', () => {
-    // 【暂缓】同上，492-sp-res 吸收批后恢复；本地默认宽 = createOverlay 90%（尺寸记忆键不存在）
+  it('面板拖拽缩放：无记忆值 → 不写 px 内联（默认宽走 build 对齐后的壳参数，高走 CSS）', () => {
+    // 票 313 融合落地：默认宽 = createOverlay min(1080px, 94vw)（与 .bz-sp-desk 定稿同源）
     const ui = new SettingsPanelUI();
     ui.open();
     const popup = document.getElementById('bz-settings-panel-popup') as HTMLElement;
@@ -1081,10 +1087,10 @@ describe('choiceCards 视觉卡片行（issue 210）', () => {
  * Embedding 行），此处补面板渲染器的同一条链，防两条渲染路径漂移。
  */
 describe('面板渲染器：模型选择器选中即刷新（issue 423 回归锚）', () => {
-  it.skip('AI 页「Embedding 模型」行：获取模型 → 选中 → 输入框当场回填（一次点击）', async () => {
-    // 【暂缓】面板 AI 域含「Embedding 模型」动作行系上游五组形制；本地面板 ai 加载器只取「🤖 AI」单组，
-    // 「获取模型名」为独立按钮行（票 173 本地适配，无行内输入框），issue 423 回归链由 core 渲染器
-    // 同款锚（tests/core）承载。随面板 AI 组扩容批（对齐 ⚙️ Embedding/JEV/语音转写组）落地后去掉 skip。
+  it('AI 页「Embedding 模型」行：获取模型 → 选中 → 输入框当场回填（一次点击）', async () => {
+    // 票 313 融合落地：面板 AI 域五组（本地主 schema 既有 Embedding 组随批入面板）。
+    // 本地行形：「Embedding 模型」text 行 + 独立按钮行「获取模型」（buttonText 获取已装模型，
+    // 票 173 本地适配）——动作后经渲染器动作后回填（acc.read 重写 input）一次点击即回填。
     const state: Record<string, unknown> = { secondBrainEmbeddingModel: '' };
     setSettingsProvider(() => state as any);
     const { setSettingsSaver } = await import('../src/core/settings-provider');
@@ -1119,9 +1125,12 @@ describe('面板渲染器：模型选择器选中即刷新（issue 423 回归锚
       )!;
       expect(row, 'Embedding 模型行存在').toBeTruthy();
       const input = () => row.querySelector<HTMLInputElement>('input.bz-input')!;
-      ([...row.querySelectorAll<HTMLElement>('button.bz-sp-btn')].find(
-        (b) => b.textContent === '获取模型'
-      ) as HTMLElement).click();
+      // 本地行形：获取模型 = 独立按钮行（紧随其后），点击后动作后回填写回上方模型行
+      const btnRow = [...popup.querySelectorAll<HTMLElement>('.bz-sp-set-row')].find(
+        (r) => r.querySelector('.bz-sp-set-name')?.textContent === '获取模型'
+      )!;
+      expect(btnRow, '获取模型按钮行存在').toBeTruthy();
+      (btnRow.querySelector('button') as HTMLElement).click();
       await vi.waitFor(() => expect(document.getElementById('bz-model-picker-popup')).toBeTruthy());
       (document.querySelector('.bz-model-picker-row') as HTMLElement).click();
       await vi.waitFor(() => expect(state.secondBrainEmbeddingModel).toBe('qwen3-embedding:8b'));

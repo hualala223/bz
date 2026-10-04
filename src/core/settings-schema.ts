@@ -53,6 +53,9 @@ export interface SettingsRowContext {
   rowEl: HTMLElement;
   /** 触发全部 visibleWhen 重求值 + 徽标刷新 + 两行式重标注（custom 行内部动态增删设置行后调用） */
   refreshVisibility: () => void;
+  /** 整面板刷新一轮（票 313，issue 423 锚）：弹层写回绑定（模型选择器 onPick 等）后调用，
+   *  各行显示值经 valueRefreshes 重读绑定回填——动作 await 链外的写入靠它闭环 */
+  refresh?: () => void;
 }
 
 /** 行公共字段（name 由各具体行按需声明，custom 行可省略） */
@@ -113,6 +116,8 @@ interface TextRow extends RowBase, TextualCommit {
   onChange?: (value: string, ctx: SettingsRowContext) => void;
   /** 数字型文本行修饰（issue 187 采样参数）：右对齐窄框（设置面板渲染器消费；core 渲染器忽略） */
   num?: boolean;
+  /** 密钥型文本行修饰（GS3 档位，票 313）：password 掩码 + 眼睛切明文（面板渲染器消费） */
+  secret?: boolean;
   /** 行内附加按钮（渲染于输入框左侧） */
   actions?: RowAction[];
 }

@@ -63,7 +63,7 @@ describe('主设置 schema（JEV 分存 + 测试钮）', () => {
   const aiGroup = schema.groups.find((g) => g.name === '🤖 AI')!;
 
   it('组结构不破坏（设置面板导航契约）', () => {
-    expect(groupNames).toEqual(['🤖 AI', 'Embedding', 'JEV', '语音转写', '📂 数据存储路径', '🔔 通知']);
+    expect(groupNames).toEqual(['🤖 AI', 'Embedding', 'JEV', '语音转写', '数据源凭据', '📂 数据存储路径', '🔔 通知']);
   });
 
   it('注册表两家：typesafe + 博查（博查缺省模型 bocha-jev-v1）', () => {

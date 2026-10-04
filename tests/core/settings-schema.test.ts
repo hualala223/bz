@@ -26,7 +26,7 @@ describe('mainSettingsSchema：主设置页区块', () => {
   it('三区块均为无 icon 分组（区块标题平铺形态），标题 DOM 契约保持', () => {
     // issue 258：新增「🔔 通知」组（core 横切偏好），仍为无 icon 平铺形态，既有两组的结构与顺序不变；
     // 上游吸收批 3（ADR-0222）：新增「语音转写」组（LLM 校对开关），置于 JEV 之后
-    expect(schema.groups.map((g) => g.name)).toEqual(['🤖 AI', 'Embedding', 'JEV', '语音转写', '📂 数据存储路径', '🔔 通知']);
+    expect(schema.groups.map((g) => g.name)).toEqual(['🤖 AI', 'Embedding', 'JEV', '语音转写', '数据源凭据', '📂 数据存储路径', '🔔 通知']); // 票 313：凭据组插语音转写后（无 icon 平铺形态）
     expect(schema.groups.every((g) => g.icon === undefined)).toBe(true);
   });
 
@@ -85,7 +85,7 @@ describe('mainSettingsSchema：主设置页区块', () => {
   });
 
   it('数据存储路径区块：path 单选行（键直绑）+ onCommit 提示文案逐字冻结', () => {
-    const row = schema.groups[4].rows[0] as { // Embedding/JEV/语音转写三组插入后数据存储后移
+    const row = schema.groups[5].rows[0] as { // Embedding/JEV/语音转写三组 + 票 313 凭据组插入后数据存储后移
       type: string;
       mode: string;
       name: string;

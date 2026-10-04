@@ -49,6 +49,10 @@ export default interface BzSettings {
   /** bz 侧自动运行台账（每工具：最近一次尝试 / 连续失败数 / 是否熔断暂停）。
    *  **不是**工具的运行记录 —— 那份归工具自己写（D8/D9）；这里只是 bz 的调度账（`DockToolRunState`）。 */
   dockRunState: Record<string, DockToolRunState>;
+  /** 🖱 设置面板桌面端拖拽缩放记忆（ADR-0084/0094，492-sp-res）：0 = 未设置（默认宽走壳参数） */
+  settingsPanelWidth: number;
+  /** 设置面板桌面端拖拽缩放记忆（高） */
+  settingsPanelHeight: number;
 
   // ===== 📂 数据存储路径（ADR-0009 共享数据路径）=====
   /** 共享 JSON 数据目录（memo/belongings/passwords/favorites/review/quiz/闪念 meta+vec 统一存放） */
@@ -651,6 +655,8 @@ export const DEFAULT_SETTINGS: BzSettings = {
   dockNotifyMissed: true,
   dockAutoRun: true,
   dockRunState: {},
+  settingsPanelWidth: 0,
+  settingsPanelHeight: 0,
 
   // 共享数据路径（ADR-0009）
   storagePath: 'CONFIG/STORAGE',

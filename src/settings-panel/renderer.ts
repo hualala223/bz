@@ -65,8 +65,8 @@ function bindValue<V>(binding: AnyBinding): ValueAccess<V> {
 }
 
 /** 行上下文（供 onChange/custom/button 回调；结构与 core SettingsRowContext 一致） */
-function makeCtx(rowEl: HTMLElement, refreshVisibility: () => void): SettingsRowContext {
-  return { rowEl, refreshVisibility };
+function makeCtx(rowEl: HTMLElement, refreshVisibility: () => void, refresh?: () => void): SettingsRowContext {
+  return { rowEl, refreshVisibility, refresh };
 }
 
 /* ==================== 路径行（纯层 chips 串 + 事件层重渲） ==================== */
@@ -176,7 +176,7 @@ function renderRow(
   refresh: () => void,
   regRefresh?: (fn: () => void) => void
 ): HTMLElement {
-  const ctx = makeCtx(document.createElement('div'), refresh);
+  const ctx = makeCtx(document.createElement('div'), refresh, refresh);
   const rowName = (row as { name?: string }).name;
   const vm: SpRowVm = {
     cls: (row as { isChild?: boolean }).isChild ? 'child' : undefined,
@@ -226,6 +226,30 @@ function renderRow(
       });
       el.innerHTML = rowHtml(vm);
       const input = el.querySelector<HTMLInputElement>('input.bz-input')!;
+      // 掩码档位眼睛（票 313）：切显示形态不动值；图标随态换 eye/eye-off
+      if (!isNum && (row as { secret?: boolean }).secret) {
+        const eye = el.querySelector<HTMLButtonElement>('.bz-sp-secret-eye');
+        if (eye) {
+          eye.addEventListener('click', () => {
+            const reveal = input.type === 'password';
+            input.type = reveal ? 'text' : 'password';
+            eye.querySelector('.bz-ic')?.setAttribute('data-lucide', reveal ? 'eye-off' : 'eye');
+            mountIcons(el);
+          });
+          mountIcons(el);
+        }
+      }
+      // 动作后回填（issue 423 锚，票 313）：「获取模型」类按钮行改写绑定后，本行显示值经
+      // refresh() 重读绑定回填（程序化写值不置脏——未编辑不落盘，防 blur 假写）
+      if (regRefresh) {
+        regRefresh(() => {
+          const f = String(acc.read() ?? '');
+          if (input.value !== f) {
+            input.value = f;
+            dirty = false;
+          }
+        });
+      }
       // 防抖落盘（对齐 TEXT_COMMIT_DELAY=800 + 失焦/回车）+ 程序化刷新不置脏（防 blur 假写）
       let timer: number | null = null;
       let dirty = false;
@@ -441,7 +465,14 @@ function renderRow(
       el.innerHTML = rowHtml(vm);
       const btn = el.querySelector<HTMLButtonElement>('.bz-sp-btn')!;
       if (row.disabled === true) btn.disabled = true; // 在线资源「已下载/等待核对」等：状态未到不可点（点击监听仍挂，禁用态由浏览器拦截）
-      btn.addEventListener('click', () => row.onClick(ctx));
+      // 动作后刷新（issue 423 锚，票 313）：异步动作（获取模型/在线资源下载等）落定后
+      // refresh 一轮——显隐重算 + 各行显示值经 valueRefreshes 重读绑定回填
+      btn.addEventListener('click', () => {
+        void (async () => {
+          await row.onClick(ctx);
+          refresh();
+        })();
+      });
       break;
     }
     case 'info': {

@@ -54,12 +54,16 @@ export function textInputHtml(opts: {
   if (opts.num) cls.push('num');
   if (opts.secret) cls.push('secret');
   const attrs: string[] = [`class="${cls.join(' ')}"`, `value="${esc(opts.value)}"`];
-  attrs.push(opts.type === 'number' ? 'type="number"' : 'type="text"');
+  // 掩码档位（GS3，票 313）：type=password 真掩码 + 眼睛切明文（切换只翻显示形态，不动值）
+  attrs.push(opts.secret ? 'type="password"' : opts.type === 'number' ? 'type="number"' : 'type="text"');
   if (opts.placeholder) attrs.push(`placeholder="${esc(opts.placeholder)}"`);
   if (opts.min !== undefined) attrs.push(`min="${opts.min}"`);
   if (opts.max !== undefined) attrs.push(`max="${opts.max}"`);
   if (opts.step !== undefined) attrs.push(`step="${opts.step}"`);
-  return `<input ${attrs.join(' ')} autocomplete="off">`;
+  attrs[0] = `class="${cls.join(' ')} bz-sp-secret-input"`;
+  const input = `<input ${attrs.join(' ')} autocomplete="off">`;
+  if (!opts.secret) return input;
+  return `<div class="bz-sp-secret">${input}<button type="button" class="bz-sp-secret-eye" title="显示/隐藏"><i data-lucide="eye" class="bz-ic"></i></button></div>`;
 }
 
 /** 多行文本（bz-input bz-sp-textarea） */

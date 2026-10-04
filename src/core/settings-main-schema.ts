@@ -119,6 +119,69 @@ function jevTestAction(): RowAction {
 
 /** LLM 密钥行「测试」钮（issue 433/434）：对该行所属服务商发一次真实极小请求验证连通
  *  （testAIConnectivity 按 id 解析该家设置，不受当前下拉选中影响）；三态同 jevTestAction。 */
+/** 桌面壳判定（凭据 CLI 导入读本机文件用；非桌面无 require 直接隐藏按钮） */
+function isDesktopShell(): boolean {
+  const w = typeof window === 'undefined' ? null : (window as unknown as { require?: unknown });
+  return !!(w && typeof w.require === 'function');
+}
+
+/** 「从 CLI 导入」：读 CLI 凭据文件 ~/.bilibili-cookies.json 填入 B站 Cookie（ADR-0133；失败提示） */
+function importCliBilibiliCookie(): void {
+  if (typeof window === 'undefined') return;
+  const w = window as any;
+  try {
+    const fs = w.require('fs');
+    const os = w.require('os');
+    const path = w.require('path');
+    const file = path.join(os.homedir(), '.bilibili-cookies.json');
+    const json = JSON.parse(String(fs.readFileSync(file, 'utf8')));
+    const cookie = String((json && json.cookie) || '').trim();
+    if (!cookie) { notice('CLI cookie 文件里没有 cookie', 'warning'); return; }
+    getSettings().bilibiliCookie = cookie;
+    void saveSettings();
+    notice('已导入 B站 Cookie', 'success');
+  } catch {
+    notice('导入失败：找不到 CLI 的 ~/.bilibili-cookies.json', 'error');
+  }
+}
+
+/**
+ * 「数据源凭据」组行（上游 issue 331 形制，票 313 随批融合）：与 AI 服务商无关的第三方数据源
+ * 凭据集中一卡——影院 ApiZero Key / 豆瓣 Cookie（键 = 本地票 301 既有 cinemaApizeroKey/
+ * cinemaDoubanCookie，零迁移）+ B站 Cookie（本地既有键 bilibiliCookie；桌面端可从 CLI 导入）。
+ * 三行一律单行掩码（secret：password 掩码 + 眼睛切明文——2026-09-23 用户口径「加密的做成
+ * 多行框看着怪」）；行序按用户要求：ApiZero Key → B站 Cookie → 豆瓣 Cookie。
+ */
+function credentialGroupRows(): SettingsRow[] {
+  return [
+    {
+      type: 'text',
+      secret: true,
+      name: 'ApiZero Key',
+      desc: '豆瓣字段接口的密钥',
+      binding: { key: 'cinemaApizeroKey' },
+      placeholder: '粘贴密钥',
+    },
+    {
+      type: 'text',
+      secret: true,
+      name: 'B站 Cookie',
+      desc: '视频录入解析清晰度用的凭据',
+      binding: { key: 'bilibiliCookie' },
+      placeholder: '粘贴从浏览器复制的 Cookie',
+      actions: isDesktopShell() ? [{ text: '从 CLI 导入', onClick: () => importCliBilibiliCookie() }] : [],
+    },
+    {
+      type: 'text',
+      secret: true,
+      name: '豆瓣 Cookie',
+      desc: '豆瓣搜索被风控时用的登录凭据',
+      binding: { key: 'cinemaDoubanCookie' },
+      placeholder: '粘贴从浏览器复制的 Cookie',
+    },
+  ];
+}
+
 function providerTestAction(providerId: string): RowAction {
   return {
     text: '测试',
@@ -325,7 +388,7 @@ export function mainSettingsSchema(): SettingsSchema {
             name: '获取模型',
             buttonText: '获取已装模型',
             desc: '拉取本机 Ollama 已装模型列表，选择后写入上方模型行',
-            onClick: () => {
+            onClick: (ctx) => {
               void (async () => {
                 const { fetchProviderModels } = await import('./ai-models');
                 const { openModelPicker } = await import('./settings-model-picker');
@@ -339,6 +402,7 @@ export function mainSettingsSchema(): SettingsSchema {
                       (getSettings() as any).secondBrainEmbeddingModel = m.id;
                       void saveSettings();
                       notice(`模型已设为 ${m.id}`, 'success');
+                      ctx.refresh?.(); // issue 423 锚：弹层写回在动作 await 链外，写完刷一轮回填行显示
                     },
                   });
                 } catch (e) {
@@ -424,6 +488,12 @@ export function mainSettingsSchema(): SettingsSchema {
         rows: [
           { type: 'toggle', name: 'LLM 校对', desc: '转写文本发送到所配大模型只修错校对，开启即同意文本出域', binding: { key: 'asrLlmProofread' } },
         ],
+      },
+      {
+        // 数据源凭据组（上游 issue 331 形制，票 313 融合）：第三方数据源凭据集中一卡，
+        // 键全为本地既有键（cinemaApizeroKey/cinemaDoubanCookie/bilibiliCookie，零迁移）
+        name: '数据源凭据',
+        rows: credentialGroupRows(),
       },
       {
         name: '📂 数据存储路径',
