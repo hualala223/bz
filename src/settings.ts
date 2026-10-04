@@ -235,9 +235,11 @@ export default interface BzSettings {
   secondBrainOllamaUrl: string;
   /** Embedding 模型 */
   secondBrainEmbeddingModel: string;
-  /** 检索重排开关（上游 issue 429；仅 qwen3 embedding 下生效，config.rerankActive 同门） */
+  /** 检索重排总闸（issue 427；issue 431/ADR-0189 起常显，通道由 rerankChannel 单源判定） */
   secondBrainRerank: boolean;
-  /** 重排模型（留空 = 内置 Qwen3-Reranker-4B） */
+  /** 重排走 Jev（issue 431/ADR-0189）：总闸开才显示，开启后走 JEV 组的 Jev 通道、不绑 8B 嵌入门 */
+  secondBrainRerankJev: boolean;
+  /** 重排模型（留空 = 内置 Qwen3-Reranker-4B；仅本地通道消费） */
   secondBrainRerankModel: string;
   /** 参考结果数 */
   secondBrainTopK: string;
@@ -747,6 +749,7 @@ export const DEFAULT_SETTINGS: BzSettings = {
   secondBrainOllamaUrl: 'http://localhost:11434',
   secondBrainEmbeddingModel: 'bge-m3',
   secondBrainRerank: true,
+  secondBrainRerankJev: false, // issue 431/ADR-0189：缺省本地通道（有 8B 门），Jev 为可选第二通道
   secondBrainRerankModel: '', // issue 429：空 = 默认 Qwen3-Reranker-4B（secondbrain/config RERANK_MODEL）
   secondBrainTopK: '20',
   secondBrainChatTopK: '20',

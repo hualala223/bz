@@ -29,16 +29,7 @@ import {
   motionDensitySettle,
 } from './motion';
 import { mountIcons } from '../core/ui';
-import type { SearchHit, VectorStore } from './vector-store';
-
-/**
- * 列表显示用相关度百分比（issue 429）：重排过的条目显示重排分（P(yes)）——
- * 名次按重排分排，显示的百分比就得是同一个尺，否则肉眼看到「没按相关度排序」。
- * 未重排/重排回退的条目回落到余弦 score。**只影响显示**：分数条与阈值仍以余弦为唯一尺（ADR-0186）。
- */
-function relevancePct(item: SearchHit): number {
-  return Math.round((item.rerankScore ?? item.score) * 100);
-}
+import { relevancePct, type SearchHit, type VectorStore } from './vector-store';
 
 export class ReferencePanel {
   fw: FloatWindow;
@@ -167,7 +158,10 @@ export class ReferencePanel {
       const results = await this.store.search(query, CONFIG.TOP_K, () => {
         degraded = true; // store 内部向量检索失败已降级文本：向用户明示
       }, ac.signal);
-      if (this.inflight === ac) this.inflight = null;
+      // 仍是本轮才收尾：若已被新查询接管（inflight 换人），本轮结果作废——
+      // 列表态归新轮所有，这里回填会盖掉新轮的「检索中…」或结果（issue 428）
+      if (this.inflight !== ac) return;
+      this.inflight = null;
       if (this.isClosed) return; // 关闭瞬间检索才返回：不再向已 detach 的 DOM 渲染（ticket 107）
       this.renderResults(results);
       if (degraded) this.appendListHint('⚠ 向量检索暂不可用，已降级为文本匹配');

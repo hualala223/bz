@@ -348,9 +348,12 @@ export function mainSettingsSchema(): SettingsSchema {
             },
           },
           { type: 'text', name: 'Ollama 本地 URL', desc: 'Ollama 服务地址，向量嵌入走此连接', binding: { key: 'secondBrainOllamaUrl' }, placeholder: 'http://localhost:11434' },
-          // 重排两行仅 qwen3 embedding 下生效（config.rerankActive 同门判据；bge-m3 下恒缺省）
-          { type: 'toggle', name: '启用重排', desc: '检索结果用重排模型精排，仅换序不重建', binding: { key: 'secondBrainRerank' }, visibleWhen: (snapshot) => isQwen3Embedding8b(snapshot.secondBrainEmbeddingModel) },
-          { type: 'text', name: '重排模型', desc: '留空使用内置重排模型，可填其他名称', binding: { key: 'secondBrainRerankModel' }, placeholder: '默认 Qwen3-Reranker-4B', visibleWhen: (snapshot) => isQwen3Embedding8b(snapshot.secondBrainEmbeddingModel) },
+          // 重排行（issue 431/ADR-0189 双通道二选一，上游吸收批 3）：总闸常显；「重排走 Jev」
+          // 总闸开才显示（云端判定不绑 8B 门）；本地「重排模型」行仅 8B 嵌入 ∧ 总闸开 ∧ Jev 关
+          //（本地通道专属，行隐藏即通道 off）。运行期判定单源 config.rerankChannel()。
+          { type: 'toggle', name: '启用重排', desc: '召回结果再精排，相关笔记排序更准', binding: { key: 'secondBrainRerank' } },
+          { type: 'toggle', name: '重排走 Jev', desc: '改用 Jev 模型云端重排，未配密钥自动回落余弦序', binding: { key: 'secondBrainRerankJev' }, visibleWhen: (snapshot) => snapshot.secondBrainRerank !== false },
+          { type: 'text', name: '重排模型', desc: '本地重排通道使用的模型，留空用内置 Qwen3-Reranker-4B', binding: { key: 'secondBrainRerankModel' }, placeholder: '默认 Qwen3-Reranker-4B', visibleWhen: (snapshot) => isQwen3Embedding8b(snapshot.secondBrainEmbeddingModel) && snapshot.secondBrainRerank !== false && snapshot.secondBrainRerankJev !== true },
         ],
       },
       {

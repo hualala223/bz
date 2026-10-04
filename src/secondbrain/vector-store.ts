@@ -28,13 +28,14 @@
  * v9→v10 迁移在 load() 从已存 chunks 现算指纹就地升级，零读盘零重嵌。
  */
 import type { App, TFile } from 'obsidian';
-import { buildConfig, IS_MOBILE } from './config';
+import { buildConfig, DEFAULT_EMBEDDING_MODEL, IS_MOBILE, rerankChannel, type RerankChannel } from './config';
 import { loadStore, mutateStore } from './store-file';
 import { MobileBuffer } from './binary';
 import { embedChunks, hashChunks, noteTitleFromPath } from './chunk';
 import { isValidVector, normalizeVec } from './vector-math';
-import { rerankScores } from './rerank';
-import { rerankActive } from './config';
+import { RERANK_MAX_DOCS, rerankScores } from './rerank';
+import { jevRerankScores } from './rerank-jev';
+import { abortError, isAbortError, throwIfAborted } from '../core/abort';
 import { parallelMap } from './parallel';
 import { TFIDF } from './tfidf';
 import { searchTextIndex } from './text-search';
@@ -80,6 +81,16 @@ export interface SearchHit {
   score: number;
   /** 重排分（上游 issue 429；bge-m3 下不激活恒缺省） */
   rerankScore?: number;
+}
+
+/**
+ * 列表显示用相关度百分比（issue 429）：重排过的条目显示重排分（P(yes)）——
+ * 名次按重排分排，显示的百分比就得是同一个尺，否则肉眼看到「没按相关度排序」。
+ * 未重排/重排回退的条目回落到余弦 score。**只影响显示**：分数条与阈值仍以余弦为唯一尺（ADR-0186）。
+ * 双端面板共用（桌面 reference-panel / 移动 mobile-panel）。
+ */
+export function relevancePct(item: SearchHit): number {
+  return Math.round((item.rerankScore ?? item.score) * 100);
 }
 
 interface ChunkTask {
@@ -619,15 +630,26 @@ export class VectorStore {
 
   /** 向量检索：查询嵌入 → VP-Tree topK×3 候选 → cos=1−d²/2 → 去重 → topK → score^0.35（QA L655-691） */
   /**
-   * 向量检索（上游 issue 425/ADR-0185 移植批 4）：查询嵌入 → 暴力全扫余弦（归一化点积）→ 去重 → topK。
-   * 全扫精确无近似：VP-Tree 近似召回会漏真实最近邻，且其距离→余弦换算只对单位向量成立
-   * （零向量距离恒 1.0 → 旧公式反推 0.5 → 锐化后 78% 恒霸榜，即 ADR-0185 病根）。
-   * 分数即原始余弦 [0,1]，与参考面板百分比同尺，不再幂次锐化。
-   * ⚠️ F2 冻结：本方法只读 this.vectors/meta；.vec 二进制布局、加载/保存路径零改动。
+   * 向量检索（issue 425/ADR-0185）：查询嵌入 → 暴力全扫余弦（归一化点积）→ 去重 → topK。
+   * 全扫精确无近似：VP-Tree 近似召回会漏掉真实最近邻，且其距离→余弦换算只对单位向量成立
+   * （零向量距离恒 1.0 → 旧公式反推 0.5 → 锐化后 78%，见 ADR-0185）。分数即原始余弦 [0,1]，
+   * 与参考面板百分比同尺，不再做幂次锐化——阈值型调用方（自动关联下限 / 每周撞车）已同步换算。
+   * signal（issue 428）：面板换新查询即中断本轮（嵌入请求中断 + 全扫/重排检查点让出）。
+   * opts.skipRerank（issue 541）：调用方显式声明不重排——成员集在重排前已按余弦锁死，重排只换顺序
+   * 与挂 `rerankScore`，凡是只读 `score` 的链路（建链）拿到的结果与「重排失败回退余弦序」逐条相同，
+   * 那一轮重排纯属白付耗时。判别权交给调用方，不再靠列表长度隐式区分前后台。
    */
-  async vectorSearch(query: string, topK = 20, baseUrl?: string, signal?: AbortSignal): Promise<SearchHit[]> {
-    const queryEmbedding = await getEmbedding(query, true, baseUrl);
-    if (!queryEmbedding || !isValidVector(queryEmbedding)) return [];
+  async vectorSearch(
+    query: string,
+    topK = 20,
+    baseUrl?: string,
+    signal?: AbortSignal,
+    opts?: { skipRerank?: boolean }
+  ): Promise<SearchHit[]> {
+    throwIfAborted(signal);
+    const queryEmbedding = await getEmbedding(query, true, baseUrl, undefined, signal);
+    throwIfAborted(signal);
+    if (!isValidVector(queryEmbedding)) return [];
     const dim = this.meta._dim || this.dim;
     if (!dim || this.vectors.length === 0) return [];
     if (queryEmbedding.length !== dim) {
@@ -662,27 +684,71 @@ export class VectorStore {
       deduped.push(item);
       if (deduped.length >= topK) break;
     }
-    return this.applyRerank(query, deduped, baseUrl, signal);
+    return this.applyRerank(query, deduped, baseUrl, signal, opts?.skipRerank === true);
   }
 
-  /** 模型重建门（融合批）：本地 meta 无 _model 跟踪、默认 bge-m3 未变——恒 false（F2：绝不自动重建） */
+  /** 模型重建门（融合批）：本地 meta 无 _model 跟踪、默认 bge-m3 未变——恒 false（F2：绝不自动重建）。
+   *  （上游 issue 422 的 meta._model 深跟踪未随本批吸收，维持本地 stub 语义。） */
   needsModelRebuild(): boolean {
     return false;
   }
 
-  /** 重排接线（上游 ADR-0186 融合）：bge-m3 下 rerankActive() 恒 false → 原样返回（纯增强层，失败静默回退） */
-  private async applyRerank(query: string, hits: SearchHit[], baseUrl?: string, signal?: AbortSignal): Promise<SearchHit[]> {
-    if (hits.length < 2 || !rerankActive()) return hits;
+  /**
+   * 重排接线（issue 427/ADR-0186 建本地通道；issue 431/ADR-0189 起双通道二选一）：列表整体交
+   * 当前生效通道打分，重排分另记 `hit.rerankScore`（issue 429），显示层据此让百分比与名次同尺；
+   * **hit.score 不动**——阈值仍走 ADR-0185 的单一余弦尺。**要么整体重排、要么维持余弦序**
+   * （ADR-0186 不变量）：skip 或列表超过 RERANK_MAX_DOCS 即整轮不重排（见下方两处早退）——
+   * 已重排头部 + 只有余弦分的尾部混排，正是 issue 429 要消灭的两把尺观感；面板侧 TopK 上限（1–50）保证
+   * 交互检索永远走整列重排。通道由 `rerankChannel()` 单源决定（off / local / jev）：
+   * local = Qwen3-Reranker 交叉编码（Ollama，绑 8B 嵌入门）；jev = Jev noul 云端判定
+   * （不绑 8B 门；返回 null 即 Jev 不可用——未配密钥 / 超时 / 畸形 / 缺题键都在这一路回落）。
+   * 任一通道失败（模型未装 / 超时 / 预算用尽）→ 静默回退余弦序 + console.warn：重排是增强层，
+   * 不打断检索链路，也不触发 search() 的文本降级（那是向量链路故障的降级）。
+   * 取消（AbortError）例外：直抛——发起方已换成新查询，这里回填旧序只会盖掉新结果。
+   */
+  private async applyRerank(
+    query: string,
+    hits: SearchHit[],
+    baseUrl?: string,
+    signal?: AbortSignal,
+    skip = false
+  ): Promise<SearchHit[]> {
+    if (skip) return hits; // issue 541：调用方声明不重排（建链只要成员集与余弦分）
+    if (hits.length < 2) return hits;
+    const channel: RerankChannel = rerankChannel();
+    if (channel === 'off') return hits;
+    // 未声明 skip 的长列表兜底：半重排会让本函数的「整轮同尺」不变量失守。
+    // issue 541 起建链不再靠这条判别——它的池 = max(TopK×3, 24)，TopK ≤ 16 时 ≤ 48，
+    // 本就够不到这里，白跑一整轮（现由 findCandidates 显式传 skipRerank）。
+    if (hits.length > RERANK_MAX_DOCS) return hits;
     try {
+      if (channel === 'jev') {
+        const scores = await jevRerankScores(query, hits.map((h) => h.chunk), signal);
+        if (!scores) {
+          // null = Jev 不可用（未配密钥 / 超时 / 畸形 / 缺题键）→ 维持余弦序（judgeOrFallback 的
+          // fallback 槽位）。失败要留痕（ADR-0189 决策 5：失败一律 warn）——judgeOrFallback 自己
+          // 只有 debug 且文案是「回落 LLM」（本票是首个非 LLM 回落），未配密钥连 debug 都没有，
+          // 与本地通道的 catch-warn 不对称，review 收口补齐。
+          console.warn('[secondbrain] Jev 重排不可用，按余弦序返回');
+          return hits;
+        }
+        return this.rankByScores(hits, scores);
+      }
       const scores = await rerankScores(query, hits.map((h) => h.chunk), baseUrl, signal);
-      const paired = hits.map((h, i) => ({ h, r: scores[i] ?? 0 }));
-      paired.sort((a, b) => b.r - a.r);
-      return paired.map(({ h, r }) => ({ ...h, rerankScore: r }));
-    } catch (e: any) {
-      if (/abort/i.test(String(e?.name || '') + String(e?.message || ''))) throw e;
-      console.warn('[secondbrain] 重排失败，回退余弦序:', e?.message || e);
+      return this.rankByScores(hits, scores);
+    } catch (e) {
+      if (signal?.aborted || isAbortError(e)) throw abortError();
+      console.warn('[secondbrain] 重排不可用，按余弦序返回', e);
       return hits;
     }
+  }
+
+  /** 重排分 → 名次（同分保持余弦序的稳定排序），重排分随条目走、score 不动（单一余弦尺） */
+  private rankByScores(hits: SearchHit[], scores: number[]): SearchHit[] {
+    return hits
+      .map((hit, i) => ({ hit, s: scores[i], i }))
+      .sort((a, b) => b.s - a.s || a.i - b.i) // 同分保持余弦序（稳定排序）
+      .map((x) => ({ ...x.hit, rerankScore: x.s }));
   }
 
   /**
@@ -722,13 +788,15 @@ export class VectorStore {
     return this.normCache;
   }
 
-  /** 桌面检索：向量优先，异常降级文本；移动端直走文本索引（QA L694-699 + bz 降级改进） */
+  /** 桌面检索：向量优先，异常降级文本；移动端直走文本索引（QA L694-699 + bz 降级改进）。
+   *  取消（issue 428）例外：AbortError 直抛不降级——发起方已换新查询，降级回填旧文本只会盖掉新轮。 */
   async search(query: string, topK = 20, onDegraded?: (reason: unknown) => void, signal?: AbortSignal): Promise<SearchHit[]> {
     if (IS_MOBILE) return searchTextIndex(query, this.meta.notes, topK);
     try {
       // ticket 46：检索整体限时（与 Ollama 统一超时同值）——挂起/超时即降级文本，避免 30s 阻塞参考面板/对话
       return await this.withSearchTimeout(this.vectorSearch(query, topK, undefined, signal));
     } catch (e) {
+      if (signal?.aborted || isAbortError(e)) throw abortError();
       console.warn('[secondbrain] 向量检索失败，降级为文本检索', e);
       onDegraded?.(e); // 降级信号：调用方（参考面板）可给用户降级提示
       return searchTextIndex(query, this.meta.notes, topK);

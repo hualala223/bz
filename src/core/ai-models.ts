@@ -189,5 +189,5 @@ export async function fetchProviderModels(
 }
 export function isQwen3Embedding8b(model: unknown): boolean {
   const m = String(model ?? '');
-  return /qwen3[-_]?embedding[:\-_.]?8b/i.test(m);
+  return /qwen3[-_]?embedding[:\-_.]?8b\b/i.test(String(model ?? ''));
 }
