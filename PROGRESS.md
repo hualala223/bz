@@ -1007,3 +1007,13 @@
 - [x] 存量腐烂顺手修复：review-fix-clip2-ui1 C1/C14 seed 日期改相对天数（写死 9 月日期随时间流逝撞 30 天保留策略被清——**master 上同为存量失败**，本批合并后即修复）；C8 序随日期倒序调位
 - [x] 归档上游 issues 11 篇 / ADR 6 篇进 upstream-yeshimei；CONTEXT.md 词条（在线资源组/下载清单/豆瓣名称索引/片单/重映厅/已看日期）
 - [x] 门禁：worktree tsc 0 错 + vitest 全量 4201 绿（4 暂缓 skip）→ master ff 合并 → 全量复测 4201 绿 → pnpm run build 部署
+
+### 票 312 — 上游吸收批 5：工具坞整域（源 yeshimei/bz 98f9bf73..dd626fc9，2026-10-04）
+
+- [x] 口径：窗口 32 提交全部属 dock 新域（issues 零新增/ADR 新增 4 篇）；git 直连持续断线，全量走 GitHub API（compare 补丁 + raw 文件）双通道移植；worktree `wt-up-batch5` 隔离
+- [x] 域本体：src/dock 12 文件（声明文件 manifest.json 自描述 + 参数值/运行记录住工具侧 + 信任签名 + bz 亲自调度 + 自动化规则表 + 面板 + 直跑命令）+ tests/dock 7 件 + prototypes/dock 行为包 + docs/dock-tool-guide.md 契约文档（ADR-0235/0236/0237/0238）
+- [x] 前置件：core/external-tool.ts（issue 461 四行协议壳，people 工具线件，dock 依赖）+ 其测试；core/path-picker 系统选择器家族（issue 457：Electron 原生目录/多选文件对话框 + webkitdirectory 兜底 + 评审壳注入点）
+- [x] 集成七点：main.ts（bz-dock-open 入 COMMANDS 表 + 每工具直达命令启动快照注册 + 调度器 onLayoutReady 启动 + 卸载链先停表再拆面板）；settings.ts（dockTools/dockNotifyMissed/dockAutoRun/dockRunState 四键，type-only 导入）；settings-panel（工具坞域行入「工具」组）；domain-icons（dock: container）；core/ui/field.ts uiField 根标签按可标记元素自适应（顺手修 label 包自绘下拉点不开的通用缺陷）；build-css 聚合 dock/styles.css；smoke 计数跟移
+- [x] 数据红线核对：dock 全部数据在工具目录与插件 data.json，零 vault 内新数据文件；登记表只存「bz 相关的最小集」（ADR-0235 决策），不触冻结域、不触 AI/小橘设置板块
+- [x] 归档 ADR-0235~0238 进 upstream-yeshimei；CONTEXT 词条（工具坞/声明文件/信任签名/自动化规则表）；AGENTS 域数 25→26、命令数 80→81（直达命令运行时注册不占表计数）
+- [x] 门禁：worktree tsc 0 错 + dock 目标面 218 测试一次全绿 + 全量 4419 绿（291 文件）→ master ff 合并 → 全量复测同绿 → pnpm run build 部署
