@@ -52,4 +52,7 @@ export const DOMAIN_ICONS: Readonly<Record<string, string>> = {
   knowledge: 'list-video',
   // 命令专属域
   'settings-panel': 'settings-2',
+  // 面板清单内原硬编码域（上游图标单源收敛随批收编）：news=剪藏本订阅未读流、quiz=做题家
+  news: 'rss',
+  quiz: 'graduation-cap',
 };
