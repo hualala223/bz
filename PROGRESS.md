@@ -1029,3 +1029,13 @@
 - [x] 本地契约协调：凭据组无 icon（「区块标题平铺形态」契约优先，面板无 icon 组照常渲染）；EMOJI_RE 断言限定头行+导航（本地「📂 数据存储路径」组名前缀为既有形态）
 - [x] 归档 ADR-0180（凭据单行掩码用户裁决）；存量归档欠账（上游 239 篇 vs 本地 42 篇）记入未随批
 - [x] 门禁：worktree tsc 0 错 + 全量 4423 绿（BZ_TEST_MAX_WORKERS=8 限流，douban-queue 两条为已知超卖抖动、单跑恒绿）→ master ff 合并 → 复测同绿 → 构建部署
+
+### 票 314 — 上游吸收批 7a：皮肤聚合行归还 + 文档弹窗 + 通知页并回（源 yeshimei/bz issue 475/472-474/476/479，2026-10-04）
+
+- [x] 皮肤聚合行归还（475/ADR-0199）：settings-panel/online-resources.ts 整文件对齐上游 master 版（95+/57-），SKINS_ROW_ID 保留 id + 版本区间三助手归 skin-pack 单源；**core/category-table + core/rss-catalog 两模型件随批入库**（只依赖批 4 基建，tsc 即绿；7b 消费方 UI 未见）
+- [x] 文档弹窗子系统（472/473/474/476）：core/manual + core/changelog 两单源（ensure/refresh + 人话失败 notice，失败不兜底用户拍板）+ 面板 manual-viewer/changelog 双弹窗（同皮 .bz-sp-skin，iframe srcdoc）+ 导航/列表末组「文档」入口（navDocSecHtml/mobDocSecHtml 纯层，2026-09-26 不做常驻底栏拍板）+ 搜索按 DOC_ENTRY_NAMES 命中 + 后台核对热替换（476：本地版秒开、核对静默、有新热替换/落盘）
+- [x] 通知组并回通用（479/ADR-0202）：general loader 增取本地既有 🔔 通知组（区块标题平铺形态不变，无 icon 契约不破）；上游外观并入通用不随批（本地外观住「设置」占位域）
+- [x] 三处测试重锚（通用域 2→3 组）；面板 45/45 全绿
+- [x] 归档 ADR-0199/0200/0202 + issues 472/473/474/476/479；CONTEXT 词条见本文件同日段
+- [x] 门禁：worktree tsc 0 错 + 全量 4423 绿 → master ff 合并 → 复测同绿 → 构建部署
+- [ ] 未随批（=批 7b）：RSS 黄页订阅弹窗双页签（495/ADR-0208）+ RSSHub 路由参数表单（497/ADR-0209）+ 归物分类表消费方（catalog-suggest 13.7KB + catalog/categories.json 88KB + icon-pool.json 32KB + 记一笔下拉 + 图标继承，478 系/ADR-0204）——core 模型件已入库，消费方清单已缮写进 .scratch/upstream-batch7-handoff.md
