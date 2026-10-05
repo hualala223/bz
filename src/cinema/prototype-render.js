@@ -25,12 +25,12 @@ var BZR_cinema = (() => {
     ICON: () => ICON,
     ST_COLOR: () => ST_COLOR,
     aiPageHtml: () => aiPageHtml,
-    aiRecMeta: () => aiRecMeta,
-    aiRecName: () => aiRecName,
     cardHtml: () => cardHtml,
+    cardInList: () => cardInList,
     cardStatus: () => cardStatus,
     chipsHtml: () => chipsHtml,
     confirmModalHtml: () => confirmModalHtml,
+    countryTally: () => countryTally,
     dedupeModalHtml: () => dedupeModalHtml,
     detailModalHtml: () => detailModalHtml,
     doubanSearchUrl: () => doubanSearchUrl,
@@ -89,6 +89,10 @@ var BZR_cinema = (() => {
   var STATUS_WANT = 0;
   var STATUS_WATCHING = 1;
   var STATUS_WATCHED = 2;
+  function rewatchCount(it) {
+    return 1 + it.rewatches.length;
+  }
+  var REWATCH_SHELF = "重映厅";
   var ILLEGAL_NAME_CHARS = '\\\\/:*?"<>|';
   var ILLEGAL_NAME_RE = new RegExp(`[${ILLEGAL_NAME_CHARS}]`);
   var ILLEGAL_NAME_RE_GLOBAL = new RegExp(`[${ILLEGAL_NAME_CHARS}]`, "g");
@@ -171,6 +175,12 @@ var BZR_cinema = (() => {
   function seasonsByRelease(slots) {
     return [...slots].sort((a, b) => cmpByRelease(a.item, b.item) || a.no - b.no);
   }
+  function cardFace(e) {
+    return e.kind === "series" ? e.face : e.item;
+  }
+  function cardGroup(e) {
+    return e.kind === "series" ? e.group : e.item.group;
+  }
 
   // src/cinema/shared.ts
   var ICON = {
@@ -181,13 +191,17 @@ var BZR_cinema = (() => {
     add: "plus",
     edit: "pencil",
     del: "trash-2",
-    confirm: "alert-circle",
     back: "chevron-left",
     grid: "layout-grid",
     eye: "eye",
     play: "play",
     globe: "globe",
-    refresh: "refresh-cw"
+    repeat: "rotate-ccw",
+    shelf: "bookmark",
+    listPlus: "list-plus",
+    import: "download",
+    refresh: "refresh-cw",
+    confirm: "alert-circle"
   };
   function typeColor(group) {
     var _a;
@@ -272,7 +286,7 @@ var BZR_cinema = (() => {
     const epsBadge = st === STATUS_WATCHING && episodesEligibleTag(it.typeTag) && it.episodesWatching !== null && it.episodesTotal !== null ? `<span class="badge badge-eps">${it.episodesWatching}/${it.episodesTotal}</span>` : "";
     const chBadge = st === STATUS_WATCHING && chaptersEligibleTag(it.typeTag) && it.chaptersWatching !== null && it.chaptersTotal !== null ? `<span class="badge badge-eps">${it.chaptersWatching}/${it.chaptersTotal}章</span>` : "";
     return `<div class="pcard${e.kind === "series" ? " pcard-series" : ""}${picked ? " is-picked" : ""}" data-cinema-key="${esc(e.kind === "series" ? e.key : itemKey(it))}" tabindex="0" role="button" aria-label="${esc(label)}"><div class="pw"><div class="pw-face">${p.poster}</div>${fetching ? '<div class="pw-fetch"><span class="pw-spin"></span></div>' : ""}
-    ${st !== STATUS_WATCHED ? `<span class="badge" style="background:${statusColor(st)}">${statusText(st)}</span>` : ""}${epsBadge}${chBadge}${e.kind === "series" ? seasonDotsHtml(e.seasons) : ""}</div>
+    ${st !== STATUS_WATCHED ? `<span class="badge" style="background:${statusColor(st)}">${statusText(st)}</span>` : ""}${epsBadge}${chBadge}${it.rewatches.length ? `<span class="badge badge--re" role="img" aria-label="共看过 ${rewatchCount(it)} 刷">${rewatchCount(it)}刷</span>` : ""}${e.kind === "series" ? seasonDotsHtml(e.seasons) : ""}</div>
     <div class="pname">${p.name}</div>
     <div class="pmeta">${p.meta}</div>
     <div class="pstars">${p.stars}</div></div>`;
@@ -280,32 +294,45 @@ var BZR_cinema = (() => {
   function pcardHtml(it, posterUrl, fetching = false, picked = false) {
     return cardHtml({ kind: "single", item: it }, posterUrl, fetching, picked);
   }
-  function multiBarHtml(view) {
-    return `<div class="cn-multibar"><span class="mb-cnt">已选 ${view.selectedCount} 条</span>
-    <button class="dm-btn gold mb-export" data-cinema-export>导出感想</button>
-    <button class="dm-btn mb-exit" data-cinema-multiselect-exit>退出多选</button></div>`;
-  }
   function viewFiltered(view) {
-    return !!(view.typeFilter || view.statusFilter || view.countryFilter || view.searchKeyword);
+    return !!(view.typeFilter || view.statusFilter || view.countryFilter || view.listFilter || view.searchKeyword);
+  }
+  function cardInList(e, list) {
+    const members = e.kind === "series" ? [...e.seasons.map((s) => s.item), ...e.specials] : [e.item];
+    return members.some((m) => m.lists.includes(list));
   }
   var HOT_FOLD_MIN = 120;
   function detailModalHtml(it, posterUrl) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
     const badge = (color, text) => `<span class="dm-chip" style="background:${color}">${esc(text)}</span>`;
     const rows = [
+      // 票 294/299（本地保留件）：国家与题材（书籍=体裁）两行在豆瓣字段之前
       ["国家", (_a = it.country) != null ? _a : ""],
       [genreLabel(it.group), ((_b = it.genres) != null ? _b : []).join("、")],
-      ["导演", (_c = it.director) != null ? _c : ""],
-      ["主演", (_d = it.actors) != null ? _d : ""],
-      ["制片国家/地区", (_e = it.region) != null ? _e : ""],
-      ["上映日期", (_g = (_f = it.releaseDate) != null ? _f : it.year) != null ? _g : ""],
+      ["类型", (_c = it.genre) != null ? _c : ""],
+      ["导演", (_d = it.director) != null ? _d : ""],
+      ["主演", (_e = it.actors) != null ? _e : ""],
+      ["制片国家/地区", (_f = it.region) != null ? _f : ""],
+      ["上映日期", (_h = (_g = it.releaseDate) != null ? _g : it.year) != null ? _h : ""],
       // 完整年月日（year 只留年，卡片/统计用）
-      ["片长", (_h = it.duration) != null ? _h : ""],
+      ["片长", (_i = it.duration) != null ? _i : ""],
       ["季集", it.seasonText ? `${it.seasonText} 集` : ""],
-      ["豆瓣评分", (_i = it.doubanRating) != null ? _i : ""]
+      ["豆瓣评分", (_j = it.doubanRating) != null ? _j : ""]
     ].filter(([, v]) => v !== "");
-    const hot = ((_j = it.hotComment) != null ? _j : "").trim();
+    const hot = ((_k = it.hotComment) != null ? _k : "").trim();
     const hotFold = hot.length > HOT_FOLD_MIN;
+    const rewatched = it.rewatches.length > 0;
+    const firstDate = (it.watchedDate || "").slice(0, 10);
+    const wantD = (it.wantDate || "").slice(0, 10);
+    const watchingD = (it.watchingDate || "").slice(0, 10);
+    const nodes = [];
+    if (wantD) nodes.push({ d: wantD, tag: "想看" });
+    if (watchingD) nodes.push({ d: watchingD, tag: "在看" });
+    if (firstDate) nodes.push({ d: firstDate, tag: rewatched ? "首看" : "已看", first: true });
+    for (const r of [...it.rewatches].sort()) nodes.push({ d: r.slice(0, 16), tag: "" });
+    nodes.sort((a, b) => a.d.localeCompare(b.d));
+    const timeline = nodes.length ? `<div class="dm-tl">${nodes.map((n) => `<div class="dm-tl-row${n.first ? " is-first" : ""}"><i></i><span class="d">${esc(n.d)}</span>${n.tag ? `<span class="tag">${esc(n.tag)}</span>` : ""}</div>`).join("")}</div>` : "";
+    const listChips = [...it.lists].sort((a, b) => a === REWATCH_SHELF ? -1 : b === REWATCH_SHELF ? 1 : 0).map((l) => `<span class="dm-chip dm-chip--shelf">${esc(l)}</span>`).join("");
     return `<div class="cn-modal cn-modal--detail">
     <div class="dm-head"><div class="dm-poster">${posterUrl ? `<img src="${esc(posterUrl)}" onerror="this.remove()">` : ""}</div>
       <div style="flex:1;min-width:0"><div class="dm-title">${esc(it.name)}</div>
@@ -314,16 +341,18 @@ var BZR_cinema = (() => {
       const st = statusNum(it.status);
       return st !== STATUS_WATCHED ? badge(statusColor(st), statusText(st)) : "";
     })()}
-          ${it.rating && it.rating > 0 ? `<span class="dm-stars">${getStarString(it.rating)}</span><span class="dm-rating">${Number(it.rating).toFixed(1)}</span>` : ""}
-          ${it.watchDate ? `<span class="dm-date">${esc((it.watchDate || "").slice(0, 10))}</span>` : ""}</div>
-        ${it.review ? `<div class="dm-review">${esc(it.review)}</div>` : ""}</div></div>
+          ${rewatched ? `<span class="dm-chip dm-chip--re">${rewatchCount(it)} 刷</span>` : ""}
+          ${listChips}
+          ${it.rating && it.rating > 0 ? `<span class="dm-stars">${getStarString(it.rating)}</span><span class="dm-rating">${Number(it.rating).toFixed(1)}</span>` : ""}</div>
+        ${it.review ? `<div class="dm-review">${esc(it.review)}</div>` : ""}
+        ${timeline}</div></div>
     ${rows.length ? '<div class="dm-sec">豆 瓣 信 息</div>' + rows.map(([k, v]) => `<div class="dm-kv"><span class="dm-kv-k">${k}</span><span class="dm-kv-v">${esc(v)}</span></div>`).join("") : ""}
     ${it.episodesWatching !== null && it.episodesTotal !== null ? `<div class="dm-kv"><span class="dm-kv-k">集数</span><span class="dm-kv-v">${it.episodesWatching} / ${it.episodesTotal}</span></div>` : it.episodesTotal != null ? `<div class="dm-kv"><span class="dm-kv-k">集数</span><span class="dm-kv-v">共 ${it.episodesTotal} 集</span></div>` : ""}
     ${it.chaptersWatching !== null && it.chaptersTotal !== null ? `<div class="dm-kv"><span class="dm-kv-k">章节</span><span class="dm-kv-v">${it.chaptersWatching} / ${it.chaptersTotal}</span></div>` : it.chaptersTotal != null ? `<div class="dm-kv"><span class="dm-kv-k">章节</span><span class="dm-kv-v">共 ${it.chaptersTotal} 章</span></div>` : ""}
     ${it.doubanUrl ? `<div class="dm-kv"><span class="dm-kv-k">豆瓣链接</span><span class="dm-kv-v"><a href="${esc(it.doubanUrl)}" target="_blank" rel="noopener">${esc(it.doubanUrl)}</a></span></div>` : ""}
     ${hot ? `<div class="dm-sec">热 门 短 评</div><div class="dm-quote${hotFold ? " is-fold" : ""}" data-dm-quote>${esc(hot)}</div>${hotFold ? `<button type="button" class="dm-fold j-quote-fold" data-dm-fold>展开全文（${hot.length} 字）</button>` : ""}` : ""}
     ${it.synopsis ? `<div class="dm-sec">简 介</div><div class="dm-synopsis">${esc(it.synopsis)}</div>` : ""}
-    <div class="dm-actions">${it.file ? `<button class="dm-btn j-refetch">${iconSpan(ICON.refresh)}重抓豆瓣</button>` : ""}<button class="dm-btn j-similar">${iconSpan(ICON.ai)}找同类</button><button class="dm-btn j-edit">${iconSpan(ICON.edit)}编辑</button><button class="dm-btn danger j-del">${iconSpan(ICON.del)}删除</button></div>
+    <div class="dm-actions">${it.file ? `<button class="dm-btn j-refetch">${iconSpan(ICON.refresh)}重抓豆瓣</button>` : ""}${statusNum(it.status) === STATUS_WATCHED ? `<button class="dm-btn j-rewatch">${iconSpan(ICON.repeat)}重温 +1</button>` : ""}<button class="dm-btn j-similar">${iconSpan(ICON.ai)}找同类</button><button class="dm-btn j-edit">${iconSpan(ICON.edit)}编辑</button><button class="dm-btn danger j-del">${iconSpan(ICON.del)}删除</button></div>
   </div>`;
   }
   function seriesCountsText(card) {
@@ -337,6 +366,7 @@ var BZR_cinema = (() => {
     return `共 ${card.seasons.length} 季` + (extra ? ` · ${extra}` : "");
   }
   function seriesDetailModalHtml(card, posterOf) {
+    var _a;
     const face = card.face;
     const url = posterOf(face);
     const st = seriesStatus(card.seasons, card.specials);
@@ -349,13 +379,15 @@ var BZR_cinema = (() => {
       const sub = [
         it.group !== card.group ? esc(it.group) : "",
         // 特别篇常是电影/纪录片：标出组，免得看着像「某一季」
-        it.watchDate ? `观影 ${esc(it.watchDate.slice(0, 10))}` : "",
+        it.watchedDate ? `观影 ${esc(it.watchedDate.slice(0, 10))}` : "",
+        // 同时间线口径：读已看日期，非排序用的观影日期（issue 536）
         it.seasonText ? esc(it.seasonText) : ""
         // 深审批 B #6：季集原文自带单位（「2季」），不再拼「 集」出「2季 集」叠字
       ].filter(Boolean).join(" · ");
       const r = it.rating;
       return `<div class="s-row${cls}" data-cinema-season-key="${esc(itemKey(it))}">${thumb(it)}
       <div class="s-mid"><div class="s-name">${esc(it.name)}</div>${sub ? `<div class="s-sub">${sub}</div>` : ""}</div>
+      ${it.rewatches.length ? `<span class="s-chip s-chip--re" role="img" aria-label="共看过 ${rewatchCount(it)} 刷">${rewatchCount(it)}刷</span>` : ""}
       <span class="s-chip" style="background:${statusColor(it.status)}">${statusText(it.status)}</span>
       <span class="s-rate${r && r > 0 ? "" : " none"}">${r && r > 0 ? Number(r).toFixed(1) : "—"}</span></div>`;
     };
@@ -364,13 +396,15 @@ var BZR_cinema = (() => {
       ...card.specials.map((it) => ({ it, special: true }))
     ].sort((a, b) => cmpByRelease(a.it, b.it) || (a.special === b.special ? 0 : a.special ? 1 : -1));
     const rows = rowSrc.map(({ it, special }) => rowOf(it, special ? " s-row-special" : "")).join("");
+    const watchedDays = rowSrc.map(({ it }) => it.watchedDate).filter((d) => !!d).sort();
+    const lastWatched = ((_a = watchedDays[watchedDays.length - 1]) != null ? _a : "").slice(0, 10);
     return `<div class="cn-modal cn-modal--detail">
     <div class="dm-head"><div class="dm-poster">${url ? `<img src="${esc(url)}" onerror="this.remove()">` : ""}</div>
       <div style="flex:1;min-width:0"><div class="dm-title">${esc(card.name)}<span class="dm-n">${seriesCountsText(card)}</span></div>
         <div class="dm-badges">${badge(typeColor(card.group), face.typeTag)}
           ${st !== STATUS_WATCHED ? badge(statusColor(st), statusText(st)) : ""}
           ${card.rating && card.rating > 0 ? `<span class="dm-stars">${getStarString(card.rating)}</span><span class="dm-rating">${Number(card.rating).toFixed(1)}</span>` : ""}
-          ${face.watchDate ? `<span class="dm-date">${esc(face.watchDate.slice(0, 10))}</span>` : ""}</div></div></div>
+          ${lastWatched ? `<span class="dm-date">${esc(lastWatched)}</span>` : ""}</div></div></div>
     <div class="s-list">${rows}</div>
   </div>`;
   }
@@ -383,10 +417,6 @@ var BZR_cinema = (() => {
     纪录片: [],
     公开课: ["公开课", "TED"]
   };
-  function genreLabel(group, spaced = false) {
-    const t = group === "书籍" ? "体裁" : "题材";
-    return spaced ? t.split("").join(" ") : t;
-  }
   function formAllTags() {
     const out = [];
     for (const g of GROUP_ORDER) {
@@ -409,24 +439,23 @@ var BZR_cinema = (() => {
     const initSt = opts.stText;
     const country = (_a = opts.country) != null ? _a : "";
     const genreLabelText = genreLabel((_b = getGroupForTag(opts.typeTag)) != null ? _b : "其他", true);
-    const nameField = `<div class="f-field"><span class="f-label">名 称</span><input class="f-input j-name" value="${esc(opts.name)}" placeholder="条目名称"></div>`;
-    const stField = `<div class="f-field"><span class="f-label">状 态</span><div class="f-choice j-sts">${formChoicesHtml(["想看", "在看", "已看"], initSt, "f-st")}</div></div>`;
-    const ratingField = `<div class="f-field j-rating" style="display:${initSt === "已看" ? "" : "none"}"><span class="f-label">评 分</span>
-      <div class="f-range-row"><input type="range" class="f-range j-range" min="1" max="10" step="0.1" value="${opts.rating}"><span class="f-range-val j-rval">${Number(opts.rating).toFixed(1)}</span><span class="f-stars j-stars" data-lit="${starsLit(opts.rating)}">${starsHtml(opts.rating)}</span></div></div>`;
-    const reviewField = `<div class="f-field j-review" style="display:${initSt === "已看" ? "" : "none"}"><span class="f-label">感 想</span><textarea class="f-input j-review-t" placeholder="写点什么…">${esc(opts.review)}</textarea></div>`;
     const countryField = `<div class="f-field"><span class="f-label">国 家</span><div class="f-choice j-countries">${optionChipsHtml(opts.countryOptions, country ? [country] : [], "f-country", false)}</div></div>`;
     const genreField = `<div class="f-field"><span class="f-label j-genre-label">${genreLabelText}</span><div class="f-choice j-genres">${optionChipsHtml(opts.genreOptions, opts.genres, "f-genre", true)}</div></div>`;
     const epsField = `<div class="f-field j-eps" style="display:none"><span class="f-label">集 数</span>
       <div class="f-eps-row"><label>正在看 <input type="number" min="0" class="f-input j-eps-watching" value="${(_c = opts.epsWatching) != null ? _c : ""}"></label><label>总集数 <input type="number" min="0" class="f-input j-eps-total" value="${(_d = opts.epsTotal) != null ? _d : ""}"></label></div></div>`;
     const chField = `<div class="f-field j-chapters" style="display:none"><span class="f-label">章 节</span>
       <div class="f-eps-row"><label>正在看 <input type="number" min="0" class="f-input j-ch-watching" value="${(_e = opts.chWatching) != null ? _e : ""}"></label><label>总章节数 <input type="number" min="0" class="f-input j-ch-total" value="${(_f = opts.chTotal) != null ? _f : ""}"></label></div></div>`;
+    const nameField = `<div class="f-field f-field--name"><span class="f-label">名 称</span><input class="f-input j-name" value="${esc(opts.name)}" placeholder="条目名称"></div>`;
+    const stField = `<div class="f-field"><span class="f-label">状 态</span><div class="f-choice j-sts">${formChoicesHtml(["想看", "在看", "已看"], initSt, "f-st")}</div></div>`;
+    const ratingField = `<div class="f-field j-rating" style="display:${initSt === "已看" ? "" : "none"}"><span class="f-label">评 分</span>
+      <div class="f-range-row"><input type="range" class="f-range j-range" min="1" max="10" step="0.1" value="${opts.rating}"><span class="f-range-val j-rval">${Number(opts.rating).toFixed(1)}</span><span class="f-stars j-stars" data-lit="${starsLit(opts.rating)}">${starsHtml(opts.rating)}</span></div></div>`;
+    const reviewField = `<div class="f-field j-review" style="display:${initSt === "已看" ? "" : "none"}"><span class="f-label">影 评</span><textarea class="f-input j-review-t" placeholder="写点什么…">${esc(opts.review)}</textarea></div>`;
     if (editing) {
       return `<div class="cn-modal" style="width:100%">
     <div class="cn-modal-title">编辑条目</div>
     ${nameField}
     <div class="f-field"><span class="f-label">类 型</span><div class="f-choice j-tags">${formChoicesHtml(formAllTags(), opts.typeTag, "f-tag")}</div></div>
-    ${countryField}${genreField}
-    ${stField}${epsField}${chField}${ratingField}${reviewField}
+    ${countryField}${genreField}${stField}${ratingField}${reviewField}${epsField}${chField}
     <div class="dm-actions"><button class="dm-btn gold j-save">保存</button></div>
   </div>`;
     }
@@ -529,7 +558,7 @@ var BZR_cinema = (() => {
     return `<div class="ai-pref">偏好：<b>${esc(inp.pref)}</b></div>
     <div class="ai-guide">
       <div class="ai-title">让 AI 读懂你的片库</div>
-      <div class="ai-sub">基于你的评分、感想与偏好标签生成荐片，<br>结果可直接加入想看清单</div>
+      <div class="ai-sub">基于你的评分、影评与偏好标签生成荐片，<br>结果可直接加入想看清单</div>
       <button class="ai-start j-ai-start" data-cinema-ai-start>${iconSpan(ICON.ai)}开始推荐</button></div>`;
   }
   function sheetHeadHtml(it, posterUrl) {
@@ -540,12 +569,21 @@ var BZR_cinema = (() => {
     return `<div class="cn-sheet-head">${posterUrl ? `<img class="cn-sheet-poster" src="${esc(posterUrl)}" onerror="this.remove()">` : ""}
     <div><div class="cn-sheet-name">${esc(card.name)}</div><div class="cn-sheet-sub">${esc(seriesCountsText(card))}</div></div></div>`;
   }
+  function multiBarHtml(view) {
+    return `<div class="cn-multibar"><span class="mb-cnt">已选 ${view.selectedCount} 条</span>
+    <button class="dm-btn gold mb-export" data-cinema-export>导出感想</button>
+    <button class="dm-btn mb-exit" data-cinema-multiselect-exit>退出多选</button></div>`;
+  }
   function optionChipsHtml(options, selected, attr, multi) {
     const chips = options.map((v) => {
       const on = selected.includes(v);
       return `<button type="button" class="f-choice-btn${on ? " is-on" : ""}" data-${attr}="${esc(v)}">${esc(v)}</button>`;
     }).join("");
     return chips + `<button type="button" class="f-choice-btn j-add-opt" data-fc-add="${attr}" title="添加新选项">＋</button>`;
+  }
+  function genreLabel(group, spaced = false) {
+    const t = group === "书籍" ? "体裁" : "题材";
+    return spaced ? t.split("").join(" ") : t;
   }
   function confirmModalHtml(item) {
     return `<div class="cn-modal cn-confirm" style="max-width:320px;width:100%">
@@ -583,6 +621,7 @@ var BZR_cinema = (() => {
           <div class="j-countries"></div>
           <div class="rail-label" style="padding-top:14px">状 态</div>
           <div class="j-status"></div>
+          <div class="j-lists"></div>
         </div>
         <div class="rail-foot">
           <button class="rail-item j-tool" data-tool="ai">${iconSpan(ICON.ai)}AI 荐片</button>
@@ -598,68 +637,103 @@ var BZR_cinema = (() => {
     return `<section class="mob bz-cinema--midnight bz-panel-mtop" data-cinema-root="midnight">
     <div class="m-head"><h2 class="j-mtitle">全部</h2><span class="cnt j-mcnt"></span>
       <span class="m-acts">
-        <button class="add j-madd" data-cinema-add title="添加条目">${iconSpan(ICON.add)}</button>
-        <button class="m-tool j-mai" title="AI 荐片">${iconSpan(ICON.ai)}</button>
-        <button class="m-tool j-yb" data-film-open title="观影志">${iconSpan(ICON.eye)}</button>
-        <button class="m-tool j-mstat" title="观影分析">${iconSpan(ICON.stat)}</button>
-        <button class="m-tool j-mclose" title="关闭">${iconSpan(ICON.close)}</button>
+        <button class="add j-madd bz-touch-target bz-touch-target--lg" data-cinema-add title="添加条目">${iconSpan(ICON.add)}</button>
+        <button class="m-tool j-import bz-touch-target bz-touch-target--lg" title="导入片单">${iconSpan(ICON.import)}</button>
+        <button class="m-tool j-mai bz-touch-target bz-touch-target--lg" title="AI 荐片">${iconSpan(ICON.ai)}</button>
+        <button class="m-tool j-yb bz-touch-target bz-touch-target--lg" data-film-open title="观影志">${iconSpan(ICON.eye)}</button>
+        <button class="m-tool j-mstat bz-touch-target bz-touch-target--lg" title="观影分析">${iconSpan(ICON.stat)}</button>
+        <button class="m-tool j-mclose bz-touch-target bz-touch-target--lg" title="关闭">${iconSpan(ICON.close)}</button>
       </span>
     </div>
     <div class="m-chips j-chips"></div>
-    <label class="m-search">${iconSpan(ICON.search)}<input class="j-mq" placeholder="搜索条目…"></label>
+    <label class="m-search">${iconSpan(ICON.search)}<input class="j-mq" placeholder="搜索条目（片名、类型、导演、主演、影评…）"><button type="button" class="q-clear" data-cinema-clear title="清空搜索" aria-label="清空搜索" hidden>${iconSpan(ICON.close)}</button></label>
     <div class="m-scroll j-mview"></div>
   </section>`;
   }
   var railRow = (on, attr, color, name, n) => `<button class="rail-item${on ? " is-on" : ""}" ${attr}><span class="dot" style="background:${color}"></span>${esc(name)}<span class="n">${n}</span></button>`;
-  function railHtml(items, view) {
+  function countryTally(cards) {
+    const cn = {};
+    let empty = 0;
+    const members = (e) => e.kind === "series" ? [...e.seasons.map((s) => s.item), ...e.specials] : [e.item];
+    for (const e of cards) {
+      const ms = members(e);
+      const hit = /* @__PURE__ */ new Set();
+      let noCountry = true;
+      for (const m of ms) {
+        if (m.country) {
+          hit.add(m.country);
+          noCountry = false;
+        }
+      }
+      if (noCountry) empty++;
+      for (const name of hit) cn[name] = (cn[name] || 0) + 1;
+    }
+    return { names: Object.keys(cn), empty };
+  }
+  function railHtml(cards, view, lists = [], cn) {
     const listOn = view.view === "list";
+    const scope = view.listFilter ? cards.filter((e) => cardInList(e, view.listFilter)) : cards;
     const g = {};
     const c = { 想看: 0, 在看: 0, 已看: 0 };
-    const cn = {};
-    let cnEmpty = 0;
-    items.forEach((it) => {
-      g[it.group] = (g[it.group] || 0) + 1;
-      c[statusText(it.status)]++;
-      if (it.country) cn[it.country] = (cn[it.country] || 0) + 1;
-      else cnEmpty++;
+    scope.forEach((e) => {
+      const grp = cardGroup(e);
+      g[grp] = (g[grp] || 0) + 1;
+      c[statusText(cardStatus(e))]++;
     });
-    let groups = railRow(listOn && !view.typeFilter && !view.statusFilter && !view.countryFilter, 'data-g="全部"', "var(--gold)", "全部", items.length);
+    let groups = railRow(listOn && !view.typeFilter && !view.statusFilter && !view.countryFilter && !view.listFilter, 'data-g="全部"', "var(--gold)", "全部", cards.length);
     for (const name of GROUP_ORDER) {
-      groups += railRow(listOn && view.typeFilter === name && !view.statusFilter && !view.countryFilter, `data-g="${name}"`, typeColor(name), name, g[name] || 0);
+      groups += railRow(listOn && view.typeFilter === name && !view.statusFilter, `data-g="${name}"`, typeColor(name), name, g[name] || 0);
     }
     let countries = "";
-    for (const name of Object.keys(cn)) {
-      countries += railRow(listOn && view.countryFilter === name, `data-cn="${esc(name)}"`, "var(--gold)", name, cn[name]);
-    }
-    if (cnEmpty > 0) {
-      countries += railRow(listOn && view.countryFilter === "未填", 'data-cn="未填"', "#8a8578", "未填", cnEmpty);
+    if (cn) {
+      for (const name of cn.names) {
+        countries += railRow(listOn && view.countryFilter === name, `data-cn="${esc(name)}"`, "var(--gold)", name, scope.filter((e) => cardMembersInCountry(e, name)).length);
+      }
+      if (cn.empty > 0) {
+        countries += railRow(listOn && view.countryFilter === "未填", 'data-cn="未填"', "#8a8578", "未填", scope.filter((e) => cardMembersAllUncountry(e)).length);
+      }
     }
     let status = "";
     for (const s of ["想看", "在看", "已看"]) {
       status += railRow(listOn && view.statusFilter === s, `data-s="${s}"`, ST_COLOR[s], s, c[s]);
     }
-    return { groups, countries, status };
+    let listsHtml = "";
+    if (lists.length) {
+      listsHtml = '<div class="rail-label" style="padding-top:14px">片 单</div>';
+      for (const name of lists) {
+        const n = cards.filter((e) => cardInList(e, name)).length;
+        listsHtml += railRow(listOn && view.listFilter === name, `data-l="${esc(name)}"`, "var(--gold)", name, n);
+      }
+    }
+    return { groups, countries, status, lists: listsHtml };
   }
-  function chipsHtml(view, items = []) {
+  function cardMembersInCountry(e, country) {
+    const ms = e.kind === "series" ? [...e.seasons.map((s) => s.item), ...e.specials] : [e.item];
+    return ms.some((m) => m.country === country);
+  }
+  function cardMembersAllUncountry(e) {
+    const ms = e.kind === "series" ? [...e.seasons.map((s) => s.item), ...e.specials] : [e.item];
+    return ms.every((m) => !m.country);
+  }
+  function chipsHtml(view, lists = [], cn) {
     const listOn = view.view === "list";
-    let html = `<button class="chip${listOn && !view.typeFilter && !view.statusFilter && !view.countryFilter ? " is-on" : ""}" data-c="all">${iconSpan(ICON.grid)}全部</button>`;
+    let html = `<button class="chip bz-touch-target--lg${listOn && !view.typeFilter && !view.statusFilter && !view.countryFilter && !view.listFilter ? " is-on" : ""}" data-c="all">${iconSpan(ICON.grid)}全部</button>`;
     for (const name of GROUP_ORDER) {
-      html += `<button class="chip${listOn && view.typeFilter === name && !view.statusFilter && !view.countryFilter ? " is-on" : ""}" data-c="${name}">${name}</button>`;
+      html += `<button class="chip bz-touch-target--lg${listOn && view.typeFilter === name && !view.statusFilter ? " is-on" : ""}" data-c="${name}">${name}</button>`;
     }
-    const cn = /* @__PURE__ */ new Set();
-    let cnEmpty = false;
-    items.forEach((it) => {
-      if (it.country) cn.add(it.country);
-      else cnEmpty = true;
-    });
-    for (const name of cn) {
-      html += `<button class="chip${listOn && view.countryFilter === name ? " is-on" : ""}" data-cn="${esc(name)}">${esc(name)}</button>`;
-    }
-    if (cnEmpty) {
-      html += `<button class="chip${listOn && view.countryFilter === "未填" ? " is-on" : ""}" data-cn="未填">未填</button>`;
+    if (cn) {
+      for (const name of cn.names) {
+        html += `<button class="chip bz-touch-target--lg${listOn && view.countryFilter === name ? " is-on" : ""}" data-cn="${esc(name)}">${esc(name)}</button>`;
+      }
+      if (cn.empty > 0) {
+        html += `<button class="chip bz-touch-target--lg${listOn && view.countryFilter === "未填" ? " is-on" : ""}" data-cn="未填">未填</button>`;
+      }
     }
     for (const s of ["想看", "在看", "已看"]) {
-      html += `<button class="chip${listOn && view.statusFilter === s ? " is-on" : ""}" data-s="${s}">${s}</button>`;
+      html += `<button class="chip bz-touch-target--lg${listOn && view.statusFilter === s ? " is-on" : ""}" data-s="${s}">${s}</button>`;
+    }
+    for (const name of lists) {
+      html += `<button class="chip bz-touch-target--lg${listOn && view.listFilter === name ? " is-on" : ""}" data-l="${esc(name)}">${iconSpan(ICON.shelf)}${esc(name)}</button>`;
     }
     return html;
   }
@@ -668,43 +742,45 @@ var BZR_cinema = (() => {
     ${filtered ? '<button class="dm-btn j-clear" data-cinema-clear style="margin-top:6px">清空筛选</button>' : '<span style="font-size:11.5px">点右上「添加影片」开始记录</span>'}</div>`;
   }
   function spHeadHtml(title, cnt) {
-    return `<div class="sp-head"><button class="sp-back j-back">${iconSpan(ICON.back)}</button><span class="sp-title">${esc(title)}</span><span class="sp-cnt j-spcnt">${cnt}</span></div>`;
+    return `<div class="sp-head"><button class="sp-back">${iconSpan(ICON.back)}</button><span class="sp-title">${esc(title)}</span><span class="sp-cnt j-spcnt">${cnt}</span></div>`;
+  }
+  function cardsHtml(cards, inp) {
+    return cards.map((e) => {
+      var _a, _b, _c, _d;
+      const face = cardFace(e);
+      return cardHtml(e, inp.poster(face), (_b = (_a = inp.fetching) == null ? void 0 : _a.call(inp, face)) != null ? _b : false, (_d = (_c = inp.picked) == null ? void 0 : _c.call(inp, e)) != null ? _d : false);
+    }).join("");
   }
   function listHeadHtml(inp) {
-    return `<div class="d-head"><h2 class="j-title">${esc(inp.title)}</h2><span class="cnt j-cnt">· ${inp.list.length} 部</span>
-    <button class="add j-add" data-cinema-add>${iconSpan(ICON.add)}添加条目</button></div>`;
+    return `<div class="d-head"><h2 class="j-title">${esc(inp.title)}</h2><span class="cnt j-cnt">· ${inp.cards.length} 部</span>
+    <button class="add j-add" data-cinema-add>${iconSpan(ICON.add)}添加条目</button><button class="imp j-import" title="导入片单">${iconSpan(ICON.import)}</button></div>`;
   }
   function listToolsHtml(view) {
     if (view.multiSelect) return multiBarHtml(view);
-    return `<div class="d-tools"><label class="d-search">${iconSpan(ICON.search)}<input class="j-q" placeholder="搜索条目（名称、类型、感想）..." value="${esc(view.searchKeyword)}"></label>
+    return `<div class="d-tools"><label class="d-search">${iconSpan(ICON.search)}<input class="j-q" placeholder="搜索条目（片名、类型、导演、主演、影评…）" value="${esc(view.searchKeyword)}"><button type="button" class="q-clear" data-cinema-clear title="清空搜索" aria-label="清空搜索"${view.searchKeyword ? "" : " hidden"}>${iconSpan(ICON.close)}</button></label>
     <div class="seg j-sort">${[["date", "最近观看"], ["created", "加入先后"], ["rating", "按评分"]].map(([k, l]) => `<button data-k="${k}" class="${view.sortMode === k ? "is-on" : ""}">${l}</button>`).join("")}</div>
     <button class="dm-btn j-multi" data-cinema-multiselect>多选</button><button class="dm-btn j-dd" data-cinema-dedupe>查重复</button></div>`;
   }
   function renderMidnightDesk(root, inp) {
-    const rail = railHtml(inp.items, inp.view);
+    const rail = railHtml(inp.allCards, inp.view, inp.lists, inp.cn);
     const groupsEl = root.querySelector(".j-groups");
     const countriesEl = root.querySelector(".j-countries");
     const statusEl = root.querySelector(".j-status");
+    const listsEl = root.querySelector(".j-lists");
     if (groupsEl) groupsEl.innerHTML = rail.groups;
     if (countriesEl) countriesEl.innerHTML = rail.countries;
     if (statusEl) statusEl.innerHTML = rail.status;
+    if (listsEl) listsEl.innerHTML = rail.lists;
     const view = root.querySelector(".j-view");
     if (!view) return;
     const v = inp.view;
+    root.querySelectorAll(".rail-foot .j-tool").forEach((b) => b.classList.toggle("is-on", v.view === "ai" && b.dataset.tool === "ai"));
     if (v.view === "ai") {
       view.innerHTML = spHeadHtml("AI 荐片", inp.aiCount ? `· ${inp.aiCount} 部` : "") + `<div class="sp-body">${inp.aiHtml}</div>`;
     } else if (v.view === "stat") {
       view.innerHTML = spHeadHtml("观影分析", `· ${inp.watchedCount} 部已看`) + `<div class="sp-body">${inp.statHtml}</div>`;
     } else {
-      const pick = (it) => {
-        var _a, _b;
-        return (_b = (_a = inp.picked) == null ? void 0 : _a.call(inp, it)) != null ? _b : false;
-      };
-      const cards = inp.list.map((it) => {
-        var _a, _b;
-        return pcardHtml(it, inp.poster(it), (_b = (_a = inp.fetching) == null ? void 0 : _a.call(inp, it)) != null ? _b : false, pick(it));
-      }).join("");
-      const body = inp.list.length ? `<div class="d-scroll"><div class="grid" style="grid-template-columns:repeat(${inp.cols},1fr)">${cards}</div></div>` : emptyPageHtml(viewFiltered(v));
+      const body = inp.cards.length ? `<div class="d-scroll"><div class="grid" style="grid-template-columns:repeat(${inp.cols},1fr)">${cardsHtml(inp.cards, inp)}</div></div>` : emptyPageHtml(viewFiltered(v));
       view.innerHTML = listHeadHtml(inp) + listToolsHtml(v) + body;
     }
   }
@@ -714,26 +790,24 @@ var BZR_cinema = (() => {
     const titleEl = root.querySelector(".j-mtitle");
     const cntEl = root.querySelector(".j-mcnt");
     if (titleEl) titleEl.textContent = t;
-    if (cntEl) cntEl.textContent = v.view === "list" ? `· ${inp.list.length}` : "";
+    if (cntEl) cntEl.textContent = v.view === "list" ? `· ${inp.cards.length}` : "";
+    const q = root.querySelector(".j-mq");
+    if (q && q.value !== v.searchKeyword) q.value = v.searchKeyword;
+    const qClear = root.querySelector(".m-search .q-clear");
+    if (qClear) qClear.hidden = !v.searchKeyword;
     const mv = root.querySelector(".j-mview");
     if (mv) {
       if (v.view === "list") {
-        mv.className = "m-scroll j-mview";
+        mv.className = inp.cards.length ? "m-scroll j-mview" : "m-scroll j-mview cn-mempty";
         const bar = v.multiSelect ? multiBarHtml(v) : "";
-        mv.innerHTML = `${bar}<div class="m-grid">${inp.list.map((it) => {
-          var _a, _b, _c, _d;
-          return pcardHtml(it, inp.poster(it), (_b = (_a = inp.fetching) == null ? void 0 : _a.call(inp, it)) != null ? _b : false, (_d = (_c = inp.picked) == null ? void 0 : _c.call(inp, it)) != null ? _d : false);
-        }).join("")}</div>`;
-      } else if (v.view === "ai") {
-        mv.className = "sp-body j-mview";
-        mv.innerHTML = inp.aiHtml;
+        mv.innerHTML = inp.cards.length ? `${bar}<div class="m-grid">${cardsHtml(inp.cards, inp)}</div>` : emptyPageHtml(viewFiltered(v));
       } else {
         mv.className = "sp-body j-mview";
-        mv.innerHTML = inp.statHtml;
+        mv.innerHTML = v.view === "ai" ? inp.aiHtml : inp.statHtml;
       }
     }
     const chips = root.querySelector(".j-chips");
-    if (chips) chips.innerHTML = chipsHtml(v, inp.items);
+    if (chips) chips.innerHTML = chipsHtml(v, inp.lists, inp.cn);
   }
   return __toCommonJS(render_exports);
 })();

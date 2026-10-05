@@ -30,6 +30,7 @@ var BZR_settings_panel = (() => {
     headToolsHtml: () => headToolsHtml,
     iconSpan: () => iconSpan,
     loadingHtml: () => loadingHtml,
+    mobDocSecHtml: () => mobDocSecHtml,
     mobEmptyHtml: () => mobEmptyHtml,
     mobHeadHtml: () => mobHeadHtml,
     mobItemHtml: () => mobItemHtml,
@@ -37,6 +38,7 @@ var BZR_settings_panel = (() => {
     mobRowHitHtml: () => mobRowHitHtml,
     mobSecHtml: () => mobSecHtml,
     mobShellHtml: () => mobShellHtml,
+    navDocSecHtml: () => navDocSecHtml,
     navItemHtml: () => navItemHtml,
     navSecHtml: () => navSecHtml,
     pageHeadHtml: () => pageHeadHtml,
@@ -81,12 +83,15 @@ var BZR_settings_panel = (() => {
     if (opts.num) cls.push("num");
     if (opts.secret) cls.push("secret");
     const attrs = [`class="${cls.join(" ")}"`, `value="${esc(opts.value)}"`];
-    attrs.push(opts.type === "number" ? 'type="number"' : 'type="text"');
+    attrs.push(opts.secret ? 'type="password"' : opts.type === "number" ? 'type="number"' : 'type="text"');
     if (opts.placeholder) attrs.push(`placeholder="${esc(opts.placeholder)}"`);
     if (opts.min !== void 0) attrs.push(`min="${opts.min}"`);
     if (opts.max !== void 0) attrs.push(`max="${opts.max}"`);
     if (opts.step !== void 0) attrs.push(`step="${opts.step}"`);
-    return `<input ${attrs.join(" ")} autocomplete="off">`;
+    attrs[0] = `class="${cls.join(" ")} bz-sp-secret-input"`;
+    const input = `<input ${attrs.join(" ")} autocomplete="off">`;
+    if (!opts.secret) return input;
+    return `<div class="bz-sp-secret">${input}<button type="button" class="bz-sp-secret-eye" title="显示/隐藏"><i data-lucide="eye" class="bz-ic"></i></button></div>`;
   }
   function textareaHtml(value, placeholder) {
     return `<textarea class="bz-input bz-sp-textarea" autocomplete="off"${placeholder ? ` placeholder="${esc(placeholder)}"` : ""}>${esc(value)}</textarea>`;
@@ -181,6 +186,12 @@ var BZR_settings_panel = (() => {
   }
   function mobModalShellHtml(icon, title) {
     return `<div class="bz-sp-mob-modal-head"><span class="bz-sp-mob-modal-ic"><i data-lucide="${esc(icon)}" class="bz-ic"></i></span><h3 class="bz-sp-mob-modal-title">${esc(title)}</h3></div><div class="bz-sp-settings-body bz-sp-mob-modal-body"></div>`;
+  }
+  function navDocSecHtml() {
+    return `<div class="bz-sp-nav-sec"><div class="bz-sp-nav-sec-t">文档</div><button type="button" class="bz-sp-nav-doc" data-sp-manual>${iconSpan("book-open", "bz-ic bz-sp-nav-ic")}<span class="bz-sp-nav-name">使用手册</span></button><button type="button" class="bz-sp-nav-doc" data-sp-changelog>${iconSpan("history", "bz-ic bz-sp-nav-ic")}<span class="bz-sp-nav-name">更新日志</span></button></div>`;
+  }
+  function mobDocSecHtml() {
+    return `<div class="bz-sp-mob-sec">文档</div><button type="button" class="bz-sp-mob-doc" data-sp-manual><span class="bz-sp-mob-ic">${iconSpan("book-open")}</span><span class="bz-sp-mob-t"><span class="bz-sp-mob-name">使用手册</span><span class="bz-sp-mob-desc">完整功能说明，随时可查</span></span></button><button type="button" class="bz-sp-mob-doc" data-sp-changelog><span class="bz-sp-mob-ic">${iconSpan("history")}</span><span class="bz-sp-mob-t"><span class="bz-sp-mob-name">更新日志</span><span class="bz-sp-mob-desc">每个版本改了什么</span></span></button>`;
   }
   return __toCommonJS(render_exports);
 })();
