@@ -1,6 +1,6 @@
 # AGENTS.md — 包仔（bz）Obsidian 插件
 
-独立 Obsidian 插件，**26 功能域**（详见领域清单，逐一以 `src/<域>/` 目录为准；2026-09 自上游线 yeshimei/bz 并入 home/recap/checkup/diary-wall/settings-panel 五域，memo 域由 todo 待办域换血接替、movie 域由 cinema 影院域换血接替、news+clipping 域由 clipbook 剪藏本融合域换血接替、password 域并入 encrypt 统一保险库；2026-09 collect 日常收集域换血接替外部 QuickAdd「日常收集」宏，ADR-0107，见 PROGRESS）。2026-09-14 核正：原写「26 功能域」为文档漂移，逐项见下方领域清单脚注。数据沿用既有格式（`CONFIG/STORAGE/*.json`、`我的/*.md`、frontmatter），旧数据直接可读。**项目语言：中文**。
+独立 Obsidian 插件，**27 功能域**（详见领域清单，逐一以 `src/<域>/` 目录为准；2026-09 自上游线 yeshimei/bz 并入 home/recap/checkup/diary-wall/settings-panel 五域，memo 域由 todo 待办域换血接替、movie 域由 cinema 影院域换血接替、news+clipping 域由 clipbook 剪藏本融合域换血接替、password 域并入 encrypt 统一保险库；2026-09 collect 日常收集域换血接替外部 QuickAdd「日常收集」宏，ADR-0107，见 PROGRESS）。2026-09-14 核正：原写「26 功能域」为文档漂移，逐项见下方领域清单脚注。数据沿用既有格式（`CONFIG/STORAGE/*.json`、`我的/*.md`、frontmatter），旧数据直接可读。**项目语言：中文**。
 
 ## 交互约定
 
@@ -18,7 +18,7 @@
 
 ## 架构
 
-- `src/main.ts`：命令裸注册表、设置页、懒加载、onunload（**81 条命令** = `COMMANDS` 表 **79** 条 + 表外裸注册 1 条 + diary 域 init 内 1 条。表内 75 = 58 条显式字面量 + 1 条 `ATTACH_COMMAND_ID`（`bz-attach-move`）+ 16 条 collect 汉字分类经 `...DEFAULT_COLLECT_CATEGORIES.map(categoryCommandId)` 展开；表外 = `bz-diary-open`；域内 init = `bz-diary-write`（`src/diary/ui/quote.ts:15`）。核算口径 = `tests/smoke.test.ts` 的 `EXPECTED_COMMAND_IDS`（60 字面量 + 16 条 collect 展开 = 76）另加 `bz-diary-write`。2026-09-14 票 288：新增 `bz-pomodoro-focus-toggle/skip/pause` 3 条（68→71）；同日票 289：新增视频生成文献笔记命令（71→72，上游 issue 278 命令入口，函数本就存在）；同日票 290：知识盒域正名，`bz-literature-*` 三条 id 更名 `bz-knowledge-*`（条数不变）；2026-09-22 票 296：新增 `bz-cinema-export` 导出感想（72→73）；2026-09-23 票 301：新增 `bz-bookshelf-douban-refetch` / `bz-cinema-douban-refetch` 豆瓣重抓（73→75）；2026-09-24 票 303：新增 `bz-diary-open-today` 打开今日日记（75→76）；同日上游移植批 2（上游 issue 368/ADR-0161，源 yeshimei/bz@42c00d1d）：新增 `bz-gameshelf-open` / `bz-gameshelf-sync` / `bz-gameshelf-stats` 游戏库三命令（76→79，域数 24→25）；2026-09-25 票 306：新增 `bz-cinema-dedupe` 条目查重/去重（79→80）；2026-10-04 上游吸收批 5（票 312，源 yeshimei/bz@dd626fc9）：新增 `bz-dock-open` 工具坞（80→81，域数 25→26）；另每登记工具一条运行时直达命令 `bz-dock-run-<id>`（启动快照注册、随 registeredCommandIds 摘除，不占 COMMANDS 表计数））
+- `src/main.ts`：命令裸注册表、设置页、懒加载、onunload（**83 条命令** = `COMMANDS` 表 **81** 条 + 表外裸注册 1 条 + diary 域 init 内 1 条。表内 77 = 60 条显式字面量 + 1 条 `ATTACH_COMMAND_ID`（`bz-attach-move`）+ 16 条 collect 汉字分类经 `...DEFAULT_COLLECT_CATEGORIES.map(categoryCommandId)` 展开；表外 = `bz-diary-open`；域内 init = `bz-diary-write`（`src/diary/ui/quote.ts:15`）。核算口径 = `tests/smoke.test.ts` 的 `EXPECTED_COMMAND_IDS`（62 字面量 + 16 条 collect 展开 = 78）另加 `bz-diary-write`。2026-09-14 票 288：新增 `bz-pomodoro-focus-toggle/skip/pause` 3 条（68→71）；同日票 289：新增视频生成文献笔记命令（71→72，上游 issue 278 命令入口，函数本就存在）；同日票 290：知识盒域正名，`bz-literature-*` 三条 id 更名 `bz-knowledge-*`（条数不变）；2026-09-22 票 296：新增 `bz-cinema-export` 导出感想（72→73）；2026-09-23 票 301：新增 `bz-bookshelf-douban-refetch` / `bz-cinema-douban-refetch` 豆瓣重抓（73→75）；2026-09-24 票 303：新增 `bz-diary-open-today` 打开今日日记（75→76）；同日上游移植批 2（上游 issue 368/ADR-0161，源 yeshimei/bz@42c00d1d）：新增 `bz-gameshelf-open` / `bz-gameshelf-sync` / `bz-gameshelf-stats` 游戏库三命令（76→79，域数 24→25）；2026-09-25 票 306：新增 `bz-cinema-dedupe` 条目查重/去重（79→80）；2026-10-04 上游吸收批 5（票 312，源 yeshimei/bz@dd626fc9）：新增 `bz-dock-open` 工具坞（80→81，域数 25→26）；另每登记工具一条运行时直达命令 `bz-dock-run-<id>`（启动快照注册、随 registeredCommandIds 摘除，不占 COMMANDS 表计数）；2026-10-04 票 317 脸谱域整域并入（源 yeshimei/bz@ef13ce3d）：新增 `bz-people-open` / `bz-people-import`（81→83，域数 26→27））
 - `src/core/`：共享层（不挂 window）——app/settings-provider/ai/json-store/domain-bus/obsidian-adapter/path-classify/esc-manager/flow-dialog/utils/dom/changelog/notice（自绘 toast）/settings-modal/settings-schema/settings-common
 - `src/<域>/`：index.ts + data + ui + styles.css（该域样式源头，聚合进根 `styles.css`）；`src/settings.ts`；根 `styles.css`（构建聚合产物，勿手改）；`docs/adr/`；`CONTEXT.md`；`.scratch/<feature>/`
 - **依赖方向（ADR-0002）**：`core ← config/state ← parser ← store ← ui ← main`。store 无 DOM；UI 刷新靠回调订阅；禁止模块顶层互访，函数级引用环须函数体内延迟解析。
@@ -43,7 +43,7 @@
 
 **统一视觉**：头部行用 `.bz-win-head`，关闭按钮用 `.bz-win-close`，按钮秩序：功能 → ⚙️ → 关闭；弹窗不放关闭按钮，靠 mask + ESC；全屏避让用全局规则。样式已集中 styles.css，勿另写差异。
 
-## 领域清单（`CONFIG/STORAGE/` 下的数据只写文件名；共 **26 域**，与 `src/<域>/` 目录一一对应，`core` 为共享层不计入）
+## 领域清单（`CONFIG/STORAGE/` 下的数据只写文件名；共 **27 域**，与 `src/<域>/` 目录一一对应，`core` 为共享层不计入）
 
 | 域 | 数据 |
 |---|---|
@@ -69,6 +69,7 @@
 | settings-panel（设置面板，上游并入） | 聚合浏览入口，读写仍走既有 schema/provider（ADR-0080，并存不替换） |
 | launcher | launcher.json |
 | dock（工具坞，2026-10 上游吸收批 5 整域并入，ADR-0235~0238） | `CONFIG/STORAGE/dock` 外无 vault 内数据——登记表 `dockTools`/调度账 `dockRunState` 住插件 data.json，声明/参数值/运行记录三件全在工具目录（一文件一写者） |
+| people（脸谱，2026-10 上游吸收批整域并入，ADR-0191~0233 系/票 317） | 微信聊天导入 + AI 人物画像；数据仓/媒体/画像档案住 `peopleDataDir`（设置键，默认 `脸谱/`），保库记录每联系人一条（kind:'people'）入保险库 |
 | pomodoro | pomodoro.json |
 | attach | —（搬当前笔记引用的 vault 附件） |
 | collect（日常收集，issue 246：换血外部 QuickAdd「日常收集」宏，ADR-0107） | `我的/日常收集/*.md`（分类 → 目标文件映射存 data.json `collectCategories`） |

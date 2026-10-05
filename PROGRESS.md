@@ -1061,3 +1061,14 @@
 - [x] 测试：envelope.test 8 用例（自动迁移/迁移后读写/回滚路径/改密镜像零接触/v1 态拒绝/中断安全修复重试/首设即 v2/锁定清密）+ vault-data fav 用例改走 updateNotePayload 正门（v2 镜像钥非主密码）
 - [x] 归档 ADR-0211 进 upstream-yeshimei；issue 508 原文名 508-envelope-change-password.md（归档时 404 未拉，待 API 配额恢复补）
 - [x] 门禁：worktree tsc 0 错 + 全量 4431 绿（292 文件，envelope 8 用例新增）→ master ff 合并 → 复测同绿 → 构建部署
+
+### 票 317 — 脸谱域整域并入（源 yeshimei/bz ef13ce3d，issue 435-541/ADR-0191~0233 系，2026-10-04）
+
+- [x] 域本体（src/people 26 文件 ≈1.03MB）：微信聊天导入（数据源向导 + bz-face 工具包 + 增量修订式画像）、AI 提炼（描述/画谱/洞察三段编排 + 确认门）、相册簿主界面（朱砂皮/双卷画像/档案十维/互动统计/仿微信聊天页+本人头像/画谱）、录音管线（分离/转写/补充素材三页签/孤立轮次清理）、数据入保险库（每联系人一条 kind:'people' 保库记录 + 头像 keptShared 共享 + verifyPassword 二次确认）、重活互斥闸（ADR-0218）+ jobs 编排（确认门/断点账本）
+- [x] 上游浅拉通道（ef13ce3d）：git fetch --depth=1 首次成功，整域 checkout + 后续归档全走本地 git show（零 API 消耗）
+- [x] 前置件：core/gesture bindWheelTurn（滚轮翻页）、core/ai DEFAULT_AI_PROVIDER+getProviderDescriptor（本地静态名表+缺省模型表形态，zhipu-plan=glm-5.3-flash）、core/lock-screen people 档+cancel 次按钮（组件出钮语义调用域接）、core/ui/lightbox 上游整件对齐（多图+srcOf 惰性取图，旧调用方口径兼容）、core/settings-schema CustomRow.name、encrypt SafeNote/LockNoteInput kind 'people'+LockAttachmentInput.keptShared+verifyPassword、settings 九键+pythonPath+面板尺寸键
+- [x] 集成：main.ts 两命令（bz-people-open/import）+卸载链、settings-panel 脸谱域行（记录组，loader 含清空聊天数据保险库闸）、domain-icons people=drama、smoke 计数 81→83、D3 白名单 me-avatar（头像二进制直写用户媒体仓）
+- [x] 解锁屏本地收敛：保留本地 vault/legacy 路径（ADR-0124/0121 冻结段位不动），people 走专用 showPeopleLockScreen（朱砂皮/联系人口径三卡/issue 506 可见取消钮/损坏清单不进重设流只提示去向）；captureLockStats 四档化（vault/diary/password-vault/people，people=清单级计数联系人/随记录附件/附件密文）
+- [x] 测试：tests/people 59 文件全量并入 + lock-screen.test 4 用例本地口径对齐（种子根/取消 data-ls/快照四档）；D3 白名单一条；全量 5425 绿（351 文件）
+- [x] 归档：ADR-0191~0239 全窗口差集 28 篇 + issues 435-549 系 69 篇进 upstream-yeshimei（git 通道）；issue 508 正名件前票已补
+- [x] 门禁：worktree tsc 0 错 + 全量 5425 绿 → master ff 合并 → 复测同绿 → 构建部署
