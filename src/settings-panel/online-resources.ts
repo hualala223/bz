@@ -2,7 +2,7 @@
  * bz · 设置面板「在线资源」组（settings-panel/online-resources.ts）——ADR-0203 / ADR-0205 / ADR-0207
  *
  * 通用域最后一组，**行集合由下载清单驱动**（ADR-0207）：
- * 清单 `rowOrder` 决定行序，每个 doc 条目一行；
+ * 清单 `rowOrder` 决定行序（SKINS_ROW_ID 是皮肤聚合行的保留 id），每个 doc 条目一行；
  * 内置的「检查更新」「全部更新」两行恒在组首（rows[0] / rows[1]）。
  * 状态机（未下载 → 下载 N；有更新 → 更新 N；已最新 → 已下载 禁用；动作中转圈禁用）。
  * ADR-0205：整组为**通用声明行**（button 行 + visibleWhen 门控 + 行按钮三态助手）。
@@ -10,14 +10,8 @@
  * 状态永远从**磁盘单源**现算（缓存清单 + 本地文件 sha256），组内不持久状态；
  * 构建期本地现算一次，打开面板顺手后台核对一次清单（60s 节流）；
  * 核对失败有缓存沿用缓存渲染 + 检查更新行留档；无缓存则只留操作行并禁用。
- * **跨入口同步**：导航入口更新文档拉取落盘后，本组订阅下载事件把行态同步成磁盘事实。
- * **半自动铁则的 UI 面**：本组按钮是下载触发点（下载只听用户的）。
- *
- * 上游吸收批 4（票 309）裁剪说明：皮肤聚合行（SKINS_ROW_ID，批 17 随 475/ADR-0199 恢复）、
- * 归物本分类表 / RSS 源库两行规模补充（随批 19 / 批剪藏本各自恢复）；版本区间两助手
- * （versionAtLeast / isInVersionRange / readPluginVersion）自上游 skin-pack 摘录，
- * 皮肤行回归时归还单源。清单现有 docs：更新日志 / 手册 / 分类表 / RSS 源库 / 豆瓣影视索引
- * ——分类表与 RSS 源库的**通用下载**照常可用（消费方随各自批次并入）。
+ * **跨入口同步**：导航入口更新文档 / 分类表拉取落盘后，本组订阅下载事件把行态同步成磁盘事实。
+ * **半自动铁则的 UI 面**：本组按钮与手册/日志导航入口是仅有的两个下载触发点。
  *
  * 新增一条在线资源 = 出版产物 + `pnpm manifest` 登记 docs 条目与 rowOrder，本文件零改动
  * （只用通用状态机的资源不必碰代码；要专属描述补规模才加一条 DESC_EXTRAS）。
@@ -26,22 +20,34 @@ import { getApp } from '../core/app';
 import { notice } from '../core/notice';
 import { onDomainEvent } from '../core/domain-bus';
 import { DOWNLOADS_CHANGED_EVENT } from '../core/remote-asset';
-import { assetVaultPath } from '../core/remote-asset';
 import type { GroupDecl, SettingsRow, SettingsRowContext } from '../core/settings-schema';
 import { setRowBtnState } from '../core/settings-btn-state';
 import {
   cachedManifest,
   docStatus,
   refreshManifest,
+  SKINS_ROW_ID,
   type DocStatus,
   type DownloadManifest,
   type ManifestDocEntry,
 } from '../core/download-manifest';
+import {
+  downloadSkinUpdates,
+  isInVersionRange,
+  readPluginVersion,
+  skinStatus,
+  type SkinStatus,
+} from '../core/skin-pack';
 import { ensureAssetWithHash } from '../core/remote-asset';
+import { loadCategoryTable } from '../core/category-table';
+import { loadRssCatalog, catalogCategoryCounts } from '../core/rss-catalog';
 import { loadDoubanNameIndex, indexKindCounts } from '../core/douban-name-index';
 
 /** 千分位（8.5 万级的条数不加分隔没法读；en-US 固定/locale 无关） */
 const thousand = (n: number): string => n.toLocaleString('en-US');
+
+/** 皮肤聚合行的行名（它不是 doc 条目、清单里没有 name，只能内置；各域选择卡叫法不变） */
+const SKINS_ROW_NAME = '主题';
 
 /** 全部更新行的忙碌哨兵：只用于拦重入与「补丁别覆盖」，不是任何资源 id */
 const ALL_BUSY_ID = '__all__';
@@ -51,6 +57,19 @@ const ALL_BUSY_ID = '__all__';
  * 这是本组唯一的「按 id 特判」处——只用通用状态机的新资源什么都不用加。
  */
 const DESC_EXTRAS: Record<string, (app: unknown, entry: ManifestDocEntry) => Promise<string | null>> = {
+  'belongings-categories': async (app) => {
+    const table = await loadCategoryTable(app);
+    if (!table) return null; // 读不出表 → 只说「已是最新版本」，不编规模
+    const items = table.groups.reduce((n, g) => n + g.items.length, 0);
+    return `${table.groups.length} 组 ${items} 条`;
+  },
+  // issue 495：RSS 源库就绪描述捎带「N 类 M 源」（只数非空大类，0 条的分类不冒充规模）
+  'rss-catalog': async (app) => {
+    const catalog = await loadRssCatalog(app);
+    if (!catalog) return null;
+    const cats = catalogCategoryCounts(catalog).filter((c) => c.count > 0).length;
+    return `${cats} 类 ${catalog.feeds.length} 源`;
+  },
   // issue 498：豆瓣影视索引就绪描述捎带「N 条 · 各类型条数」（用户点名按类型给量级参考）
   'cinema-douban-index': async (app) => {
     const idx = await loadDoubanNameIndex(app);
@@ -102,61 +121,47 @@ export function resetOnlineResourcesState(): void {
 
 /** 行渲染所需的全部事实（一次算齐） */
 interface RowState {
-  /** 清单条目 id（动作分发用） */
+  /** 清单条目 id（动作分发用）；皮肤聚合行是 SKINS_ROW_ID */
   id: string;
-  /** 行名（取清单 name） */
+  /** 行名（doc 行取清单 name；皮肤行取内置名） */
   name: string;
-  /** doc 行状态 */
+  /** doc 行状态；皮肤行 null */
   doc: DocStatus | null;
-  /** 描述里的规模补充（如「14.3 万 条」）；无则 null */
+  /** 皮肤行三态计数；doc 行 null */
+  skin: SkinStatus | null;
+  /** 描述里的规模补充（如「26 组 515 条」）；无则 null */
   extra: string | null;
-  /** 该行资源的体积（清单 size）；无信息 null */
+  /** 该行资源的体积（doc = 清单 size；皮肤 = 区间内各套合计）；无信息 null */
   size: number | null;
 }
 
-/* ---- 版本区间两助手（自上游 skin-pack 摘录；皮肤聚合行回归批 17 时归还单源） ---- */
-
-function versionAtLeast(ver: string, min: string): boolean {
-  const pa = String(ver || '').split('.').map((x) => parseInt(x, 10) || 0);
-  const pb = String(min || '').split('.').map((x) => parseInt(x, 10) || 0);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const d = (pa[i] || 0) - (pb[i] || 0);
-    if (d !== 0) return d > 0;
-  }
-  return true; // 相等
-}
-
-function isInVersionRange(entry: { since?: string; until?: string }, pluginVersion: string): boolean {
-  const ver = String(pluginVersion || '');
-  if (!ver) return false;
-  if (entry.since && !versionAtLeast(ver, entry.since)) return false;
-  if (entry.until && versionAtLeast(ver, entry.until)) return false;
-  return true;
-}
-
-async function readPluginVersion(app: unknown): Promise<string> {
-  try {
-    const adapter = (app as { vault?: { adapter?: { read?: (p: string) => Promise<string> } } }).vault?.adapter;
-    if (!adapter?.read) return '';
-    const text = await adapter.read(assetVaultPath(app, 'manifest.json'));
-    return String(JSON.parse(text || '{}')?.version || '');
-  } catch {
-    return '';
-  }
-}
-
 /**
- * 行序：清单 `rowOrder` 优先；缺失 = docs 顺序。
- * rowOrder 漏提的 doc 追加在末尾（清单是事实源，漏登记不该让条目凭空消失）。
+ * 行序：清单 `rowOrder` 优先（SKINS_ROW_ID 是皮肤聚合行的保留 id）；缺失 = docs 顺序 + 皮肤末位。
+ * rowOrder 漏提的 doc 追加在末尾（清单是事实源，漏登记不该让条目凭空消失），漏提皮肤也补在末尾。
  */
 function rowIdsOf(manifest: DownloadManifest): string[] {
   const docIds = manifest.docs.map((d) => d.id);
   const order = manifest.rowOrder;
-  if (!order || order.length === 0) return [...docIds];
-  const ids = order.filter((id) => docIds.includes(id));
+  if (!order || order.length === 0) return [...docIds, SKINS_ROW_ID];
+  const ids = order.filter((id) => id === SKINS_ROW_ID || docIds.includes(id));
+  if (!ids.includes(SKINS_ROW_ID)) ids.push(SKINS_ROW_ID);
   const seen = new Set(ids);
   for (const id of docIds) if (!seen.has(id)) ids.push(id);
   return ids;
+}
+
+/** 皮肤总体积（区间内已登记 size 的条目合计）；一条都没登记 → null（不提体积） */
+function skinTotalSize(manifest: DownloadManifest, pluginVersion: string): number | null {
+  let sum = 0;
+  let any = false;
+  for (const e of manifest.skins) {
+    if (pluginVersion && !isInVersionRange(e, pluginVersion)) continue;
+    if (typeof e.size === 'number' && e.size > 0) {
+      sum += e.size;
+      any = true;
+    }
+  }
+  return any ? sum : null;
 }
 
 /** 体积文案（MB 一位小数 / KB 取整；不足 1 KB 折成 <1 KB） */
@@ -170,11 +175,22 @@ function sizeText(bytes: number): string {
 async function computeRowStates(app: unknown): Promise<{ rows: RowState[]; manifest: DownloadManifest | null }> {
   const manifest = await cachedManifest(app);
   if (!manifest) return { rows: [], manifest: null };
-  // 插件版本：doc 版本区间过滤（读不到 → 不过滤）
+  // 插件版本：doc 版本区间过滤与皮肤区间计数共用（读不到 → 皮肤状态不可判，doc 不过滤）
   const pluginVersion = await readPluginVersion(app);
 
   const rows: RowState[] = [];
   for (const id of rowIdsOf(manifest)) {
+    if (id === SKINS_ROW_ID) {
+      rows.push({
+        id,
+        name: SKINS_ROW_NAME,
+        doc: null,
+        skin: pluginVersion ? await skinStatus(app, manifest) : null,
+        extra: null,
+        size: skinTotalSize(manifest, pluginVersion),
+      });
+      continue;
+    }
     const entry = manifest.docs.find((d) => d.id === id);
     if (!entry) continue;
     // 版本区间外 → 该行不呈现（旧版插件看到「需新版」的资源不误报可下载）
@@ -182,7 +198,7 @@ async function computeRowStates(app: unknown): Promise<{ rows: RowState[]; manif
     const doc = await docStatus(app, entry);
     // 规模补充只在就绪态读（未下载时读本地产物无意义，白读盘）
     const extra = doc === 'ready' && DESC_EXTRAS[id] ? await DESC_EXTRAS[id](app, entry) : null;
-    rows.push({ id, name: entry.name, doc, extra, size: entry.size ?? null });
+    rows.push({ id, name: entry.name, doc, skin: null, extra, size: entry.size ?? null });
   }
   return { rows, manifest };
 }
@@ -190,6 +206,12 @@ async function computeRowStates(app: unknown): Promise<{ rows: RowState[]; manif
 /** 行状态 → 描述文案（设置项文案规范：一句自然句，无符号花样；就绪态捎带规模与体积） */
 function rowDesc(st: RowState): string {
   const size = st.size !== null ? sizeText(st.size) : '';
+  if (st.skin) {
+    const { ready, missing, updated } = st.skin;
+    if (updated > 0) return missing > 0 ? `${updated} 套主题有更新，另有 ${missing} 套未下载` : `${updated} 套主题有更新，已就绪 ${ready} 套`;
+    if (missing > 0) return `${missing} 套主题可下载，已就绪 ${ready} 套`;
+    return `全部主题已是最新（已下载 ${ready} 套${size ? `，共 ${size}` : ''}）`;
+  }
   if (st.doc === 'missing') return '尚未下载，下载后即可查看';
   if (st.doc === 'updated') return '有新版本，可更新到最新';
   if (st.doc === 'ready') {
@@ -201,17 +223,28 @@ function rowDesc(st: RowState): string {
 
 /** 行状态 → 按钮文案与禁用态（更新优先于下载；两者并存的差额在描述里说清） */
 function rowButton(st: RowState): { text: string; disabled: boolean } {
+  if (st.skin) {
+    const { missing, updated } = st.skin;
+    if (updated > 0) return { text: `更新 ${updated}`, disabled: false };
+    if (missing > 0) return { text: missing > 1 ? `下载 ${missing}` : '下载', disabled: false };
+    return { text: '已下载', disabled: true };
+  }
   if (st.doc === 'missing') return { text: '下载', disabled: false };
   if (st.doc === 'updated') return { text: '更新', disabled: false };
   if (st.doc === 'ready') return { text: '已下载', disabled: true };
   return { text: '下载', disabled: true };
 }
 
-/** 待办统计，供全部更新行取数 */
+/** 待办统计：整行口径（皮肤行按「有缺或有更」算一行），供全部更新行取数 */
 function pendingOf(states: RowState[]): { pending: number; updatable: number } {
   let pending = 0;
   let updatable = 0;
   for (const st of states) {
+    if (st.skin) {
+      if (st.skin.missing + st.skin.updated > 0) pending++;
+      if (st.skin.updated > 0) updatable++;
+      continue;
+    }
     if (st.doc === 'missing' || st.doc === 'updated') {
       pending++;
       if (st.doc === 'updated') updatable++;
@@ -290,7 +323,7 @@ export async function onlineResourcesGroup(): Promise<GroupDecl> {
   return { name: '在线资源', icon: 'cloud-download', rows: meta.rows };
 }
 
-/** 下载事件订阅（幂等单例）：任何下载资产落盘（导航入口更新文档）
+/** 下载事件订阅（幂等单例）：任何下载资产落盘（导航入口更新文档、分类表自动拉取、皮肤注入）
  *  都把已渲染行态同步成磁盘事实——派发方不感知本组存在（总线 fire-and-forget）。 */
 let subscribed = false;
 function subscribeOnce(): void {
@@ -425,11 +458,16 @@ function patchRenderedGroup(): void {
   });
 }
 
-/** 单条资源的下载；失败抛错，由调用方决定通知口径 */
+/** 单条资源的下载（皮肤聚合行走批量入口）；失败抛错，由调用方决定通知口径 */
 async function downloadOne(app: unknown, manifest: DownloadManifest, id: string): Promise<void> {
+  if (id === SKINS_ROW_ID) {
+    const r = await downloadSkinUpdates(app, manifest);
+    if (r.failed > 0) throw new Error(`${r.failed} 套主题下载失败，可稍后重试`);
+    return;
+  }
   const entry: ManifestDocEntry | undefined = manifest.docs.find((d) => d.id === id);
   if (!entry) return;
-  // 走 sha256 校验通道：清单 hash 对不上即拒收，不把坏内容写进本地
+  // 走 sha256 校验通道（与皮肤同口径）：清单 hash 对不上即拒收，不把坏内容写进本地
   await ensureAssetWithHash(app, entry.file, entry.sha256, entry.name);
 }
 
@@ -479,7 +517,7 @@ async function runAll(ctx: SettingsRowContext): Promise<void> {
       const { rows: states } = await computeRowStates(app);
       for (const st of states) {
         if (busyIds.has(st.id)) continue; // 单行动作正在跑 → 跳过，不抢
-        const isPending = st.doc === 'missing' || st.doc === 'updated';
+        const isPending = st.skin ? st.skin.missing + st.skin.updated > 0 : st.doc === 'missing' || st.doc === 'updated';
         if (!isPending) continue;
         busyIds.add(st.id);
         const row = currentGroup?.entries.find((e) => e.id === st.id)?.row;

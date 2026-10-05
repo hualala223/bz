@@ -1191,3 +1191,51 @@
 @media (hover: hover) {
   .bz-sp-secret-eye:hover { color: var(--bz-text-1); }
 }
+
+/* ═══ 文档入口（使用手册/更新日志，issue 472/473，票 314）：导航/列表末组按钮 ═══ */
+.bz-sp-nav-doc {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  /* 显式靠左：宿主 Obsidian 的 button 默认 justify-content: center，
+    域项靠 .bz-sp-nav-count 的 margin-left:auto 才没被居中，本项没有徽标兜底，
+    漏掉这行就会整块内容居中（2026-09-26 用户报「更新日志/使用手册没左对齐」） */
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 0;
+  background: transparent;
+  border-radius: 9px;
+  font-size: var(--bz-font-label);
+  font-family: inherit;
+  color: var(--sp-ink);
+  cursor: pointer;
+  text-align: left;
+}
+.bz-sp-nav-doc:hover { background: var(--sp-accent-soft); }
+.bz-sp-nav-doc .bz-sp-nav-ic { color: var(--sp-ink-2); }
+.bz-sp-nav-doc:hover .bz-sp-nav-ic { color: var(--sp-accent); }
+.bz-sp-nav-doc.is-loading,
+.bz-sp-mob-doc.is-loading { pointer-events: none; opacity: 0.72; }
+.bz-sp-nav-doc.is-loading .bz-ic svg,
+.bz-sp-mob-doc.is-loading .bz-ic svg { animation: bz-sp-spin 0.8s linear infinite; }
+.bz-sp-mob-doc.is-loading { pointer-events: none; opacity: 0.72; }
+.bz-sp-mob-doc.is-loading .bz-ic svg { animation: bz-sp-spin 0.8s linear infinite; }
+.bz-sp-mob-doc {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--bz-space-md);
+  padding: 11px var(--bz-space-md);
+  margin-bottom: 6px;
+  border: 1px solid var(--sp-line);
+  border-radius: var(--bz-radius-md);
+  background: var(--sp-panel);
+  box-shadow: var(--sp-shadow);
+  font-family: inherit;
+  font-size: 13.5px;
+  color: var(--sp-ink);
+  cursor: pointer;
+  text-align: left;
+}
+.bz-sp-mob-doc:active { background: var(--sp-accent-soft); }

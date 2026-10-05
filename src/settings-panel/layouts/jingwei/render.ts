@@ -89,3 +89,26 @@ export function mobModalShellHtml(icon: string, title: string): string {
     `<h3 class="bz-sp-mob-modal-title">${esc(title)}</h3></div>` +
     `<div class="bz-sp-settings-body bz-sp-mob-modal-body"></div>`;
 }
+
+/** 文档组挂导航末尾（issue 473/472；2026-09-26 用户拍板：不做常驻底栏，改挂末组随列表滚动、可被搜索命中） */
+export function navDocSecHtml(): string {
+  return `<div class="bz-sp-nav-sec"><div class="bz-sp-nav-sec-t">文档</div>` +
+    `<button type="button" class="bz-sp-nav-doc" data-sp-manual>` +
+    `${iconSpan('book-open', 'bz-ic bz-sp-nav-ic')}<span class="bz-sp-nav-name">使用手册</span></button>` +
+    `<button type="button" class="bz-sp-nav-doc" data-sp-changelog>` +
+    `${iconSpan('history', 'bz-ic bz-sp-nav-ic')}<span class="bz-sp-nav-name">更新日志</span></button>` +
+    `</div>`;
+}
+
+/** 移动列表文档组（同拍板口径：挂列表末尾） */
+export function mobDocSecHtml(): string {
+  return `<div class="bz-sp-mob-sec">文档</div>` +
+    `<button type="button" class="bz-sp-mob-doc" data-sp-manual>` +
+    `<span class="bz-sp-mob-ic">${iconSpan('book-open')}</span>` +
+    `<span class="bz-sp-mob-t"><span class="bz-sp-mob-name">使用手册</span>` +
+    `<span class="bz-sp-mob-desc">完整功能说明，随时可查</span></span></button>` +
+    `<button type="button" class="bz-sp-mob-doc" data-sp-changelog>` +
+    `<span class="bz-sp-mob-ic">${iconSpan('history')}</span>` +
+    `<span class="bz-sp-mob-t"><span class="bz-sp-mob-name">更新日志</span>` +
+    `<span class="bz-sp-mob-desc">每个版本改了什么</span></span></button>`;
+}

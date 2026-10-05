@@ -10,7 +10,7 @@
  */
 export * from './shared';
 export {
-  deskHeadHtml, deskShellHtml, navSecHtml, navItemHtml,
+  deskHeadHtml, deskShellHtml, navSecHtml, navItemHtml, navDocSecHtml,
   mobHeadHtml, mobShellHtml, mobItemHtml, mobRowHitHtml, mobModalShellHtml,
-  mobSecHtml, mobEmptyHtml,
+  mobSecHtml, mobEmptyHtml, mobDocSecHtml,
 } from './layouts/jingwei/render';

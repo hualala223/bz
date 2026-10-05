@@ -13,6 +13,7 @@
  * - 通用域/AI 域 → 本地 mainSettingsSchema() 按组名拆分（本地无独立导出）。
  */
 import type { App } from 'obsidian';
+import { setIcon } from 'obsidian';
 import { createOverlay, topifyZ } from '../core/dom';
 import { escManager } from '../core/esc-manager';
 import { isMobileEnv, applyMobileWindowFullscreen } from '../core/mobile';
@@ -21,12 +22,14 @@ import type { SettingsSchema } from '../core/settings-schema';
 import { DOMAIN_ICONS } from '../core/domain-icons';
 import { mountIcons } from '../core/ui/icons';
 import { renderPanelSchema } from './renderer';
+// 更新日志弹窗（issue 472，票 314）：侧栏文档组入口的独立子弹窗，同皮 .bz-sp-skin
+import { openChangelogModal, isChangelogOpen } from './changelog';
 import { notice } from '../core/notice';
 import { getApp } from '../core/app';
 import {uiIconBtn, uiEmpty, uiResizable} from '../core/ui';
 import {
-  deskShellHtml, navSecHtml, navItemHtml, pageHeadHtml, loadingHtml,
-  mobShellHtml, mobItemHtml, mobRowHitHtml, mobModalShellHtml, mobSecHtml, mobEmptyHtml,
+  deskShellHtml, navSecHtml, navDocSecHtml, navItemHtml, pageHeadHtml, loadingHtml,
+  mobShellHtml, mobItemHtml, mobRowHitHtml, mobModalShellHtml, mobSecHtml, mobDocSecHtml, mobEmptyHtml,
 } from './render';
 
 /* ==================== 域清单（全局 + 19 域；图标 = lucide 名） ==================== */
@@ -51,7 +54,8 @@ const schemaLoaders: Record<string, () => Promise<SettingsSchema>> = {
   general: async () => {
     const { mainSettingsSchema } = await import('../core/settings-main-schema');
     const full = mainSettingsSchema();
-    const schema: SettingsSchema = { groups: full.groups.filter((g) => g.name === '📂 数据存储路径') };
+    // 通知组并回通用（issue 479/ADR-0202，票 314）：本地 🔔 通知组随通用域渲染（区块标题平铺形态不变）
+    const schema: SettingsSchema = { groups: full.groups.filter((g) => g.name === '📂 数据存储路径' || g.name === '🔔 通知') };
     const { openDataCheckup } = await import('../checkup');
     // 「数据体检」按钮挂「数据存储路径」组尾（按 name 定位防未来组序漂移）
     const storageGroup = schema.groups.find((g) => g.name === '📂 数据存储路径') ?? schema.groups[schema.groups.length - 1];
@@ -235,6 +239,10 @@ function visibleItemCount(schema: SettingsSchema): number {
  *  视口 92% 逐帧钳制在 core uiResizable 内，此处只给硬边界 */
 const PANEL = { MIN_W: 760, MIN_H: 520, MAX_W: 1280, MAX_H: 900 };
 
+/** 文档入口（使用手册 / 更新日志）参与搜索匹配的名目：搜「文档」「手册」「日志」都能命中。
+ *  它们不是域（无 data-sp-domain），不进 groupDomains，只在导航/列表末尾成组（issue 473/472，票 314）。 */
+const DOC_ENTRY_NAMES = ['文档', '使用手册', '更新日志', '手册', '日志', 'changelog'];
+
 export class SettingsPanelUI {
   private mask: HTMLElement | null = null;
   private popup: HTMLElement | null = null;
@@ -285,6 +293,76 @@ export class SettingsPanelUI {
     if (!this.panelResizeDetach) return;
     this.panelResizeDetach.detach();
     this.panelResizeDetach = null;
+  }
+
+  /* 使用手册一键（issue 473/476，票 314）：无手册先下载再打开，已下载直接打开（core/manual 单源）
+   * 本地内容秒开，随后后台向远端核对一次（不 await）：有新版热替换/落盘；核对全程静默。 */
+  private async runManualOpen(btn: HTMLElement): Promise<void> {
+    if (btn.classList.contains('is-loading')) return; // 下载中防重入
+    const ic = btn.querySelector<HTMLElement>('.bz-ic');
+    btn.classList.add('is-loading');
+    try {
+      const [core, viewer] = await Promise.all([
+        import('../core/manual'),
+        import('./manual-viewer'),
+      ]);
+      if (ic) setIcon(ic, 'loader');
+      const html = await core.ensureManualReady(getApp());
+      viewer.openManualViewer(html);
+      void this.refreshDocInBackground(
+        () => core.refreshManual(getApp()),
+        (fresh) => {
+          if (viewer.isManualViewerOpen()) viewer.openManualViewer(fresh);
+        },
+      );
+    } catch (e) {
+      notice((e as Error)?.message || '手册下载失败', 'error');
+    } finally {
+      btn.classList.remove('is-loading');
+      if (ic) setIcon(ic, 'book-open');
+    }
+  }
+
+  /* 更新日志一键（issue 474/476，票 314）：与手册同口径——日志现场下载后独立弹窗内嵌渲染；
+   * 失败不兜底（用户拍板），core/changelog 的人话原因出 notice，弹窗不开。 */
+  private async runChangelogOpen(btn: HTMLElement): Promise<void> {
+    if (btn.classList.contains('is-loading')) return; // 下载中防重入
+    const ic = btn.querySelector<HTMLElement>('.bz-ic');
+    btn.classList.add('is-loading');
+    try {
+      const [core, modal] = await Promise.all([
+        import('../core/changelog'),
+        import('./changelog'),
+      ]);
+      if (ic) setIcon(ic, 'loader');
+      const html = await core.ensureChangelogReady(getApp());
+      modal.openChangelogModal(html);
+      void this.refreshDocInBackground(
+        () => core.refreshChangelog(getApp()),
+        (fresh) => {
+          if (modal.isChangelogOpen()) modal.openChangelogModal(fresh);
+        },
+      );
+    } catch (e) {
+      notice((e as Error)?.message || '更新日志下载失败', 'error');
+    } finally {
+      btn.classList.remove('is-loading');
+      if (ic) setIcon(ic, 'history');
+    }
+  }
+
+  /** 文档后台核对（issue 476，票 314）：本地版秒开后后台向远端核对一次（不 await，阅读不被网络拖住）；
+   *  远端有新重出才覆盖落盘，弹窗还开着就热替换；全程静默（离线保持本地版）。 */
+  private async refreshDocInBackground(
+    refresh: () => Promise<string | null>,
+    swap: (html: string) => void,
+  ): Promise<void> {
+    try {
+      const fresh = await refresh();
+      if (fresh) swap(fresh);
+    } catch (e) {
+      /* 静默：refreshAsset 内部已收口，这里只兜意外（如模块加载失败） */
+    }
   }
 
   private build(deep?: DomainDef): void {
@@ -362,7 +440,13 @@ export class SettingsPanelUI {
           on: d.id === this.activeDomainId && !query,
         })).join('')))
         .join('');
+      // 文档组挂导航末尾（issue 473/472，票 314）：搜索时同样按词过滤，命中「手册/日志/文档」才出
+      const docHit = !query || DOC_ENTRY_NAMES.some((n) => n.includes(query) || query.includes(n));
+      if (docHit) nav.insertAdjacentHTML('beforeend', navDocSecHtml());
       mountIcons(nav);
+      // 文档入口随 nav 整树重渲，故每次重渲后重绑
+      nav.querySelector<HTMLElement>('[data-sp-manual]')?.addEventListener('click', () => void this.runManualOpen(nav.querySelector<HTMLElement>('[data-sp-manual]')!));
+      nav.querySelector<HTMLElement>('[data-sp-changelog]')?.addEventListener('click', () => void this.runChangelogOpen(nav.querySelector<HTMLElement>('[data-sp-changelog]')!));
       nav.querySelectorAll<HTMLElement>('.bz-sp-nav-item').forEach((b) => {
         b.addEventListener('click', () => {
           this.activeDomainId = b.dataset.spDomain ?? 'global';
@@ -546,12 +630,13 @@ export class SettingsPanelUI {
         const rest = visible.filter((d) => !NAV_SECS.some((sec) => sec.ids.indexOf(d.id) >= 0));
         if (rest.length) secs.push({ title: '其他', domains: rest });
         // markup 出纯层（mobSecHtml × mobItemHtml 串拼），事件经 data-sp-domain 契约委托绑定
+        // 文档组挂列表末尾（issue 473/472，票 314）
+        const docHit0 = !query || DOC_ENTRY_NAMES.some((n) => n.includes(query) || query.includes(n));
         list.innerHTML = secs
           .filter((sec) => sec.domains.length)
           .map((sec) => mobSecHtml(sec.title) + sec.domains.map((d) => mobItemHtml({
             id: d.id, icon: d.icon, name: d.name, desc: d.desc,
-          })).join(''))
-          .join('');
+          })).join('')) + (docHit0 ? mobDocSecHtml() : '');
         mountIcons(list);
         bindList();
         return;
@@ -581,6 +666,7 @@ export class SettingsPanelUI {
           html += mobRowHitHtml({ id: r.domain.id, icon: r.icon, name: r.name, desc: `${r.domain.name} · ${r.desc}` });
         });
       }
+      if (DOC_ENTRY_NAMES.some((n) => n.includes(query) || query.includes(n))) html += mobDocSecHtml();
       if (!doms.length && !rows.length) {
         html = mobEmptyHtml(query);
       }
@@ -597,6 +683,9 @@ export class SettingsPanelUI {
           if (d) void this.openMobileDomain(d);
         });
       });
+      // 文档入口（issue 473/472，票 314）：随列表重渲重绑
+      list.querySelector<HTMLElement>('[data-sp-manual]')?.addEventListener('click', () => void this.runManualOpen(list.querySelector<HTMLElement>('[data-sp-manual]')!));
+      list.querySelector<HTMLElement>('[data-sp-changelog]')?.addEventListener('click', () => void this.runChangelogOpen(list.querySelector<HTMLElement>('[data-sp-changelog]')!));
     };
 
     searchIn.addEventListener('input', () => render(searchIn.value));

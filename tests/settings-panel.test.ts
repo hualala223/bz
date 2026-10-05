@@ -188,11 +188,11 @@ describe('设置面板（settings-panel）', () => {
     // 首次动态 import 冷加载可能超过 tick 的 20ms：改轮询等分组出现，消除时序脆断（原 await tick()）
     expect(await waitGroups(popup, 1)).toBe(true);
     let groups = popup.querySelectorAll('.bz-sp-group');
-    // 本地口径：通用域 = 「📂 数据存储路径」（本地组名带 📂 前缀）+ 末尾「在线资源」（ADR-0203 随批）；
-    // 上游 479 通知并回/外观并入通用不随批——外观住独立「设置」占位域
-    expect(groups.length).toBe(2);
+    // 本地口径：通用域 = 「📂 数据存储路径」+「🔔 通知」（479 并回，票 314）+ 末尾「在线资源」
+    // （ADR-0203 随批）；上游外观并入通用不随批——外观住独立「设置」占位域
+    expect(groups.length).toBe(3);
     expect([...groups].map((g) => g.querySelector('.bz-sp-group-name')!.textContent)).toEqual([
-      '📂 数据存储路径', '在线资源',
+      '📂 数据存储路径', '🔔 通知', '在线资源',
     ]);
     // 点 AI 域 → 内嵌渲染 AI 组（服务商 select 等）
     const aiItem = Array.from(popup.querySelectorAll('.bz-sp-nav-item')).find(

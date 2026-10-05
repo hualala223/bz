@@ -1,0 +1,75 @@
+/* ============================================================
+ * bz · 使用手册下载（core/manual.ts，单源）
+ *
+ * 手册不随插件构建分发（main.js/styles.css 不含它），而是发布在
+ * GitHub 仓库 manual/bz-manual.html；用户点「使用手册」按钮时
+ * 现场拉取，写入插件安装目录（<configDir>/plugins/bz/）。
+ *
+ * 下载/校验/落盘/自愈整条链在 core/remote-asset.ts（与更新日志共用），
+ * 本文件只钉手册的文件名与内容口径。
+ *
+ * 打开（issue 473 二次拍板）：**在 Obsidian 内独立弹窗打开**——
+ * ensureManualReady 确保手册在本地并返回文本，弹窗层（settings-panel
+ * manual-viewer）用 iframe srcdoc 内嵌渲染（单文件自包含，
+ * 不走 file:// 免系统开程序与路径转义整条坑链；原 shell.openPath /
+ * openExternalUrl file:/// 方案随「0x2 找不到文件」报障一并退役）。
+ * ============================================================ */
+import {
+  downloadAsset,
+  ensureAssetReady,
+  hasAsset,
+  readAsset,
+  refreshAsset,
+} from './remote-asset';
+import { cachedSha256For } from './download-manifest';
+import { downloadsVaultPath } from './remote-asset';
+
+/** 手册文件名（写入插件目录时用；ASCII，避免 file:/// 转义麻烦） */
+export const MANUAL_FILENAME = 'bz-manual.html';
+
+/** 手册在 vault 里的相对路径（= 插件安装目录内） */
+export function manualVaultPath(app: unknown): string {
+  return downloadsVaultPath(app, MANUAL_FILENAME);
+}
+
+/** 内容是否像手册页（最宽校验：HTML 文档头或含产品名即可，防 CDN 错误页） */
+function looksLikeManual(text: string): boolean {
+  const t = String(text || '');
+  return /<!DOCTYPE/i.test(t) || /<html/i.test(t) || t.includes('包仔');
+}
+
+/** 手册是否已经下载到插件目录 */
+export function hasManual(app: unknown): Promise<boolean> {
+  return hasAsset(app, MANUAL_FILENAME);
+}
+
+/** 从 GitHub 下载手册，写入插件安装目录（覆盖旧版）；全败抛人话 Error */
+export function downloadManual(app: unknown): Promise<void> {
+  return downloadAsset(app, MANUAL_FILENAME, looksLikeManual, '手册');
+}
+
+/** 读已下载的手册文本；未下载/读失败 → null（调用方决定引导下载） */
+export function readManual(app: unknown): Promise<string | null> {
+  return readAsset(app, MANUAL_FILENAME);
+}
+
+/**
+ * 确保手册在本地并返回文本（footer 入口一键口径，issue 473）：
+ * 本地没有 → 从 GitHub 下载；然后读出 HTML 交给弹窗层内嵌渲染。
+ * 下载失败抛人话 Error；本地读取异常视同未下载走重下（自愈陈旧半截文件）。
+ */
+export function ensureManualReady(app: unknown): Promise<string> {
+  return ensureAssetReady(app, MANUAL_FILENAME, looksLikeManual, '手册');
+}
+
+/**
+ * 后台核对手册是否有新版（issue 476）：远端与本地同版 → null（不动）；
+ * 有新版 → 覆盖落盘并返回新文本；离线/失败 → null（静默，保持本地已存版本）。
+ * 入口口径 = ensureManualReady 先本地秒开，再调本函数后台核对一遍
+ * ——手册重新生成推上 GitHub 而插件版本没动时，靠这层才能拿到新版。
+ * ADR-0203 省流：缓存下载清单里手册的 sha256 与本地一致 → 清单确认无新版，
+ * 直接跳过远端拉取（327KB 不必每次打开都白拉）；清单缺席回落全量核对。
+ */
+export async function refreshManual(app: unknown): Promise<string | null> {
+  return refreshAsset(app, MANUAL_FILENAME, looksLikeManual, '手册', await cachedSha256For(app, MANUAL_FILENAME));
+}
