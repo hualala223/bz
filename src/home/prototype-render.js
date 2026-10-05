@@ -57,6 +57,7 @@ var BZR_home = (() => {
     pomodoroMenuAction: () => pomodoroMenuAction,
     reorderTo: () => reorderTo,
     riverCountText: () => riverCountText,
+    settingsMenuAction: () => settingsMenuAction,
     sheetHeadHtml: () => sheetHeadHtml,
     tilesHtml: () => tilesHtml,
     timelineKind: () => timelineKind,
@@ -221,7 +222,7 @@ var BZR_home = (() => {
     if (phase === "break") return { label: "跳过休息", commandId: "bz-pomodoro-skip", icon: "skip-forward" };
     return { label: "开始专注", commandId: "bz-pomodoro-focus-toggle", icon: "timer" };
   }
-  var DOMAIN_MENU = {
+  var DOMAIN_MENU_RAW = {
     // 日记四动作（2026-09-14 用户点名；解冻上游「日记不挂菜单」的票 288 口径——
     // 均为既有 bz 命令直呼，不新增命令面，diary 域本身零改动）：
     diary: [
@@ -302,6 +303,19 @@ var BZR_home = (() => {
       { label: "收集内容", commandId: "bz-collect-capture", icon: "pencil-line" }
     ]
   };
+  var SETTINGS_DOMAIN_KEY = {};
+  function settingsMenuAction(id) {
+    var _a;
+    return {
+      label: "设置",
+      commandId: "bz-settings-panel-open",
+      icon: iconOf("settings"),
+      settingsDeep: (_a = SETTINGS_DOMAIN_KEY[id]) != null ? _a : id
+    };
+  }
+  var DOMAIN_MENU = Object.fromEntries(
+    Object.entries(DOMAIN_MENU_RAW).map(([id, actions]) => [id, [...actions, settingsMenuAction(id)]])
+  );
   function domainColor(id) {
     var _a;
     return (_a = DOMAIN_DOT[id]) != null ? _a : "#8a8f99";
