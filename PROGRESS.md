@@ -1049,3 +1049,15 @@
 - [x] 测试三处重锚（issue 434 精简文案：UP/RSS 名单 desc 去「添加与移除在管理弹窗」尾注、行型清单 +RSSHub 实例 text 行）；clipbook/belongings/settings-panel 全绿
 - [x] 归档 ADR-0204/0208/0209 + issues 478/488/489/491/495/497 系（497-people-gen 系 people 域件照录不消费）；CONTEXT 词条见同日段
 - [x] 门禁：worktree tsc 0 错 + 全量 4423 绿 → master ff 合并 → 复测同绿 → 构建部署
+
+### 票 316 — 508 信封密钥结构 v2 + 修改主密码（源 yeshimei/bz ADR-0211/issue 508 本地化落地，2026-10-04）
+
+- [x] 红线方案（ADR-0120 例外通道）：备份（迁移前 .safe.enc.v1bak 留底，不覆盖最初那份）+ 就地迁移（opQueue 串行、清单版本裁决一切、任意中断安全、解密失败即中止保持 v1 完整性优先）+ 回滚（旧镜像不删除挪 .migrate-v1-backup/ 归档，v1bak+归档搬回即回滚——本地加固偏离上游「删旧镜像」，方向为更安全）
+- [x] 双层信封：每镜像独立 fileKey（32B 随机 base64url 43 字符 ≈256bit）+ 中间主密钥 masterWrap；清单 v2 增 keys[ref]/masterWrap 字段；**版本位最后置**（读到 v2 必有完整信封——竞态教训见下）
+- [x] 公共 API 面零变化：SafeManager 读写方法签名不动，逐镜像 keyForRef 切换 12 处（正文/附件原始层/预览/完整性校验/密码本 updateNotePayload）；密码本/日记/第二大脑三域无感
+- [x] changePassword O(1)：重包 masterWrap + 清单以新密码重加密（原子三段式），镜像零接触；v1 运行态拒绝执行；ui 修改主密码入口（面板头行 key-round 钮 + flow-dialog 确认 + 自绘三段密码表单）
+- [x] 首设即 v2（空库也带 masterWrap）；v1 老库解锁后自动迁移（后台串行，解锁不阻塞）
+- [x] 竞态教训入册：迁移 v2 切换曾把 masterWrap = await PBKDF2 放在 version=2 之后——测试轮询在窗口内读到「v2 而无 wrap」连坐 changePassword/二次解锁；修正为 wrap 先算、版本位最后置；测试等待条件同步加 masterWrap 与进度清空
+- [x] 测试：envelope.test 8 用例（自动迁移/迁移后读写/回滚路径/改密镜像零接触/v1 态拒绝/中断安全修复重试/首设即 v2/锁定清密）+ vault-data fav 用例改走 updateNotePayload 正门（v2 镜像钥非主密码）
+- [x] 归档 ADR-0211 进 upstream-yeshimei；issue 508 原文名 508-envelope-change-password.md（归档时 404 未拉，待 API 配额恢复补）
+- [x] 门禁：worktree tsc 0 错 + 全量 4431 绿（292 文件，envelope 8 用例新增）→ master ff 合并 → 复测同绿 → 构建部署
