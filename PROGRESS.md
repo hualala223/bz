@@ -1039,3 +1039,13 @@
 - [x] 归档 ADR-0199/0200/0202 + issues 472/473/474/476/479；CONTEXT 词条见本文件同日段
 - [x] 门禁：worktree tsc 0 错 + 全量 4423 绿 → master ff 合并 → 复测同绿 → 构建部署
 - [ ] 未随批（=批 7b）：RSS 黄页订阅弹窗双页签（495/ADR-0208）+ RSSHub 路由参数表单（497/ADR-0209）+ 归物分类表消费方（catalog-suggest 13.7KB + catalog/categories.json 88KB + icon-pool.json 32KB + 记一笔下拉 + 图标继承，478 系/ADR-0204）——core 模型件已入库，消费方清单已缮写进 .scratch/upstream-batch7-handoff.md
+
+### 票 315 — 上游吸收批 7b：RSS 黄页/路由源 + 归物分类表消费方（源 yeshimei/bz issue 495/497/478 系，2026-10-04）
+
+- [x] RSS 源库黄页订阅（495/ADR-0208）：news-sources-group.ts 整文件对齐上游 master 版（586→1165 行，含黄页订阅双页签弹窗 + 路由型条目 + 分组/过滤/订阅去重），订阅弹窗按 core/rss-catalog（批 7a 入库）渲染云端出版源清单
+- [x] RSSHub 路由型源（497/ADR-0209）：news-source-settings 整文件对齐（rsshubInstance 字段 + writeRsshubInstance 写侧）+ news-data 六处增量（字段/emptyData 默认/normalizeRsshubInstance 归一/parse 读侧/合并段 rsshubInstance）；路由 URL 订阅时按实例重拼，fetcher 零改动（两版逐字节相同实证）
+- [x] 归物分类表消费方（478/488/489/491/ADR-0204）：catalog-suggest.ts（13.8KB，Jev 兜底 + 远端表候选）+ catalog/categories.json（26 组 515 条）+ icon-pool.json 随批入库；记一笔/编辑表单分类联想集成——候选 = 历史分类 ∪ 远端表（异步装载失败回落纯历史）、别名关键词命中、图标继承三兜底（历史记档 → 表目图标 → tag）
+- [x] 端到端闭环达成：在线资源组「RSS 源库/分类表」两行下载（批 4 起可用）自此有了消费方；下载只听用户的铁则不变
+- [x] 测试三处重锚（issue 434 精简文案：UP/RSS 名单 desc 去「添加与移除在管理弹窗」尾注、行型清单 +RSSHub 实例 text 行）；clipbook/belongings/settings-panel 全绿
+- [x] 归档 ADR-0204/0208/0209 + issues 478/488/489/491/495/497 系（497-people-gen 系 people 域件照录不消费）；CONTEXT 词条见同日段
+- [x] 门禁：worktree tsc 0 错 + 全量 4423 绿 → master ff 合并 → 复测同绿 → 构建部署
