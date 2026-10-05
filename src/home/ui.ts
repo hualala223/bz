@@ -22,10 +22,11 @@
 import type { IconName } from 'obsidian';
 import { escManager, registerPanelEsc, unregisterPanelEsc } from '../core/esc-manager';
 import { notice } from '../core/notice';
-import { mountIcons, uiEmpty, uiBtn } from '../core/ui';
+import { mountIcons, uiEmpty, uiBtn, uiResizable } from '../core/ui';
 import { topifyZ } from '../core/dom';
 import { attachItemActions, type ItemAction } from '../core/item-actions';
-import { tryGetSettings } from '../core/settings-provider';
+import { tryGetSettings, panelSizePersist } from '../core/settings-provider';
+import { isMobileEnv } from '../core/mobile';
 import { H } from './state';
 import { DOMAIN_MAP } from './domains';
 import {
@@ -93,6 +94,54 @@ function pickInitialView(river: RiverData, defaultDay: string, rangeDays: number
 
 /* ---------- 生命周期 ---------- */
 
+/** 两滚动容器（上游 eff P2-2，票 319）：桌面时间线列内部滚（.bz-home-flow）、移动整页滚
+ *  （.bz-home-body）。触发面 = 重开（display:none 复用丢滚位）与 renderAll 全量重建。 */
+function saveScroll(overlay: HTMLElement): void {
+  const body = overlay.querySelector<HTMLElement>('.bz-home-body');
+  const flow = overlay.querySelector<HTMLElement>('.bz-home-flow');
+  H.scroll.body = body ? body.scrollTop : 0;
+  H.scroll.flow = flow ? flow.scrollTop : 0;
+}
+
+/** 写回滚位（仅显示中；隐藏期间写回无效——display:none 的元素 scrollTop 恒 0） */
+function restoreScroll(overlay: HTMLElement): void {
+  if (!H.overlayVisible) return;
+  const body = overlay.querySelector<HTMLElement>('.bz-home-body');
+  const flow = overlay.querySelector<HTMLElement>('.bz-home-flow');
+  if (body) body.scrollTop = H.scroll.body;
+  if (flow) flow.scrollTop = H.scroll.flow;
+}
+
+/** 主面板拖拽缩放口径（上游 ADR-0084，票 319）：下限挡住三栏 grid 塌缩，上限留视口余量；
+ *  视口 92% 逐帧钳制在 core uiResizable 内，此处只给硬边界 */
+const PANEL = { MIN_W: 640, MIN_H: 420, MAX_W: 1200, MAX_H: 820 };
+
+/** 面板当前 resize 句柄（显示期间非空，隐藏/卸载摘除清空） */
+let panelResizeDetach: { flush: () => void; detach: () => void } | null = null;
+
+/**
+ * 挂桌面拖拽缩放（上游 ADR-0084/0094，票 319；createOverlay 首建与 showOverlay 复用显两路都走）。
+ * 三态复用同一 DOM 可能重复走到：挂前判句柄非空**直接跳过**（旧句柄的监听还活着，
+ * 先 detach 再挂反而白拆一遍还丢掉未落盘的防抖尾值）；移动端不挂（CSS 撑满视口）。
+ */
+function mountPanelResize(overlay: HTMLElement): void {
+  if (isMobileEnv() || panelResizeDetach) return;
+  const panel = overlay.querySelector<HTMLElement>('.bz-home-panel');
+  if (!panel) return;
+  panelResizeDetach = uiResizable(panel, {
+    minW: PANEL.MIN_W, minH: PANEL.MIN_H,
+    maxW: PANEL.MAX_W, maxH: PANEL.MAX_H,
+    persist: panelSizePersist('homePanelWidth', 'homePanelHeight', PANEL.MIN_W, PANEL.MIN_H),
+  });
+}
+
+/** 摘拖拽缩放（closeOverlay 隐藏与 unloadHome 卸载共用；persist 未落盘尾值由 detach 补存） */
+export function unmountPanelResize(): void {
+  if (!panelResizeDetach) return;
+  panelResizeDetach.detach();
+  panelResizeDetach = null;
+}
+
 export function createOverlay(app: any): void {
   const overlay = document.createElement('div');
   overlay.className = 'bz-panel-overlay bz-home-overlay';
@@ -110,6 +159,7 @@ export function createOverlay(app: any): void {
     motionPanelIn(overlay, false);
     motionRendered(overlay, true);
   };
+  mountPanelResize(overlay); // 桌面拖拽缩放 + 尺寸记忆（上游 ADR-0084/0094，票 319）
   void refreshRiverAndRender();
 }
 
@@ -167,6 +217,8 @@ async function refreshRiverAndRender(): Promise<void> {
 export function closeOverlay(): void {
   if (!H.currentOverlay || !H.overlayVisible) return;
   const overlay = H.currentOverlay;
+  saveScroll(overlay); // 滚位记忆（上游 eff P2-2，票 319）：隐藏前先存（display:none 后读不到）
+  unmountPanelResize(); // 隐藏即摘缩放句柄（常驻 DOM 面板，重开 showOverlay 再挂）
   H.overlayVisible = false;
   // 动效层：先演退场再收 display（重开竞态由 motionPanelOut 的 done 判 H.overlayVisible 兜住）
   motionPanelOut(overlay, () => {
@@ -181,7 +233,9 @@ export function showOverlay(): void {
   overlay.style.display = '';
   topifyZ(overlay);
   H.overlayVisible = true;
+  restoreScroll(overlay); // 滚位写回（上游 eff P2-2，票 319）
   motionPanelIn(overlay, true);
+  mountPanelResize(overlay); // 复用显重挂（closeOverlay 隐藏时已摘，句柄恒空，幂等由 mount 自守）
   void refreshRiverAndRender();
 }
 
@@ -355,6 +409,12 @@ function renderAll(): void {
   const date = overlay.querySelector('[data-home-date]');
   if (date) date.textContent = headDateText();
 
+  // 全量重建前的双记忆（上游 eff P2-2 / ui P3-4，票 319）：滚位 + 焦点——keepHome 动作落地
+  // 刷新与失败重试不再把浏览位置/键盘焦点打回面板顶部
+  saveScroll(overlay);
+  const active = document.activeElement as HTMLElement | null;
+  const fk = active && overlay.contains(active) ? focusKeyOf(active) : null;
+
   if (!H.river) {
     // 数据未到：结构占位（骨架），不闪空内容；采集失败（H12）→ 失败空态 + 重试，不再永挂骨架
     const entries = overlay.querySelector('[data-home-entries]') as HTMLElement;
@@ -417,7 +477,25 @@ function renderAll(): void {
   mountIcons(next);
   mountIcons(tiles);
   mountRowInteractions(overlay, H.appRef, river);
+  restoreScroll(overlay); // 滚位写回（上游 eff P2-2，票 319）
   motionRendered(overlay, flowBoot); // 动效层：首屏编排 / 刷新静默补挂河道
+  // 焦点回置（上游 ui P3-4，票 319）：等价新元素在场且面板显示中才回焦，找不到不抢
+  if (fk && fk.value && H.overlayVisible) {
+    const target = overlay.querySelector(`[${fk.attr}="${fk.value}"]`) as HTMLElement | null;
+    target?.focus();
+  }
+}
+
+/** 焦点定位键（上游 ui P3-4，票 319）：renderAll 全量重建会丢焦点——重建前从 activeElement
+ *  提取委托定位键（入口行/瓦片/预告卡的 data-home-go、周历格的 data-home-weekday），
+ *  重建后对等价新元素回焦；找不到（域被隐藏等）即放弃，不抢焦点。 */
+function focusKeyOf(el: Element | null): { attr: string; value: string } | null {
+  if (!el) return null;
+  const go = el.closest('[data-home-go]') as HTMLElement | null;
+  if (go) return { attr: 'data-home-go', value: go.dataset.homeGo || '' };
+  const wk = el.closest('[data-home-weekday]') as HTMLElement | null;
+  if (wk) return { attr: 'data-home-weekday', value: wk.dataset.homeWeekday || '' };
+  return null;
 }
 
 /* ---------- ESC / 通知 ---------- */

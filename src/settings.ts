@@ -76,6 +76,10 @@ export default interface BzSettings {
   settingsPanelWidth: number;
   /** 设置面板桌面端拖拽缩放记忆（高） */
   settingsPanelHeight: number;
+  /** 🖱 首页面板桌面端拖拽缩放记忆（上游 ADR-0084/0094，票 319）：0 = 未设置 */
+  homePanelWidth: number;
+  /** 首页面板桌面端拖拽缩放记忆（高） */
+  homePanelHeight: number;
 
   // ===== 📂 数据存储路径（ADR-0009 共享数据路径）=====
   /** 共享 JSON 数据目录（memo/belongings/passwords/favorites/review/quiz/闪念 meta+vec 统一存放） */
@@ -693,6 +697,8 @@ export const DEFAULT_SETTINGS: BzSettings = {
   peoplePanelHeight: 0,
   settingsPanelWidth: 0,
   settingsPanelHeight: 0,
+  homePanelWidth: 0,
+  homePanelHeight: 0,
 
   // 共享数据路径（ADR-0009）
   storagePath: 'CONFIG/STORAGE',

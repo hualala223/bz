@@ -1085,3 +1085,12 @@
 - [x] 归档核对：cmp_docs 报告的 47 issues + 23 ADR「上游修订」抽样 diff 证伪——纯 CRLF 行尾噪声，归档零内容漂移，无需刷新
 - [x] CONTEXT 词条（远端皮肤/皮肤就绪门控/设置直达/动效层）；AGENTS 命令数 83、域数 27 均不变
 - [x] 门禁：worktree tsc 0 错 + 全量 vitest → master ff 合并 → 复测同绿 → 构建部署
+
+### 票 319 — 首页面板缩放/滚位/焦点回置 + 二脑 canvas 入脑（源 yeshimei/bz ef13ce3d 残余功能件，2026-10-05）
+
+- [x] 起因：票 318 吸收时按范围纪律摘出的两个用户可感知功能缺口，用户拍板「不影响本地特意修改的前提下补」
+- [x] home 三件（上游 eff P2-2 / ui P3-4 / ADR-0084/0094）：H.scroll 滚位记忆（closeOverlay 存 / showOverlay 写回 / renderAll 重建前后双保险——display:none 丢布局 scrollTop 归零的反命题）+ 焦点回置（focusKeyOf 委托定位键 data-home-go/weekday，等价新元素在场才回焦）+ 桌面拖拽缩放（uiResizable 零样式热区，PANEL 640×420~1200×820，homePanelWidth/Height 两新键默认 0，closeOverlay/unloadHome 双路摘句柄防「已挂」误判）；票 288 本地件（秒开三件套/今日收集快照卡/菜单适配）零接触
+- [x] 二脑 canvas 入脑（上游 ADR-0141 §5）：indexableFiles = md + canvas（getFiles 按 extension 过滤），whitelistedFiles 白名单过滤不变（**ticket 116 本地红线保留：白名单空 = 什么也不录**）；doRefresh 读文件 canvas 走 canvasToText 抽节点文本（text>label>file 笔记名>url，畸形 JSON 空串兜底）后进既有切块链路，向量只作候选来源不写回（canvas 无 frontmatter）；本地 chunk.ts canvasToText 前批已在，仅补接线
+- [x] 明确不随：refreshSeq 代次守卫 / trapPanelFocus 焦点圈闭 / aria-pressed / bz-home-grid--no-next 塌缩修 / encrypt 体检 T9·T10·T15（健壮性修复非功能，未在拍板范围）
+- [x] 测试：tests/ticket-319.test.ts 6 用例（滚位存写全链 ×2 / 缩放句柄生命周期 / 设置键 / canvasToText 纯函数 / 白名单含 canvas + 空白名单红线）
+- [x] 门禁：worktree tsc 0 错 + 全量 vitest → master ff 合并 → 复测同绿 → 构建部署

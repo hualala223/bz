@@ -32,7 +32,7 @@ import type { App, TFile } from 'obsidian';
 import { buildConfig, DEFAULT_EMBEDDING_MODEL, IS_MOBILE, rerankChannel, type RerankChannel } from './config';
 import { loadStore, mutateStore } from './store-file';
 import { MobileBuffer } from './binary';
-import { embedChunks, hashChunks, noteTitleFromPath } from './chunk';
+import { canvasToText, embedChunks, hashChunks, noteTitleFromPath } from './chunk';
 import { isValidVector, normalizeVec } from './vector-math';
 import { RERANK_MAX_DOCS, rerankScores } from './rerank';
 import { jevRerankScores } from './rerank-jev';
@@ -212,13 +212,25 @@ export class VectorStore {
     return this.refreshPromise !== null;
   }
 
-  /** 白名单过滤后的 md 文件列表（doRefresh / hasPendingChanges / 主面板覆盖率共用） */
+  /** 可索引文件全集（上游 ADR-0141 §5，票 319）：全库 md + canvas。canvas 只作**候选来源**
+   *  （抽节点文本嵌入，不写回——canvas 无 frontmatter，related 无处落），与 md 同列。 */
+  private indexableFiles(): TFile[] {
+    const vault = this.app.vault as any;
+    const md = typeof vault.getMarkdownFiles === 'function' ? (vault.getMarkdownFiles() as TFile[]) : [];
+    const canvas =
+      typeof vault.getFiles === 'function'
+        ? (vault.getFiles() as TFile[]).filter((f) => f && f.extension === 'canvas')
+        : [];
+    return [...md, ...canvas];
+  }
+
+  /** 索引范围过滤后的文件列表（doRefresh / hasPendingChanges / 主面板覆盖率共用） */
   whitelistedFiles(): TFile[] {
     const CONFIG = buildConfig();
     const allowPaths = CONFIG.ALLOW_PATHS || [];
-    return (this.app.vault.getMarkdownFiles() as TFile[]).filter((f) => {
-      // ticket 116：白名单空 = 什么也不录（不索引任何目录），不再是"全库"
-      if (allowPaths.length === 0) return false;
+    // ticket 116 本地语义保留（票 319 红线）：白名单空 = 什么也不录（不索引任何目录），不再是"全库"
+    if (allowPaths.length === 0) return [];
+    return this.indexableFiles().filter((f) => {
       for (const allow of allowPaths) {
         if (f.path.startsWith(allow + '/') || f.path === allow) return true;
       }
@@ -376,11 +388,11 @@ export class VectorStore {
   private async doRefresh(): Promise<void> {
     const CONFIG = buildConfig();
 
-    // 白名单过滤（与 hasPendingChanges / 主面板覆盖率同一实现）
+    // 索引范围过滤（与 hasPendingChanges / 主面板覆盖率同一实现）
     const allowPaths = CONFIG.ALLOW_PATHS || [];
-    const allFiles = this.app.vault.getMarkdownFiles();
+    const allFiles = this.indexableFiles();
     const files = this.whitelistedFiles();
-    console.log(`[secondbrain] 全库 ${allFiles.length} 篇，白名单 [${allowPaths}] → 过滤后 ${files.length} 篇`);
+    console.log(`[secondbrain] 可索引 ${allFiles.length} 个文件（md+canvas），范围 [${allowPaths}] → 过滤后 ${files.length} 个`);
 
     // 记录「删除前」完整键序的源偏移（修复②：拷贝旧段必须按源布局寻址）
     const srcOffsets = new Map<string, number>();
@@ -460,7 +472,9 @@ export class VectorStore {
     let migrated = 0; // 挪动后指纹命中孤儿 → 继承向量、迁移登记键，不调嵌入
     for (const file of toProcess) {
       try {
-        const content = await this.app.vault.read(file);
+        const raw = await this.app.vault.read(file);
+        // canvas 入脑（上游 ADR-0141 §5，票 319）：JSON 白板抽节点文本后走同一条切块链路（md 原样进）
+        const content = file.extension === 'canvas' ? canvasToText(raw) : raw;
         // ticket 110：frontmatter 剥离后切块、标题并入首块（空正文兜底截断收口在 embedChunks 内）
         const chunks = embedChunks(content, noteTitleFromPath(file.path), minChunk);
         const hash = hashChunks(chunks);
