@@ -22,6 +22,7 @@ import type { SettingsSchema } from '../core/settings-schema';
 import { DOMAIN_ICONS } from '../core/domain-icons';
 import { mountIcons } from '../core/ui/icons';
 import { renderPanelSchema } from './renderer';
+import * as spm from './motion';
 // 更新日志弹窗（issue 472，票 314）：侧栏文档组入口的独立子弹窗，同皮 .bz-sp-skin
 import { openChangelogModal, isChangelogOpen } from './changelog';
 import { notice } from '../core/notice';
@@ -292,6 +293,9 @@ export class SettingsPanelUI {
       this.mask.style.display = 'block';
       this.popup.style.display = 'flex';
       this.mountPanelResize(); // 桌面拖拽缩放重挂（hide 软关时已摘，ADR-0084/0094）
+      // 动效挂点（上游动效批，票 318）：软重开 = 重新通电（尘光/萤标随 open 链唤醒）
+      spm.motionPanelIn(this.popup, this.mask);
+      spm.motionEnsureDust(this.popup);
       if (deep && isMobileEnv()) void this.openMobileDomain(deep);
       return;
     }
@@ -481,13 +485,22 @@ export class SettingsPanelUI {
       pane.querySelectorAll<HTMLElement>('.bz-sp-set-row').forEach((row) => {
         row.classList.toggle('hit', !!kw && row.textContent!.includes(kw));
       });
+      // 动效挂点（上游动效批，票 318）：萤标跟随新选中项（重建后 sync，幂等）——不推迟任何 DOM 就位
+      spm.motionNavSynced(nav);
     };
 
     searchIn.addEventListener('input', () => renderNav(searchIn.value));
     renderNav('');
+    // 动效挂点：导航悬停微浮（委托绑 nav 容器，重建免疫）
+    spm.motionBindNavFeel(nav);
     // 注册列表重绘回调：preload 解析出零项域后按当前搜索词重绘导航（issue 194 按端隐藏）
     this.rerenderList = () => renderNav(searchIn.value);
     void this.renderDomain(pane, DOMAINS.find((x) => x.id === this.activeDomainId) ?? DOMAINS[0]);
+    // 动效挂点（面板级，build 一次）：通电入场 + 按压实感 + 灯下尘常驻
+    // （萤标已由 renderNav→motionNavSynced 自建；markup 契约零改写，见 motion.ts）
+    spm.motionPanelIn(popup, this.mask);
+    spm.motionBindPressFeel(popup);
+    spm.motionEnsureDust(popup);
   }
 
   /**
@@ -604,6 +617,8 @@ export class SettingsPanelUI {
           '该域的设置项仅移动端可见（如移动端默认全屏），桌面端无需配置'
         ));
       }
+      // 动效挂点（上游动效批，票 318）：翻层揭帘（DOM 已全部就位后纯表现编排，绝不推迟重写）
+      spm.motionRendered(pane);
       return;
     } catch (e) {
       body.innerHTML = '';
@@ -694,6 +709,8 @@ export class SettingsPanelUI {
       }
       list.innerHTML = html;
       mountIcons(list);
+      // 动效挂点（上游动效批，票 318）：列表项轻浮接力（DOM 已就位的纯表现层，前 12 项，其余直达）
+      spm.motionMobList(list);
       bindList();
     };
 
@@ -712,6 +729,10 @@ export class SettingsPanelUI {
 
     searchIn.addEventListener('input', () => render(searchIn.value));
     render('');
+    // 动效挂点（面板级，build 一次）：通电入场 + 按压实感 + 灯下尘常驻（尘挂域页滚动域）
+    spm.motionPanelIn(popup, this.mask);
+    spm.motionBindPressFeel(popup);
+    spm.motionEnsureDust(popup);
     // 注册列表重绘回调：preload 解析出零项域后按当前搜索词重绘列表（issue 194 按端隐藏）
     this.rerenderList = () => render(searchIn.value);
   }
@@ -796,11 +817,15 @@ export class SettingsPanelUI {
 
   hide(): void {
     this.unmountPanelResize(); // 软关即摘缩放句柄（常驻面板，重开 open/build 补挂；ADR-0084）
+    // 动效挂点（上游动效批，票 318）：软关入睡（编排定时器清空 + 双系统停泵；唤醒在 open→motionPanelIn 链）
+    spm.motionSleep();
     if (this.mask) this.mask.style.display = 'none';
     if (this.popup) this.popup.style.display = 'none';
   }
 
   cleanup(): void {
+    // 动效挂点：全清（泵/监听/注入件状态全收，幂等）——先于 DOM 摘除，句柄不残留
+    spm.motionTeardown();
     this.unmountPanelResize(); // 缩放句柄随销毁摘除（popup 将移除，句柄不得跨实例残留）
     if (this.escHandle) {
       this.escHandle.unregister();

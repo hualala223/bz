@@ -40,6 +40,7 @@ import {
   headDateText, panelFrameHtml, loadingEntriesHtml, loadingFlowHtml,
   weekHtml, entriesHtml, flowHtml, nextHtml, tilesHtml, sheetHeadHtml, menuHeadHtml, type FlowOpts,
 } from './render';
+import { motionDaySwitch, motionPanelIn, motionPanelOut, motionRendered, motionWeekPop } from './motion';
 
 /** 明天预告卡：本次打开是否被设置关掉（关掉时要连第三栏一起收敛，不能只清内容） */
 let nextOff = true;
@@ -103,6 +104,12 @@ export function createOverlay(app: any): void {
   mountIcons(overlay); // 头行关闭钮等静态占位（renderAll 只挂数据区图标）
   bindEvents(overlay, app);
   renderAll();
+  motionPanelIn(overlay, false); // 动效层：面板壳入场（渲染编排由 renderAll 内的 motionRendered 管）
+  // 评审便利：#replay 重播首屏编排（motion.ts 的 hashchange 钩子消费；插件内无害）
+  (window as unknown as Record<string, unknown>).__bzHomeReplay = () => {
+    motionPanelIn(overlay, false);
+    motionRendered(overlay, true);
+  };
   void refreshRiverAndRender();
 }
 
@@ -159,8 +166,12 @@ async function refreshRiverAndRender(): Promise<void> {
  */
 export function closeOverlay(): void {
   if (!H.currentOverlay || !H.overlayVisible) return;
-  H.currentOverlay.style.display = 'none';
+  const overlay = H.currentOverlay;
   H.overlayVisible = false;
+  // 动效层：先演退场再收 display（重开竞态由 motionPanelOut 的 done 判 H.overlayVisible 兜住）
+  motionPanelOut(overlay, () => {
+    if (!H.overlayVisible && H.currentOverlay === overlay) overlay.style.display = 'none';
+  });
 }
 
 /** 重开复用（issue 290）：恢复显示 + 重新发号（谁后显示谁在上）+ 立即动态刷新数据 */
@@ -170,6 +181,7 @@ export function showOverlay(): void {
   overlay.style.display = '';
   topifyZ(overlay);
   H.overlayVisible = true;
+  motionPanelIn(overlay, true);
   void refreshRiverAndRender();
 }
 
@@ -208,12 +220,20 @@ function bindEvents(overlay: HTMLElement, app: any): void {
       H.riverView = wk.dataset.homeWeekday || null;
       const overlay2 = H.currentOverlay;
       if (overlay2) {
-        overlay2.querySelectorAll('[data-home-weekday]').forEach((b) =>
-          b.classList.toggle('bz-home-wk--sel', (b as HTMLElement).dataset.homeWeekday === H.riverView));
+        let selEl: HTMLElement | null = null;
+        overlay2.querySelectorAll('[data-home-weekday]').forEach((b) => {
+          const sel = (b as HTMLElement).dataset.homeWeekday === H.riverView;
+          b.classList.toggle('bz-home-wk--sel', sel);
+          if (sel) selEl = b as HTMLElement;
+        });
+        if (selEl) motionWeekPop(selEl); // 选中彩条弹跳（动效层）
         const flow = overlay2.querySelector('[data-home-flow]') as HTMLElement | null;
         if (flow) {
-          flow.innerHTML = flowHtml(H.river!, H.riverView ?? '', readHomeSettings().flow);
-          mountIcons(flow);
+          // 切天编排（动效层）：旧河 blur 退场 → 重写（markup 单源不动）→ 新河接力揭出
+          motionDaySwitch(flow, () => {
+            flow.innerHTML = flowHtml(H.river!, H.riverView ?? '', readHomeSettings().flow);
+            mountIcons(flow);
+          });
         }
       }
     }
@@ -282,11 +302,19 @@ function attachRowMenu(el: HTMLElement, app: any, river: RiverData): void {
   const actions: ItemAction[] = menu.map((a) => {
     // 相位敏感项：静态声明只是 idle 兜底，这里按实时相位整体换掉（见 shared.pomodoroMenuAction）
     const spec = a.dynamic === 'phase' ? { ...a, ...pomodoroMenuAction(H.pomodoroPhase) } : a;
+    const deep = spec.settingsDeep;
     return {
       icon: spec.icon as IconName,
       label: spec.label,
       kind: spec.kind === 'danger' ? 'danger' : 'normal',
       onClick: () => {
+        if (deep) {
+          // 设置直达（上游 issue 388）：关首页再开设置面板（定位该域设置页），避免两层面板叠着；
+          // 域 id 落空（plan/collect 无面板域页）时 openSettingsPanel 退化为普通打开
+          closeOverlay();
+          void import('../settings-panel').then((m) => m.openSettingsPanel(app, deep));
+          return;
+        }
         if (spec.keepHome) {
           // 即时类：面板留着，动作跑完刷新一次数据（计数/彩点当场归位）
           if (spec.busyText) notice(spec.busyText); // 慢动作 busy 反馈（上游 eff P3-2：Steam 拉库 1-3s 防重复点击）
@@ -372,6 +400,9 @@ function renderAll(): void {
   const entries = overlay.querySelector('[data-home-entries]') as HTMLElement;
   const flow = overlay.querySelector('[data-home-flow]') as HTMLElement;
   const next = overlay.querySelector('[data-home-next]') as HTMLElement;
+  // 动效层 boot 判定（上游动效批）：重写前 flow 还处于「骨架 / 失败位」= 数据首次到达 → 走首屏编排；
+  // 已有渲染的刷新走静默（整屏不闪，对齐 cinema issue 402 的 identity 口径）
+  const flowBoot = !!flow.querySelector('.bz-home-sk-line, .bz-home-flow-empty');
   entries.innerHTML = entriesHtml(river, H.order.desk, H.order.hiddenDesk);
   flow.innerHTML = flowHtml(river, view ?? today, cfg.flow);
   next.innerHTML = nextHtml(river, cfg.next);
@@ -386,6 +417,7 @@ function renderAll(): void {
   mountIcons(next);
   mountIcons(tiles);
   mountRowInteractions(overlay, H.appRef, river);
+  motionRendered(overlay, flowBoot); // 动效层：首屏编排 / 刷新静默补挂河道
 }
 
 /* ---------- ESC / 通知 ---------- */

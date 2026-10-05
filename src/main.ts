@@ -11,6 +11,7 @@ import { closeItemMenu } from './core/item-actions';
 import { setApp, getApp } from './core/app';
 import { scheduleSelfUpdateCheck } from './core/self-update';
 import { refreshManifest } from './core/download-manifest';
+import { applySkinManifest, loadLocalSkinPack } from './core/skin-pack';
 import { setAISettingsProvider, resetAIProviderCache } from './core/ai';
 import { setSettingsProvider, setSettingsSaver } from './core/settings-provider';
 import { clearDomainEvents } from './core/domain-bus';
@@ -400,12 +401,17 @@ export default class BzPlugin extends Plugin {
         ensureFavoritesFileSync(this.app); // 收藏本引用同步（本地保留）
       }
       if (this.settings.secondBrainEnabled) ensureSecondBrainOnReady(this.app);
+      // 皮肤包本地缓存（上游 ADR-0199，票 318 接线）：**不等**下面那 15 秒——先用已下载的皮肤起效，
+      // 否则用户上次选的远端皮肤会在每次重启的头十几秒里回落首套（像「皮肤被重置」）
+      void loadLocalSkinPack(getApp());
       // 新版本自更新巡检（上游 issue 480/ADR-0203 随批：24h 节流、启动 15s 后静默跑；有新版才弹通知，
-      // 失败不吵）。after = 在线资源清单对比（ADR-0203）：只对比 + 就绪注入，**绝不下载**（半自动铁则：
+      // 失败不吵）。after = 在线资源清单对比（ADR-0203）：必须**串在自更新之后**——皮肤版本区间校验
+      // 吃 manifest 版本号。只对比 + 下架清理 + 就绪注入，**绝不下载**（半自动铁则：
       // 下载只听用户的，在设置面板「在线资源」组触发）；失败静默等下次启动，组内失败态由 UI 自行呈现。
       scheduleSelfUpdateCheck(getApp, () => this.unloaded, async () => {
         try {
-          await refreshManifest(getApp());
+          const { manifest, previous } = await refreshManifest(getApp());
+          await applySkinManifest(getApp(), manifest, previous);
         } catch (e) {
           console.warn('[bz] 下载清单拉取失败（已静默，等下次启动/手动重试）:', (e as Error)?.message || e);
         }

@@ -5,12 +5,46 @@
  */
 import { mobileFullscreenGroup } from '../core/settings-common';
 import type { SettingsSchema } from '../core/settings-schema';
+import { skinPackOptions } from '../core/skin-pack';
 import { resolveFolderPath } from './data';
-import { applyBookshelfSkin } from './ui';
+import { applyBookshelfSkin, BUILTIN_SKIN } from './ui';
+
+/**
+ * 面板主题选项：**内置首套（恒首位）+ 已就绪的远端皮肤（清单顺序）**——
+ * 不生效（未下载/下架/版本区间外）的皮肤不进选择卡（上游 ADR-0199 决策 6，票 318 接线）。
+ * 清单在设置面板打开时才求值，故启动同步完成后重开面板即可见新皮肤。
+ */
+function skinOptions() {
+  return skinPackOptions('bookshelf', [
+    {
+      value: BUILTIN_SKIN,
+      label: '雪松白',
+      layout: 'default',
+      prevClass: `bz-skinprev-bs-${BUILTIN_SKIN}`,
+    },
+  ]);
+}
 
 export function bookshelfSettingsSchema(): SettingsSchema {
   return {
     groups: [
+      {
+        // 外观组（上游 ADR-0199 标准化：布局行占位单卡 + 主题=bookshelfSkin，layoutKey 联动同范式；
+        // onChange 热切换已开面板；退役肤/未就绪远端肤值读取回落雪松白（normalizeSkin））
+        icon: 'palette',
+        name: '外观',
+        rows: [
+          { type: 'choiceCards', name: '面板布局', binding: { key: 'bookshelfLayout' }, options: [{ value: 'default', label: '书架墙', prevClass: 'bz-sp-prev-panel' }] },
+          {
+            type: 'choiceCards',
+            name: '面板主题',
+            binding: { key: 'bookshelfSkin' },
+            layoutKey: 'bookshelfLayout',
+            options: skinOptions(),
+            onChange: (v) => applyBookshelfSkin(v),
+          },
+        ],
+      },
       {
         icon: 'folder-open',
         name: '目录',
@@ -29,22 +63,6 @@ export function bookshelfSettingsSchema(): SettingsSchema {
         icon: 'eye',
         name: '显示',
         rows: [
-          {
-            // 面板皮肤（issue 235 五肤×亮暗）：choiceCards「看脸选」；每肤配亮暗两套变体，
-            // Obsidian 主题切模式（bz-bs-mode-*）；默认雪松白；onChange 热切换已开面板；
-            // 存量退役肤值（dark/wabi/bauhaus/blueprint/neon）读取时回落雪松白（normalizeSkin）
-            type: 'choiceCards',
-            name: '面板皮肤',
-            binding: { key: 'bookshelfSkin' },
-            options: [
-              { value: 'nordic', label: '雪松白', prevClass: 'bz-skinprev-bs-nordic' },
-              { value: 'noir', label: '黑金夜曲', prevClass: 'bz-skinprev-bs-noir' },
-              { value: 'kraft', label: '牛皮手帐', prevClass: 'bz-skinprev-bs-kraft' },
-              { value: 'velvet', label: '丝绒剧院', prevClass: 'bz-skinprev-bs-velvet' },
-              { value: 'mono', label: '极简黑白', prevClass: 'bz-skinprev-bs-mono' },
-            ],
-            onChange: (v) => applyBookshelfSkin(v),
-          },
           {
             type: 'select',
             name: '默认筛选',

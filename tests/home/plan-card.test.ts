@@ -91,10 +91,15 @@ describe('DOMAINS / DOMAIN_MENU 计划卡（ADR-0132）', () => {
     expect(d!.icon).toBeTruthy();
   });
 
-  it('DOMAIN_MENU.plan 挂「打开计划总览」1 条（Q6(b)）', () => {
-    expect(DOMAIN_MENU.plan).toEqual([
-      { label: '打开计划总览', commandId: 'planflow:open-planboard', icon: 'target' },
-    ]);
+  it('DOMAIN_MENU.plan 首条挂「打开计划总览」（Q6(b)）；末尾统一「设置」直达（issue 388）', () => {
+    expect(DOMAIN_MENU.plan![0]).toEqual({
+      label: '打开计划总览',
+      commandId: 'planflow:open-planboard',
+      icon: 'target',
+    });
+    const last = DOMAIN_MENU.plan![DOMAIN_MENU.plan!.length - 1];
+    expect(last.label).toBe('设置');
+    expect(last.settingsDeep).toBe('plan'); // 无面板域页：深链落空退化为普通打开（兜底契约）
   });
 });
 

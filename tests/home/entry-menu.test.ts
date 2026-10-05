@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   DOMAIN_MENU, DOMAIN_MAP, DOMAIN_DOT, domainColor,
-  pomodoroMenuAction, sheetHeadHtml, menuHeadHtml, riverCountText, EMPTY_COUNTS,
+  pomodoroMenuAction, settingsMenuAction, sheetHeadHtml, menuHeadHtml, riverCountText, EMPTY_COUNTS,
 } from '../../src/home/render';
 import type { RiverData, RiverStreak } from '../../src/home/render';
 
@@ -73,11 +73,29 @@ describe('DOMAIN_MENU 形状', () => {
       .filter(([, list]) => list.some((a) => a.dynamic))
       .map(([id]) => id);
     expect(dyn).toEqual(['pomodoro']);
-    expect(DOMAIN_MENU.pomodoro.length).toBe(1);
-    expect(DOMAIN_MENU.pomodoro[0].dynamic).toBe('phase');
+    // 末尾统一「设置」直达（issue 388）不计入：相位项仍是唯一 dynamic
+    const phaseItems = DOMAIN_MENU.pomodoro.filter((a) => a.dynamic);
+    expect(phaseItems.length).toBe(1);
+    expect(phaseItems[0].dynamic).toBe('phase');
     // 静态声明 = idle 兜底（挂菜单时整条被 pomodoroMenuAction 盖掉）
-    expect(DOMAIN_MENU.pomodoro[0].label).toBe(pomodoroMenuAction('idle').label);
-    expect(DOMAIN_MENU.pomodoro[0].keepHome).toBe(true);
+    expect(phaseItems[0].label).toBe(pomodoroMenuAction('idle').label);
+    expect(phaseItems[0].keepHome).toBe(true);
+  });
+
+  it('每域菜单末尾统一「设置」直达（issue 388，票 318）：settingsDeep 槽位 + 图标与设置磁贴同源', () => {
+    for (const [id, list] of Object.entries(DOMAIN_MENU)) {
+      const last = list[list.length - 1];
+      expect(last.label, id).toBe('设置');
+      expect(last.commandId, id).toBe('bz-settings-panel-open');
+      expect(last.settingsDeep, id).toBe(id); // 本地菜单键与面板域 id 同名直通（SETTINGS_DOMAIN_KEY 空表）
+      expect(last.dynamic, id).toBeUndefined();
+      expect(last.kind, id).toBeUndefined();
+      expect(last.keepHome, id).toBeUndefined();
+      expect(last.settingsDeep === undefined || typeof last.settingsDeep === 'string', id).toBe(true);
+    }
+    // settingsMenuAction 纯函数单源（node 可测）：图标链 settings→settings-panel（与设置磁贴同款）
+    expect(settingsMenuAction('diary')).toMatchObject({ label: '设置', commandId: 'bz-settings-panel-open', settingsDeep: 'diary' });
+    expect(settingsMenuAction('diary').icon).toBe('settings-2');
   });
 
   it('设置 / 附件不在菜单里（无域快捷动作 → 不挂浮层）', () => {

@@ -200,6 +200,8 @@ export default interface BzSettings {
   bookshelfDefaultSide: string;
   bookshelfSortMode: string;
   bookshelfSkin: string;
+  /** 书架墙面板布局（上游 ADR-0199 外观组联动键；现仅 default 一档） */
+  bookshelfLayout: string;
   /** 🏷️ 书籍识别标签 */
   bookTag: string;
   /** 📦 显示文件大小 */
@@ -763,6 +765,7 @@ export const DEFAULT_SETTINGS: BzSettings = {
   bookshelfDefaultSide: 'all',
   bookshelfSortMode: 'date',
   bookshelfSkin: 'nordic',
+  bookshelfLayout: 'default',
   bookTag: 'book',
   showFileSize: true,
   showReadingTime: true,

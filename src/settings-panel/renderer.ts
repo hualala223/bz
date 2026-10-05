@@ -28,6 +28,11 @@ import {
   sliderHtml, pathChipsItemsHtml, pathAddBtnHtml, rowBtnHtml, badgeHtml, cardpickHtml,
   rowHtml, groupCardHtml, type SpRowVm,
 } from './render';
+// 动效层（上游动效批，票 318）：只在行为反馈点被调用，markup 契约不变
+import {
+  motionSwitchFlip, motionSelectPick, motionCardChoose,
+  motionInputSaved, motionInputAdjust,
+} from './motion';
 
 /** 快照读取（visibleWhen 求值输入；键直绑行从 getSettings 读，三函数行由外部提供） */
 function snapshot(): SettingsSnapshot {
@@ -201,6 +206,7 @@ function renderRow(
         sw.setAttribute('aria-checked', String(v));
         acc.write(v);
         void acc.persist();
+        motionSwitchFlip(sw, v); // 动效层（上游动效批）：拨杆按弹 + 到位微光（旋钮滑行归 CSS transition）
         row.onChange?.(v, ctx);
         refresh();
       });
@@ -270,10 +276,12 @@ function renderRow(
           if (numRow.max !== undefined && v > numRow.max) v = numRow.max;
           input.value = String(v);
           acc.write(v);
+          motionInputAdjust(input); // 动效层（上游动效批）：值被钳制——回弹提示落值与所写不同
         } else {
           acc.write(raw);
         }
         void acc.persist();
+        motionInputSaved(input); // 动效层（上游动效批）：入槽一呼吸（提交落盘确认，轻到不打断输入流）
         (row.onChange as unknown as ((v: string | number, c: SettingsRowContext) => void) | undefined)?.(
           isNum ? Number(input.value) : raw, ctx
         );
@@ -340,6 +348,7 @@ function renderRow(
         if (!dirty) return;
         acc.write(ta.value);
         void acc.persist();
+        motionInputSaved(ta); // 动效层（上游动效批）：入槽一呼吸（多行文本提交同皮同反馈）
       };
       ta.addEventListener('input', () => {
         dirty = true;
@@ -399,6 +408,7 @@ function renderRow(
             vspan.textContent = labelOf(o.value);
             acc.write(o.value);
             void acc.persist();
+            motionSelectPick(sel); // 动效层（上游动效批）：旋钮位提亮一拍 + 箭头回弹（菜单本体不加动效——用户拍板）
             row.onChange?.(o.value, ctx);
             refresh();
           });
@@ -504,6 +514,7 @@ function renderRow(
         c.addEventListener('click', () => {
           wrap.querySelectorAll('.is-on').forEach((x) => x.classList.remove('is-on'));
           c.classList.add('is-on');
+          motionCardChoose(c); // 动效层（上游动效批）：选卡按实 + 提亮一拍
           acc.write(c.dataset.spCard ?? '');
           void acc.persist();
           row.onChange?.(c.dataset.spCard ?? '', ctx);

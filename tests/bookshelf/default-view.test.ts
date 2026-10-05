@@ -46,19 +46,28 @@ describe('bookshelf applyDefaultView（issue 194）', () => {
 });
 
 describe('bookshelf 设置 schema（issue 194）', () => {
-  it('组序：目录 → 显示 → 移动端；显示组三行键与选项集契约（issue 215 皮肤、issue 218 排序三档）', () => {
+  it('组序：外观 → 目录 → 显示 → 移动端；主题行走 skin-pack 就绪表（上游 ADR-0199，票 318），显示组两行键契约（issue 218）', () => {
     const schema = bookshelfSettingsSchema();
-    expect(schema.groups.map((g) => g.name)).toEqual(['目录', '显示', '移动端']);
-    const view = schema.groups[1];
-    expect(view.rows).toHaveLength(3);
-    const [skin, side, sort] = view.rows as any[];
-    // 面板皮肤（issue 235 五肤×亮暗）：choiceCards 五选一，默认雪松白，onChange 热切换
+    expect(schema.groups.map((g) => g.name)).toEqual(['外观', '目录', '显示', '移动端']);
+    // 外观组：布局占位单卡 + 主题=bookshelfSkin（skinPackOptions 就绪表；未同步远端时仅内置首套）
+    const look = schema.groups[0];
+    expect(look.rows).toHaveLength(2);
+    const [layout, skin] = look.rows as any[];
+    expect(layout.type).toBe('choiceCards');
+    expect(layout.binding).toMatchObject({ key: 'bookshelfLayout' });
+    expect(DEFAULT_SETTINGS.bookshelfLayout).toBe('default');
     expect(skin.type).toBe('choiceCards');
-    expect(skin.name).toBe('面板皮肤');
+    expect(skin.name).toBe('面板主题');
     expect(skin.binding).toMatchObject({ key: 'bookshelfSkin' });
-    expect(skin.options.map((o: any) => o.value)).toEqual(['nordic', 'noir', 'kraft', 'velvet', 'mono']);
-    expect(skin.options.every((o: any) => typeof o.prevClass === 'string')).toBe(true);
+    // 未就绪远端肤不进选择卡（ADR-0199 决策 6）：种子空表 → 只有内置雪松白
+    expect(skin.options.map((o: any) => o.value)).toEqual(['nordic']);
+    expect(skin.options[0].label).toBe('雪松白');
+    expect(typeof skin.options[0].prevClass).toBe('string');
     expect(typeof skin.onChange).toBe('function');
+    // 显示组：默认筛选/排序两行（皮肤行已上移外观组）
+    const view = schema.groups[2];
+    expect(view.rows).toHaveLength(2);
+    const [side, sort] = view.rows as any[];
     expect(side.type).toBe('select');
     expect(side.name).toBe('默认筛选');
     expect(side.binding).toMatchObject({ key: 'bookshelfDefaultSide' });

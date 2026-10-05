@@ -200,6 +200,12 @@ export interface DomainMenuAction {
    * 缺省 false = 关首页再执行（打开别域面板/需要确认框的动作走这条）。
    */
   keepHome?: boolean;
+  /**
+   * 设置直达槽位（上游 issue 388，票 318 吸收）：填 **settings-panel 的域 id**——
+   * ui.ts 据此改走 `openSettingsPanel(app, 该 id)`（定位到该域设置页）而非 executeCommandById；
+   * commandId 仍恒填 `bz-settings-panel-open`（类型契约不动，兜底路径可直跑命令）。
+   */
+  settingsDeep?: string;
 }
 
 /**
@@ -231,7 +237,7 @@ export function pomodoroMenuAction(phase: PomodoroPhase): DomainMenuAction {
  * 2026-09-11 补 9 条（用户点名采纳）：全部是「不开面板、一步完成」的动作，
  * 其中即时类带 `keepHome`（不关首页）；清空类带 `kind: 'danger'`（红字 + 二次确认）。
  */
-export const DOMAIN_MENU: Record<string, DomainMenuAction[]> = {
+const DOMAIN_MENU_RAW: Record<string, DomainMenuAction[]> = {
   // 日记四动作（2026-09-14 用户点名；解冻上游「日记不挂菜单」的票 288 口径——
   // 均为既有 bz 命令直呼，不新增命令面，diary 域本身零改动）：
   diary: [
@@ -312,6 +318,32 @@ export const DOMAIN_MENU: Record<string, DomainMenuAction[]> = {
     { label: '收集内容', commandId: 'bz-collect-capture', icon: 'pencil-line' },
   ],
 };
+
+/** home 域 id → settings-panel 域 id（仅异名处登记，ICON_KEY 同款惯例；缺省同名直通）。
+ *  本地菜单键与面板域 id 全部同名（encrypt 即面板「保险库」域），故现为空表；
+ *  plan / collect 无面板域页——深链落空时 openSettingsPanel 退化为普通打开（上游兜底契约）。 */
+const SETTINGS_DOMAIN_KEY: Record<string, string> = {};
+
+/**
+ * 每域菜单末尾统一追加的「设置」直达项（上游 issue 388，票 318 吸收；纯函数，node 可测）。
+ * 文案就叫「设置」——桌面菜单有单行盒头标域名，不违反「无『打开 X』」形状契约；
+ * 图标与「设置」入口磁贴同源（settings，已在图标表，零新增）。
+ * 声明序注意：消费表 DOMAIN_MENU 在模块顶层初始化即调用本函数，SETTINGS_DOMAIN_KEY 必须先初始化。
+ */
+export function settingsMenuAction(id: string): DomainMenuAction {
+  return {
+    label: '设置',
+    commandId: 'bz-settings-panel-open',
+    icon: iconOf('settings'),
+    settingsDeep: SETTINGS_DOMAIN_KEY[id] ?? id,
+  };
+}
+
+/** 消费表 = DOMAIN_MENU_RAW 每域动作 + 末尾统一「设置」直达（表内域全追加）；
+ *  本地表 diary/vault 口径沿用票 288 适配（diary 有菜单、vault 不挂），追加项不改这些裁决。 */
+export const DOMAIN_MENU: Record<string, DomainMenuAction[]> = Object.fromEntries(
+  Object.entries(DOMAIN_MENU_RAW).map(([id, actions]) => [id, [...actions, settingsMenuAction(id)]]),
+);
 
 /** 域色（入口行 / 移动瓦片 / 抽屉盒头共用单一口径；未登记的域回落中性灰） */
 export function domainColor(id: string): string {

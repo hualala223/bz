@@ -1072,3 +1072,16 @@
 - [x] 测试：tests/people 59 文件全量并入 + lock-screen.test 4 用例本地口径对齐（种子根/取消 data-ls/快照四档）；D3 白名单一条；全量 5425 绿（351 文件）
 - [x] 归档：ADR-0191~0239 全窗口差集 28 篇 + issues 435-549 系 69 篇进 upstream-yeshimei（git 通道）；issue 508 正名件前票已补
 - [x] 门禁：worktree tsc 0 错 + 全量 5425 绿 → master ff 合并 → 复测同绿 → 构建部署
+
+### 票 318 — 上游吸收批 8：检索取消尾巴 + 设置直达 + 远端皮肤接线 + 动效层三域（源 yeshimei/bz ef13ce3d，2026-10-05）
+
+- [x] 口径：上游差量三口径交叉盘点（`.scratch/upstream-diff-report-2026-10-05.md` + cmp_docs/cmp_domain/cmp_verify 脚本组）；上游 tip 即票 317 源提交 ef13ce3d（零新提交），本批吸收「窗口内未吸」残余；A1 盘点误判修正——425/ADR-0185 全扫余弦主体早已在库（buildNormCache 逐字段在），真差量仅 428 尾巴；冻结域（diary/review）与两处已裁决分歧（密码本并入保险库 ADR-0085、待办皮肤本地内置形态）按裁决维持，A5 help-tip（上游零消费方）缓吸
+- [x] A1 二脑检索收尾（issue 428 尾巴）：vectorSearch 全扫循环 64 篇一查 throwIfAborted 取消检查点 + searchMobile 远程级 signal 直通（AbortError 直抛不降级文本）+ 文件头/检索段 VP-Tree 陈旧注释纠偏（代码早已全扫余弦）
+- [x] A2 首页设置直达（issue 388）：DomainMenuAction.settingsDeep 槽位 + SETTINGS_DOMAIN_KEY（本地空表——菜单键与面板域 id 同名）+ settingsMenuAction 纯函数 + DOMAIN_MENU 消费表 = RAW + 末尾统一「设置」项（RAW 转私有，diary 有菜单/vault 不挂等票 288 裁决原样）+ ui.ts attachRowMenu 深链分支（closeOverlay → openSettingsPanel(app, deep)，plan/collect 无面板域页退化为普通打开）
+- [x] A3 远端皮肤消费方接线（ADR-0199；资产侧与 core/skin-pack 票 314 已齐，本批补三域）：main.ts 启动链 loadLocalSkinPack（不等 15 秒，防重启头十几秒皮肤回落）+ scheduleSelfUpdateCheck after 回调 applySkinManifest（串自更新后，只对比+注入绝不下载）；pomodoro applySkinClass 就绪门控+动态类摘除+skinThemeOptions 函数化+styles 删九套远端变量（番茄内置）+render 注释对齐；smartcat types ALL_APPEARANCES 全集化+config 外观校验不吞用户选择+ui applyAppearance 门控/外观行 custom 格子退役换 choiceCards+styles 皮肤本体段远端化（139 行本体+54 行色块+18 条皮肤专属 keyframes 摘除，orange 预览块植入，skinLabel 死代码清除；票 307 isPathExclude 等本地件全保留）；bookshelf ui KNOWN_SKIN_IDS/BUILTIN_SKIN/normalizeSkin 读时回落+applyBookshelfSkin 前缀摘类+settings 外观组前置（布局占位卡+主题走 skinPackOptions，bookshelfLayout 新键）+styles 四套远端皮本体摘除（104 规则块；五肤预览块留置同上游）
+- [x] A4 动效层三域（2026-09-22 上游动效批余量；影院系批 4 已入、smartcat 本地已有、diary/review 冻结不随）：src/{home,encrypt,settings-panel}/motion.ts 三文件整件入（Q5 拍板：继承上游「无视系统减少动态效果」现状）；home 接线五点（面板入/退场/首屏编排 flowBoot 骨架判定/切天编排+彩条弹跳/#replay 评审钩子）；encrypt 接线 19 点（资产切换/搜索级联/开关铁门/解锁屏封条验印+验讫余韵+拒盖三摇 vault·people 两屏、legacy 冻结不动/预览升起+显影+原始层曝光/体检扫描线开关+发现行揭出+报告落定/状态栏锁芯/二级页揭出×3/卸载清场）；settings-panel 接线（index 卸载清场+renderer 拨杆/入槽/钳制回弹/旋钮/选卡+ui 开板通电/萤标同步/导航悬停/按压实感/灯下尘/翻层揭帘/移动列表接力/软关入睡；上游输入校验拒绝路径本地无对应不落）
+- [x] 明确不随批：settings-panel/styles.css 全域对齐（两套体系策略，票 289 裁决）；上游 home 面板缩放/滚位/代次守卫/aria 等他票混入件；encrypt 体检 T9 重入守卫/T10 锁定态/T15 时间格式（他票修复）；上游 settings renderer safePersist/N5 重构（本地 commit 形制保留）
+- [x] 测试：tests/skin-gate.test.ts 6 用例（三域就绪门控：未就绪回落/种子就绪挂类/pomodoro 选项表）+ tests/motion-smoke.test.ts 4 用例（三域全 API 冒烟/jsdom 直达终态/null 容错/teardown 幂等/注入件无残留）+ home entry-menu/plan-card 重锚（pomodoro 相位项过滤、plan 卡末项设置直达）；全量见门禁
+- [x] 归档核对：cmp_docs 报告的 47 issues + 23 ADR「上游修订」抽样 diff 证伪——纯 CRLF 行尾噪声，归档零内容漂移，无需刷新
+- [x] CONTEXT 词条（远端皮肤/皮肤就绪门控/设置直达/动效层）；AGENTS 命令数 83、域数 27 均不变
+- [x] 门禁：worktree tsc 0 错 + 全量 vitest → master ff 合并 → 复测同绿 → 构建部署

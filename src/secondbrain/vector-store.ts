@@ -4,7 +4,8 @@
  * 行序 = meta.notes 键序 × chunks）。meta 段随 JSON 并入 secondbrain.json（store-file 单文件三段）。
  *
  * 对齐要点：
- * - VP-Tree 构建缓存（{dim,count,noteCount} 键）+ 归一化一次性预存；检索 cos = max(0, 1 − d²/2)，score^0.35 锐化；
+ * - 检索 = 归一化矩阵缓存 + 暴力全扫点积（issue 425/ADR-0185，VP-Tree 与 score^0.35 锐化已退役）；
+ *   分数即原始余弦 [0,1]，零向量/非有限行整行跳过；
  * - refresh 批量嵌入走 parallelMap 自适应并发（起始并发 3，EMA 爬坡上限 60），批量失败回退逐条；
  *   逐条失败按段计数，完成态有失败 → 通知失败段数（ticket 3 假成功修复），全部成功才发完成通知；
  * - 移动端三级降级 remote→tfidf→text；TF-IDF 以 chunk 为文档单位且构建后复用（不再随查询重建）。
@@ -628,7 +629,6 @@ export class VectorStore {
   }
 
 
-  /** 向量检索：查询嵌入 → VP-Tree topK×3 候选 → cos=1−d²/2 → 去重 → topK → score^0.35（QA L655-691） */
   /**
    * 向量检索（issue 425/ADR-0185）：查询嵌入 → 暴力全扫余弦（归一化点积）→ 去重 → topK。
    * 全扫精确无近似：VP-Tree 近似召回会漏掉真实最近邻，且其距离→余弦换算只对单位向量成立
@@ -661,7 +661,11 @@ export class VectorStore {
 
     const hits: SearchHit[] = [];
     let row = 0;
+    let scanned = 0;
     for (const [path, note] of Object.entries(this.meta.notes)) {
+      // 取消检查点（issue 428）：全扫是同步段，取消只能靠行间让出——每 64 篇一查，
+      // 检查开销相对点积可忽略，大库下也让「已经没人要的查询」不再吃完整个扫描
+      if (++scanned % 64 === 0) throwIfAborted(signal);
       for (const chunk of note.chunks) {
         if (row >= cache.rows) break;
         if (cache.valid[row]) {
@@ -821,14 +825,16 @@ export class VectorStore {
     return searchTextIndex(query, this.meta.notes, topK);
   }
 
-  /** 移动端三级检索：远程向量 → TF-IDF（复用已建索引）→ 文本（QA L704-718） */
+  /** 移动端三级检索：远程向量 → TF-IDF（复用已建索引）→ 文本（QA L704-718）。
+   *  signal（issue 428）：取消通道——远程向量这一级被取消时直抛（不清空结果、不降级文本）。 */
   async searchMobile(query: string, topK = 20, signal?: AbortSignal): Promise<SearchHit[]> {
     const CONFIG = buildConfig();
     if (this.searchMode === 'remote' && CONFIG.OLLAMA_REMOTE_URL) {
       try {
-        const results = await this.vectorSearch(query, topK, CONFIG.OLLAMA_REMOTE_URL);
+        const results = await this.vectorSearch(query, topK, CONFIG.OLLAMA_REMOTE_URL, signal);
         if (results.length) return results;
       } catch (e) {
+        if (signal?.aborted || isAbortError(e)) throw abortError();
         console.warn('[secondbrain] 远程向量检索失败，降级', e);
       }
     }
