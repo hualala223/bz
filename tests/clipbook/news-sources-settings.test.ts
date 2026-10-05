@@ -54,7 +54,8 @@ describe('数据源组 schema 形态（声明式重写）', () => {
     expect(rows.length).toBeGreaterThanOrEqual(6);
     expect(rows.some((r) => r.type === 'custom')).toBe(false);
     // ADR-0121 后 RSS 管理行入组；2026-09-12 B站/RSS 开关退役；issue 302 头部插入立即抓取按钮 + 抓取间隔 select
-    expect(rows.map((r) => r.type)).toEqual(['button', 'select', 'toggle', 'toggle', 'button', 'button', 'number', 'number']);
+    // 上游 issue 434 精简 + ADR-0209：抓取间隔后增 RSSHub 实例 text 行（票 315）
+    expect(rows.map((r) => r.type)).toEqual(['button', 'select', 'toggle', 'toggle', 'button', 'button', 'text', 'number', 'number']);
     expect(rowByName(rows, '每日简报名单')).toBeUndefined();
     expect(rowByName(rows, 'RSS 订阅源').buttonText).toBe('管理');
   });
@@ -140,8 +141,8 @@ describe('数据源组常显（B 站/RSS 开关退役）', () => {
   it('UP 名单行 desc 计数：已跟踪 N 位 / 暂未跟踪', async () => {
     seedDisk();
     const rows = dataSourceGroupRows(await readDataSourceState());
-    expect(rowByName(rows, 'UP 主名单').desc).toBe('已跟踪 1 位 UP 主，添加与移除在管理弹窗');
+    expect(rowByName(rows, 'UP 主名单').desc).toBe('已跟踪 1 位 UP 主'); // issue 434 精简口径（票 315）
     const empty = dataSourceGroupRows({ ...emptyDataSourceState(true), exists: true });
-    expect(rowByName(empty, 'UP 主名单').desc).toBe('暂未跟踪 UP 主，添加与移除在管理弹窗');
+    expect(rowByName(empty, 'UP 主名单').desc).toBe('暂未跟踪任何 UP 主');
   });
 });

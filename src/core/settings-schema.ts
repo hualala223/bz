@@ -217,6 +217,8 @@ interface ButtonRow extends RowBase {
   cta?: boolean;
   /** 禁用态（在线资源「已下载/状态未知」等：状态未到，动作不可点）；两渲染器同调 */
   disabled?: boolean;
+  /** 扩展帮助长文案（上游形制；本地渲染器暂不渲染该字段，保留内容为将来 help 气泡预留） */
+  help?: string;
   onClick: (ctx: SettingsRowContext) => void;
 }
 

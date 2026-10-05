@@ -1,7 +1,7 @@
 /**
  * 归物本 · 分类串拆分（纯函数单源）
  *
- * 沿革（issue 477 / ADR-0201，上游吸收批 3）：本模块原为「emoji → lucide 图标映射表」
+ * 沿革（issue 477 / ADR-0201）：本模块原为「emoji → lucide 图标映射表」
  * （`emoji-icon-map.ts`，445 条，issue 231/ADR-0102 引入），承担三重职责——
  *   1. 载入迁移转换器（emoji 前缀分类 → 纯文字 + icon 字段）；
  *   2. 遗留 emoji 渲染兜底；

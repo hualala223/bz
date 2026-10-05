@@ -34,6 +34,9 @@ import { longPress } from '../core/dom';
 import { tryGetSettings } from '../core/settings-provider';
 import { confirmDiscard } from '../core/flow-dialog';
 import { mountIcons, uiModal, uiSuggest, uiIconSpan } from '../core/ui';
+// 分类表资产层（478 系/ADR-0204，票 315）：远端分类表候选 + 别名关键词 + 图标继承
+import { buildCatSuggest } from './catalog-suggest';
+import { loadCategoryTable } from '../core/category-table';
 import { bindFormSubmit } from '../core/ui/modal';
 import { openItemMenu, openItemSheet, refreshItemSheet, registerSheetCompanion, unregisterSheetCompanion, closeItemMenu, type ItemAction, resetItemMenuClickGuard } from '../core/item-actions';
 import { emitDomainEvent } from '../core/domain-bus';
@@ -1031,16 +1034,25 @@ export function openForm(it: BelongingsItem | null): void {
   };
   drawIconChip();
   const historyIconOf = (cat: string): string => (M.db?.categoryIcons?.[cat] as string) || '';
+  // 分类表资产层（478 系/ADR-0204，票 315）：候选 = 历史分类 ∪ 远端表（异步装载，读不到保持纯历史；
+  // 下载走设置页「在线资源」组，此处不联网）；图标继承 = 历史记档 → 表目图标 → tag 兜底
+  let catSrc = buildCatSuggest(M.db?.categories ?? [], historyIconOf, null);
+  void loadCategoryTable(getApp())
+    .then((t) => { if (t) catSrc = buildCatSuggest(M.db?.categories ?? [], historyIconOf, t); })
+    .catch(() => { /* 表读取失败 → 保持纯历史候选 */ });
   uiSuggest({
     anchor: catInput,
-    source: () => M.db?.categories ?? [],
+    source: () => catSrc.list,
     max: 60,
     iconOf: (raw: string) => {
-      const name = historyIconOf(raw);
+      // 展示走 displayIconOf（历史无记档时兜底 tag）；点选落值走真实图标，兜底不写进物品
+      const name = catSrc.displayIconOf(raw) || historyIconOf(raw);
       return name ? uiIconSpan(name) : '';
     },
+    keywordsOf: (raw: string) => catSrc.keywordsOf(raw),
+    hintOf: (raw: string) => catSrc.aliasHintOf(raw),
     onPick: (raw: string) => {
-      const name = historyIconOf(raw);
+      const name = catSrc.iconOf(raw) || historyIconOf(raw);
       if (name) { formIcon = name; drawIconChip(); }
     },
   });
