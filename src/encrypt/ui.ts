@@ -566,6 +566,7 @@ export class UIManager {
             <button class="bz-vault-ic" data-act="gen" title="生成密码">${vIc('refresh-cw', 15)}</button>
             <button class="bz-vault-ic" data-act="lock-note" title="加密当前笔记">${vIc('file-lock', 15)}</button>
             <button class="bz-vault-ic" data-act="health" title="保险库体检">${vIc('stethoscope', 15)}</button>
+            <button class="bz-vault-ic" data-act="chg-pw" title="修改主密码">${vIc('key-round', 15)}</button>
             <button class="bz-vault-ic" data-act="settings" title="保险库设置">${vIc('settings', 15)}</button>
             <button class="bz-vault-ic close" data-act="close" title="关闭">${vIc('x', 15)}</button>
           </div>
@@ -645,6 +646,7 @@ export class UIManager {
     this.popup!.querySelector('[data-act="close"]')?.addEventListener('click', () => this.hide());
     this.popup!.querySelector('[data-act="mob-close"]')?.addEventListener('click', () => this.hide());
     this.popup!.querySelector('[data-act="settings"]')?.addEventListener('click', () => this.openSettings());
+    this.popup!.querySelector('[data-act="chg-pw"]')?.addEventListener('click', () => void this.openChangePasswordDialog());
     this.popup!.querySelector('[data-act="health"]')?.addEventListener('click', () => void this.openHealthDialog());
     // 左栏健康卡：读真实体检状态 + 点击直达体检
     this.popup!.querySelector('[data-act="health-card"]')?.addEventListener('click', () => void this.openHealthDialog());
@@ -2647,6 +2649,64 @@ export class UIManager {
   }
 
   // ---------- 设置弹窗 ----------
+  /**
+   * 修改主密码弹窗（ADR-0211/票 316）：旧密码 + 新密码 + 确认，v2 信封下 O(1) 完成；
+   * v1 运行态（迁移未完成）提示稍后重试。迁移进行中同拒。
+   */
+  private async openChangePasswordDialog(): Promise<void> {
+    const sm = this.dataManager;
+    if (!sm.unlocked) { notice('先解锁保险库再修改主密码', 'warning'); return; }
+    const state = sm.envelopeState;
+    if (state !== 'v2') {
+      notice(state === 'running' ? '信封迁移进行中，完成后即可修改主密码' : '信封迁移尚未完成（首次解锁后台进行中），请稍后重试', 'warning');
+      return;
+    }
+    // 三段密码表单：flow-dialog 只承载确认动作（本地无 inputs 面），输入行自绘挂弹窗
+    const form = document.createElement('div');
+    form.style.display = 'flex';
+    form.style.flexDirection = 'column';
+    form.style.gap = '10px';
+    const row = (labelText: string, placeholderText: string): HTMLInputElement => {
+      const wrap = document.createElement('label');
+      wrap.style.display = 'flex';
+      wrap.style.flexDirection = 'column';
+      wrap.style.gap = '4px';
+      const lb = document.createElement('span');
+      lb.textContent = labelText;
+      const inp = document.createElement('input');
+      inp.type = 'password';
+      inp.className = 'bz-input';
+      inp.placeholder = placeholderText;
+      inp.autocomplete = 'off';
+      wrap.append(lb, inp);
+      form.appendChild(wrap);
+      return inp;
+    };
+    const oldInp = row('旧密码', '输入当前主密码');
+    const newInp = row('新密码（至少 8 位）', '建议混合大小写/数字/符号');
+    const confirmInp = row('确认新密码', '再输一遍');
+    let submitted: { old: string; pw: string } | null = null;
+    openFlowDialog({
+      title: '修改主密码',
+      message: '信封结构下秒级完成：旧密码验证身份，新密码立即生效。加密数据本体不变，请牢记新密码——遗忘无法找回。',
+      actions: [
+        { label: '取消', value: 'cancel' },
+        { label: '修改', value: 'ok', cta: true },
+      ],
+    }).then((v) => {
+      if (v !== 'ok') return;
+      const ov = oldInp.value;
+      const np = newInp.value;
+      if (np.length < 8) { notice('新密码至少 8 位', 'warning'); return; }
+      if (np !== confirmInp.value) { notice('两次输入的新密码不一致', 'warning'); return; }
+      submitted = { old: ov, pw: np };
+      void sm
+        .changePassword(submitted.old, submitted.pw)
+        .then(() => notice('主密码已修改（数据本体零重加密）', 'success'))
+        .catch((e) => notice((e as Error)?.message || '修改失败', 'error'));
+    });
+  }
+
   openSettings() {
     // 以下配置项均为启动快照（控制器构造时读取），改动需重载插件后生效——warnReload 一次性提示
     // 收敛为渲染器 onCommit（text/path 行）/ onChange 一次性闭包（toggle），文案逐字保留（ticket 131）

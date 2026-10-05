@@ -30,12 +30,13 @@ describe('PasswordVaultDataManager', () => {
     const dm = await unlockedDM();
     await dm.addItem({ platform: 'GitHub', account: 'a', password: 'p' });
     expect(dm.pwData[0].fav).toBe(false);
-    // 直接写旧 7 字段（无 fav）整表 → load 后补 false
+    // 直接写旧 7 字段（无 fav）整表 → load 后补 false。
+    // v2 信封（票 316）：镜像钥是逐镜像 fileKey，手工密文须走 sanctioned 改写通道 updateNotePayload
     const note = sm.manifest.notes[0];
     const oldData = JSON.stringify([
       { id: 'old-1', platform: 'GitHub', url: '', account: 'me', password: 'x', note: '', createdAt: '2026-01-01T00:00:00.000Z' },
     ]);
-    vault.files.set('CONFIG/.ENCRYPT/' + note.contentRef, await (await import('../../src/core/crypto')).CryptoService.encrypt(oldData, 'pw'));
+    await sm.updateNotePayload(note.id, oldData);
     await dm.load();
     expect(dm.pwData[0].fav).toBe(false);
     expect(dm.pwData[0].id).toBe('old-1');
