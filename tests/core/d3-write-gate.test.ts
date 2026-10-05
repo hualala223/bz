@@ -34,6 +34,10 @@ const WHITELIST: Array<{ file: RegExp; reason: string; /** 防回归哨兵：预
     reason: 'knowledge 域（上游 issue 344 移植批 3f）：旧来源伴生文件退役时的内容改写为用户文档写',
   },
   {
+    file: /^src\/people\/me-avatar\.ts$/,
+    reason: 'people 域（票 317）：本人头像二进制直写用户媒体仓（vault writeBinary；域内头像更新，非 JSON 状态写）',
+  },
+  {
     file: /^src\/clipbook\/image-save\.ts$/,
     reason: 'clipbook 域（上游 issue 329 移植批 3e）：剪藏图片/正文图片本地化写——二进制落 vault 与覆盖前回写为用户文档写，非 JSON 状态写',
   },

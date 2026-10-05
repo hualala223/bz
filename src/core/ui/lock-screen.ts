@@ -17,7 +17,7 @@ export interface LockScreenStat {
 }
 
 /** 域标识：决定作用域类与注入的统计口径 */
-export type LockScreenKind = 'vault' | 'password-vault' | 'diary';
+export type LockScreenKind = 'vault' | 'password-vault' | 'diary' | 'people';
 
 export interface LockScreenOpts {
   kind: LockScreenKind;
@@ -36,6 +36,8 @@ export interface LockScreenOpts {
   hint?: string;
   /** 首设模式：双输入 + 风险告知 + 勾选确认 */
   firstSetup?: boolean;
+  /** 次按钮文案（未传不渲染；取消语义由调用域接——people 封面 issue 506） */
+  cancel?: string;
   warningHtml?: string;
   ackText?: string;
   /**
@@ -62,6 +64,8 @@ export interface LockScreenHandle {
   showSecondInput(show: boolean): void;
   focus(): void;
   close(): void;
+  /** 次按钮（未传 opts.cancel 时为 null）——语义由调用域挂 onclick */
+  cancelBtn: HTMLButtonElement | null;
 }
 
 /** 生成解锁屏（结构同源，三域各自注入内容与风格） */
@@ -162,6 +166,17 @@ export function uiLockScreen(opts: LockScreenOpts): LockScreenHandle {
   row.appendChild(actionBtn);
   box.appendChild(row);
 
+  // 次按钮（未传不渲染；取消算什么语义由调用域接——组件只出钮与槽位）
+  let cancelBtn: HTMLButtonElement | null = null;
+  if (opts.cancel) {
+    cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'bz-lockscreen-cancel';
+    cancelBtn.dataset.ls = 'cancel';
+    cancelBtn.textContent = opts.cancel;
+    box.appendChild(cancelBtn);
+  }
+
   // 错误行
   const err = document.createElement('div');
   err.className = 'bz-lockscreen-err';
@@ -226,5 +241,6 @@ export function uiLockScreen(opts: LockScreenOpts): LockScreenHandle {
     showSecondInput: (show) => { input2.style.display = show ? '' : 'none'; },
     focus,
     close: () => { el.remove(); },
+    cancelBtn,
   };
 }

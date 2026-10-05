@@ -1,0 +1,302 @@
+/**
+ * 详情头删除（issue 500 / 501）：三档门禁落链测试。
+ *   - 未画谱 / 画谱未完成 → 弹确认框二次确认（501：废掉「图标灯光 + 通知」那套看不出来的确认）；
+ *   - 已画脸谱 → 重输主密码（uiLockScreen + SafeManager.verifyPassword 只读校验），错误不删、通过才删、遮罩取消不删；
+ *   - 删之前先停该人未完成任务（引擎是保库记录的唯一写方，任务在队列里会把记录写回来）；
+ *   - 删完墙上那张卡立刻消失（501：面板记录快照要同步失效，否则会被合成「待画」占位卡挂回来）。
+ * 引擎用假件注入（setJobsModuleForTests）；保库注入 MockVault 上的真 SafeManager；数据全构造。
+ */
+// @vitest-environment jsdom
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { resetObsidianMocks, hasNotice } from '../mock-obsidian-entry';
+import { MockVault } from '../mock-vault';
+import { makeApp } from '../helpers/app';
+import { setApp, getApp } from '../../src/core/app';
+import { setSettingsProvider } from '../../src/core/settings-provider';
+import {
+  closePeoplePanel,
+  openPeoplePanel,
+  setJobsModuleForTests,
+  setUnlockGateForTests,
+  type JobsApi,
+} from '../../src/people/ui';
+import { PeopleSafeStore, setPeopleSafeStoreForTests } from '../../src/people/safe-store';
+import {
+  enqueueRecordingTask,
+  isRecordingQueued,
+  queuedRecordingItems,
+  resetRecordingProcessesForTests,
+  resetRecordingQueueForTests,
+  setRecordingQueueSleepForTests,
+  setRecordingRunnerForTests,
+} from '../../src/people/recording';
+import { releaseHeavy, resetHeavyGateForTests, tryAcquireHeavy } from '../../src/people/heavy-gate';
+import { SafeManager } from '../../src/encrypt/data';
+import { getSafeManager } from '../../src/encrypt';
+import type { PersonEntry } from '../../src/people/types';
+
+const PW = 'delete-test-pw';
+const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
+
+function click(sel: string): void {
+  const node = document.querySelector(sel);
+  if (!node) throw new Error(`找不到节点：${sel}`);
+  node.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+}
+
+const card = (id: string): HTMLElement | null => document.querySelector<HTMLElement>(`[data-people-pocket="${id}"]`);
+const delBtn = (id: string): HTMLElement | null => document.querySelector<HTMLElement>(`[data-people-del="${id}"]`);
+/** 二次确认不再是浮层，是册子里翻出来的一页（issue 505）：页根钩子即契约 */
+const flowMask = (): HTMLElement | null => document.querySelector<HTMLElement>('[data-people-sub="del"]');
+/** 「合上这页」＝取消语义（页眉的关页钮；册页没有遮罩层了） */
+const flowClose = (): HTMLElement | null => flowMask()?.querySelector<HTMLElement>('[data-people-close]') ?? null;
+const flowOk = (): HTMLElement | null => document.querySelector<HTMLElement>('button[data-people-del-ok]');
+const flowCancel = (): HTMLElement | null => document.querySelector<HTMLElement>('button[data-people-del-cancel]');
+
+/** 假引擎：removeJob 记一笔调用序（真删顺序契约：先停任务、再删记录） */
+class FakeEngine implements JobsApi {
+  constructor(private readonly order: string[]) {}
+  startJobs = async (): Promise<{ queued: string[]; skipped: string[]; resumed: string[] }> =>
+    ({ queued: [], skipped: [], resumed: [] });
+  resumeJobs = async (): Promise<void> => undefined;
+  resume = (): boolean => true;
+  pauseJobs = (): void => undefined;
+  removeJob = (talker: string): boolean => { this.order.push(`removeJob:${talker}`); return true; };
+  subscribe = (): (() => void) => () => undefined;
+  snapshot = () => ({ queue: [], currentIndex: -1, running: false });
+}
+
+function entry(over: Partial<PersonEntry> = {}): PersonEntry {
+  return { id: '莫莫', name: '莫莫', createdAt: '2026-09-25T02:57:37.341Z', imports: [], ...over };
+}
+
+const DRAWN: PersonEntry = entry({
+  digest: { person: '## 画像速写\n- 凌晨三点还醒着', events: [], generatedAt: '2026-09-26T10:20:30.000Z' },
+});
+
+async function boot(seed: PersonEntry[], order: string[]): Promise<{ safe: PeopleSafeStore; sm: SafeManager }> {
+  const vault = new MockVault();
+  setApp(makeApp(vault));
+  setSettingsProvider(() => ({ storagePath: 'CONFIG/STORAGE' }) as never);
+  const sm = new SafeManager('CONFIG/.ENCRYPT');
+  await sm.unlock(PW);
+  const safe = new PeopleSafeStore(sm);
+  setPeopleSafeStoreForTests(safe);
+  for (const p of seed) {
+    await safe.write(p.id, (rec) => {
+      rec.person = p;
+      // 501 回归：仓里放一条真消息——删完若面板快照没失效，wallPeople 会拿它合成
+      // 「待画」占位卡把卡挂回墙上（改前必须关面板 / 重启才消失）
+      rec.store = {
+        ...rec.store,
+        msgs: [{ key: 'm1', ts: Date.parse('2026-09-20T10:00:00Z'), isSender: true, type: 1, text: '在吗' }],
+        stats: { msgCount: 1, voiceCount: 0, voiceTotalSec: 0, imageCount: 0 },
+      };
+    });
+  }
+  const origRemove = safe.removeContact.bind(safe);
+  // 记账放在 await 之后：调用序断言成立（removeJob 是同步入账，必然在前），
+  // 且「order 齐了」= 记录真落盘删掉了——不然断言会抢在删除完成前跑，测试发飘
+  vi.spyOn(safe, 'removeContact').mockImplementation(async (talker: string) => {
+    await origRemove(talker);
+    order.push(`removeContact:${talker}`);
+  });
+  setJobsModuleForTests(new FakeEngine(order));
+  // 门禁真链会弹真解锁屏（jsdom 里锁不住），只注入放行；密码门走的是真 verifyPassword
+  setUnlockGateForTests(() => Promise.resolve(true));
+  openPeoplePanel(getApp());
+  await vi.waitFor(() => expect(card('莫莫')).toBeTruthy());
+  click('[data-people-pocket="莫莫"]');
+  await vi.waitFor(() => expect(delBtn('莫莫')).toBeTruthy());
+  return { safe, sm };
+}
+
+/** 已画谱档：清单落在 encryptDir()（门禁真链的清单根），密码 = PW */
+async function seedVaultPassword(): Promise<void> {
+  await getSafeManager().unlock(PW);
+}
+
+beforeEach(() => {
+  resetObsidianMocks();
+  document.body.innerHTML = '';
+});
+
+afterEach(() => {
+  try { closePeoplePanel(); } catch { /* 幂等 */ }
+  setJobsModuleForTests(null);
+  setUnlockGateForTests(null);
+  setPeopleSafeStoreForTests(null);
+  resetRecordingQueueForTests();
+  resetRecordingProcessesForTests();
+  resetHeavyGateForTests();
+  setRecordingRunnerForTests(null);
+  setRecordingQueueSleepForTests(null);
+  vi.restoreAllMocks();
+});
+
+describe('未画谱档：弹确认框二次确认（issue 500 / 501）', () => {
+  it('点删除弹确认框（不是通知消息）；点取消什么都不删、框收起', async () => {
+    const order: string[] = [];
+    const { safe } = await boot([entry()], order);
+
+    click('[data-people-del="莫莫"]');
+    await vi.waitFor(() => expect(flowMask()).toBeTruthy());
+    expect(flowMask()!.querySelector('.bz-people-head-label')!.textContent).toBe('删除联系人');
+    expect(flowMask()!.querySelector('.bz-people-del-who')!.textContent).toContain('「莫莫」');
+    expect(flowMask()!.querySelector('.bz-people-del-line')!.textContent).toContain('还没画过脸谱');
+    expect(flowCancel()!.textContent).toBe('取消');
+    expect(flowOk()!.textContent).toBe('删除');
+    expect(await safe.read('莫莫')).toBeTruthy(); // 还没删
+
+    flowCancel()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(() => expect(flowMask()).toBeNull());
+    await tick();
+    expect(await safe.read('莫莫')).toBeTruthy();
+    expect(order).toEqual([]);
+  });
+
+  it('点「合上这页」（取消语义）同样不删', async () => {
+    const order: string[] = [];
+    const { safe } = await boot([entry()], order);
+
+    click('[data-people-del="莫莫"]');
+    await vi.waitFor(() => expect(flowMask()).toBeTruthy());
+    flowClose()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); // 合上这页＝取消，不删
+    await vi.waitFor(() => expect(flowMask()).toBeNull());
+    await tick();
+    expect(await safe.read('莫莫')).toBeTruthy();
+    expect(order).toEqual([]);
+  });
+
+  it('确认后才真删，并回列表；墙上那张卡立刻消失（501 回归）', async () => {
+    const order: string[] = [];
+    const { safe } = await boot([entry()], order);
+
+    click('[data-people-del="莫莫"]');
+    await vi.waitFor(() => expect(flowOk()).toBeTruthy());
+    flowOk()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(() => expect(order).toEqual(['removeJob:莫莫', 'removeContact:莫莫']));
+    await vi.waitFor(async () => expect(await safe.read('莫莫')).toBeFalsy());
+    expect(hasNotice(/已删除「莫莫」/)).toBe(true);
+    // 关键：不等关面板 / 重启，删完这一帧墙上就得没有它
+    // （记录快照没失效的话，这条会一直挂着，waitFor 超时即红）
+    await vi.waitFor(() => expect(document.querySelector('[data-people-pocket="莫莫"]')).toBeNull());
+    expect(document.querySelector('[data-people-del="莫莫"]')).toBeNull(); // 详情已回墙
+  });
+});
+
+describe('已画谱档：页内重输主密码才可删（issue 500 / 506）', () => {
+  it('点删除翻出的就是删除册页，页里有主密码框；输错不删、页上给话，输对才删', async () => {
+    const order: string[] = [];
+    const { safe } = await boot([DRAWN], order);
+    await seedVaultPassword();
+
+    click('[data-people-del="莫莫"]');
+    await vi.waitFor(() => expect(flowMask()).toBeTruthy());
+    // 506：密码不再另弹一屏宿主锁屏，就在这一页里
+    expect(document.querySelector('.bz-lockscreen--mask')).toBeNull();
+    expect(flowMask()!.querySelector('.bz-people-del-note')!.textContent).toContain('要删除，请重输主密码确认。');
+    const input = flowMask()!.querySelector<HTMLInputElement>('input[data-people-del-pw]')!;
+    expect(input.type).toBe('password');
+    expect(input.placeholder).toBe('主密码');
+    expect(flowOk()!.textContent).toBe('删除');
+
+    input.value = 'wrong-pw';
+    flowOk()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const err = flowMask()!.querySelector<HTMLElement>('[data-people-del-err]')!;
+    await vi.waitFor(() => expect(err.textContent).toBe('主密码不对，再试一次。'));
+    expect(await safe.read('莫莫')).toBeTruthy(); // 没删
+    expect(flowMask()).toBeTruthy(); // 页还开着
+    expect(flowMask()!.querySelector<HTMLInputElement>('input[data-people-del-pw]')!.value).toBe(''); // 清空重输
+
+    flowMask()!.querySelector<HTMLInputElement>('input[data-people-del-pw]')!.value = PW;
+    flowOk()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(() => expect(order).toEqual(['removeJob:莫莫', 'removeContact:莫莫']));
+    await vi.waitFor(async () => expect(await safe.read('莫莫')).toBeFalsy());
+    expect(flowMask()).toBeNull(); // 删完这一页跟着收场
+    expect(document.querySelector('[data-people-pocket="莫莫"]')).toBeNull(); // 卡片同样立刻消失
+  });
+
+  it('密码框里按回车＝点删除', async () => {
+    const order: string[] = [];
+    const { safe } = await boot([DRAWN], order);
+    await seedVaultPassword();
+
+    click('[data-people-del="莫莫"]');
+    await vi.waitFor(() => expect(flowMask()).toBeTruthy());
+    const input = flowMask()!.querySelector<HTMLInputElement>('input[data-people-del-pw]')!;
+    input.value = PW;
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await vi.waitFor(() => expect(order).toEqual(['removeJob:莫莫', 'removeContact:莫莫']));
+    expect(await safe.read('莫莫')).toBeFalsy();
+  });
+
+  it('合上这页（取消语义）→ 什么都不删，密码框里的字也不作数', async () => {
+    const order: string[] = [];
+    const { safe } = await boot([DRAWN], order);
+    await seedVaultPassword();
+
+    click('[data-people-del="莫莫"]');
+    await vi.waitFor(() => expect(flowMask()).toBeTruthy());
+    flowMask()!.querySelector<HTMLInputElement>('input[data-people-del-pw]')!.value = PW;
+    flowClose()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(() => expect(flowMask()).toBeNull());
+    await tick();
+    expect(await safe.read('莫莫')).toBeTruthy();
+    expect(order).toEqual([]);
+  });
+
+  it('主密码为空直接拦下（不发校验、不删）', async () => {
+    const order: string[] = [];
+    const { safe } = await boot([DRAWN], order);
+    await seedVaultPassword();
+
+    click('[data-people-del="莫莫"]');
+    await vi.waitFor(() => expect(flowMask()).toBeTruthy());
+    flowOk()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const err = flowMask()!.querySelector<HTMLElement>('[data-people-del-err]')!;
+    await vi.waitFor(() => expect(err.textContent).toBe('请输入主密码确认'));
+    expect(await safe.read('莫莫')).toBeTruthy();
+    expect(order).toEqual([]);
+  });
+});
+
+describe('删除口径（issue 500）：先停任务再删记录，数据源目录不动', () => {
+  it('删之前先调 removeJob（引擎是保库记录的写方，任务留着会把记录写回来）', async () => {
+    const order: string[] = [];
+    const { safe } = await boot([entry()], order);
+    click('[data-people-del="莫莫"]');
+    await vi.waitFor(() => expect(flowOk()).toBeTruthy());
+    flowOk()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(() => expect(order).toHaveLength(2));
+    expect(order).toEqual(['removeJob:莫莫', 'removeContact:莫莫']);
+    await vi.waitFor(async () => expect(await safe.read('莫莫')).toBeFalsy());
+    expect(hasNotice(/未完成的任务一并停掉/)).toBe(true);
+  });
+
+  it('录音任务也一并清（审计 #1）：转写排在独立队列上，不清掉它跑完会把删掉的人重建出来', async () => {
+    const order: string[] = [];
+    const { safe } = await boot([entry()], order);
+    // 占住重进程闸门：让录音任务停在「排队」态（不起真进程），构造确定的清理对象
+    tryAcquireHeavy('portrait');
+    setRecordingQueueSleepForTests(() => new Promise((r) => setTimeout(r, 1)));
+    enqueueRecordingTask({
+      key: 'rec-key',
+      talker: '莫莫',
+      file: 'a.aac',
+      spec: () => ({ cmd: 'x', args: [], shell: true }),
+    });
+    expect(isRecordingQueued('rec-key')).toBe(true);
+
+    click('[data-people-del="莫莫"]');
+    await vi.waitFor(() => expect(flowOk()).toBeTruthy());
+    flowOk()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(async () => expect(await safe.read('莫莫')).toBeFalsy());
+    // 关键：该人的转写任务必须已移出队列——留着的话转写收尾会走 suppMergeRecording →
+    // peopleSafe.write 的 !existing 分支把「莫莫」以空壳卡重建出来（删除白删）
+    expect(isRecordingQueued('rec-key')).toBe(false);
+    expect(queuedRecordingItems().some((q) => q.talker === '莫莫')).toBe(false);
+    expect(hasNotice(/录音转写一并停掉/)).toBe(true);
+    releaseHeavy('portrait');
+  });
+});

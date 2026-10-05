@@ -132,6 +132,27 @@ const schemaLoaders: Record<string, () => Promise<SettingsSchema>> = {
   },
   // 工具坞（dock 域，ADR-0235）：大部分配置在工具自己的清单里，本页只放登记入口 + 漏跑提醒开关
   dock: async () => (await import('../dock/settings')).dockSettingsSchema(),
+  // 脸谱（people 域，ADR-0191 系，票 317）：数据目录与导入/提炼口径 + 清空聊天数据（保险库闸）
+  people: async () => {
+    const { peopleSettingsSchema } = await import('../people/settings');
+    const { getPeopleSafeStore } = await import('../people/safe-store');
+    const { notifyActionError } = await import('../core/notice');
+    return peopleSettingsSchema({
+      onClearStore: async () => {
+        try {
+          const safe = await getPeopleSafeStore();
+          if (!safe.unlocked) {
+            notice('保险库未解锁，先解锁再清空', 'warning');
+            return;
+          }
+          await safe.clearStores();
+          notice('聊天数据已清空', 'delete');
+        } catch (e) {
+          notifyActionError(e, '清空聊天数据');
+        }
+      },
+    });
+  },
 };
 
 /** 域清单（图标 = core/domain-icons 单一事实源，与命令面板/内容首页同源——enh-sweep-a 收敛；
@@ -166,6 +187,7 @@ export const DOMAINS: DomainDef[] = [
   { id: 'encrypt', name: '保险库', icon: DOMAIN_ICONS.encrypt, desc: '密码、加密笔记与加密日记', schemaLoader: schemaLoaders.encrypt },
   { id: 'smartcat', name: '小橘陪伴猫', icon: DOMAIN_ICONS.smartcat, desc: '桌面宠物陪伴', schemaLoader: schemaLoaders.smartcat },
   { id: 'dock', name: '工具坞', icon: DOMAIN_ICONS.dock, desc: '外部工具的登记、启动与观测', schemaLoader: schemaLoaders.dock },
+  { id: 'people', name: '脸谱', icon: DOMAIN_ICONS.people, desc: '微信聊天导入与 AI 人物画像', schemaLoader: schemaLoaders.people },
   { id: 'knowledge', name: '知识盒', icon: DOMAIN_ICONS.knowledge, desc: '文献笔记与术语录入', schemaLoader: schemaLoaders.knowledge },
 ];
 
@@ -173,7 +195,7 @@ export const DOMAINS: DomainDef[] = [
  *  id 口径 = DOMAINS 的 id（本地域 id：备忘录 memo/影视 movie/书库 library）。导出供回归测试断言。 */
 export const NAV_SECS: Array<{ title: string; ids: string[] }> = [
   { title: '基础', ids: ['global', 'appearance', 'ai'] },
-  { title: '记录', ids: ['diary', 'diary-wall', 'todo', 'belongings', 'clipping', 'favorites'] },
+  { title: '记录', ids: ['diary', 'diary-wall', 'todo', 'belongings', 'clipping', 'favorites', 'people'] },
   { title: '媒体与知识', ids: ['cinema', 'bookshelf', 'gameshelf', 'review', 'secondbrain', 'knowledge'] },
   { title: '工具', ids: ['pomodoro', 'encrypt', 'smartcat', 'dock'] },
 ];

@@ -231,6 +231,8 @@ interface InfoRow extends RowBase {
 
 /** 非常规内容唯一出口：render 插槽（内容渲染进独立包装容器，visibleWhen 作用于包装容器） */
 interface CustomRow extends RowBase {
+  /** 行名（people 设置组的锚点行等带名 custom 行用） */
+  name?: string;
   type: 'custom';
   render: (body: HTMLElement, ctx: SettingsRowContext) => void;
   /** ticket 172：任意行变更后（含 aiProvider 切换）重求值时回调，供外部绑定行刷新显示值 */

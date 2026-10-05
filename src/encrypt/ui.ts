@@ -1067,9 +1067,118 @@ export class UIManager {
    * 解锁弹窗调度：'vault'（默认）= 共享解锁屏（core/ui/lock-screen，ADR-0124）；
    * 'legacy' = 旧主密码弹窗，**仅供日记 / 回忆墙复用路径**（ADR-0121 冻结域 UI 不得变）。
    */
-  async showPasswordDialog(kind: 'vault' | 'legacy' = 'vault'): Promise<boolean> {
+  async showPasswordDialog(kind: 'vault' | 'legacy' | 'people' = 'vault'): Promise<boolean> {
     if (kind === 'legacy') return this.showLegacyPasswordDialog();
+    if (kind === 'people') return this.showPeopleLockScreen();
     return this.showVaultLockScreen();
+  }
+
+  /**
+   * 脸谱口径解锁屏（issue 482，票 317）：kind='people'——朱砂配色（styles 按 kind 作用域）+
+   * 联系人口径统计卡 + 可见「取消」钮（issue 506：取消 = 不开面板不展示任何数据）。
+   * 解锁/首设/损坏清单重设逻辑与 showVaultLockScreen 同一线（同一把主密码），仅文案与皮不同。
+   */
+  private async showPeopleLockScreen(): Promise<boolean> {
+    const exists = await this.dataManager.exists();
+    const meta = {
+      icon: 'lock' as const,
+      title: '脸谱',
+      sub: '人物消息脸谱',
+      action: '解锁保险库',
+      stats: [
+        { num: '—', label: '联系人' },
+        { num: '—', label: '随记录附件' },
+        { num: '—', label: '附件密文' },
+      ],
+    };
+    const stats =
+      this.lockStatsCache.people || (await readLockStats('people')) || meta.stats.map((s) => ({ ...s, num: '—' }));
+    return new Promise((resolve) => {
+      const ls = uiLockScreen({
+        kind: 'people',
+        icon: meta.icon,
+        title: exists ? meta.title : '设置主密码',
+        sub: exists ? meta.sub : '请设置一个主密码（用于加密所有数据）',
+        stats,
+        action: exists ? meta.action : '设置并解锁',
+        firstSetup: !exists,
+        warningHtml: `${vIc('triangle-alert', 14)} <strong>重要提醒</strong><br>• 主密码 <b>不会存储</b>，也无法找回，请务必牢记！<br>• 若遗忘密码，加密笔记及其附件将永久丢失。<br>• 建议使用密码本（如 Bitwarden）保存此密码。`,
+        ackText: '我已了解：主密码无法找回，遗忘将导致密文永久无法恢复',
+        secText: exists ? '主密码不会存储 · 遗忘将无法恢复密文' : '',
+        secTone: 'warn',
+        hint: exists ? '' : '建议使用密码本保存此密码',
+        cancel: exists ? '取消' : undefined, // issue 506：脸谱封面给一颗看得见的退出口
+      });
+      topifyZ(ls.el);
+      document.body.appendChild(ls.el);
+      const esc = escManager.register('bz-people-unlock', {
+        isVisible: () => ls.el.isConnected,
+        close: () => done(false),
+      });
+      const done = (ok: boolean) => { esc.unregister(); ls.close(); resolve(ok); };
+      const setErr = (m: string) => {
+        ls.setError(m);
+        setTimeout(() => { if (ls.input.value) ls.setError(''); }, 2600);
+      };
+      if (ls.cancelBtn) ls.cancelBtn.onclick = () => done(false); // issue 506：取消不开面板
+      ls.actionBtn.onclick = async () => {
+        const pw = ls.input.value;
+        if (!pw) { this.rejectInput('请输入密码', setErr); return; }
+        if (!exists) {
+          if (ls.input2.style.display === 'none') {
+            ls.showSecondInput(true);
+            ls.input2.value = '';
+            ls.setMessage('请再次输入主密码确认');
+            ls.focus();
+            return;
+          }
+          if (pw !== ls.input2.value) { this.rejectInput('两次密码不一致', setErr); return; }
+          if (pw.length < 4) { this.rejectInput('主密码至少 4 位', setErr); return; }
+          if (!ls.ackBox || !ls.ackBox.checked) { this.rejectInput('请先勾选风险确认', setErr); return; }
+          try {
+            const ok = await this.dataManager.unlock(pw);
+            if (ok) {
+              done(true);
+              notice('密码已设置，数据已加密', 'success');
+            } else {
+              notice('设置失败：无法写入清单，请检查磁盘空间后重试', 'error');
+              done(false);
+            }
+          } catch (e: any) {
+            notifyActionError(e, '设置主密码');
+            done(false);
+          }
+          return;
+        }
+        const remainMs = this.unlockCooldownUntil - Date.now();
+        if (remainMs > 0) { this.rejectInput(`尝试过于频繁，请再等 ${Math.ceil(remainMs / 1000)} 秒`, setErr, 'warning'); return; }
+        const success = await this.dataManager.unlock(pw);
+        if (success) {
+          this.resetUnlockThrottle();
+          done(true);
+          notice('解锁成功', 'success');
+        } else {
+          const issue = this.dataManager.manifestIssue;
+          if (issue === 'empty' || issue === 'corrupt') {
+            // people 封面不进损坏重设流（重设入口归保险库面板本体）——只提示去向
+            this.rejectInput('清单疑似损坏：请从保险库面板打开后按引导处理', setErr, 'error');
+            ls.input.value = '';
+            ls.focus();
+          } else {
+            this.rejectInput('密码错误，请重试', setErr, 'error');
+            const delaySec = this.registerUnlockFailure();
+            notice(`${delaySec} 秒后可再次尝试`, 'warning');
+            ls.input.value = '';
+            ls.focus();
+          }
+        }
+      };
+      ls.input.addEventListener('keydown', (e) => { if (e.key === 'Enter') ls.actionBtn.click(); });
+      ls.input2.addEventListener('keydown', (e) => { if (e.key === 'Enter') ls.actionBtn.click(); });
+      ls.el.addEventListener('click', (e) => { if (e.target === ls.el) done(false); });
+      ls.focus();
+      setTimeout(() => ls.focus(), 150);
+    });
   }
 
   /**
@@ -1437,16 +1546,25 @@ export class UIManager {
   private captureLockStats(): void {
     try {
       const all = this.dataManager.manifest?.notes || [];
-      const list = all.filter((n) => n.kind !== 'diary-entry' && n.kind !== 'password-vault');
-      const atts = list.reduce((s, n) => s + n.attachments.length, 0);
-      const bytes = list.reduce((s, n) => s + n.attachments.reduce((b, a) => b + (a.blobSize || 0), 0), 0);
-      this.lockStatsCache.vault = [
-        { num: String(list.length), label: '笔记条目' },
-        { num: String(atts), label: '随库附件' },
-        { num: bytes > 0 ? (bytes / 1024).toFixed(1) + ' KB' : '—', label: '附件密文' },
+      // 四档快照（票 317 对齐上游）：vault（普通笔记）/ diary / password-vault / people，
+      // 同一口径（条目/随库附件/附件密文）按 kind 过滤分档；people 用脸谱口径标签
+      const buckets: Array<{ key: 'vault' | 'diary' | 'password-vault' | 'people'; list: typeof all; labels: [string, string, string] }> = [
+        { key: 'vault', list: all.filter((n) => n.kind !== 'diary-entry' && n.kind !== 'password-vault' && n.kind !== 'people'), labels: ['笔记条目', '随库附件', '附件密文'] },
+        { key: 'diary', list: all.filter((n) => n.kind === 'diary-entry'), labels: ['笔记条目', '随库附件', '附件密文'] },
+        { key: 'password-vault', list: all.filter((n) => n.kind === 'password-vault'), labels: ['笔记条目', '随库附件', '附件密文'] },
+        { key: 'people', list: all.filter((n) => n.kind === 'people'), labels: ['联系人', '随记录附件', '附件密文'] },
       ];
-      // 快照即落明文档（fire-and-forget：统计丢一拍不伤数据，下次解锁会重写）
-      void writeLockStats('vault', this.lockStatsCache.vault).catch(() => {});
+      for (const { key, list, labels } of buckets) {
+        const atts = list.reduce((s, n) => s + n.attachments.length, 0);
+        const bytes = list.reduce((s, n) => s + n.attachments.reduce((b, a) => b + (a.blobSize || 0), 0), 0);
+        const stats: LockScreenStat[] = [
+          { num: String(list.length), label: labels[0] },
+          { num: String(atts), label: labels[1] },
+          { num: bytes > 0 ? (bytes / 1024).toFixed(1) + ' KB' : '—', label: labels[2] },
+        ];
+        this.lockStatsCache[key] = stats;
+        void writeLockStats(key, stats).catch(() => {});
+      }
     } catch (e) {
       /* 清单不可读时保持上一次快照 */
     }

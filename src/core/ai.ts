@@ -43,6 +43,37 @@ export function setAISettingsProvider(fn: () => AISettingsLike): void {
   _settingsProvider = fn;
 }
 
+export const DEFAULT_AI_PROVIDER = 'deepseek';
+
+/** 服务商显示名（people 描述通道用；与 ⚙️「AI 服务商」下拉 options 同名单——本地无注册表，
+ *  此处静态映射，新增服务商时两处同更） */
+const AI_PROVIDER_LABELS: Record<string, string> = {
+  deepseek: 'DeepSeek',
+  'opencode-go': 'OpenCode Go',
+  zhipu: '智谱',
+  'zhipu-plan': '智谱 Plan',
+  siliconflow: '硅基流动',
+  'volcano-ark': '火山方舟',
+  ollama: 'Ollama（本地）',
+};
+
+/** 各家缺省模型（与主 schema placeholder 同源口径；zhipu-plan = glm-5.3-flash 为上游注册表值） */
+const AI_PROVIDER_DEFAULT_MODELS: Record<string, string> = {
+  deepseek: '',
+  'opencode-go': '',
+  zhipu: '',
+  'zhipu-plan': 'glm-5.3-flash',
+  siliconflow: '',
+  'volcano-ark': '',
+  ollama: 'llama3.1',
+};
+
+/** 按 id 取服务商描述（label 显示名 + 缺省模型；people 描述通道的确认门展示用） */
+export function getProviderDescriptor(id?: string): { id: string; label: string; model: string } {
+  const key = String(id ?? '') || DEFAULT_AI_PROVIDER;
+  return { id: key, label: AI_PROVIDER_LABELS[key] ?? key, model: AI_PROVIDER_DEFAULT_MODELS[key] ?? '' };
+}
+
 function getQ3Settings(): AISettingsLike {
   return _settingsProvider ? _settingsProvider() : {};
 }

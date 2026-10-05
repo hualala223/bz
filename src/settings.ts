@@ -49,6 +49,29 @@ export default interface BzSettings {
   /** bz 侧自动运行台账（每工具：最近一次尝试 / 连续失败数 / 是否熔断暂停）。
    *  **不是**工具的运行记录 —— 那份归工具自己写（D8/D9）；这里只是 bz 的调度账（`DockToolRunState`）。 */
   dockRunState: Record<string, DockToolRunState>;
+  // ===== 👤 脸谱（people 域，2026-10-04 并入）：数据目录与导入/提炼口径 =====
+  /** 脸谱数据目录（导出/画像/媒体仓根；vault 相对路径） */
+  peopleDataDir: string;
+  /** 微信账号数据目录（聊天记录 raw 来源根） */
+  peopleWxAccountDir: string;
+  /** 导入是否包含群聊会话 */
+  peopleIncludeGroups: boolean;
+  /** 语音转写预览开关 */
+  peoplePreviewVoice: boolean;
+  /** 图片描述模式（AI 段口径） */
+  peopleImageDescMode: string;
+  /** 图片描述批量大小 */
+  peopleDescBatchSize: number;
+  /** 视频预览开关 */
+  peoplePreviewVideo: boolean;
+  /** 导入保留系统会话 */
+  peopleKeepSystem: boolean;
+  /** 外部工具：Python 路径（bz-face 工具包运行时） */
+  pythonPath: string;
+  /** 脸谱面板桌面端拖拽缩放记忆（宽/高；0 = 未设置） */
+  peoplePanelWidth: number;
+  /** 脸谱面板桌面端拖拽缩放记忆（高） */
+  peoplePanelHeight: number;
   /** 🖱 设置面板桌面端拖拽缩放记忆（ADR-0084/0094，492-sp-res）：0 = 未设置（默认宽走壳参数） */
   settingsPanelWidth: number;
   /** 设置面板桌面端拖拽缩放记忆（高） */
@@ -655,6 +678,17 @@ export const DEFAULT_SETTINGS: BzSettings = {
   dockNotifyMissed: true,
   dockAutoRun: true,
   dockRunState: {},
+  peopleDataDir: '脸谱',
+  peopleWxAccountDir: '',
+  peopleIncludeGroups: false,
+  peoplePreviewVoice: true,
+  peopleImageDescMode: 'ai',
+  peopleDescBatchSize: 4,
+  peoplePreviewVideo: true,
+  peopleKeepSystem: false,
+  pythonPath: 'python',
+  peoplePanelWidth: 0,
+  peoplePanelHeight: 0,
   settingsPanelWidth: 0,
   settingsPanelHeight: 0,
 

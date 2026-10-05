@@ -71,6 +71,8 @@ const EXPECTED_COMMAND_IDS = [
   'bz-home-open', 'bz-diary-wall-open', 'bz-data-checkup-open', 'bz-settings-panel-open',
   // 工具坞（dock 域，ADR-0235）
   'bz-dock-open',
+  // 脸谱（people 域，issue 435/ADR-0191）
+  'bz-people-open', 'bz-people-import',
   'bz-todo-open', 'bz-todo-add',
   'bz-belongings-add', 'bz-belongings-open',
   'bz-clipbook-open', 'bz-clipbook-mark-all-read', 'bz-clipbook-fetch-now',

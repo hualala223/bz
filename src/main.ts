@@ -86,6 +86,7 @@ import { openDataCheckup, unloadDataCheckup } from './checkup';
 import { DOMAIN_ICONS } from './core/domain-icons';
 // 工具坞（dock 域，ADR-0235 + ADR-0236：外部工具的标准接口 + 集中观测台 + **bz 调度**；
 // 不关心工具是什么。调度只在桌面端、且在 Obsidian 开着的期间生效）
+import { openPeople, importWechat, unloadPeople } from './people';
 import {
   openDock,
   unloadDock,
@@ -123,6 +124,9 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   // 工具坞（dock 域，ADR-0235 + ADR-0236：外部工具的登记 / 启动 / 回显 / 留痕 / **调度**；
   // 面板是唯一入口，自动化工具由调度器在启动就绪后按节奏触发）
   { id: 'bz-dock-open', name: '工具坞', icon: DOMAIN_ICONS.dock, callback: () => openDock(getApp()) },
+  // 脸谱（people 域，issue 435/ADR-0191；issue 449 D 命名收敛：去「本」字、导入动作以数据源立题）
+  { id: 'bz-people-open', name: '脸谱', icon: DOMAIN_ICONS.people, callback: () => openPeople(getApp()) },
+  { id: 'bz-people-import', name: '脸谱数据源', icon: DOMAIN_ICONS.people, callback: () => importWechat(getApp()) },
   // 设置面板（settings-panel 域，ADR-0080：全域设置聚合入口，与既有设置架构并存不替换）
   { id: 'bz-settings-panel-open', name: '设置面板', icon: 'settings-2', callback: () => openSettingsPanel(getApp()) },
   // 待办（todo 域，上游 ADR-0092：memo.json 唯一属主）
@@ -479,6 +483,7 @@ export default class BzPlugin extends Plugin {
     // 先于 unloadDock，免得停表前又 tick 一轮去碰已拆的面板；再清面板 DOM + esc 注销 + 会话态复位）
     stopDockScheduler();
     unloadDock();
+    unloadPeople();
     // 日常收集（collect 域）：面板 DOM + ESC 层（未初始化时幂等空清理）
     unloadCollect();
     // 域事件总线收口：摘除 vault 订阅点 + 清空全部域事件订阅（总线为进程内单例，随插件卸载全量清空）

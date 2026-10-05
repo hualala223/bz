@@ -101,10 +101,11 @@ export function getSafeManager(): import('./data').SafeManager {
  * 保险库面板自身的解锁走共享解锁屏（ADR-0124，见 UIManager.showPasswordDialog）。
  * @returns 解锁成功返回 true
  */
-export async function ensureSafeUnlocked(): Promise<boolean> {
+export async function ensureSafeUnlocked(kind: 'vault' | 'legacy' | 'people' = 'legacy'): Promise<boolean> {
   const controller = getController();
   if (controller.dataManager.unlocked) return true;
-  const ok = await controller.uiManager.showPasswordDialog('legacy');
+  // people 档走共享解锁屏（issue 482，票 317）；legacy/vault 维持本地原路径（ADR-0121 冻结段位）
+  const ok = await controller.uiManager.showPasswordDialog(kind);
   return ok;
 }
 

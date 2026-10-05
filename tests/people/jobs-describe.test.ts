@@ -1,0 +1,625 @@
+// @vitest-environment node
+/**
+ * 图片描述段编排测试（issue 470 / ADR-0196 决策 8、9；spec Testing Decisions 第 1 条）：
+ * 生成任务引擎（jobs.ts）的 describe 段在「画脸谱编排」缝上的行为——AI 与确认门经
+ * startJobs / resumeJobs 的 askDescribe / askDescribeConfirm 注入假件、派生档 fs 经
+ * setDescribeFsForTests 注入内存假件（零媒体联系人不起 prep 进程，本票不依赖工具段），断言：
+ *   · 确认门数据（服务商/模型/张数/调用数/起始位置）与「开始」路径的逐批描述并合并回聊天仓；
+ *   · 「跳过图片描述」≠ 取消：图片空文本继续走到画像生成（决策 8）；
+ *   · 零图片自动跳过且不弹确认（决策 9）；
+ *   · 批级断点：单批失败只废该批，续跑只补失败批、已完成批零调用；确认过的任务续跑不再弹窗；
+ *   · 批间暂停（决策 3 同款语义）；门未注入按跳过处理（绝不静默烧钱）。
+ * 测试数据全构造，不含真实聊天内容。
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  startJobs,
+  resumeJobs,
+  resume,
+  pauseJobs,
+  snapshot,
+  whenIdle,
+  runDescribeOnly,
+  isDescribeOnlyBusy,
+  retryPrepFailures,
+  __resetJobsForTests,
+  type JobTarget,
+  type PersonJob,
+} from '../../src/people/jobs';
+import { storeStatsOf, storeToUnified, type StoreMsg } from '../../src/people/datasource';
+import { PeopleSafeStore, setPeopleSafeStoreForTests } from '../../src/people/safe-store';
+import { SafeManager } from '../../src/encrypt/data';
+import { setDescribeFsForTests, type DescribeFs } from '../../src/people/describe';
+import { setPrepRunnerForTests } from '../../src/people/prep';
+import type { DescribeConfirmInfo } from '../../src/people/types';
+import { setApp } from '../../src/core/app';
+import { setSettingsProvider } from '../../src/core/settings-provider';
+import { MockVault, mockAppWithVault } from '../mock-vault';
+import { resetObsidianMocks } from '../mock-obsidian-entry';
+
+const TALKER = 'wxid_desc';
+const DATA_ROOT = 'E:\\构造数据根';
+const BASE = Date.UTC(2024, 4, 1, 12, 0, 0);
+const PW = 'jobs-desc-pw';
+
+let vault: MockVault;
+let app: any;
+let sm: SafeManager;
+let safe: PeopleSafeStore;
+
+const BATCH_JSON = JSON.stringify({
+  events: [{ ts: '2024-05-01', kind: 'major', summary: '构造事件' }],
+  traits: ['构造特质'],
+  quotes: [{ ts: '2024-05-01', who: '对方', text: '构造原话' }],
+  moments: [{ ts: '2024-05-01', summary: '构造场景' }],
+});
+
+/** 假确认门：记录收到的确认数据，按预设答复 */
+function makeGate(answer: 'start' | 'skip' = 'start') {
+  const seen: Array<DescribeConfirmInfo> = [];
+  const gate = vi.fn(async (info: DescribeConfirmInfo) => {
+    seen.push(info);
+    return answer;
+  });
+  return { gate, seen };
+}
+
+/** 假提炼 / 画像 AI（describe 段之后的整链沿用 jobs-prep 同款假件） */
+function makeAsks() {
+  return {
+    askExtract: vi.fn(async () => BATCH_JSON),
+    askPortrait: vi.fn(async (p: string) => {
+      if (p.includes('《纪事》')) return '## 2024 年';
+      if (p.includes('要产出的卷二')) return '## 关系定性\n构造我们';
+      return '## 画像速写\n构造画像';
+    }),
+  };
+}
+
+/** 假视觉 AI：按图片张数回 descs 数组；可注入第几批失败 */
+function makeAskDescribe(opts: { failBatch?: number } = {}) {
+  const calls: string[][] = []; // 每次调用的图片路径集合（从 prompt 不可见，改由注入侧记录 images）
+  let batch = 0;
+  const ask = vi.fn(async (input: { text: string; images: string[] }) => {
+    batch += 1;
+    calls.push(input.images);
+    if (opts.failBatch !== undefined && batch === opts.failBatch) throw new Error('构造视觉调用失败');
+    const prompt = input.text;
+    const count = Number(/图片张数 (\d+)/.exec(prompt)?.[1] ?? input.images.length);
+    return JSON.stringify({ descs: input.images.map((_, i) => `构造描述${batch}-${i + 1}`).slice(0, count) });
+  });
+  return { ask, calls };
+}
+
+/** 构造一条仓消息 */
+function m(n: number, over: Partial<StoreMsg> = {}): StoreMsg {
+  return { key: `k${n}`, ts: BASE + n * 60000, isSender: n % 2 === 1, type: 1, text: `构造消息${n}`, ...over };
+}
+
+/** 带图种子聊天仓：2 文本 + 3 图片（img 已关联、text 空 = 待描述） */
+function imageMsgs(): StoreMsg[] {
+  return [
+    m(1),
+    m(2, { key: 'p1', type: 3, sid: 101, img: '2026-05/p1.jpg', text: '' }),
+    m(3),
+    m(4, { key: 'p2', type: 3, sid: 102, img: '2026-05/p2.jpg', text: '' }),
+    m(5, { key: 'p3', type: 3, sid: 103, img: '2026-05/p3.jpg', text: '' }),
+  ];
+}
+
+async function seedStore(msgs: StoreMsg[]): Promise<void> {
+  await safe.write(TALKER, (rec) => {
+    rec.store = { msgs, watermarkSid: 103, stats: storeStatsOf(msgs), kindCounts: { 文本: 2 }, updatedAt: '2026-09-25T00:00:00.000Z' };
+  });
+}
+
+/**
+ * 给任务补「prep 已齐段」账本。生产流里图片有 img 必然经过 prep（image_map / desc 派生档
+ * 是它的产物），账本必然齐段、续跑不再起进程；本票用例不依赖工具段，直接落位同一状态。
+ */
+async function markPrepDone(): Promise<void> {
+  await safe.write(TALKER, (rec) => {
+    if (rec.job && !rec.job.prep) {
+      rec.job.prep = { phase: null, pct: null, counts: {}, donePhases: ['media', 'derive', 'map', 'transcribe'], failed: 0 };
+    }
+  });
+}
+
+function target(msgs: StoreMsg[]): JobTarget {
+  return { talker: TALKER, name: '构造对象', msgs: storeToUnified(msgs), kindCounts: {}, skippedCount: 0, fileLabel: `数据源:${TALKER}` };
+}
+
+function jobOf(): PersonJob | undefined {
+  return snapshot().queue.find((j) => j.talker === TALKER);
+}
+
+/** 轮询等待（引擎是后台 promise，以状态 / 调用计数为条件） */
+async function until(cond: () => boolean | Promise<boolean>): Promise<void> {
+  for (let i = 0; i < 2000; i++) {
+    if (await cond()) return;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  throw new Error('jobs-describe.test: 等待条件超时');
+}
+
+/** 派生档 fs 假件：desc/ 下的 jpg 都可读（内容任意非空字节） */
+class MemDescFs implements DescribeFs {
+  missing = new Set<string>();
+  /** 全库派生档都读不动（issue 521「有欠账、零可读」现场：源图损坏 / 缺失） */
+  allMissing = false;
+  readBytes(path: string): Uint8Array | null {
+    const p = path.replace(/\\/g, '/');
+    if (!p.includes('/desc/') || this.allMissing || this.missing.has(p)) return null;
+    return new Uint8Array([1, 2, 3]);
+  }
+}
+
+let descFs: MemDescFs;
+
+beforeEach(async () => {
+  vault = new MockVault();
+  app = mockAppWithVault(vault);
+  setApp(app);
+  resetObsidianMocks();
+  __resetJobsForTests();
+  sm = new SafeManager('CONFIG/.ENCRYPT');
+  await sm.unlock(PW);
+  safe = new PeopleSafeStore(sm);
+  setPeopleSafeStoreForTests(safe);
+  descFs = new MemDescFs();
+  setDescribeFsForTests(descFs);
+  setSettingsProvider(
+    () => ({ storagePath: 'CONFIG/STORAGE', peopleDataDir: DATA_ROOT, aiProvider: 'zhipu-plan' }) as never
+  );
+});
+
+afterEach(() => {
+  __resetJobsForTests();
+  setPeopleSafeStoreForTests(null);
+  setDescribeFsForTests(null);
+  setPrepRunnerForTests(null);
+  sm.lock();
+});
+
+describe('describe 段编排（470）', () => {
+  it('确认门数据与「开始」路径：逐批描述合并回聊天仓 → 指纹刷新 → 整链继续走到 done', async () => {
+    const msgs = imageMsgs();
+    await seedStore(msgs);
+    const gateBox = makeGate('start');
+    const askBox = makeAskDescribe();
+    await startJobs(app, [target(msgs)], {
+      maxRetries: 0,
+      sleep: async () => {},
+      ...makeAsks(),
+      askDescribe: askBox.ask,
+      askDescribeConfirm: gateBox.gate,
+    });
+    await whenIdle();
+    const job = jobOf();
+    expect(job?.status).toBe('done');
+    expect(job?.stage).toBe('done');
+    // 确认门数据（ADR-0196 决策 8：服务商/模型/张数/调用数/起始位置；不报金额）
+    expect(gateBox.seen.length).toBe(1);
+    expect(gateBox.seen[0]).toMatchObject({
+      provider: '智谱 Plan',
+      model: 'glm-5.3-flash',
+      name: '构造对象',
+      totalImages: 3,
+      doneImages: 0,
+      calls: 1, // 3 张按缺省批 20 → 1 批 1 次调用
+      batchSize: 20,
+    });
+    expect(askBox.calls.length).toBe(1);
+    // 合并回聊天仓（ADR-0197 决策 4）：`[图片] 描述` 进派生 text，时间线与统计随之更新
+    const rec = await safe.read(TALKER);
+    const img1 = rec!.store.msgs.find((x) => x.key === 'p1')!;
+    expect(img1.text).toBe('[图片] 构造描述1-1');
+    expect(rec!.store.stats.msgCount).toBe(5); // 2 文本 + 3 图（描述进时间线）
+    expect(rec!.store.stats.imageCount).toBe(3);
+    // 指纹刷新（合并后重算，不判废）；账本落位
+    expect(job?.describe).toMatchObject({ imgCount: 3, totalBatches: 1, doneBatches: 1, confirmed: true });
+    const refp = (await import('../../src/people/jobs')).fingerprintOf(
+      rec!.store.msgs.filter((x) => x.text !== '').map((x) => ({ ts: x.ts, isSender: x.isSender, text: x.text }))
+    );
+    expect(job?.contentHash).toBe(refp.contentHash);
+  });
+
+  it('跳过 ≠ 取消（决策 8）：图片空文本继续走到画像生成；视觉调用零发生', async () => {
+    const msgs = imageMsgs();
+    await seedStore(msgs);
+    const gateBox = makeGate('skip');
+    const askBox = makeAskDescribe();
+    await startJobs(app, [target(msgs)], {
+      maxRetries: 0,
+      sleep: async () => {},
+      ...makeAsks(),
+      askDescribe: askBox.ask,
+      askDescribeConfirm: gateBox.gate,
+    });
+    await whenIdle();
+    const job = jobOf();
+    expect(job?.status).toBe('done'); // 整链不中断
+    expect(askBox.ask).not.toHaveBeenCalled();
+    expect(job?.describe?.skipped).toBe(true);
+    const rec = await safe.read(TALKER);
+    expect(rec!.store.msgs.find((x) => x.key === 'p1')?.text).toBe(''); // 空文本 = 不进时间线
+    expect(rec!.store.stats.msgCount).toBe(2);
+    expect(job?.msgCount).toBe(2); // 指纹按空文本口径刷新
+  });
+
+  it('零图片自动跳过本段且不弹确认（决策 9）', async () => {
+    const msgs = [m(1), m(2), m(3)];
+    await seedStore(msgs);
+    const gateBox = makeGate('start');
+    await startJobs(app, [target(msgs)], { maxRetries: 0, sleep: async () => {}, ...makeAsks(), askDescribeConfirm: gateBox.gate });
+    await whenIdle();
+    expect(jobOf()?.status).toBe('done');
+    expect(gateBox.gate).not.toHaveBeenCalled();
+    expect(jobOf()?.describe).toBeUndefined();
+  });
+
+  it('批级断点：单批失败只废该批；续跑只补失败批（已完成批零调用）且不再弹确认', async () => {
+    const msgs = imageMsgs();
+    await seedStore(msgs);
+    // 设置批 2 → 2 批：批 1 成功、批 2 失败（maxRetries 0 → 任务 error）
+    setSettingsProvider(
+      () => ({ storagePath: 'CONFIG/STORAGE', peopleDataDir: DATA_ROOT, peopleDescBatchSize: 2 }) as never
+    );
+    const askBox = makeAskDescribe({ failBatch: 2 });
+    const gateBox = makeGate('start');
+    await startJobs(app, [target(msgs)], {
+      maxRetries: 0,
+      sleep: async () => {},
+      ...makeAsks(),
+      askDescribe: askBox.ask,
+      askDescribeConfirm: gateBox.gate,
+    });
+    await until(() => jobOf()?.status === 'error');
+    let job = jobOf();
+    expect(job?.error).toBe('构造视觉调用失败');
+    // error 面不再叠失败说明（归进度块错误行 / 底部红字）：message 停在批开始的「本批 N 张」
+    expect(job?.message).toBe('本批 1 张');
+    expect(job?.describe).toMatchObject({ doneBatches: 1, totalBatches: 2, confirmed: true });
+    expect(askBox.calls.length).toBe(2);
+    // 批 1 的成果已逐批落仓（checkpoint：p1 / p2 都在批 1）
+    const rec0 = await safe.read(TALKER);
+    expect(rec0!.store.msgs.find((x) => x.key === 'p1')?.text).toBe('[图片] 构造描述1-1');
+    expect(rec0!.store.msgs.find((x) => x.key === 'p2')?.text).toBe('[图片] 构造描述1-2');
+    expect(rec0!.store.msgs.find((x) => x.key === 'p3')?.text).toBe('');
+    // 续跑：不再弹确认（confirmed 记账）；批 1 零调用，只补批 2
+    await markPrepDone(); // 描述并仓后图片进时间线（stats.imageCount 增长）——prep 账本齐段则不再起进程
+    expect(resume(TALKER)).toBe(true);
+    await whenIdle();
+    job = jobOf();
+    expect(job?.status).toBe('done');
+    expect(gateBox.gate).toHaveBeenCalledTimes(1);
+    expect(askBox.calls.length).toBe(3); // 批1 + 批2失败 + 续跑只重试批2
+    expect(askBox.calls[2].length).toBe(1); // 第 3 次调用只带批 2 的 1 张
+    const rec = await safe.read(TALKER);
+    expect(rec!.store.msgs.find((x) => x.key === 'p3')?.text).toBe('[图片] 构造描述3-1');
+  });
+
+  it('批间暂停：确认门回来后、下一批开始前收手（断点留在 describe 段）', async () => {
+    const msgs = imageMsgs();
+    await seedStore(msgs);
+    setSettingsProvider(
+      () => ({ storagePath: 'CONFIG/STORAGE', peopleDataDir: DATA_ROOT, peopleDescBatchSize: 1 }) as never
+    );
+    const askBox = makeAskDescribe();
+    const gateBox = makeGate('start');
+    // 门里顺手请求暂停：引擎从 await 恢复后，describe 循环在批顶收手
+    const gate = vi.fn(async (info: DescribeConfirmInfo) => {
+      void info;
+      pauseJobs();
+      return 'start' as const;
+    });
+    await startJobs(app, [target(msgs)], {
+      maxRetries: 0,
+      sleep: async () => {},
+      ...makeAsks(),
+      askDescribe: askBox.ask,
+      askDescribeConfirm: gate,
+    });
+    await until(() => jobOf()?.status === 'paused');
+    const job = jobOf();
+    expect(job?.stage).toBe('describe');
+    expect(job?.message).toBe('已暂停 · 图片描述 0/3 批');
+    expect(askBox.ask).not.toHaveBeenCalled();
+    // 恢复：确认不重弹（已 confirmed），三批跑完
+    expect(resume(TALKER)).toBe(true);
+    await whenIdle();
+    expect(jobOf()?.status).toBe('done');
+    expect(gate).toHaveBeenCalledTimes(1);
+    expect(askBox.calls.length).toBe(3);
+  });
+
+  it('确认门未注入（无授权通道）按跳过处理：不烧调用，整链继续', async () => {
+    const msgs = imageMsgs();
+    await seedStore(msgs);
+    const askBox = makeAskDescribe();
+    await startJobs(app, [target(msgs)], { maxRetries: 0, sleep: async () => {}, ...makeAsks(), askDescribe: askBox.ask });
+    await whenIdle();
+    const job = jobOf();
+    expect(job?.status).toBe('done');
+    expect(askBox.ask).not.toHaveBeenCalled();
+    expect(job?.describe?.skipped).toBe(true);
+  });
+
+  it('重启续跑：崩溃遗留 interrupted 任务恢复后不再重复弹确认，只补未描述的图', async () => {
+    const msgs = imageMsgs();
+    await seedStore(msgs);
+    // 盘上遗留：describe 已确认（confirmed 记账），p1 的描述上次已并仓、p2 / p3 待补
+    await safe.write(TALKER, (rec) => {
+      rec.store.msgs.find((x) => x.key === 'p1')!.text = '[图片] 上次已并仓';
+      rec.job = {
+        talker: TALKER,
+        name: '构造对象',
+        mode: 'full',
+        fileLabel: `数据源:${TALKER}`,
+        status: 'running',
+        stage: 'describe',
+        msgCount: 3,
+        contentHash: 'stale',
+        chunks: [],
+        batchesDone: 0,
+        results: [],
+        describe: { imgCount: 3, batchSize: 2, totalBatches: 2, doneBatches: 1, confirmed: true },
+        startedAt: '2026-09-26T00:00:00.000Z',
+        updatedAt: '2026-09-26T00:00:00.000Z',
+      };
+    });
+    const gateBox = makeGate('start');
+    const askBox = makeAskDescribe();
+    await resumeJobs(app, { ...makeAsks(), askDescribe: askBox.ask, askDescribeConfirm: gateBox.gate });
+    expect(jobOf()?.status).toBe('interrupted'); // 中断不自动续（烧 token 等用户点）
+    expect(resume(TALKER)).toBe(true);
+    await whenIdle();
+    const job = jobOf();
+    expect(job?.status).toBe('done');
+    expect(gateBox.gate).not.toHaveBeenCalled(); // confirmed 记账：续跑不重复弹确认
+    expect(askBox.calls.length).toBe(2); // 批边界按遗留账本重导（[p1,p2],[p3]）：p2 一批、p3 一批
+    expect(askBox.calls[0].length).toBe(1);
+    const rec = await safe.read(TALKER);
+    expect(rec!.store.msgs.find((x) => x.key === 'p1')?.text).toBe('[图片] 上次已并仓'); // 已描述的不重写
+    expect(rec!.store.msgs.find((x) => x.key === 'p3')?.text).toContain('[图片] 构造描述');
+  });
+
+  it('resumeJobs 只注 askDescribeConfirm 也生效（注入判定与 startJobs 同源）：整包注入不再被丢弃', async () => {
+    const msgs = [m(2, { key: 'p1', type: 3, sid: 101, img: '2026-05/p1.jpg', text: '' })];
+    await seedStore(msgs);
+    await safe.write(TALKER, (rec) => {
+      rec.job = {
+        talker: TALKER,
+        name: '构造对象',
+        mode: 'full',
+        fileLabel: `数据源:${TALKER}`,
+        status: 'running',
+        stage: 'describe',
+        msgCount: 1,
+        contentHash: 'stale',
+        chunks: [],
+        batchesDone: 0,
+        results: [],
+        startedAt: '2026-09-26T00:00:00.000Z',
+        updatedAt: '2026-09-26T00:00:00.000Z',
+      };
+    });
+    // 门答 skip：验证「门被征询」即可，答案落地后没有可提炼文本自然收束，不烧任何真 AI
+    const gateBox = makeGate('skip');
+    await resumeJobs(app, { askDescribeConfirm: gateBox.gate }); // 只注 describe 门
+    expect(jobOf()?.status).toBe('interrupted');
+    expect(resume(TALKER)).toBe(true);
+    await whenIdle();
+    expect(gateBox.gate).toHaveBeenCalledTimes(1); // 修复前：判定漏 askDescribeConfirm → 注入整包当 null 丢弃，门从未被征询
+    expect(jobOf()?.describe?.skipped).toBe(true); // 门答 skip → 跳过（skip ≠ 取消口径不变）
+    expect(jobOf()?.status).toBe('error'); // 没有可提炼文本收束（唯一图片空文本不进时间线）
+  });
+
+  it('敏感降级（ADR-0224）：整批被判敏感 → 该批逐张重来，被拒的标 descSkip，其余照常落仓', async () => {
+    const msgs = imageMsgs(); // 3 张图（p1 / p2 / p3）
+    await seedStore(msgs);
+    const gateBox = makeGate('start');
+    const sizes: number[] = []; // 每次调用的图片张数——降级的直接证据
+    let singleIdx = 0; // 逐张轮次（images 是 data URL，认不出是哪张图，按顺序认：第 2 张 = p2）
+    const ask = vi.fn(async (input: { text: string; images: string[] }) => {
+      sizes.push(input.images.length);
+      // 整批（>1 张）一律被服务商判敏感；逐张时只有第 2 张（p2）是那颗毒瘤
+      if (input.images.length > 1) {
+        throw new Error('API 请求失败: 系统检测到输入或生成内容可能包含不安全或敏感内容（fallback: Request failed, status 400）');
+      }
+      singleIdx += 1;
+      if (singleIdx === 2) {
+        throw new Error('AI 请求失败: 输入可能包含敏感内容（fallback: Request failed, status 400）');
+      }
+      return JSON.stringify({ descs: input.images.map(() => '构造描述') });
+    });
+    await startJobs(app, [target(msgs)], {
+      maxRetries: 2, // 敏感拒绝不该耗掉重试次数
+      sleep: async () => {},
+      ...makeAsks(),
+      askDescribe: ask,
+      askDescribeConfirm: gateBox.gate,
+    });
+    await whenIdle();
+    // 调用序列 = 1 次整批（3 张）+ 3 次逐张。整批若走了退避重试，这里会是 [3, 3, 3, …]
+    expect(sizes).toEqual([3, 1, 1, 1]);
+    const rec = await safe.read(TALKER);
+    const byKey = new Map(rec!.store.msgs.map((x) => [x.key, x]));
+    expect(byKey.get('p1')!.text).toBe('[图片] 构造描述');
+    expect(byKey.get('p3')!.text).toBe('[图片] 构造描述');
+    expect(byKey.get('p2')!.text).toBe(''); // 被拒：空文本不进时间线
+    expect(byKey.get('p2')!.descSkip).toBe('sensitive'); // 且已标注
+    // 一批毒图没有废掉整条链
+    expect(jobOf()?.status).toBe('done');
+    expect(jobOf()?.describe).toMatchObject({ doneBatches: 1, sensitive: 1 });
+    expect(rec!.store.stats.imageCount).toBe(2); // 只有两张进了时间线
+  });
+
+  it('标注即终态：已标注的图不计数、不切批、不再调用（补画零浪费）', async () => {
+    const msgs = imageMsgs();
+    msgs[3].descSkip = 'sensitive'; // p2 已标注
+    await seedStore(msgs);
+    const gateBox = makeGate('start');
+    const askBox = makeAskDescribe();
+    await startJobs(app, [target(msgs)], {
+      maxRetries: 0,
+      sleep: async () => {},
+      ...makeAsks(),
+      askDescribe: askBox.ask,
+      askDescribeConfirm: gateBox.gate,
+    });
+    await whenIdle();
+    // 确认门报的是 2 张（p1 / p3），不是 3 张——标注的图根本没进 refs
+    expect(gateBox.seen[0]).toMatchObject({ totalImages: 2 });
+    const rec = await safe.read(TALKER);
+    const p2 = rec!.store.msgs.find((x) => x.key === 'p2')!;
+    expect(p2.descSkip).toBe('sensitive'); // 没被并仓动作抹掉（applyImageDescToMsgs 也跳过它）
+    expect(p2.text).toBe('');
+    expect(jobOf()?.describe?.sensitive).toBeUndefined(); // 本轮没有新标注
+  });
+
+  it('有欠账、零可读（ADR-0225 决策 3）：整段零调用收尾，不烧画像，明确告知张数', async () => {
+    const msgs = imageMsgs();
+    await seedStore(msgs);
+    await markPrepDone();
+    // 三张图的派生档全读不动（源图损坏 / 缺失的真实现场：磁盘上压根没有 desc/ 档）
+    descFs.allMissing = true;
+    const gateBox = makeGate('start');
+    const askBox = makeAskDescribe();
+    const asks = makeAsks();
+    await startJobs(app, [target(msgs)], {
+      maxRetries: 0,
+      sleep: async () => {},
+      ...asks,
+      askDescribe: askBox.ask,
+      askDescribeConfirm: gateBox.gate,
+    });
+    await whenIdle();
+    const job = jobOf()!;
+    expect(job.status).toBe('done');
+    expect(job.describe?.unreadable).toBe(3);
+    expect(job.message).toContain('源图损坏或缺失');
+    expect(job.person).toBeUndefined(); // 没有产物：不进「done 即有画像」的口径
+    // 关键：视觉 / 采集 / 画像一次都没烧（用户实测的那 5 次调用就此省掉）
+    expect(askBox.ask).not.toHaveBeenCalled();
+    expect(asks.askExtract).not.toHaveBeenCalled();
+    expect(asks.askPortrait).not.toHaveBeenCalled();
+  });
+
+  it('非敏感失败仍走原重试路径（不误伤）：5xx 不会触发逐张降级', async () => {
+    const msgs = imageMsgs();
+    await seedStore(msgs);
+    const gateBox = makeGate('start');
+    const sizes: number[] = [];
+    const ask = vi.fn(async (input: { text: string; images: string[] }) => {
+      sizes.push(input.images.length);
+      throw new Error('AI 请求失败: 服务暂时不可用（fallback: Request failed, status 503）');
+    });
+    await startJobs(app, [target(msgs)], {
+      maxRetries: 1,
+      sleep: async () => {},
+      ...makeAsks(),
+      askDescribe: ask,
+      askDescribeConfirm: gateBox.gate,
+    });
+    await whenIdle();
+    expect(sizes).toEqual([3, 3]); // 整批退避重试一次后耗尽——从未降到逐张
+    expect(jobOf()?.status).toBe('error');
+  });
+});
+
+describe('补充素材·描述单段（509）：零可读不许报成功 / 收尾唤醒队列（审计 #4 #5）', () => {
+  it('零可读：单段入口返回 ok:false 并交代张数（修复前返回 ok:true，界面弹「描述完成」）', async () => {
+    const msgs = imageMsgs();
+    await seedStore(msgs);
+    descFs.allMissing = true; // 三张图的派生档全读不动（源图损坏 / 缺失的真实现场）
+    const askBox = makeAskDescribe();
+    await resumeJobs(app, { askDescribe: askBox.ask });
+    const r = await runDescribeOnly(app, TALKER);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('3 张');
+    expect(r.reason).toContain('源图损坏或缺失');
+    expect(askBox.ask).not.toHaveBeenCalled(); // 一张都没读出来 → 零视觉调用，不烧钱
+    expect(isDescribeOnlyBusy()).toBe(false);
+  });
+
+  it('收尾唤醒队列：跑单段期间被置回 paused 的任务不再卡死在队列里', async () => {
+    const msgs = imageMsgs();
+    await seedStore(msgs);
+    // 造一个「已 error、prep 有失败项」的正式任务：只有它能在描述单段跑着的时候被
+    // 「重试失败项」置回 paused（队列里本来就有 paused 任务时，describe-only 自己会拒绝起跑）
+    await safe.write(TALKER, (rec) => {
+      rec.job = {
+        talker: TALKER,
+        name: '构造对象',
+        mode: 'incremental',
+        fileLabel: `数据源:${TALKER}`,
+        status: 'error',
+        stage: 'preprocess',
+        msgCount: 0,
+        contentHash: '',
+        chunks: [],
+        batchesDone: 0,
+        results: [],
+        message: '构造：预处理失败',
+        startedAt: '2026-09-25T00:00:00.000Z',
+        updatedAt: '2026-09-25T00:00:00.000Z',
+        prep: { phase: null, pct: null, counts: {}, donePhases: [], failed: 1 },
+      };
+    });
+    // prep 假件：进程立刻以失败收场（只为让被唤醒的任务跑完，不让它真起 python）
+    setPrepRunnerForTests((() => ({
+      stop: () => {},
+      done: Promise.resolve({ ok: false, stopped: false, code: 1, stderr: '', error: new Error('构造：prep 失败') }),
+    })) as never);
+    let release!: () => void;
+    const gate = new Promise<void>((res) => {
+      release = res;
+    });
+    const askDescribe = vi.fn(async () => {
+      await gate; // 卡住单段：留出「期间用户点重试失败项」的窗口
+      return JSON.stringify({ descs: ['构造描述'] });
+    });
+    // sleep 注入：mock 返回 1 条 desc 对 3 张图数量不符 → 批级重试链（describe-only 段 +
+    // 被唤醒任务的 describe 段各一条），真实退避各 1000+3000ms 是纯墙钟浪费；本用例只验
+    // 「收尾唤醒队列」，与退避时长无关（2026-10-01：resumeJobs 此前漏消费 sleep，补齐后方生效）
+    await resumeJobs(app, { askDescribe, sleep: async () => {} });
+    const r = runDescribeOnly(app, TALKER);
+    await until(() => isDescribeOnlyBusy() && (askDescribe as any).mock.calls.length === 1);
+    expect(retryPrepFailures(TALKER)).toBe(true);
+    expect(jobOf()?.status).toBe('paused'); // 单段在跑，队列让位：这一脚踢不动
+    release();
+    await r;
+    // 修复前：describe-only 收尾没有 kick，任务永远停在 paused（用户得手动再点一次「继续生成」）；
+    // 修复后：收尾唤醒队列，它被拾起跑掉（status 离开 paused）
+    await whenIdle();
+    expect(jobOf()?.status).not.toBe('paused');
+    expect(isDescribeOnlyBusy()).toBe(false);
+  });
+});
+
+describe('补充素材·描述单段（509）：临时任务不落盘', () => {
+  it('describe-only 运行中的 checkpoint 不含临时任务：保库 job 段保持为空', async () => {
+    const msgs = [m(2, { key: 'p1', type: 3, sid: 101, img: '2026-05/p1.jpg', text: '' })];
+    await seedStore(msgs);
+    let release!: () => void;
+    const gate = new Promise<void>((res) => {
+      release = res;
+    });
+    const askDescribe = vi.fn(async () => {
+      await gate; // 卡在视觉调用上：留下跑单段中途的落盘窗口
+      return JSON.stringify({ descs: ['构造描述'] });
+    });
+    // 面板首开先 resumeJobs 注入 AI 依赖（生产顺序）：describe-only 借 st.injected 拿到假视觉 AI
+    await resumeJobs(app, { askDescribe });
+    const r = runDescribeOnly(app, TALKER);
+    await until(() => isDescribeOnlyBusy() && (askDescribe as any).mock.calls.length === 1);
+    // 修复前：确认门前后的裸 persist 把临时任务整条写进保库——崩溃后 resumeJobs 会把它标
+    // interrupted 出「继续生成」，且面板首开注入的确认门自动放行，点继续就烧完整条画像链
+    expect((await safe.read(TALKER))?.job ?? null).toBeNull();
+    release();
+    await expect(r).resolves.toEqual({ ok: true, skipped: false });
+    await until(async () => ((await safe.read(TALKER))?.job ?? null) === null); // 收尾落盘同样不带它
+    expect(isDescribeOnlyBusy()).toBe(false);
+  });
+});

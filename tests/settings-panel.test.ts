@@ -132,7 +132,7 @@ describe('设置面板（settings-panel）', () => {
     // 17 个稳定域逐个在列；回忆墙（diary-wall）预载竞态下其可见计数可能暂为 0 而按端剔除（全量套件高负载下
     // 曾观测 17），有设置域总数下限 17，回忆墙单独放行
     expect(navIds.length).toBeGreaterThanOrEqual(17);
-    for (const id of ['global', 'appearance', 'ai', 'diary', 'todo', 'belongings', 'clipping', 'favorites', 'cinema', 'gameshelf', 'bookshelf', 'review', 'secondbrain', 'knowledge', 'pomodoro', 'encrypt', 'smartcat']) {
+    for (const id of ['global', 'appearance', 'ai', 'diary', 'todo', 'belongings', 'clipping', 'favorites', 'cinema', 'gameshelf', 'bookshelf', 'review', 'secondbrain', 'knowledge', 'pomodoro', 'encrypt', 'smartcat', 'people']) {
       expect(navIds, `域 ${id} 应在导航`).toContain(id);
     }
     const iconOf = (id: string) =>

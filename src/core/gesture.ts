@@ -39,3 +39,49 @@ export function bindSwipeTurn(el: HTMLElement, go: (dir: 1 | -1) => void): () =>
     el.removeEventListener('touchcancel', end);
   };
 }
+
+/* ==================== 滚轮翻页（people 相册簿 505/507 系，票 317 随域并入） ==================== */
+
+function scrollHostOf(node: EventTarget | null): HTMLElement | null {
+  for (let n: Element | null = node instanceof Element ? node : null; n && n !== document.body; n = n.parentElement) {
+    if (!(n instanceof HTMLElement)) continue;
+    const oy = getComputedStyle(n).overflowY;
+    if ((oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight + 1) return n;
+  }
+  return null;
+}
+
+function canScroll(box: HTMLElement, dy: number): boolean {
+  return dy > 0 ? box.scrollTop + box.clientHeight < box.scrollHeight - 1 : box.scrollTop > 1;
+}
+
+/**
+ * 滚轮翻页：列表滚动优先，滚到边了才翻页；换向立即归零，翻完进冷却。
+ * 需要 preventDefault，必须非 passive 监听。返回解绑函数。
+ */
+export function bindWheelTurn(el: HTMLElement, go: (dir: 1 | -1) => void, opts: { gap?: number; lock?: number } = {}): () => void {
+  const TH = opts.gap ?? 60;
+  const LOCK = opts.lock ?? 620;
+  let acc = 0;
+  let last = 0;
+  let locked = false;
+  const onWheel = (e: WheelEvent): void => {
+    const host = scrollHostOf(e.target);
+    if (host && canScroll(host, e.deltaY)) return; // 先让原生滚完
+    e.preventDefault();
+    const now = Date.now();
+    if (locked) {
+      if (now - last < LOCK) { acc = 0; return; }
+      locked = false;
+    }
+    if (acc !== 0 && Math.sign(acc) !== Math.sign(e.deltaY)) acc = 0; // 换向归零
+    acc += e.deltaY;
+    if (Math.abs(acc) < TH) return;
+    go(acc > 0 ? 1 : -1);
+    acc = 0;
+    locked = true;
+    last = now;
+  };
+  el.addEventListener('wheel', onWheel, { passive: false });
+  return (): void => el.removeEventListener('wheel', onWheel);
+}

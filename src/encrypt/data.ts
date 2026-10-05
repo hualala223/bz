@@ -54,7 +54,7 @@ export interface SafeNote {
    * 'diary-entry'=加密日记条目（ADR-0017，保险库面板过滤，日记面板单独读）；
    * 'password-vault'=密码本整表（与保险库共享主密码/解锁态，密码本面板单独读写）。
    */
-  kind?: 'diary-entry' | 'password-vault';
+  kind?: 'diary-entry' | 'password-vault' | 'people';
   /** 原笔记路径（如 我的/日记/2025-06-01.md） */
   path: string;
   /** 列表展示标题 */
@@ -123,6 +123,8 @@ export interface LockAttachmentInput {
   data: string;
   /** 预览内容 base64（压缩/抽帧产物）；不传则无预览层 */
   previewData?: string;
+  /** people 域：原图与保险库既有附件同指纹时保留共享镜像（不重复入保险箱） */
+  keptShared?: boolean;
 }
 
 export interface LockNoteInput {
@@ -130,7 +132,7 @@ export interface LockNoteInput {
   path: string;
   title: string;
   /** 来源类型：'diary-entry'=加密日记条目（ADR-0017）；'password-vault'=密码本整表 */
-  kind?: 'diary-entry' | 'password-vault';
+  kind?: 'diary-entry' | 'password-vault' | 'people';
   /** 笔记正文（明文） */
   content: string;
   attachments: LockAttachmentInput[];
@@ -544,6 +546,23 @@ export class SafeManager {
     this.password = newPassword;
     await this.saveManifest(); // 清单以新密码整体重加密（原子三段式）
     emitDomainEvent(ENCRYPT_UNLOCK_CHANGED_CHANNEL, { unlocked: true });
+  }
+
+  /**
+   * 主密码校验（供销毁/删除人物等高危操作的二次确认用；绝不写 this.unlocked/manifest/password，
+   * 也不触发解锁事件）。@returns true = 密码正确；false = 密码错误或清单不存在/为空/不可读
+   */
+  async verifyPassword(password: string): Promise<boolean> {
+    try {
+      if (!(await this.exists())) return false;
+      const content = await this.adapter.read(this.manifestPath);
+      if (!content.trim()) return false;
+      await CryptoService.decrypt(content.trim(), password);
+      return true;
+    } catch (e) {
+      // GCM 认证失败（绝大多数为密码错误）或读文件异常：一律视为校验不通过
+      return false;
+    }
   }
 
   /**
