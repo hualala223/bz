@@ -7,7 +7,6 @@
  */
 import { Setting, type App } from 'obsidian';
 import { notice, notifyUndo, notifySaveError } from '../core/notice';
-import { openFlowDialog } from '../core/flow-dialog';
 import { getSettings, saveSettings } from '../core/settings-provider';
 import { openSettingsModal } from '../core/settings-modal';
 import type { SettingsSchema } from '../core/settings-schema';
@@ -207,20 +206,36 @@ export function reviewSettingsSchema(deps: { app: App; dataManager: ReviewDataMa
         icon: 'list-tree',
         name: '复习条目管理',
         rows: [
-          // 条目列表（ticket 168 切片 05）：面板删除后清理 review.json 条目的唯一入口。
-          // 挂起（文件缺失）条目标灰展示；逐条移出走确认弹窗 → removeItem → toast 撤销原样恢复（阶段/排期/历史零丢失，
-          // ticket 141 通病 1 机制，与旧面板抽屉「移出复习计划」同构）。
+          // 条目列表（ticket 168 切片 05）：面板删除后清理 review.json 条目的唯一入口（票 320 起批量入口见下）。
+          // 挂起（文件缺失）条目标灰展示；逐条移出 = removeItem → toast 撤销原样恢复（阶段/排期/历史零丢失，
+          // ticket 141 通病 1 机制）——票 320 对齐：摘确认弹窗（效率整改 5，撤销兜底替代）+ 监听目录内
+          // 移出时写排除名单（CONTEXT.md「排除笔记」既有语义，与批量/删除联动同口径，撤销只解除本次新增）。
           {
             type: 'custom',
             render: (body) => {
               const setting = new Setting(body).setName('条目列表').setDesc('复习计划内全部条目；挂起（文件缺失）标灰，移出可撤销');
               setting.settingEl.classList.add('bz-review-manage-row');
+              const toolbar = document.createElement('div');
+              toolbar.className = 'bz-review-manage-toolbar';
+              const batchBtn = document.createElement('button');
+              batchBtn.className = 'bz-review-manage-batch';
+              batchBtn.textContent = '批量移出…';
+              batchBtn.addEventListener('click', () => {
+                void (async () => {
+                  const { openReviewBatchRemove } = await import('./batch-ui');
+                  await openReviewBatchRemove(deps.app, deps.dataManager, () => void renderList());
+                })();
+              });
+              toolbar.appendChild(batchBtn);
+              setting.controlEl.appendChild(toolbar);
               const listBox = document.createElement('div');
               listBox.className = 'bz-review-manage-list';
               setting.controlEl.appendChild(listBox);
               const renderList = async () => {
                 listBox.innerHTML = '';
                 const items = await deps.dataManager.loadItems();
+                // 空计划批量移出无意义：按钮隐藏（功能性内联仅显隐）
+                batchBtn.style.display = items.length ? '' : 'none';
                 if (!items.length) {
                   const empty = document.createElement('div');
                   empty.className = 'bz-review-manage-empty';
@@ -239,25 +254,24 @@ export function reviewSettingsSchema(deps: { app: App; dataManager: ReviewDataMa
                   remove.className = 'bz-review-manage-remove';
                   remove.textContent = '移出';
                   remove.addEventListener('click', () => {
-                    void openFlowDialog({
-                      title: '移出复习计划',
-                      message: `确定移出“${item.name}”？`,
-                      actions: [
-                        { label: '取消', value: 'cancel' },
-                        { label: '确定', value: 'ok', cta: true },
-                      ],
-                    }).then(async (v) => {
-                      if (v !== 'ok') return;
+                    void (async () => {
                       try {
                         await deps.dataManager.removeItem(item.filePath);
+                        // 监听目录内且未排除 → 落排除名单（防自动加回；记录本次新增，撤销只解除这些）
+                        const { ReviewWatcher } = await import('./watch');
+                        const watcher = new ReviewWatcher(deps.app, deps.dataManager);
+                        const newlyExcluded =
+                          watcher.isWatched(item.filePath) && !watcher.isExcluded(item.filePath) ? [item.filePath] : [];
+                        if (newlyExcluded.length) await watcher.excludePaths(newlyExcluded);
                         await renderList();
                         const { reviewApp } = await import('./app');
                         await reviewApp.applyReviewStyles(deps.app);
-                        // ticket 141 通病 1：原条目（含阶段/排期/历史）重新插回，进度不丢
+                        // ticket 141 通病 1 + 效率整改 5：原条目（含阶段/排期/历史）重新插回，进度不丢
                         notifyUndo(`已移出「${item.name}」`, () => {
                           void (async () => {
                             try {
                               await deps.dataManager.restoreItem(item);
+                              for (const p of newlyExcluded) await watcher.removeExcludedNote(p);
                               await renderList();
                             } catch (e) {
                               notifySaveError(e, '移出复习条目');
@@ -267,7 +281,7 @@ export function reviewSettingsSchema(deps: { app: App; dataManager: ReviewDataMa
                       } catch (e) {
                         notifySaveError(e, '移出复习条目');
                       }
-                    });
+                    })();
                   });
                   row.appendChild(name);
                   row.appendChild(remove);

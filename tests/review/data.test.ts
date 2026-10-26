@@ -142,6 +142,51 @@ describe('ReviewDataManager', () => {
     expect(raw.length).toBe(0);
   });
 
+  it('removeItems（票 320）：批量移除单次落盘，返回计划序快照；未知路径忽略', async () => {
+    const vault = new MockVault();
+    for (const p of ['A.md', 'B.md', 'C.md']) vault.files.set(p, '正文');
+    const now = new Date();
+    const row = (id: string, filePath: string, stage = 2) => ({
+      id, filePath, name: filePath.replace(/\.md$/, ''), reviewStart: now.toISOString(), stage, phase: 'ladder' as const,
+      stability: 1, difficulty: 0.3, reviewHistory: [], totalReviews: 0, averageConfidence: 0,
+      nextReviewDate: new Date(now.getTime() + 86400000).toISOString(), lastReviewed: null, lastDifficulty: null, completed: false,
+    });
+    vault.files.set(REVIEW_FILE_PATH, JSON.stringify([row('1', 'A.md'), row('2', 'B.md'), row('3', 'C.md')]));
+    const app = makeApp(vault);
+    setApp(app);
+    const dm = new ReviewDataManager(app);
+    const removed = await dm.removeItems(['C.md', 'A.md', 'Z.md']); // 乱序传入 + 未知路径
+    expect(removed.map((i) => i.filePath)).toEqual(['A.md', 'C.md']); // 返回按计划序
+    const raw = JSON.parse(vault.files.get(REVIEW_FILE_PATH)!);
+    expect(raw.map((i: any) => i.filePath)).toEqual(['B.md']); // 一次落盘只剩 B
+    // 空输入零写：计划原样
+    await dm.removeItems([]);
+    expect(JSON.parse(vault.files.get(REVIEW_FILE_PATH)!).length).toBe(1);
+  });
+
+  it('restoreItems（票 320）：按传入序原样插回单次落盘；已在计划中的跳过；运行时字段不落盘', async () => {
+    const vault = new MockVault();
+    for (const p of ['A.md', 'B.md', 'C.md']) vault.files.set(p, '正文');
+    const now = new Date();
+    const row = (id: string, filePath: string, stage = 2) => ({
+      id, filePath, name: filePath.replace(/\.md$/, ''), reviewStart: now.toISOString(), stage, phase: 'ladder' as const,
+      stability: 1, difficulty: 0.3, reviewHistory: [], totalReviews: 0, averageConfidence: 0,
+      nextReviewDate: new Date(now.getTime() + 86400000).toISOString(), lastReviewed: null, lastDifficulty: null, completed: false,
+    });
+    vault.files.set(REVIEW_FILE_PATH, JSON.stringify([row('1', 'A.md'), row('2', 'B.md'), row('3', 'C.md')]));
+    const app = makeApp(vault);
+    setApp(app);
+    const dm = new ReviewDataManager(app);
+    const removed = await dm.removeItems(['A.md', 'C.md']);
+    expect(JSON.parse(vault.files.get(REVIEW_FILE_PATH)!).length).toBe(1);
+    // 撤销时 B 已被别处加入计划：只插回 A/C，B 跳过
+    const kept = await dm.loadItems();
+    await dm.restoreItems([...removed, kept[0]]);
+    const raw = JSON.parse(vault.files.get(REVIEW_FILE_PATH)!);
+    expect(raw.map((i: any) => i.filePath)).toEqual(['B.md', 'A.md', 'C.md']); // 按传入序（=原计划序）追加
+    expect(raw.find((i: any) => i.filePath === 'A.md').file).toBeUndefined(); // 运行时字段不落盘
+  });
+
   it('restoreItem（ticket 141 通病 1）：移出后撤销原样插回，阶段/排期不重置', async () => {
     const vault = new MockVault();
     vault.files.set('A.md', '正文');

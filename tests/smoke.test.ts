@@ -86,6 +86,8 @@ const EXPECTED_COMMAND_IDS = [
   'bz-review-count', 'bz-review-add-current', 'bz-review-add-current-with-links',
   // 上游线 P2/P3：复习统计报告 + 快速复制密码
   'bz-review-report', 'bz-review-today', 'bz-encrypt-copy-password',
+  // 票 320：批量移出复习计划（勾选清单弹窗，单选/全选）
+  'bz-review-remove',
   // ticket 276：今日已复习列表（点击打开原文，强制阅读模式）
   'bz-secondbrain-panel', 'bz-secondbrain-open', 'bz-secondbrain-chat', 'bz-secondbrain-rebuild-index', 'bz-secondbrain-weekly',
   // 游戏库（gameshelf 域，上游 issue 368 移植）：三命令
@@ -169,6 +171,7 @@ describe('bz 骨架冒烟', () => {
     expect(byId('bz-review-add-current').name).toBe('将当前文档加入复习计划');
     expect(typeof byId('bz-review-add-current-with-links').editorCallback).toBe('function');
     expect(byId('bz-review-today').name).toBe('今日已复习');
+    expect(byId('bz-review-remove').name).toBe('批量移出复习计划');
     expect(typeof byId('bz-review-add-current').editorCallback).toBe('function');
     // ticket 170：「批量加入复习计划」——当前文档及一级出链一起加入
     // ticket 276：今日已复习——独立命令，弹窗罗列当天复习过的文档

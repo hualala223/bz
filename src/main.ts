@@ -41,7 +41,7 @@ import { unloadReadingReport } from './reading-report';
 import { openCinema, addCinemaItem, openCinemaAnalysis, openCinemaExport, pickRandomCinema, unloadCinema, refetchCinemaDouban, openCinemaDedupe } from './cinema';
 import { migrateCinemaFolder } from './cinema/migrate';
 // 复习（ticket 168 单一入口：仅「复习（按数量）」命令；ticket 169 加回「加入复习计划」；ensureReview/unloadReview 为常驻监控与卸载所需）
-import { reviewCountStart, reviewAddCurrent, reviewAddCurrentWithLinks, openReviewReport, openTodayReviewed, ensureReview, unloadReview } from './review';
+import { reviewCountStart, reviewAddCurrent, reviewAddCurrentWithLinks, openReviewReport, openTodayReviewed, openReviewBatchRemove, ensureReview, unloadReview } from './review';
 // 第二大脑（ticket 103 起原闪念正名接管，ADR-0051——flash 域已删除）
 import {
   openSecondBrainPanel,
@@ -199,6 +199,8 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   },
   // 今日已复习（ticket 276）：弹窗罗列当天复习过的文档，点击新标签页打开原文（强制阅读模式）
   { id: 'bz-review-today', name: '今日已复习', icon: 'history', callback: () => openTodayReviewed(getApp()) },
+  // 批量移出复习计划（票 320）：勾选清单弹窗（单选/全选，默认不选），一次落盘 + 撤销兜底，不再二次确认
+  { id: 'bz-review-remove', name: '批量移出复习计划', icon: 'list-x', callback: () => openReviewBatchRemove(getApp()) },
   // 番茄钟（ticket 26-32 新域）
   { id: 'bz-pomodoro-open', name: '番茄钟', icon: 'timer', callback: () => openPomodoro(getApp()) },
   // 首页入口菜单三支（票 288 / 上游 issue 288）：相位敏感动作——开始/停止专注、跳过休息、暂停/继续

@@ -185,3 +185,10 @@ export async function openTodayReviewed(app: App): Promise<void> {
   const { showTodayReviewed } = await import('./today');
   await showTodayReviewed(app, dataManager!);
 }
+
+/** 批量移出复习计划（票 320，bz-review-remove）：勾选清单弹窗（单选/全选），一次落盘 + 撤销兜底 */
+export async function openReviewBatchRemove(app: App): Promise<void> {
+  ensureReview(app);
+  const mod = await import('./batch-ui');
+  await mod.openReviewBatchRemove(app, dataManager!);
+}

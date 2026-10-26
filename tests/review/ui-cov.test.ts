@@ -2,7 +2,7 @@
  * 复习设置弹窗写回测试（ticket 168 切片 02/05）：面板删除后 ⚙️ 收敛到篇数弹窗
  * （showCountReviewModal 的 .review-count-settings），设置弹窗经其打开；
  * 七组声明式 schema 逐项触发写回 + 空候选时入口仍可达；
- * 切片 05：复习条目管理组（渲染/挂起标灰/移出确认/撤销恢复）。
+ * 切片 05：复习条目管理组（渲染/挂起标灰/移出撤销恢复；票 320 起移出不再二次确认、监听目录内落排除名单、批量移出入口）。
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { MockVault, mockAppWithVault } from '../mock-vault';
@@ -170,7 +170,7 @@ describe('设置弹窗（ticket 168：经篇数弹窗 ⚙️ 打开）onChange �
       expect(items[1].textContent).toContain('挂起');
     });
 
-    it('移出：确认弹窗 → 移除 + 撤销 toast → 恢复原条目（阶段/排期/历史零丢失）', async () => {
+    it('移出：直接移除（票 320 起不再二次确认）+ 撤销 toast → 恢复原条目（阶段/排期/历史零丢失）', async () => {
       const history = [{ timestamp: new Date(Date.now() - 86400000).toISOString(), rating: 'good' as const }];
       const next = new Date(Date.now() + 3 * 86400000);
       vault.files.set('A.md', '正文');
@@ -179,12 +179,9 @@ describe('设置弹窗（ticket 168：经篇数弹窗 ⚙️ 打开）onChange �
       await new Promise((r) => setTimeout(r, 60)); // custom 行异步 loadItems 渲染
       const popup = document.getElementById('bz-settings-modal-popup')!;
       (popup.querySelector('.bz-review-manage-remove') as HTMLElement).click();
-      await new Promise((r) => setTimeout(r, 15));
-      expect(document.getElementById('__shared_confirm_ok__')).toBeTruthy(); // 确认弹窗
-      (document.getElementById('__shared_confirm_ok__') as HTMLElement).click();
-      await new Promise((r) => setTimeout(r, 40));
+      await new Promise((r) => setTimeout(r, 50));
       const dm = new ReviewDataManager(makeApp(vault));
-      expect((await dm.loadItems()).length).toBe(0); // 已移除
+      expect((await dm.loadItems()).length).toBe(0); // 已移除（无确认弹窗，效率整改 5）
       const msgs = [...document.querySelectorAll('.bz-notice-msg')].map((e) => e.textContent);
       expect(msgs.join('|')).toContain('已移出「A」');
       // 撤销原样恢复
@@ -198,17 +195,49 @@ describe('设置弹窗（ticket 168：经篇数弹窗 ⚙️ 打开）onChange �
       expect(back[0].stage).toBe(2); // 阶段不变
     });
 
-    it('移出：取消确认 → 条目不动', async () => {
+    it('移出：监听目录内条目落排除名单，撤销解除；目录外不落（票 320 对齐「排除笔记」语义）', async () => {
+      const settings: any = { reviewWatchedFolders: ['我的/复习'], reviewExcludedNotes: [] };
+      vault.files.set('我的/复习/A.md', '正文');
+      vault.files.set('B.md', '正文');
+      vault.files.set(REVIEW_FILE_PATH, JSON.stringify([row('1', '我的/复习/A.md'), row('2', 'B.md')]));
+      await openSettings(settings);
+      await new Promise((r) => setTimeout(r, 60));
+      const popup = document.getElementById('bz-settings-modal-popup')!;
+      const rows = [...popup.querySelectorAll<HTMLElement>('.bz-review-manage-item')];
+      (rows[0].querySelector('.bz-review-manage-remove') as HTMLElement).click(); // 监听目录内
+      await new Promise((r) => setTimeout(r, 50));
+      expect(settings.reviewExcludedNotes).toEqual(['我的/复习/A.md']); // 落名单
+      (document.querySelector('.bz-notice-action') as HTMLElement).click(); // 撤销
+      await new Promise((r) => setTimeout(r, 50));
+      expect(settings.reviewExcludedNotes).toEqual([]); // 撤销解除
+      // 目录外：不落名单
+      (popup.querySelectorAll<HTMLElement>('.bz-review-manage-item')[0].querySelector('.bz-review-manage-remove') as HTMLElement).click();
+      await new Promise((r) => setTimeout(r, 50));
+      expect(settings.reviewExcludedNotes).toEqual([]); // B.md 目录外
+      expect((await new ReviewDataManager(makeApp(vault)).loadItems()).map((i) => i.filePath)).toEqual(['我的/复习/A.md']);
+    });
+
+    it('批量移出入口：按钮打开批量弹窗；空计划隐藏按钮', async () => {
       vault.files.set('A.md', '正文');
+      vault.files.set('B.md', '正文');
       vault.files.set(REVIEW_FILE_PATH, JSON.stringify([row('1', 'A.md')]));
       await openSettings({});
-      await new Promise((r) => setTimeout(r, 60)); // custom 行异步 loadItems 渲染
+      await new Promise((r) => setTimeout(r, 60));
       const popup = document.getElementById('bz-settings-modal-popup')!;
-      (popup.querySelector('.bz-review-manage-remove') as HTMLElement).click();
-      await new Promise((r) => setTimeout(r, 15));
-      (document.getElementById('__shared_confirm_cancel__') as HTMLElement).click();
-      await new Promise((r) => setTimeout(r, 15));
-      expect((await new ReviewDataManager(makeApp(vault)).loadItems()).length).toBe(1);
+      const batchBtn = popup.querySelector('.bz-review-manage-batch') as HTMLElement;
+      expect(batchBtn).toBeTruthy();
+      batchBtn.click();
+      await new Promise((r) => setTimeout(r, 30));
+      const batchPop = document.querySelector('.bz-review-batch-pop') as HTMLElement;
+      expect(batchPop).not.toBeNull();
+      expect(batchPop.querySelector('.bz-dialog-title')!.textContent).toBe('批量移出复习计划');
+      // 清空计划 → 按钮隐藏（功能性显隐）
+      vault.files.set(REVIEW_FILE_PATH, JSON.stringify([]));
+      await closeSettingsModal();
+      await openSettings({});
+      await new Promise((r) => setTimeout(r, 60));
+      const btn2 = document.querySelector('.bz-review-manage-batch') as HTMLElement;
+      expect(btn2.style.display).toBe('none');
     });
   });
 });

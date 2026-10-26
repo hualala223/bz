@@ -158,6 +158,17 @@ export class ReviewDataManager {
     });
   }
 
+  /** 批量移除（票 320）：一次读改写单次落盘（同入串行队列），返回按计划序的被移除条目（供批量撤销原样插回）；未知路径忽略 */
+  async removeItems(paths: string[]): Promise<ReviewItem[]> {
+    return enqueueFileTask(getReviewFilePath(), async () => {
+      const want = new Set(paths);
+      const items = await this.loadItems();
+      const removed = items.filter((i) => want.has(i.filePath));
+      if (removed.length) await this.saveItems(items.filter((i) => !want.has(i.filePath)));
+      return removed;
+    });
+  }
+
   /** 撤销移出（ticket 141 通病 1）：原条目（含阶段/排期/历史）原样插回，不走 addItem 重置进度（P1-33：整体入串行队列） */
   async restoreItem(item: ReviewItem): Promise<void> {
     await enqueueFileTask(getReviewFilePath(), async () => {
@@ -165,6 +176,22 @@ export class ReviewDataManager {
       if (items.some((i) => i.filePath === item.filePath)) return;
       const { file: _file, isMissing: _m, isCompleted: _c, isOverdue: _o, currentStage: _cs, totalStages: _ts, ...rest } = item; // 运行时字段不落盘（saveItems 同口径）
       items.push(rest as ReviewItem);
+      await this.saveItems(items);
+    });
+  }
+
+  /** 批量撤销移出（票 320）：按传入序（= removeItems 返回的计划序）原样插回、单次落盘；已在计划中的路径跳过 */
+  async restoreItems(restored: ReviewItem[]): Promise<void> {
+    await enqueueFileTask(getReviewFilePath(), async () => {
+      if (!restored.length) return;
+      const items = await this.loadItems();
+      const present = new Set(items.map((i) => i.filePath));
+      for (const item of restored) {
+        if (present.has(item.filePath)) continue;
+        const { file: _file, isMissing: _m, isCompleted: _c, isOverdue: _o, currentStage: _cs, totalStages: _ts, ...rest } = item; // 运行时字段不落盘（saveItems 同口径）
+        items.push(rest as ReviewItem);
+        present.add(item.filePath);
+      }
       await this.saveItems(items);
     });
   }

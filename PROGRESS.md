@@ -1094,3 +1094,14 @@
 - [x] 明确不随：refreshSeq 代次守卫 / trapPanelFocus 焦点圈闭 / aria-pressed / bz-home-grid--no-next 塌缩修 / encrypt 体检 T9·T10·T15（健壮性修复非功能，未在拍板范围）
 - [x] 测试：tests/ticket-319.test.ts 6 用例（滚位存写全链 ×2 / 缩放句柄生命周期 / 设置键 / canvasToText 纯函数 / 白名单含 canvas + 空白名单红线）
 - [x] 门禁：worktree tsc 0 错 + 全量 vitest → master ff 合并 → 复测同绿 → 构建部署
+
+### 票 320 — 复习计划批量移出：勾选清单弹窗 + 单条移出口径对齐（2026-10-26）
+
+- [x] 起因：用户需求——把已有复习计划的文件移出计划，支持批量（单选/全选）；grill 七问全按推荐落板（.scratch/review-batch-remove/spec.md 裁决表）
+- [x] 两处「文档 vs 代码」矛盾修正：①CONTEXT.md「排除笔记」词条早写明手动移出（监听目录内）落名单，单条移出代码从未写——本票补齐；②效率整改 5 书面口径「接撤销的移除不再二次确认」，单条移出仍带确认弹窗——本票摘除
+- [x] 数据层：`removeItems(paths)` 批量移除（一次读改写单次落盘，返回计划序快照）/ `restoreItems(items)` 按序原样插回（批量撤销单次落盘）；P1-33 串行队列口径不变，review.json 格式零接触（ADR-0121 例外条款：用户主动需求）
+- [x] UI 层：`batch-ui.ts` 勾选清单弹窗（attach openMovePreview 范式）——默认全不选 + 表头全选（半选态联动）+ 底部「移出 N 条」实时计数 0 禁用；挂起条目同选；执行 = 单次落盘 + 监听目录内未排除路径写排除名单（记录本次新增）+ 染色回退 + notifyUndo（撤销原序插回 + 仅解除本次新增排除）；单次读改写无 i/N 进度
+- [x] 入口双轨：⚙️「复习条目管理」组「批量移出…」按钮（空计划隐藏）+ 命令 `bz-review-remove`「批量移出复习计划」（icon list-x，命令总数 83 → 84，表内 81 → 82）
+- [x] 单条移出对齐：摘确认弹窗（效率整改 5）+ 监听目录内移出补写排除名单；撤销回调含 removeExcludedNote（仅本次新增）；flow-dialog import 随之移除
+- [x] 测试：data.test.ts +2（removeItems 计划序返回/未知路径忽略/空输入零写；restoreItems 按序插回/已在计划跳过/运行时字段不落盘）+ batch-ui.test.ts 4 用例（空计划不弹窗/默认不选+全选联动/监听目录排除写入与撤销解除/预存排除不重复写不解除）+ ui-cov.test.ts 移出用例改口径（无确认直达 + 监听目录排除/撤销解除/目录外不落）+ 批量入口用例（开弹窗/空计划隐藏按钮）+ smoke 命令表同步；复习域 + smoke 199 绿
+- [x] 文档：ADR-0135、CONTEXT.md「复习计划」词条（批量入口 + 不再二次确认 + 命令计数）、AGENTS.md 命令核算 84
