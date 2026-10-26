@@ -1114,3 +1114,10 @@
 - [x] 命令总数 84 → 85（表内 82 → 83）；smoke 同步
 - [x] 测试：remove-current.test.ts 4 用例（计划内移出+撤销恢复/不在计划仅提示/监听目录排除写入与撤销解除/无活动笔记提示）；复习域 + smoke 复跑全绿
 - [x] 文档：CONTEXT.md 词条补右键入口句、AGENTS.md 核算 85；语义沿用 ADR-0135 不另立 ADR
+
+### 票 322 — 首页「复习计划」右键菜单挂批量移出入口（2026-10-26）
+
+- [x] 起因：用户指正——「右键」指的是内容首页「复习计划」模块的右键选择功能（入口菜单），非文档内右键
+- [x] `src/home/shared.ts` DOMAIN_MENU_RAW.review 追加一条 `{ label: '批量移出复习计划', commandId: 'bz-review-remove', icon: 'list-x' }`——票 320 命令直达复用，零新增命令面（菜单按 executeCommandById 派发既有命令）；不标 danger（点开的是勾选弹窗，勾选+底部按钮即确认）、不 keepHome（与「今日复习」同款关首页再开弹窗）
+- [x] 测试：tests/home/entry-menu.test.ts 新用例（条目存在 / 文案 / 不 danger 不 keepHome / 插在分析报告与末尾「设置」直达之间）；home+review+smoke 323 绿
+- [x] 文档：CONTEXT.md 词条补首页入口句；PROGRESS/spec 留痕；无新 ADR（纯入口，语义沿用 ADR-0135）

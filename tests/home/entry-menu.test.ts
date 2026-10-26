@@ -142,6 +142,19 @@ describe('DOMAIN_MENU 形状', () => {
     // 番茄钟的「跳过休息 / 暂停·继续」不进表：它们是相位派发的结果（见下个 describe）
     expect(byId('pomodoro', 'bz-pomodoro-skip')).toBeUndefined();
   });
+
+  it('票 322：复习菜单挂「批量移出复习计划」（bz-review-remove 直达，票 320 命令复用零新增命令面）', () => {
+    const item = DOMAIN_MENU.review.find((a) => a.commandId === 'bz-review-remove');
+    expect(item).toBeTruthy();
+    expect(item!.label).toBe('批量移出复习计划');
+    // 点开的是勾选清单弹窗（勾选 + 底部按钮即确认，非立即执行）→ 不标危险；与今日复习同款关首页再开 → 不 keepHome
+    expect(item!.kind).toBeUndefined();
+    expect(item!.keepHome).toBeUndefined();
+    // RAW 末项 = 分析报告，「设置」直达是导出时统一追加（票 318），批量移出插在两者之间
+    const raw = DOMAIN_MENU.review;
+    expect(raw[raw.length - 1].settingsDeep).toBe('review');
+    expect(raw[raw.length - 2].commandId).toBe('bz-review-remove');
+  });
 });
 
 describe('pomodoroMenuAction（相位敏感的单个动作）', () => {
