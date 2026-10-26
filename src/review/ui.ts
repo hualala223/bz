@@ -254,33 +254,10 @@ export function reviewSettingsSchema(deps: { app: App; dataManager: ReviewDataMa
                   remove.className = 'bz-review-manage-remove';
                   remove.textContent = '移出';
                   remove.addEventListener('click', () => {
+                    // 票 321：移出编排收敛到 remove.ts 共享用例（与命令/右键「将当前文档移出复习计划」同口径）
                     void (async () => {
-                      try {
-                        await deps.dataManager.removeItem(item.filePath);
-                        // 监听目录内且未排除 → 落排除名单（防自动加回；记录本次新增，撤销只解除这些）
-                        const { ReviewWatcher } = await import('./watch');
-                        const watcher = new ReviewWatcher(deps.app, deps.dataManager);
-                        const newlyExcluded =
-                          watcher.isWatched(item.filePath) && !watcher.isExcluded(item.filePath) ? [item.filePath] : [];
-                        if (newlyExcluded.length) await watcher.excludePaths(newlyExcluded);
-                        await renderList();
-                        const { reviewApp } = await import('./app');
-                        await reviewApp.applyReviewStyles(deps.app);
-                        // ticket 141 通病 1 + 效率整改 5：原条目（含阶段/排期/历史）重新插回，进度不丢
-                        notifyUndo(`已移出「${item.name}」`, () => {
-                          void (async () => {
-                            try {
-                              await deps.dataManager.restoreItem(item);
-                              for (const p of newlyExcluded) await watcher.removeExcludedNote(p);
-                              await renderList();
-                            } catch (e) {
-                              notifySaveError(e, '移出复习条目');
-                            }
-                          })();
-                        });
-                      } catch (e) {
-                        notifySaveError(e, '移出复习条目');
-                      }
+                      const { removeItemWithUndo } = await import('./remove');
+                      await removeItemWithUndo(deps.app, deps.dataManager, item, () => void renderList());
                     })();
                   });
                   row.appendChild(name);

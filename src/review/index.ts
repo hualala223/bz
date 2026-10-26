@@ -150,6 +150,28 @@ export function reviewAddCurrentWithLinks(app: App, file?: { path: string; basen
   void reviewApp.addCurrentWithLinksToReview(target);
 }
 
+/** 将当前文档移出复习计划（票 321，bz-review-remove-current）：命令/文档内右键对当前（或右键所在）文档
+ *  单条移出，与设置组「移出」同走 remove.ts 共享用例（撤销兜底 + 监听目录排除名单口径）；
+ *  不在计划中仅提示不动数据 */
+export function reviewRemoveCurrent(app: App, file?: { path: string; basename: string; extension: string } | null): void {
+  ensureReview(app);
+  const target = file ?? app.workspace.getActiveFile();
+  if (!target) {
+    notice('没有打开的笔记', 'info');
+    return;
+  }
+  void (async () => {
+    const items = await dataManager!.loadItems();
+    const item = items.find((i) => i.filePath === target.path);
+    if (!item) {
+      notice('该笔记不在复习计划中', 'info');
+      return;
+    }
+    const { removeItemWithUndo } = await import('./remove');
+    await removeItemWithUndo(app, dataManager!, item);
+  })();
+}
+
 /** 卸载清理 */
 export function unloadReview(): void {
   initialized = false;

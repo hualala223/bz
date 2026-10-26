@@ -41,7 +41,7 @@ import { unloadReadingReport } from './reading-report';
 import { openCinema, addCinemaItem, openCinemaAnalysis, openCinemaExport, pickRandomCinema, unloadCinema, refetchCinemaDouban, openCinemaDedupe } from './cinema';
 import { migrateCinemaFolder } from './cinema/migrate';
 // 复习（ticket 168 单一入口：仅「复习（按数量）」命令；ticket 169 加回「加入复习计划」；ensureReview/unloadReview 为常驻监控与卸载所需）
-import { reviewCountStart, reviewAddCurrent, reviewAddCurrentWithLinks, openReviewReport, openTodayReviewed, openReviewBatchRemove, ensureReview, unloadReview } from './review';
+import { reviewCountStart, reviewAddCurrent, reviewAddCurrentWithLinks, openReviewReport, openTodayReviewed, openReviewBatchRemove, reviewRemoveCurrent, ensureReview, unloadReview } from './review';
 // 第二大脑（ticket 103 起原闪念正名接管，ADR-0051——flash 域已删除）
 import {
   openSecondBrainPanel,
@@ -170,6 +170,12 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
     id: 'bz-review-add-current', name: '将当前文档加入复习计划', icon: 'list-plus',
     callback: () => reviewAddCurrent(getApp()),
     editorCallback: (_editor, ctx) => reviewAddCurrent(getApp(), ctx.file),
+  },
+  // 将当前文档移出复习计划（票 321）：editorCallback 进文档内右键，与「加入」同面；不在计划中仅提示
+  {
+    id: 'bz-review-remove-current', name: '将当前文档移出复习计划', icon: 'list-minus',
+    callback: () => reviewRemoveCurrent(getApp()),
+    editorCallback: (_editor, ctx) => reviewRemoveCurrent(getApp(), ctx.file),
   },
   // 复习计划分析报告（上游线 P2 移植：统计弹窗——streak/负载热力图/单条时间线，只读 review.json）
   { id: 'bz-review-report', name: '复习计划分析报告', icon: 'calendar-check', callback: () => openReviewReport(getApp()) },

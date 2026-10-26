@@ -1105,3 +1105,12 @@
 - [x] 单条移出对齐：摘确认弹窗（效率整改 5）+ 监听目录内移出补写排除名单；撤销回调含 removeExcludedNote（仅本次新增）；flow-dialog import 随之移除
 - [x] 测试：data.test.ts +2（removeItems 计划序返回/未知路径忽略/空输入零写；restoreItems 按序插回/已在计划跳过/运行时字段不落盘）+ batch-ui.test.ts 4 用例（空计划不弹窗/默认不选+全选联动/监听目录排除写入与撤销解除/预存排除不重复写不解除）+ ui-cov.test.ts 移出用例改口径（无确认直达 + 监听目录排除/撤销解除/目录外不落）+ 批量入口用例（开弹窗/空计划隐藏按钮）+ smoke 命令表同步；复习域 + smoke 199 绿
 - [x] 文档：ADR-0135、CONTEXT.md「复习计划」词条（批量入口 + 不再二次确认 + 命令计数）、AGENTS.md 命令核算 84
+
+### 票 321 — 复习计划文档内右键移出入口（2026-10-26）
+
+- [x] 起因：用户追问「能不能直接在复习的右键加入口」——「加入复习计划」经 editorCallback 出现在文档内右键，移出跟它同面
+- [x] 编排收敛：新 `src/review/remove.ts` `removeItemWithUndo` 共享用例（移出 → 监听目录内写排除名单 → 染色回退 → notifyUndo 撤销插回 + 解除本次新增排除）；⚙️ 设置组单条「移出」改走此路径，与右键/命令单源单语义（批量仍走 removeItems 批量编排）
+- [x] 命令 `bz-review-remove-current`「将当前文档移出复习计划」（icon list-minus，callback + editorCallback 右键 ctx.file；不在计划中仅提示「该笔记不在复习计划中」不动数据；ensureReview 幂等前置——启动链 enableAutoNotify=false 时不曾 ensure）
+- [x] 命令总数 84 → 85（表内 82 → 83）；smoke 同步
+- [x] 测试：remove-current.test.ts 4 用例（计划内移出+撤销恢复/不在计划仅提示/监听目录排除写入与撤销解除/无活动笔记提示）；复习域 + smoke 复跑全绿
+- [x] 文档：CONTEXT.md 词条补右键入口句、AGENTS.md 核算 85；语义沿用 ADR-0135 不另立 ADR
