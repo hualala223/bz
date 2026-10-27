@@ -4106,19 +4106,20 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
   resize: vertical;
 }
 
-/* 按钮：纸签（次级）与火漆（主行动）两档 */
+/* 按钮：纸签（次级）与火漆（主行动）两档。
+   core .bz-btn--primary 带 !important（components.css），域皮必须同级 !important 才压得住 */
 .bz-diary-add-popup .bz-btn:not(.bz-btn--primary):not(.bz-btn--danger) {
-  background: linear-gradient(180deg, #fbf6e8, #efe6cf);
-  border: 1px solid rgba(120, 92, 56, .4);
-  color: #43392b;
+  background: linear-gradient(180deg, #fbf6e8, #efe6cf) !important;
+  border: 1px solid rgba(120, 92, 56, .4) !important;
+  color: #43392b !important;
 }
 .bz-diary-add-popup .bz-btn--primary {
-  background: linear-gradient(180deg, #b23a2a, #8d2b1d);
-  border: 1px solid rgba(90, 25, 15, .55);
-  color: #fdf3e2;
+  background: linear-gradient(180deg, #b23a2a, #8d2b1d) !important;
+  border: 1px solid rgba(90, 25, 15, .55) !important;
+  color: #fdf3e2 !important;
 }
 @media (hover: hover) {
-  .bz-diary-add-popup .bz-btn--primary:hover { background: linear-gradient(180deg, #c04433, #9c3122); }
+  .bz-diary-add-popup .bz-btn--primary:hover { background: linear-gradient(180deg, #c04433, #9c3122) !important; }
 }
 
 /* 吸底栏：取消/添加右对齐、常驻可视区，内容从其下滚过 */
@@ -7813,8 +7814,10 @@ mark.bz-todo-hit {
     #pomodoro-ring-svg { width: 160px; height: 160px; margin: var(--bz-space-sm) auto; display: block; overflow: visible; }
     .pomodoro-ring-track { fill: none; stroke: var(--pz-line, var(--background-modifier-border)); stroke-width: 8; }
     .pomodoro-ring-progress { fill: none; stroke: var(--pz-accent, var(--interactive-accent)); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 1s linear; }
-    /* 本轮循环位置：N 个 6px 方点，已完成填 accent（增强包，替代「专注 2/4」文字小字） */
+    /* 本轮循环位置：N 个 6px 方点，已完成填 accent（增强包，替代「专注 2/4」文字小字）；
+       [hidden] 守卫：display:flex 会压过 UA 的 hidden 隐藏（护眼模式整行收起，票 323） */
     .pomodoro-cycle { display: flex; gap: var(--bz-space-xs); justify-content: center; align-items: center; margin-top: var(--bz-space-xs); height: 6px; }
+    .pomodoro-cycle[hidden] { display: none; }
     .pomodoro-cycle-dot { width: 6px; height: 6px; border-radius: 2px; background: var(--pz-line, var(--background-modifier-border)); }
     .pomodoro-cycle-dot-on { background: var(--pz-accent, var(--interactive-accent)); }
     #pomodoro-phase { font-size: var(--bz-font-emphasis); color: var(--pz-muted, var(--text-muted)); margin-top: var(--bz-space-sm); }

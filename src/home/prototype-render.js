@@ -256,7 +256,10 @@ var BZR_home = (() => {
       //（注册名「今日已复习」，是历史查看不是开刷），2026-09-14 用户点名纠正，已复习历史保留为第二条。
       { label: "今日复习", commandId: "bz-review-count", icon: "play" },
       { label: "今日已复习", commandId: "bz-review-today", icon: "history" },
-      { label: "复习计划分析报告", commandId: "bz-review-report", icon: "bar-chart-3" }
+      { label: "复习计划分析报告", commandId: "bz-review-report", icon: "bar-chart-3" },
+      // 批量移出复习计划（票 322）：票 320 勾选清单弹窗的直达入口，既有命令复用零新增命令面；
+      // 点开的是勾选弹窗而非立即执行（勾选 + 底部按钮即确认），故不标 danger、不 keepHome（与今日复习同款关首页再开）
+      { label: "批量移出复习计划", commandId: "bz-review-remove", icon: "list-x" }
     ],
     // 番茄钟：**相位敏感的单个动作**（见 pomodoroMenuAction）——静态项只是 idle 兜底，
     // 挂菜单时整条按实时相位替换（文案/命令/图标），四相位互斥、一次只出一条。
