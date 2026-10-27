@@ -93,6 +93,8 @@ const EXPECTED_COMMAND_IDS = [
   // 游戏库（gameshelf 域，上游 issue 368 移植）：三命令
   'bz-gameshelf-open', 'bz-gameshelf-sync', 'bz-gameshelf-stats',
   'bz-pomodoro-open',
+  // 票 323 续：关闭番茄钟完整休眠（停循环 + 关面板 + 收状态栏，再开满血复活）
+  'bz-pomodoro-close',
   // 首页入口菜单三支（票 288 / 上游 issue 288）：相位敏感动作
   'bz-pomodoro-focus-toggle', 'bz-pomodoro-skip', 'bz-pomodoro-pause',
   // 票 323：护眼模式开始/停止（设置键唯一真源，命令快捷面）

@@ -67,7 +67,7 @@ import {
   motionTimeTick,
   motionTodayBlip,
 } from './motion';
-import { syncPomodoroStatusBar } from './statusbar';
+import { syncPomodoroStatusBar, remountPomodoroStatusBar, unmountPomodoroStatusBar } from './statusbar';
 import { todayCount, todayMinutes, last7Days, lastNMonths, TREND_MONTHS } from './stats';
 import { PRESETS, CUSTOM_PRESET_ID } from './config';
 import type { PomodoroState, HistoryEntry, ArchivedWeek, Durations, PomodoroOptions, Phase, PomodoroAction, PomodoroEvent } from './state';
@@ -1031,6 +1031,7 @@ let openInflight: Promise<void> | null = null;
 export async function openPomodoro(app: App): Promise<void> {
   appRef = app;
   disposed = false; // 深审 UI P3-2：入口清位（卸载后再打开 = 新会话）
+  remountPomodoroStatusBar(app); // 完整休眠后再开面板：状态栏图标一并复活（票 323；仅显式开面板重挂，首页兜底读不复活）
   if (!dataManager) dataManager = new PomodoroDataManager(app);
   if (!maskEl) {
     openInflight ??= (async () => {
@@ -1286,6 +1287,17 @@ export async function toggleEyeMode(app: App): Promise<void> {
   await ensurePomodoro(app);
   if (!loaded) return; // 深审 PF5：加载失败（ensurePomodoro 已报错）→ 不在空内存态上继续
   await setEyeMode(!tryGetSettings().pomodoroEyeMode);
+}
+
+/**
+ * 完整休眠（命令「关闭番茄钟」，票 323）：整个番茄钟从界面消失——停掉循环/计时（运行中会话作废，
+ * 与「不补算」同口径不记史）、关面板、收状态栏图标。设置偏好（含护眼模式）与历史数据都在盘上不动；
+ * 再点「番茄钟」命令即满血复活（openPomodoro 重初始化 + 状态栏重挂）。
+ * 等效 = 卸载路径（unloadPomodoro）+ 状态栏收起（unmountPomodoroStatusBar），组合成用户可见的「关程序」。
+ */
+export function shutdownPomodoro(): void {
+  unloadPomodoro();
+  unmountPomodoroStatusBar();
 }
 
 /** 卸载清理（T32 接入 onunload；测试重置） */

@@ -9,8 +9,9 @@ import { MockVault, mockAppWithVault } from '../mock-vault';
 import { resetObsidianMocks, clearNotices } from '../mock-obsidian-entry';
 import { setApp } from '../../src/core/app';
 import { setSettingsProvider } from '../../src/core/settings-provider';
-import { openPomodoro, unloadPomodoro, toggleEyeMode } from '../../src/pomodoro';
+import { openPomodoro, unloadPomodoro, toggleEyeMode, shutdownPomodoro } from '../../src/pomodoro';
 import { pomodoroSettingsSchema } from '../../src/pomodoro/ui';
+import { mountPomodoroStatusBar } from '../../src/pomodoro/statusbar';
 import { playSound } from '../../src/pomodoro/sound';
 
 vi.mock('../../src/pomodoro/sound', () => ({ playSound: vi.fn() }));
@@ -189,6 +190,27 @@ describe('护眼模式：到点提示音（票 323 拍板修订）', () => {
     await vi.advanceTimersByTimeAsync(REST_MS); // 远眺到点 → 用眼
     expect(vi.mocked(playSound)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(playSound)).toHaveBeenLastCalledWith('focus-start', expect.any(Number));
+  });
+});
+
+describe('关闭番茄钟：完整休眠（票 323 续）', () => {
+  it('护眼循环中关闭 → 面板与状态栏收起、计时作废；再开「番茄钟」满血复活（状态栏回位、偏好保留）', async () => {
+    const { app } = setup({ pomodoroEyeMode: true });
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    mountPomodoroStatusBar(host, app);
+    await openPomodoro(app);
+    el('pomodoro-mode-eye').click(); // 分段钮开循环
+    await vi.advanceTimersByTimeAsync(0);
+    expect(el('pomodoro-time').textContent).toBe('20:00');
+    expect(document.querySelector('.pomodoro-statusbar')).not.toBeNull();
+    shutdownPomodoro();
+    expect(document.getElementById('pomodoro-mask')).toBeNull(); // 面板收起
+    expect(document.querySelector('.pomodoro-statusbar')).toBeNull(); // 状态栏收起
+    await openPomodoro(app); // 再开「番茄钟」：满血复活
+    expect(document.querySelector('.pomodoro-statusbar')).not.toBeNull(); // 状态栏回位
+    expect(el('pomodoro-phase').textContent).toBe('护眼'); // 护眼偏好保留、回空闲
+    host.remove();
   });
 });
 

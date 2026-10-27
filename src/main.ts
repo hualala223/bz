@@ -51,7 +51,7 @@ import {
   rebuildSecondBrainIndex,
   unloadSecondBrain,
 } from './secondbrain';
-import { openPomodoro, unloadPomodoro, ensurePomodoro, toggleFocus, skipBreak, togglePause, toggleEyeMode } from './pomodoro';
+import { openPomodoro, unloadPomodoro, ensurePomodoro, toggleFocus, skipBreak, togglePause, toggleEyeMode, shutdownPomodoro } from './pomodoro';
 import { mountPomodoroStatusBar, unmountPomodoroStatusBar } from './pomodoro/statusbar';
 // 知识盒（knowledge 域，ADR-0072 自 bili-downloader 迁出；网页版已移除，见 tools/bili-downloader）
 import { openKnowledgePanel, openKnowledgeAddTask, openTermNote, unloadKnowledge } from './knowledge';
@@ -209,6 +209,8 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-review-remove', name: '批量移出复习计划', icon: 'list-x', callback: () => openReviewBatchRemove(getApp()) },
   // 番茄钟（ticket 26-32 新域）
   { id: 'bz-pomodoro-open', name: '番茄钟', icon: 'timer', callback: () => openPomodoro(getApp()) },
+  // 完整休眠（票 323）：停循环/计时 + 关面板 + 收状态栏；再点「番茄钟」命令一键复活
+  { id: 'bz-pomodoro-close', name: '关闭番茄钟', icon: 'power', callback: () => shutdownPomodoro() },
   // 首页入口菜单三支（票 288 / 上游 issue 288）：相位敏感动作——开始/停止专注、跳过休息、暂停/继续
   { id: 'bz-pomodoro-focus-toggle', name: '开始专注', icon: 'timer', callback: () => toggleFocus(getApp()) },
   { id: 'bz-pomodoro-skip', name: '跳过休息', icon: 'skip-forward', callback: () => skipBreak(getApp()) },

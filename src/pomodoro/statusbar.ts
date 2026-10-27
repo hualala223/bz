@@ -11,11 +11,14 @@ import { motionStatusbarPop } from './motion';
 
 let statusEl: HTMLElement | null = null;
 let textSpan: HTMLElement | null = null;
+/** 状态栏宿主（main.ts addStatusBarItem 项）：完整休眠后复活重挂要用同一宿主（票 323） */
+let containerEl: HTMLElement | null = null;
 /** 动效层：相位签名记忆（run/paused/idle 变化时微跃一记；首记不出手） */
 let statusSig = '';
 
 export function mountPomodoroStatusBar(container: HTMLElement, app: App): void {
   if (statusEl) return;
+  containerEl = container;
   statusEl = document.createElement('span');
   statusEl.className = 'pomodoro-statusbar pomodoro-statusbar-idle';
   statusEl.title = '番茄钟';
@@ -40,6 +43,15 @@ export function unmountPomodoroStatusBar(): void {
     textSpan = null;
   }
   statusSig = '';
+}
+
+/**
+ * 复活重挂（完整休眠后再开面板用，票 323）：宿主还在（Obsidian 状态栏容器不随休眠消失），
+ * 只在「已卸载且有宿主」时重挂——幂等，已挂/从未挂过都零动作。
+ */
+export function remountPomodoroStatusBar(app: App): void {
+  if (statusEl || !containerEl) return;
+  mountPomodoroStatusBar(containerEl, app);
 }
 
 /**
