@@ -18,6 +18,9 @@
   left: 50% !important;
   top: 50% !important;
   translate: -50% -50% !important;
+  /* core/styles.css:565 另有一份老版 .bz-overlay-popup{fixed+50%+transform 居中}，
+     与本皮的 translate 叠加 = 双份位移（诊断实测 transform=matrix(-200,-296)），此处废掉 */
+  transform: none !important;
   margin: 0 !important;
   width: min(400px, calc(100vw - 32px));
   background: linear-gradient(178deg, #f6efdd, #ece2c8);
