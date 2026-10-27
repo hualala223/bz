@@ -12,6 +12,14 @@
 }
 
 .bz-overlay-popup.bz-diary-add-popup {
+  /* 自带完整定位（票 323 修订二）：不依赖壳/环境/主题的居中机制——移动端曾被环境样式
+     干扰致弹窗横移出屏（left 恒 50% 无校正）。translate 属性与 transform 互不覆盖。 */
+  position: fixed !important;
+  left: 50% !important;
+  top: 50% !important;
+  translate: -50% -50% !important;
+  margin: 0 !important;
+  width: min(400px, calc(100vw - 32px));
   background: linear-gradient(178deg, #f6efdd, #ece2c8);
   color: #43392b;
   border: 1px solid rgba(120, 92, 56, .42);
@@ -137,9 +145,10 @@
   background: linear-gradient(178deg, #f6efdd, #ece2c8);
 }
 
-/* 软键盘避让（上游 D-UI16）：输入聚焦弹窗整体上移一档，失焦回落 */
+/* 软键盘避让（上游 D-UI16）：仅移动端生效——用 translate 属性整体上移，
+   与居中的 -50% -50% 同属性叠加（写 transform 会覆盖掉居中校正 → 弹窗横移出屏，修订二实测） */
 #add-diary-popup.keyboard-up {
-  transform: translateY(-20vh);
+  translate: -50% calc(-50% - 20vh) !important;
 }
 
 /* 放弃确认框同皮：桌角撕下来的一角纸 */
