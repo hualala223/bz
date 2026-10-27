@@ -214,6 +214,18 @@
   }
   /* 顶部避让由根节点 .bz-panel-mtop 统一接管（44px，components.css），头行不再自垫 */
 
+  /* 手机常规卡上下缩短（用户拍板 2026-10-27）：不吃桌面 580px 定高——随内容收缩、
+     超限走 .bz-todo-content 滚动；上限 = min(580px, 可视视口−底部安全区−88px)，
+     面板居中后底边净空恒 ≥44px+安全区一半，底部录入「添加」不再与系统手势条重合。
+     真全屏态面板底=屏幕底，录入条自垫底部安全区（env 缺失按 20px 兜底）抬离手势条。 */
+  .bz-todo-panel {
+    height: auto;
+    max-height: min(580px, calc(var(--bz-vvh, 100vh) - env(safe-area-inset-bottom, 0px) - 88px));
+  }
+  .bz-todo-panel.bz-win-mfs .bz-todo-composer {
+    padding-bottom: calc(10px + max(env(safe-area-inset-bottom, 0px), 20px));
+  }
+
   /* 场景栏桌面专属（移动端走 .bz-mobstrip 横滑条）；主头行同（移动端新建走头行钮） */
   .bz-todo-body .bz-rail { display: none; }
   .bz-todo-main .bz-main-head { display: none; }

@@ -67,6 +67,53 @@ const HEADER = [
   "",
 ].join("\r\n");
 
+/* ── 括号平衡闸门（2026-10-27 手机端首页裸奔事故防再犯）──────────────
+   cinema/styles.css 曾少一个 `}`，聚合产物把其后 35 万字符吞进
+   @media (hover: hover)：桌面（有鼠标）条件恒真毫无感知，触屏设备上
+   首页/知识盒/体检/工具坞/设置面板整段失效。此处对每个源文件与最终
+   聚合产物做去注释/去字符串后的花括号平衡校验，不平衡直接让构建失败。 */
+function assertCssBalanced(css, label) {
+  const BS = String.fromCharCode(92);
+  const mask = css.split("");
+  let i = 0;
+  const n = css.length;
+  while (i < n) {
+    const c = css[i];
+    if (c === "/" && css[i + 1] === "*") {
+      const j = css.indexOf("*/", i + 2);
+      const end = j === -1 ? n : j + 2;
+      for (let k = i; k < end; k++) if (mask[k] !== "\r" && mask[k] !== "\n") mask[k] = " ";
+      i = end;
+    } else if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < n && css[j] !== c) {
+        if (css[j] === BS) j++;
+        j++;
+      }
+      i = Math.min(j + 1, n);
+    } else {
+      i++;
+    }
+  }
+  const clean = mask.join("");
+  let depth = 0;
+  let line = 1;
+  for (let k = 0; k < clean.length; k++) {
+    const c = clean[k];
+    if (c === "\n") line++;
+    else if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth < 0) {
+        throw new Error(`[build-css] ${label} 第 ${line} 行出现多余的 }（括号不平衡）`);
+      }
+    }
+  }
+  if (depth !== 0) {
+    throw new Error(`[build-css] ${label} 括号不平衡：文件结束时仍有 ${depth} 个未闭合的 {（疑似缺闭合花括号）`);
+  }
+}
+
 export function buildStyles() {
   const parts = [HEADER];
   for (const rel of SOURCES) {
@@ -77,9 +124,11 @@ export function buildStyles() {
 // 行尾统一 CRLF：与仓库工作区惯例一致，避免混合行尾造成 git 状态假差异
     let text = fs.readFileSync(file, "utf8").replace(/\r?\n/g, "\r\n");
     if (!text.endsWith("\n")) text += "\r\n";
+    assertCssBalanced(text, rel);
     parts.push(text);
   }
   const css = parts.join("");
+  assertCssBalanced(css, "聚合产物 styles.css");
   fs.writeFileSync(path.join(ROOT, "styles.css"), css, "utf8");
   if (fs.existsSync(PLUGIN_DIR)) {
     fs.copyFileSync(path.join(ROOT, "styles.css"), path.join(PLUGIN_DIR, "styles.css"));

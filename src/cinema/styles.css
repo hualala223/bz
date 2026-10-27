@@ -280,6 +280,7 @@
 .bz-cinema--midnight .s-rate.none{color:var(--ink-3);font-weight:400}@media (hover: hover) {
 
 .bz-cinema--midnight .dm-kv-v a:hover{text-decoration:underline}
+}
 .bz-cinema--midnight .dm-actions{display:flex;justify-content:flex-end;gap:var(--bz-space-sm);margin-top:var(--bz-space-lg)}
 .bz-cinema--midnight .dm-btn{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:none;border-radius:var(--bz-radius-sm);padding:7px 13px;font-size:var(--bz-font-meta);color:var(--ink-2);cursor:pointer;font-family:inherit}
 .bz-cinema--midnight .dm-btn:hover{color:var(--ink);border-color:var(--gold);background:var(--chip)}
