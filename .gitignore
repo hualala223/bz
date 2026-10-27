@@ -14,3 +14,11 @@ prototypes/
 我的/
 *.m4a
 *.mp4
+
+# 测试/构建临时输出与本地工具目录（防误提交）
+test-out*.txt
+tsc-out.txt
+.workbuddy/
+.zcode/
+0
+%SystemDrive%/
