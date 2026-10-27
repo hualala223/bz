@@ -27,6 +27,7 @@ import { applyFilter as applyFilterFromDialogs, insertCard, removeCard, showConf
 import { createDateTimeControl, resetDateTimeControl } from './datetime-picker';
 import { uiModal, bindFormSubmit } from '../../core/ui/modal';
 import { uiBtn } from '../../core/ui/button';
+import { bindMobileViewport } from '../../core/viewport';
 import { motionSheetDialog } from './motion';
 
 // ===== 类型选择按钮（类型选择器与写日记弹窗共用） =====
@@ -642,6 +643,10 @@ export function closeAddDialog(): void {
   addDialogSaveBtn = null;
   addDialogDraft = '';
   addDialogSection = ESSAY_HEADING;
+  if (detachKeyboardLift) {
+    detachKeyboardLift();
+    detachKeyboardLift = null;
+  }
 }
 
 /** 关闭意图分流：有输入走 confirmDiscard（放弃确认），无输入直接收（ESC/遮罩/取消共用） */
@@ -659,17 +664,32 @@ function setAddSavingUi(saving: boolean): void {
   label.textContent = saving ? '保存中…' : '确认';
 }
 
+let detachKeyboardLift: (() => void) | null = null;
+
 /**
- * 软键盘避让（上游 D-UI16）：仅移动端生效——输入聚焦给弹窗加 .keyboard-up 上移档（样式在域 styles.css）。
- * 桌面无软键盘，不做抬升（桌面误抬 20vh 就是「弹窗跑偏」事故，票 323 修订实测）。
+ * 软键盘避让（上游 D-UI16 + 票 323 修订五，仅移动端）：
+ * - 挂载全局 --bz-vvh（bindMobileViewport 幂等；此前全仓无人调用，变量恒空 → CSS 抬底恒 0，键盘挡抽屉）；
+ * - 抽屉底边按可视视口实时抬升：遮挡高度 = 布局视口高 − 可视视口高 − 视口纵向偏移，
+ *   内联 setProperty(important) 压过样式表同名 !important 规则；
+ * - 桌面端不挂（无软键盘）。
  */
 function wireKeyboardLift(popup: HTMLElement): void {
   if (!isMobileEnv()) return;
-  popup.addEventListener('focusin', (e) => {
-    const t = e.target as HTMLElement;
-    if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) popup.classList.add('keyboard-up');
-  });
-  popup.addEventListener('focusout', () => popup.classList.remove('keyboard-up'));
+  bindMobileViewport();
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const lift = () => {
+    const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    popup.style.setProperty('bottom', `${Math.round(overlap)}px`, 'important');
+  };
+  lift();
+  vv.addEventListener('resize', lift);
+  vv.addEventListener('scroll', lift);
+  detachKeyboardLift = () => {
+    vv.removeEventListener('resize', lift);
+    vv.removeEventListener('scroll', lift);
+    popup.style.removeProperty('bottom');
+  };
 }
 
 /** 读取第一步选中的类型（saveNewEntry 与「添加」校验共用同一数据源） */

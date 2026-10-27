@@ -203,22 +203,32 @@ describe('写日记单弹窗（票 323 上游视觉移植）', () => {
     expect(vault.files.get('我的/日记/2024-03-06.md')!).toContain('回车直存');
   });
 
-  it('软键盘抬升仅移动端生效：桌面聚焦不抬（跑偏回归），移动端聚焦抬升、失焦回落', () => {
+  it('键盘避让仅移动端：桌面不动；移动端抽屉底边按可视视口实时抬升（遮挡高度=内高−可视高）', () => {
     setup();
-    // 桌面：wire 直接不挂监听（桌面误抬 20vh = 弹窗跑偏，票 323 修订实测事故）
+    // 桌面：不挂避让（无软键盘）
     Platform.isMobile = false;
     openAddDialog();
-    contentInput().dispatchEvent(new Event('focusin', { bubbles: true }));
-    expect(popup().classList.contains('keyboard-up')).toBe(false);
+    expect(popup().style.bottom).toBe('');
     closeAddDialog();
-    // 移动端：聚焦抬升、失焦回落
+
+    // 移动端：假 visualViewport（高 300，布局内高 768 → 遮挡 468px）
     Platform.isMobile = true;
+    const listeners: Array<[string, EventListener]> = [];
+    (window as any).visualViewport = {
+      height: 300,
+      offsetTop: 0,
+      addEventListener: (t: string, fn: EventListener) => listeners.push([t, fn]),
+      removeEventListener: () => {},
+    };
     openAddDialog();
-    const ta = contentInput();
-    ta.dispatchEvent(new Event('focusin', { bubbles: true }));
-    expect(popup().classList.contains('keyboard-up')).toBe(true);
-    ta.dispatchEvent(new Event('focusout', { bubbles: true }));
-    expect(popup().classList.contains('keyboard-up')).toBe(false);
+    expect(popup().style.bottom).toBe(`${window.innerHeight - 300}px`);
+    // 键盘高度变化（可视视口升高）→ 抬升量实时跟随
+    (window as any).visualViewport.height = 500;
+    listeners.find(([t]) => t === 'resize')![1](new Event('resize'));
+    expect(popup().style.bottom).toBe(`${window.innerHeight - 500}px`);
+    closeAddDialog();
+    expect(mask()).toBeNull();
+    delete (window as any).visualViewport;
     Platform.isMobile = false;
   });
 
