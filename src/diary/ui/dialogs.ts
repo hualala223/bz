@@ -862,6 +862,7 @@ export function openAddDialog(preset?: AddDialogPreset) {
         `popup rect: x=${Math.round(r.x)} y=${Math.round(r.y)} w=${Math.round(r.width)} h=${Math.round(r.height)}`,
         `computed: pos=${cs.position} left=${cs.left} top=${cs.top} translate=${cs.translate} transform=${cs.transform} maxH=${cs.maxHeight} overflow=${cs.overflow}`,
         `step1=${tv ? tv.style.display || '(flex)' : '缺失'} step2=${cv ? cv.style.display || '(flex)' : '缺失'} body滚动=${body ? `${(body as HTMLElement).scrollHeight}/${(body as HTMLElement).clientHeight}` : '?'} chips滚动=${chipCs ? `${(chip as HTMLElement).scrollHeight}/${(chip as HTMLElement).clientHeight} maxH=${chipCs.maxHeight}` : '?'}`,
+        `抬底: 内联bottom=${p.style.bottom || '(无)'} --bz-vvh=${getComputedStyle(document.documentElement).getPropertyValue('--bz-vvh') || '(空)'} 内高=${window.innerHeight}`,
         `---`,
       ].join('\n');
       void getApp().vault.adapter.append?.('书库/bz弹窗诊断.txt', line + '\n');
