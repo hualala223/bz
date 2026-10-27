@@ -4144,10 +4144,41 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
   background: linear-gradient(178deg, #f6efdd, #ece2c8);
 }
 
-/* 软键盘避让（上游 D-UI16）：仅移动端生效——用 translate 属性整体上移，
-   与居中的 -50% -50% 同属性叠加（写 transform 会覆盖掉居中校正 → 弹窗横移出屏，修订二实测） */
+/* 软键盘避让（上游 D-UI16）：移动端为底部抽屉形制（见下），系统键盘挤压视口时抽屉
+   随 layout viewport 自然上移，无需 translate 抬升（居中形态的 -20vh 抬升已废）； */
 #add-diary-popup.keyboard-up {
-  translate: -50% calc(-50% - 20vh) !important;
+  translate: none !important;
+  transform: none !important;
+}
+
+/* 移动端：底部抽屉形制——left/right/bottom 钉死屏幕底边、宽度撑满，
+   无居中计算即无跑偏余地（修订三：居中形态在手机端被环境干扰横移出屏） */
+@media (max-width: 768px) {
+  .bz-overlay-popup.bz-diary-add-popup {
+    top: auto !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    translate: none !important;
+    transform: none !important;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: 82vh;
+    border-radius: var(--bz-radius-lg, 12px) var(--bz-radius-lg, 12px) 0 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .bz-diary-add-popup .bz-diary-add-foot {
+    flex-direction: column-reverse;
+    gap: 8px;
+  }
+  .bz-diary-add-popup .bz-diary-add-foot .bz-btn {
+    width: 100%;
+    text-align: center;
+  }
+  .diary-tag-selector-btn {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
 }
 
 /* 放弃确认框同皮：桌角撕下来的一角纸 */
@@ -4164,22 +4195,6 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
   padding-bottom: 9px;
 }
 .bz-flow-dialog.bz-diary-flow-dialog p { color: #6b5f4c; }
-
-/* 移动端（上游同款）：底栏纵排、按钮全宽；chips 触控 padding 提档 */
-@media (max-width: 768px) {
-  .bz-diary-add-popup .bz-diary-add-foot {
-    flex-direction: column-reverse;
-    gap: 8px;
-  }
-  .bz-diary-add-popup .bz-diary-add-foot .bz-btn {
-    width: 100%;
-    text-align: center;
-  }
-  .diary-tag-selector-btn {
-    padding: 8px 14px;
-    font-size: 13px;
-  }
-}
 
 /* 删除按钮样式 */
 .diary-delete-btn {
