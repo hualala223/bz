@@ -7,6 +7,7 @@ import { topifyZ } from '../../core/z-order';
 import { notice } from '../../core/notice';
 import { confirmDiscard, openFlowDialog } from '../../core/flow-dialog';
 import { emitDomainEvent, onDomainEvent } from '../../core/domain-bus';
+import { isMobileEnv } from '../../core/mobile';
 import { getApp } from '../app';
 import {
   DIARY_DIRECTORY,
@@ -658,8 +659,12 @@ function setAddSavingUi(saving: boolean): void {
   label.textContent = saving ? '保存中…' : '确认';
 }
 
-/** 软键盘避让（上游 D-UI16）：输入聚焦给弹窗加 .keyboard-up 上移档，失焦回落（样式在域 styles.css） */
+/**
+ * 软键盘避让（上游 D-UI16）：仅移动端生效——输入聚焦给弹窗加 .keyboard-up 上移档（样式在域 styles.css）。
+ * 桌面无软键盘，不做抬升（桌面误抬 20vh 就是「弹窗跑偏」事故，票 323 修订实测）。
+ */
 function wireKeyboardLift(popup: HTMLElement): void {
+  if (!isMobileEnv()) return;
   popup.addEventListener('focusin', (e) => {
     const t = e.target as HTMLElement;
     if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) popup.classList.add('keyboard-up');

@@ -10,12 +10,12 @@ import { setApp } from '../../src/diary/app';
 import { applyDirectories, resetTagsConfig } from '../../src/diary/config';
 import { setDiaryDataMap, state } from '../../src/diary/state';
 import { applyUiSettings } from '../../src/diary/ui/ui-settings';
-import { createAddDialog, openAddDialog, saveNewEntry, resetTagUsageStats, __resetAddDialogDraftForTests } from '../../src/diary/ui/dialogs';
+import { closeAddDialog, createAddDialog, openAddDialog, saveNewEntry, resetTagUsageStats, __resetAddDialogDraftForTests } from '../../src/diary/ui/dialogs';
 import { emitDomainEvent } from '../../src/core/domain-bus';
 import { REVIEW_TEMPLATE } from '../../src/diary/daily';
 import { REVIEW_HEADING } from '../../src/diary/daily-write';
 import { MockVault, mockAppWithVault } from '../mock-vault';
-import { clearNotices, hasNotice } from '../mock-obsidian-entry';
+import { clearNotices, hasNotice, Platform } from '../mock-obsidian-entry';
 
 let vault: MockVault;
 
@@ -203,14 +203,23 @@ describe('写日记单弹窗（票 323 上游视觉移植）', () => {
     expect(vault.files.get('我的/日记/2024-03-06.md')!).toContain('回车直存');
   });
 
-  it('软键盘抬升：输入聚焦加 .keyboard-up，失焦回落', () => {
+  it('软键盘抬升仅移动端生效：桌面聚焦不抬（跑偏回归），移动端聚焦抬升、失焦回落', () => {
     setup();
+    // 桌面：wire 直接不挂监听（桌面误抬 20vh = 弹窗跑偏，票 323 修订实测事故）
+    Platform.isMobile = false;
+    openAddDialog();
+    contentInput().dispatchEvent(new Event('focusin', { bubbles: true }));
+    expect(popup().classList.contains('keyboard-up')).toBe(false);
+    closeAddDialog();
+    // 移动端：聚焦抬升、失焦回落
+    Platform.isMobile = true;
     openAddDialog();
     const ta = contentInput();
     ta.dispatchEvent(new Event('focusin', { bubbles: true }));
     expect(popup().classList.contains('keyboard-up')).toBe(true);
     ta.dispatchEvent(new Event('focusout', { bubbles: true }));
     expect(popup().classList.contains('keyboard-up')).toBe(false);
+    Platform.isMobile = false;
   });
 
   it('chips 频次前置：保存用过「诗」后重开弹窗，诗排到首位', () => {
