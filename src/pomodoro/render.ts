@@ -61,7 +61,7 @@ export function skinClassOf(v: unknown): string {
 
 /**
  * 弹窗骨架（#pomodoro-popup 内部；控件 id 由 ui.ts 接线）
- * ——环形进度 / 循环圆点 / 阶段 / 任务 / 时间 / 三按钮 / 今日统计 + 统计两档（近 7 天 / 近 6 月，issue 357）。
+ * ——模式切换（番茄/护眼，票 323）/ 环形进度 / 循环圆点 / 阶段 / 任务 / 时间 / 三按钮 / 今日统计 + 统计两档（近 7 天 / 近 6 月，issue 357）。
  *
  * 时间字双层（2026-09-23 翻牌机）：`#pomodoro-time` 是可见文本层（读屏与测试锚点，语义不变），
  * `.pomodoro-time-reel` 是同尺寸的视觉层（aria-hidden，四位滚动位由 ui.ts 填充）——翻牌机开着时
@@ -70,6 +70,10 @@ export function skinClassOf(v: unknown): string {
  */
 export function panelShellHtml(): string {
   return `
+      <div class="pomodoro-mode" id="pomodoro-mode" role="group" aria-label="计时模式">
+        <button id="pomodoro-mode-tomato" class="pomodoro-mode-btn" type="button">番茄</button>
+        <button id="pomodoro-mode-eye" class="pomodoro-mode-btn" type="button">护眼</button>
+      </div>
       <svg id="pomodoro-ring-svg" viewBox="0 0 120 120">
         <circle class="pomodoro-ring-track" cx="60" cy="60" r="52"></circle>
         <circle id="pomodoro-ring-progress" class="pomodoro-ring-progress" cx="60" cy="60" r="52"></circle>

@@ -1,7 +1,8 @@
 /**
  * 护眼模式 UI 集成测试（票 323）：toggleEyeMode 命令语义（切开+空闲直接开跑 / 切关收敛会话）、
- * 循环内 toast 静默（声音以外）、远眺秒级文案、圆点行隐藏、设置 schema 三行。
- * 范式同 pomodoro-action.test.ts：真实内存态 + MockVault + 假时钟，断言走 DOM。
+ * 面板模式分段钮（选护眼即开跑 / 切回番茄即停）、循环内 toast 静默、远眺秒级文案、圆点行隐藏、
+ * 到点提示音语义（一记新阶段起音、无倒数滴答、无收工钟叠音）、设置 schema 三行。
+ * 范式同 pomodoro-action.test.ts：真实内存态 + MockVault + 假时钟，断言走 DOM；声音模块 mock 探针。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { MockVault, mockAppWithVault } from '../mock-vault';
@@ -10,6 +11,9 @@ import { setApp } from '../../src/core/app';
 import { setSettingsProvider } from '../../src/core/settings-provider';
 import { openPomodoro, unloadPomodoro, toggleEyeMode } from '../../src/pomodoro';
 import { pomodoroSettingsSchema } from '../../src/pomodoro/ui';
+import { playSound } from '../../src/pomodoro/sound';
+
+vi.mock('../../src/pomodoro/sound', () => ({ playSound: vi.fn() }));
 
 const T0 = new Date('2026-10-27T10:00:00').getTime();
 const EYE_WORK_MS = 20 * 60 * 1000;
@@ -36,6 +40,7 @@ beforeEach(() => {
   clearNotices();
   document.body.innerHTML = '';
   unloadPomodoro();
+  vi.mocked(playSound).mockClear();
   vi.useFakeTimers();
   vi.setSystemTime(new Date(T0));
 });
@@ -138,6 +143,52 @@ describe('护眼模式：循环行为（票 323）', () => {
     await vi.advanceTimersByTimeAsync(EYE_WORK_MS);
     expect(el('pomodoro-today').textContent).toContain('今日 1 个');
     expect(el('pomodoro-today').textContent).toContain('20 分钟');
+  });
+});
+
+describe('护眼模式：面板模式分段钮（票 323）', () => {
+  it('点「护眼」→ 设置键开 + 直接开始第一轮用眼；选中态亮护眼档（番茄档熄）', async () => {
+    const { app, settings } = setup();
+    await openPomodoro(app);
+    expect(el('pomodoro-mode-tomato').classList.contains('pomodoro-mode-btn-on')).toBe(true);
+    el('pomodoro-mode-eye').click();
+    await vi.advanceTimersByTimeAsync(0); // 分段钮走异步 setEyeMode（落盘后开跑）
+    expect(settings.pomodoroEyeMode).toBe(true);
+    expect(el('pomodoro-time').textContent).toBe('20:00');
+    expect(el('pomodoro-mode-eye').classList.contains('pomodoro-mode-btn-on')).toBe(true);
+    expect(el('pomodoro-mode-tomato').classList.contains('pomodoro-mode-btn-on')).toBe(false);
+  });
+
+  it('循环中切回「番茄」→ 停止回空闲，选中态亮回番茄档', async () => {
+    const { app, settings } = setup({ pomodoroEyeMode: true });
+    await openPomodoro(app);
+    el('pomodoro-btn-start').click();
+    vi.advanceTimersByTime(60_000);
+    el('pomodoro-mode-tomato').click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settings.pomodoroEyeMode).toBe(false);
+    expect(el('pomodoro-time').textContent).toBe('25:00'); // 正常模式满时长，未计时
+    expect(el('pomodoro-mode-tomato').classList.contains('pomodoro-mode-btn-on')).toBe(true);
+    expect(el('pomodoro-mode-eye').classList.contains('pomodoro-mode-btn-on')).toBe(false);
+  });
+});
+
+describe('护眼模式：到点提示音（票 323 拍板修订）', () => {
+  it('阶段到点只出一记新阶段起音；最后 10 秒无倒数滴答、不叠收工钟', async () => {
+    const { app } = setup({ pomodoroEyeMode: true });
+    await openPomodoro(app);
+    el('pomodoro-btn-start').click(); // 手动开始：起音照常（transition + focus-start）
+    expect(vi.mocked(playSound).mock.calls.length).toBeGreaterThan(0);
+    vi.mocked(playSound).mockClear();
+    await vi.advanceTimersByTimeAsync(EYE_WORK_MS - 11_000);
+    expect(vi.mocked(playSound)).not.toHaveBeenCalled(); // 临近结束零响（无倒数滴答）
+    await vi.advanceTimersByTimeAsync(11_000); // 用眼到点 → 远眺
+    expect(vi.mocked(playSound)).toHaveBeenCalledTimes(1); // 只有一记到点音
+    expect(vi.mocked(playSound)).toHaveBeenLastCalledWith('short-break-start', expect.any(Number));
+    vi.mocked(playSound).mockClear();
+    await vi.advanceTimersByTimeAsync(REST_MS); // 远眺到点 → 用眼
+    expect(vi.mocked(playSound)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(playSound)).toHaveBeenLastCalledWith('focus-start', expect.any(Number));
   });
 });
 

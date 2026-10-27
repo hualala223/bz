@@ -31,6 +31,20 @@
        与元素右边缘 368px 重合 = 视口裁切，非滤镜区域。）SVG 根的 UA 默认 overflow 是 hidden，
        显式置 visible 后滤镜输出可绘到框外；面板 padding 24px，够它落。 */
     #pomodoro-ring-svg { width: 160px; height: 160px; margin: var(--bz-space-sm) auto; display: block; overflow: visible; }
+    /* 模式切换（票 323）：番茄/护眼两态分段钮，置顶可选——选中态吃 accent 变量（随皮肤走） */
+    .pomodoro-mode { display: flex; justify-content: center; margin-bottom: var(--bz-space-2xs, 4px); }
+    .pomodoro-mode-btn {
+      appearance: none; border: 1px solid var(--pz-line, var(--background-modifier-border));
+      background: transparent; color: var(--pz-muted, var(--text-muted));
+      font-size: var(--bz-font-ui-small, 12px); padding: 2px 14px; cursor: pointer;
+    }
+    .pomodoro-mode-btn:first-child { border-radius: 8px 0 0 8px; }
+    .pomodoro-mode-btn:last-child { border-radius: 0 8px 8px 0; border-left: none; }
+    .pomodoro-mode-btn-on {
+      background: var(--pz-accent, var(--interactive-accent));
+      border-color: var(--pz-accent, var(--interactive-accent));
+      color: var(--pz-accent-contrast, var(--text-on-accent));
+    }
     .pomodoro-ring-track { fill: none; stroke: var(--pz-line, var(--background-modifier-border)); stroke-width: 8; }
     .pomodoro-ring-progress { fill: none; stroke: var(--pz-accent, var(--interactive-accent)); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 1s linear; }
     /* 本轮循环位置：N 个 6px 方点，已完成填 accent（增强包，替代「专注 2/4」文字小字）；

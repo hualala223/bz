@@ -247,13 +247,18 @@ function forceFocusHint(paused = false): string {
  */
 function notifyPhaseComplete(e: Extract<PomodoroEvent, { type: 'phase-completed' }>): void {
   const d = durations();
+  // 护眼循环（票 323 拍板修订）：只要到点提示音——新阶段起音一记（不叠收工钟、不垫下扫过渡层），
+  // 循环内不弹 toast、无倒数滴答（用户 2026-10-27：不需要提前 10 秒通知，零手动操作）
+  if (eyeMode()) {
+    if (tryGetSettings().pomodoroSound !== false) {
+      playSound(e.nextPhase === 'focus' ? 'focus-start' : 'short-break-start', pomodoroVolume());
+    }
+    return;
+  }
   // 收工钟：专注完成才敲（休息完成不敲，见 playCeremonySound 注）
   if (e.completedPhase === 'focus') playCeremonySound();
   // 声音 = 新阶段开始提示（听声即知状态，无需打开弹窗）
   playPhaseSound(e.nextPhase);
-  // 护眼循环（票 323）：循环内阶段自然流转不弹 toast——声音即提示（听声知该远眺/该回用眼），
-  // 防每小时 6 条刷屏；手动开始/停止/暂停/恢复走各自出口照常提示
-  if (eyeMode()) return;
   // 自动流转（autoCycle/autoSkipBreak）：下一阶段已在计时，toast 只报完成事实
   if (e.autoStarted) {
     if (e.completedPhase === 'focus') {
@@ -518,9 +523,10 @@ function render(): void {
     motionTimeTick(timeEl, remain, state.endTime !== null); // 动效层：大跳揭新 / 整分脉冲
   }
   syncTimeReels(remain); // 翻牌机：滚动位跟随（文本层不动，仍是读屏与断言的锚点）
-  tickBeep(remain, state.endTime !== null); // 倒数滴答：最后十秒每秒一记（随声音总开关）
+  tickBeep(remain, state.endTime !== null && !eyeMode()); // 倒数滴答：最后十秒每秒一记（随声音总开关；护眼循环只要到点提示音，票 323）
   renderStats();
   updateButtons();
+  syncModeSelector(); // 模式分段钮可视态随设置走（票 323）
   applySkinClass(); // 面板主题随设置走（设置面板改主题后下一次 render 即生效）
   // 动效层：相位氛围单点（专注呼吸 / 休息渐暗 / 暂停凝滞 / 待发亮息；签名变更才动）
   motionPhaseSync(document.getElementById('pomodoro-popup'), state.phase, state.endTime !== null, state.paused);
@@ -574,6 +580,16 @@ function renderTaskLine(): void {
     if (taskEl.hasAttribute('title')) taskEl.removeAttribute('title');
   }
   motionTaskLine(taskEl, !!state.task); // 动效层：任务名落名轻揭
+}
+
+/** 模式分段钮可视态（票 323）：当前模式亮 accent（番茄/护眼互斥；render 每秒跑，toggle 同值零开销） */
+function syncModeSelector(): void {
+  const on = eyeMode();
+  const tomato = document.getElementById('pomodoro-mode-tomato');
+  const eye = document.getElementById('pomodoro-mode-eye');
+  if (!tomato || !eye) return;
+  tomato.classList.toggle('pomodoro-mode-btn-on', !on);
+  eye.classList.toggle('pomodoro-mode-btn-on', on);
 }
 
 /** 按钮态渲染（render 内部抽取） */
@@ -901,6 +917,9 @@ function bindEvents(): void {
   // 统计两档切换（issue 357）：近 7 天明细 / 近 6 月趋势
   document.getElementById('pomodoro-stat-tab-week')?.addEventListener('click', () => setStatMode('week'));
   document.getElementById('pomodoro-stat-tab-month')?.addEventListener('click', () => setStatMode('month'));
+  // 模式分段钮（票 323）：选护眼即开跑循环，切回番茄即停——面板可见的一等选择面
+  document.getElementById('pomodoro-mode-tomato')?.addEventListener('click', () => void setEyeMode(false));
+  document.getElementById('pomodoro-mode-eye')?.addEventListener('click', () => void setEyeMode(true));
   const popup = document.getElementById('pomodoro-popup')!;
   // 深审 PE2：点内容区（环形图/时间等无 tabindex 子元素）焦点落 body → Space 静默失效；
   // 点击即把焦点收回面板。按钮自身点击不抢焦点（保留按钮聚焦的原生键盘激活语义，防 Space 双触发口径被绕开）
@@ -1217,20 +1236,19 @@ export async function togglePause(app: App): Promise<void> {
 }
 
 /**
- * 护眼模式开关（命令 bz-pomodoro-eye-toggle，票 323）：设置键 pomodoroEyeMode 为唯一真源，命令是快捷面。
- * - 切到开：空闲（无计时、未暂停）→ 直接开始第一轮用眼（一键进护眼节奏）；
+ * 护眼模式切换本体（票 323）：面板分段钮（选「护眼」/切回「番茄」）与命令 bz-pomodoro-eye-toggle 共用；
+ * 设置键 pomodoroEyeMode 为唯一真源。同模式幂等（点已选中档不动）。
+ * - 切到开：空闲（无计时、未暂停）→ 直接开始第一轮用眼（选中即开跑，循环零操作）；
  *   已有会话（计时/暂停）→ 只切开关不重启会话，提示下一阶段起按护眼节奏（运行中改时长由进度环钳制兜底）。
  * - 切到关：进行中会话收敛回空闲——休息相位先静默跳过（skip 不记历史不弹 toast），
  *   用眼相位走重置（不记历史）；forceFocus 锁重置时提示不改状态（与 toggleFocus 同款守卫）。
  */
-export async function toggleEyeMode(app: App): Promise<void> {
-  await ensurePomodoro(app);
-  if (!loaded) return; // 深审 PF5：加载失败（ensurePomodoro 已报错）→ 不在空内存态上继续
+async function setEyeMode(on: boolean): Promise<void> {
   const s = getSettings();
-  const turningOn = !s.pomodoroEyeMode;
-  s.pomodoroEyeMode = turningOn;
+  if (!!s.pomodoroEyeMode === on) return;
+  s.pomodoroEyeMode = on;
   await saveSettings();
-  if (turningOn) {
+  if (on) {
     notice('护眼模式已开启');
     if (state.endTime === null && !state.paused) {
       applyAction('start'); // 空闲 → 直接开始第一轮用眼（内含通知/落盘/tick 生命周期/渲染）
@@ -1261,6 +1279,13 @@ export async function toggleEyeMode(app: App): Promise<void> {
     render(); // 空闲切换：阶段文案随模式换（护眼/番茄钟）
     notice('护眼模式已关闭');
   }
+}
+
+/** 护眼模式开关（命令 bz-pomodoro-eye-toggle，票 323）：语义见 setEyeMode；面板分段钮同走此路 */
+export async function toggleEyeMode(app: App): Promise<void> {
+  await ensurePomodoro(app);
+  if (!loaded) return; // 深审 PF5：加载失败（ensurePomodoro 已报错）→ 不在空内存态上继续
+  await setEyeMode(!tryGetSettings().pomodoroEyeMode);
 }
 
 /** 卸载清理（T32 接入 onunload；测试重置） */
