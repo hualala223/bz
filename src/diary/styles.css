@@ -103,10 +103,12 @@
   border-color: rgba(178, 58, 42, .55);
 }
 
-/* 正文输入框布局（配色随上方纸皮） */
+/* 正文输入框布局（配色随上方纸皮）；内容多时框内自滚（修订五），不撑爆抽屉 */
 .bz-diary-add-content {
   width: 100%;
   min-height: 88px;
+  max-height: 32vh;
+  overflow-y: auto;
   font-size: 14px;
   font-family: inherit;
   line-height: 1.5;
@@ -157,14 +159,16 @@
 @media (max-width: 768px) {
   .bz-overlay-popup.bz-diary-add-popup {
     top: auto !important;
-    bottom: 0 !important;
+    /* 底边抬到「可视视口」底（= 键盘上沿）：100vh(布局视口) − --bz-vvh(可视视口) 即键盘遮挡高度，
+       键盘收起时差值为 0 自然落底（todo 面板 --bz-vvh 同源方案） */
+    bottom: calc(100vh - var(--bz-vvh, 100vh)) !important;
     left: 0 !important;
     right: 0 !important;
     translate: none !important;
     transform: none !important;
     width: 100% !important;
     max-width: none !important;
-    max-height: 82vh;
+    max-height: min(82vh, calc(var(--bz-vvh, 100vh) - 8px));
     border-radius: var(--bz-radius-lg, 12px) var(--bz-radius-lg, 12px) 0 0;
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
