@@ -21,7 +21,7 @@ import { loadAll, onFullRefresh, onLightRefresh, onProgress, onLoadingChange, on
 import { isUnlocked, onUnlockChange } from '../encrypt';
 import { applyFilter, cancelEdit, updateSticky, initScroll } from './entries';
 import { createTag, rebuildTags, refreshSubTagsBar } from './filter-shared';
-import { createTagPicker, createAddDialog, createDatePicker, showDatePicker, openAddDialog, closeAddDialog } from './dialogs';
+import { createTagPicker, createAddDialog, createDatePicker, showDatePicker, openAddDialog } from './dialogs';
 import { registerOpenDialogCommand } from './quote';
 import { runTaskCheck, openReviewDialog, openPlanPicker, openTodayDiary } from '../daily';
 // 当日待办事项/日常行为记录（issue 247：QuickAdd 两个 Capture 宏换血，同格式共写当天日记）
@@ -514,8 +514,6 @@ function registerEscapeListener() {
       if (conf && conf.style.display === 'block') return true;
       const tag = byId('diary-tag-selector-mask');
       if (tag && tag.style.display === 'block') return true;
-      const add = byId('add-diary-mask');
-      if (add && add.style.display === 'block') return true;
       const date = byId('diary-date-filter-mask');
       if (date && date.style.display === 'block') return true;
       const main = byId('diary-filter-mask');
@@ -534,12 +532,8 @@ function registerEscapeListener() {
         tag.style.display = 'none';
         return;
       }
-      const add = byId('add-diary-mask');
-      if (add && add.style.display === 'block') {
-        // 两步弹窗（ADR-0109）：ESC 属取消语义，两步一并收起并丢弃草稿
-        closeAddDialog();
-        return;
-      }
+      // 写日记弹窗（add-diary-mask）ESC 由 core uiModal 壳自带 'bz-modal' 层接管
+      //（后开先关，脏表单走 requestClose 分流），此处不再重复处理
       const date = byId('diary-date-filter-mask');
       if (date && date.style.display === 'block') {
         date.style.display = 'none';

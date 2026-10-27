@@ -95,8 +95,8 @@ describe('写日记落点：`# 随笔` 小节（ADR-0114）', () => {
     // 有正文：不打开日记文件
     expect(openFileSpy).not.toHaveBeenCalled();
     expect(openLinkSpy).not.toHaveBeenCalled();
-    // 弹窗已关闭
-    expect(document.getElementById('add-diary-mask')!.style.display).toBe('none');
+    // 弹窗已关闭（壳关即摘，票 323 迁 uiModal）
+    expect(document.getElementById('add-diary-mask')).toBeNull();
   });
 
   it('有正文：不进面板列表（标签/日期/搜索筛选都不再联动）', async () => {

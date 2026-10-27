@@ -154,8 +154,8 @@ describe('标签筛选（ticket 06）', () => {
 describe('添加日记弹窗（ticket 07）', () => {
   it('打开弹窗：默认不预选标签（全部加载）、日期时间为当前', () => {
     openAddDialog();
-    const mask = document.getElementById('add-diary-mask')!;
-    expect(mask.style.display).toBe('block');
+    // 壳挂载即见（票 323 迁 uiModal，无 display 切换）
+    expect(document.getElementById('add-diary-mask')).toBeTruthy();
     const activeBtns = document.querySelectorAll('#add-diary-type-container .diary-active');
     expect(activeBtns.length).toBe(0);
     const dt = document.getElementById('add-diary-datetime') as HTMLInputElement;

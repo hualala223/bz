@@ -326,13 +326,13 @@ describe('dialogs 补测', () => {
     expect(vault.files.get(`我的/日记/${entry.date}.md`)).toContain('📕');
   });
 
-  it('createAddDialog：渲染添加弹窗 DOM + 打开显示', () => {
-    createAddDialog();
+  it('openAddDialog：开即建关即拆，壳挂载即见（票 323 迁 uiModal）', () => {
+    createAddDialog(); // 兼容空操作（panel init 契约）
+    expect(document.getElementById('add-diary-mask')).toBeNull();
+    openAddDialog();
     expect(document.getElementById('add-diary-mask')).toBeTruthy();
     expect(document.getElementById('add-diary-popup')).toBeTruthy();
-    openAddDialog();
-    expect(document.getElementById('add-diary-mask')!.style.display).toBe('block');
-    expect(document.getElementById('add-diary-popup')!.style.display).toBe('block');
+    expect(document.querySelector('#add-diary-popup .bz-diary-add-foot')).toBeTruthy();
   });
 
   it('createDatePicker：渲染日期筛选弹窗结构', () => {

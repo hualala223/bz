@@ -9,6 +9,7 @@ import { setApp } from '../../../src/diary/app';
 import { applyDirectories, resetTagsConfig, DIARY_DIRECTORY } from '../../../src/diary/config';
 import { init } from '../../../src/diary/ui/panel';
 import {
+  closeAddDialog,
   createDatePicker,
   createTagPicker,
   createAddDialog,
@@ -290,19 +291,22 @@ describe('updateTags 筛选联动分支', () => {
 });
 
 describe('弹窗守卫与搜索命中分支', () => {
-  it('add-diary 元素缺失时 openAddDialog/saveNewEntry 直接返回', async () => {
-    createAddDialog(); // 显式确保 mask+popup 成对就位
-    (document.getElementById('add-diary-mask') as HTMLElement).remove();
-    expect(() => openAddDialog()).not.toThrow(); // mask 缺失 → 早退
-    (document.getElementById('add-diary-popup') as HTMLElement | null)?.remove();
-    await saveNewEntry(); // 输入元素随弹窗一并缺失 → 早退
+  it('add-diary 未构建时 openAddDialog 自建壳（开即建）；壳摘除后 saveNewEntry 直接返回', async () => {
+    // 票 323 迁 uiModal：不再依赖预构建，openAddDialog 空地自建壳
+    expect(() => openAddDialog()).not.toThrow();
+    expect(document.getElementById('add-diary-mask')).toBeTruthy();
+    // 收壳（关即摘）后 saveNewEntry 守卫早退（popup 缺失 → 不抛错不落盘）
+    closeAddDialog();
+    expect(document.getElementById('add-diary-mask')).toBeNull();
+    await saveNewEntry();
   });
 
-  it('createAddDialog 自带的类型按钮与保存按钮可用（未选类型提示）', async () => {
-    createAddDialog();
-    // 两步化（ADR-0109）：保存按钮在第二步 popup 里，第一步是「下一步」
-    const saveBtn = [...document.querySelectorAll('#add-diary-content-popup button')]
-      .find((b) => b.textContent === '保存') as HTMLElement;
+  it('写日记弹窗自带类型 chips 与「添加」按钮可用（未选类型提示）', async () => {
+    openAddDialog();
+    // 票 323 单弹窗：吸底栏「取消/添加」，主钮 id 沿用 add-diary-save
+    const saveBtn = document.getElementById('add-diary-save') as HTMLElement;
+    expect(saveBtn).toBeTruthy();
+    expect(saveBtn.textContent).toContain('添加');
     saveBtn.click();
     await new Promise((r) => setTimeout(r, 10));
     expect(hasNotice(/至少选择一个类型|至少选择一个标签/)).toBe(true);

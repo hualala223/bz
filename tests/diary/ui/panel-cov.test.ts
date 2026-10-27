@@ -102,8 +102,9 @@ describe('头部按钮与遮罩', () => {
     headBtn('搜索日记').click(); // 再点收起并清关键词
 
     headBtn('写日记').click();
-    expect(document.getElementById('add-diary-mask')!.style.display).toBe('block');
-    // 关闭写日记弹窗，避免影响后续断言
+    // 壳挂载即见（票 323 迁 uiModal，无 display 切换）
+    expect(document.getElementById('add-diary-mask')).toBeTruthy();
+    // 关闭写日记弹窗（遮罩点击走壳 requestClose：无输入直接收），避免影响后续断言
     document.getElementById('add-diary-mask')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     (document.querySelector('#diary-tag-filter h3') as HTMLElement).click(); // 标题 = 日期筛选
@@ -236,8 +237,8 @@ describe('ESC 分层关闭', () => {
     await showDiaryPanel();
     openAddDialog();
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    expect(document.getElementById('add-diary-mask')!.style.display).toBe('none');
-    expect(document.getElementById('add-diary-popup')!.style.display).toBe('none');
+    // 写日记弹窗 ESC 由 uiModal 壳自带层接管（后开先关），关壳即摘
+    expect(document.getElementById('add-diary-mask')).toBeNull();
     expect(document.getElementById('diary-tag-filter')!.style.visibility).toBe('visible');
   });
 

@@ -5,9 +5,8 @@ import { MarkdownView as MarkdownViewFromObsidian, moment } from 'obsidian';
 import { pad2 } from '../../core/utils';
 import { topifyZ } from '../../core/z-order';
 import { notice } from '../../core/notice';
-import { openFlowDialog } from '../../core/flow-dialog';
-import { emitDomainEvent } from '../../core/domain-bus';
-import { isMobileEnv } from '../../core/mobile';
+import { confirmDiscard, openFlowDialog } from '../../core/flow-dialog';
+import { emitDomainEvent, onDomainEvent } from '../../core/domain-bus';
 import { getApp } from '../app';
 import {
   DIARY_DIRECTORY,
@@ -25,6 +24,9 @@ import { getJumpToEditAfterSaveSetting, getTagShowEmojiSetting, getUseFileDateTi
 import { rebuildTags, updateTitleSuffix } from './filter-shared';
 import { applyFilter as applyFilterFromDialogs, insertCard, removeCard, showConfirm as showConfirmFromDialogs } from './entries';
 import { createDateTimeControl, resetDateTimeControl } from './datetime-picker';
+import { uiModal, bindFormSubmit } from '../../core/ui/modal';
+import { uiBtn } from '../../core/ui/button';
+import { motionSheetDialog } from './motion';
 
 // ===== 类型选择按钮（类型选择器与写日记弹窗共用） =====
 
@@ -482,203 +484,142 @@ export async function updateTags(entryId: string, newTags: string[]) {
   updateTitleSuffix();
 }
 
-// ===== 添加日记弹窗（原 3238-3478） =====
+// ===== 添加日记弹窗（票 323：上游 yeshimei/bz master 2a1a62b1 视觉移植） =====
 
 /**
- * 写日记弹窗为两步（ADR-0109）：第一步「类型 + 时间」，第二步「正文」。
- * 拆分原因：原单弹窗里正文框位于类型区下方，移动端软键盘弹起后正文框与保存按钮被键盘吞掉；
- * 两步后第二步只有「一个 textarea + 两枚按钮」，几何上不存在被键盘遮挡的元素。
- * 两个 popup 同挂一个 mask：第一步隐藏而非销毁，其 datetime / 类型容器仍是 saveNewEntry 的数据源。
+ * 写日记弹窗（ADR-0121 修订：2026-10-27 用户解冻写界面换肤）：整弹窗移植上游形态——
+ * core uiModal 壳（标题行 + 82vh 限高 + 遮罩/ESC/关闭意图都走壳）、单步表单
+ * 「日期时间 + 类型 chips + 正文」、吸底「取消/添加」栏、字段落纸 + 章签摆上动效（./motion）。
+ * 两步制（ADR-0109）随上游单弹窗退役：移动端软键盘以「壳限高 + 表单自滚 + 吸底栏 +
+ * .keyboard-up 抬升」消化。与上游刻意保留的本地差异：
+ * - 落盘走 writeDiaryEntry（ADR-0114 小节写入，默认 `# 随笔`），非上游条目模型；
+ * - 保留正文 textarea（上游无正文框、存后跳条目文件书写；本地弹窗内直写，留空按设置打开当天日记）；
+ * - AddDialogPreset 签名与语义不变（每日触动点记录预选标签/预填模板/指定落点）。
+ * 冻结 id：add-diary-mask / add-diary-popup（main.ts 卸载清理表按 id 摘除，缺席即跳过）；
+ * 旧第二弹窗 id add-diary-content-popup 随两步制退役。
  */
-export function createAddDialog() {
-  const existingMask = document.getElementById('add-diary-mask');
-  const existingPopup = document.getElementById('add-diary-popup');
-  if (existingMask) existingMask.remove();
-  if (existingPopup) existingPopup.remove();
-  const existingContentPopup = document.getElementById('add-diary-content-popup');
-  if (existingContentPopup) existingContentPopup.remove();
 
-  const mask = document.createElement('div');
-  mask.id = 'add-diary-mask';
-  mask.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.3);display:none;';
-  // 遮罩点击 = 放弃整条（草稿随关闭清空，见 closeAddDialog）
-  mask.onclick = (e) => e.target === mask && closeAddDialog();
+/** 当前写日记弹窗壳（uiModal 产物，开即建关即拆） */
+let addDialogUi: { close: () => void } | null = null;
+/** 「添加」钮引用（保存进行中禁用 + 「保存中…」，防大文件写盘期连点重复落块） */
+let addDialogSaveBtn: HTMLButtonElement | null = null;
+/** 打开时刻的日期默认值（脏检测基准：当前值偏离默认 = 有输入） */
+let addDialogDefaultDateTime = '';
 
-  // ---------- 第一步：类型 + 时间 ----------
-  const popup = document.createElement('div');
-  popup.id = 'add-diary-popup';
-  popup.className = 'add-diary-popup bz-diary-add-popup';
-  popup.style.cssText =
-    'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--background-primary);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.3);padding:24px;max-width:400px;width:90%;max-height:80vh;display:none;';
+/**
+ * 本次打开弹窗的落点小节（ADR-0114）：默认 `# 随笔`；每日触动点记录入口经 preset.section
+ * 指到 `# 当日触动点`（票 302 前为 `# 当日复盘`）。openAddDialog 重置、closeAddDialog 归位。
+ */
+let addDialogSection: string = ESSAY_HEADING;
 
-  const title = document.createElement('h4');
-  title.className = 'add-diary-title';
-  title.textContent = '写日记';
-  title.style.cssText = 'margin:0 0 20px 0;font-size:18px;font-weight:600;color:var(--text-normal);';
+/** 测试钩子：落点归位（跨用例隔离；旧名保留，草稿概念已随两步制退役） */
+export function __resetAddDialogDraftForTests(): void {
+  addDialogSection = ESSAY_HEADING;
+}
 
-  const dateTimePicker = createDateTimeControl();
+/** 兼容入口（panel init 预构建契约）：迁 uiModal 壳后弹窗改「开即建关即拆」，此处为空操作 */
+export function createAddDialog(): void {}
 
-  const typeLabel = document.createElement('label');
-  typeLabel.textContent = '类型';
-  typeLabel.style.cssText = 'display:block;margin-bottom:6px;font-size:14px;color:var(--text-muted);font-weight:500;';
+// --- 标签使用频次（上游效率#1：chips 按使用频次前置，无历史保持原序） ---
 
-  const typeContainer = document.createElement('div');
-  typeContainer.id = 'add-diary-type-container';
-  typeContainer.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;';
+const tagUsageCount = new Map<string, number>();
+onDomainEvent<{ tags?: string[] }>('diary:entry-added', (evt) => {
+  for (const t of evt?.tags ?? []) tagUsageCount.set(t, (tagUsageCount.get(t) ?? 0) + 1);
+});
 
-  // 类型按钮（排序规则与 openAddDialog 一致：主标签平铺、有二级标签的主标签展开为二级；加密分类不在此提供）
-  const allTags = getSortedTagsForAddDialog();
-  for (const tag of allTags) {
-    const btn = createTagOptionButton(tag, true);
+/** 使用频次降序稳定排序（次数相同 / 无历史保持传入原序） */
+function sortTagsByUsage(tags: string[]): string[] {
+  return tags
+    .map((tag, idx) => ({ tag, idx, count: tagUsageCount.get(tag) ?? 0 }))
+    .sort((a, b) => b.count - a.count || a.idx - b.idx)
+    .map((x) => x.tag);
+}
+
+/** 清空标签使用频次统计（测试/重置入口，上游同款） */
+export function resetTagUsageStats(): void {
+  tagUsageCount.clear();
+}
+
+/**
+ * 写日记弹窗的类型 chip（上游 D-UI11：标签名/emoji 走 textContent + createElement 拼装，
+ * 标签配置含 HTML 片段时字面显示；样式收 src/diary/styles.css，不再内联 cssText）。
+ * 条目「换分类」选择器（showTagPicker）继续用下方 createTagOptionButton（跟随 diaryTagShowEmoji 设置）。
+ */
+function createAddTagChip(tag: string): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'diary-tag-selector-btn bz-diary-tag-chip';
+  btn.dataset.tag = tag;
+  btn.appendChild(document.createTextNode(`${getTagEmoji(tag)} ${tag}`));
+  if (isSubTag(tag)) {
+    const parentTag = getParentPrimaryTag(tag);
+    if (parentTag) {
+      const badge = document.createElement('span');
+      badge.className = 'bz-diary-tag-badge';
+      badge.textContent = getTagEmoji(parentTag);
+      btn.appendChild(badge);
+    }
+  }
+  return btn;
+}
+
+/** 重建类型 chips（频次前置由调用方排好传入；selected 命中即选中态） */
+function renderAddTagChips(container: HTMLElement, tags: string[], selected: Set<string>): void {
+  container.innerHTML = '';
+  for (const tag of tags) {
+    const btn = createAddTagChip(tag);
+    if (selected.has(tag)) btn.classList.add('diary-active');
     btn.onclick = (e) => {
       e.preventDefault();
       btn.classList.toggle('diary-active');
     };
-    typeContainer.appendChild(btn);
-  }
-
-  const typeBody = document.createElement('div');
-  typeBody.className = 'bz-diary-add-body';
-  typeBody.appendChild(title);
-  typeBody.appendChild(dateTimePicker);
-  typeBody.appendChild(typeLabel);
-  typeBody.appendChild(typeContainer);
-
-  const typeFoot = document.createElement('div');
-  typeFoot.className = 'bz-diary-add-foot';
-  const nextBtn = document.createElement('button');
-  nextBtn.id = 'add-diary-next';
-  nextBtn.textContent = '下一步';
-  nextBtn.className = 'bz-diary-add-btn';
-  nextBtn.onclick = () => gotoContentStep();
-  typeFoot.appendChild(nextBtn);
-
-  popup.appendChild(typeBody);
-  popup.appendChild(typeFoot);
-
-  // ---------- 第二步：正文 ----------
-  const contentPopup = document.createElement('div');
-  contentPopup.id = 'add-diary-content-popup';
-  contentPopup.className = 'add-diary-popup bz-diary-add-popup';
-  contentPopup.style.cssText =
-    'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--background-primary);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.3);padding:24px;max-width:400px;width:90%;max-height:80vh;display:none;';
-
-  const contentTitle = document.createElement('h4');
-  contentTitle.className = 'add-diary-title';
-  contentTitle.textContent = '写日记';
-  contentTitle.style.cssText = 'margin:0 0 20px 0;font-size:18px;font-weight:600;color:var(--text-normal);';
-
-  const contentLabel = document.createElement('label');
-  contentLabel.textContent = '内容';
-  contentLabel.style.cssText = 'display:block;margin-bottom:6px;font-size:14px;color:var(--text-muted);font-weight:500;';
-
-  // 正文输入框：弹窗内直写正文，保存即落盘（留空则只写一行时间标题，并按设置打开当天日记）
-  const contentInput = document.createElement('textarea');
-  contentInput.id = 'add-diary-content';
-  contentInput.className = 'bz-diary-add-content';
-  contentInput.placeholder = '写点什么…（留空则保存后打开当天日记）';
-  contentInput.rows = 4;
-
-  const contentBody = document.createElement('div');
-  contentBody.className = 'bz-diary-add-body';
-  contentBody.appendChild(contentTitle);
-  contentBody.appendChild(contentLabel);
-  contentBody.appendChild(contentInput);
-
-  const contentFoot = document.createElement('div');
-  contentFoot.className = 'bz-diary-add-foot';
-  const backBtn = document.createElement('button');
-  backBtn.id = 'add-diary-back';
-  backBtn.textContent = '上一步';
-  backBtn.className = 'bz-diary-add-btn bz-diary-add-btn-ghost';
-  backBtn.onclick = () => backToTypeStep();
-  const saveBtn = document.createElement('button');
-  saveBtn.id = 'add-diary-save';
-  saveBtn.textContent = '保存';
-  saveBtn.className = 'bz-diary-add-btn';
-  saveBtn.style.cssText = 'padding:8px 16px;border-radius:6px;border:none;background:var(--interactive-accent);color:var(--background-primary);cursor:pointer;font-size:14px;font-weight:500;';
-  saveBtn.onclick = async () => await saveNewEntry();
-  contentFoot.appendChild(backBtn);
-  contentFoot.appendChild(saveBtn);
-
-  contentPopup.appendChild(contentBody);
-  contentPopup.appendChild(contentFoot);
-
-  mask.appendChild(popup);
-  mask.appendChild(contentPopup);
-  document.body.appendChild(mask);
-}
-
-/** 第二步正文草稿：仅「上一步」返回时保留，取消/保存后清空（ADR-0109 草稿语义） */
-let addDialogDraft = '';
-
-/**
- * 本次打开弹窗的落点小节（ADR-0114）：默认 `# 随笔`；每日触动点记录入口经 preset.section
- * 指到 `# 当日触动点`（票 302 前为 `# 当日复盘`）。与草稿同生命周期（openAddDialog 重置、closeAddDialog 归位），
- * 且不经由「上一步/下一步」发生改变，故跨步保存仍取到入口决定的那一个。
- */
-let addDialogSection: string = ESSAY_HEADING;
-
-/** 测试钩子：清空跨步草稿（跨用例隔离；与 __resetCorruptNotifyForTests 同款先例） */
-export function __resetAddDialogDraftForTests(): void {
-  addDialogDraft = '';
-  addDialogSection = ESSAY_HEADING;
-}
-
-function addDialogParts() {
-  return {
-    mask: document.getElementById('add-diary-mask'),
-    typePopup: document.getElementById('add-diary-popup'),
-    contentPopup: document.getElementById('add-diary-content-popup'),
-    contentInput: document.getElementById('add-diary-content') as HTMLTextAreaElement | null,
-  };
-}
-
-/** 显示第 1 步（类型+时间）或第 2 步（正文）；mask 常显，两个 popup 二选一 */
-function showAddStep(step: 1 | 2): void {
-  const { mask, typePopup, contentPopup } = addDialogParts();
-  if (!mask || !typePopup || !contentPopup) return;
-  mask.style.display = 'block';
-  typePopup.style.display = step === 1 ? 'block' : 'none';
-  contentPopup.style.display = step === 2 ? 'block' : 'none';
-  // ADR-0067：显示即发号
-  topifyZ(mask, step === 1 ? typePopup : contentPopup);
-  if (step === 2) {
-    // 第二步意图明确（专门来写正文），移动端也自动聚焦——键盘由用户主动进入触发
-    setTimeout(() => addDialogParts().contentInput?.focus(), 100);
+    container.appendChild(btn);
   }
 }
 
-/** 第一步 → 第二步：先校验至少选了一个类型（文案沿用冻结文案），避免写完全文才被告知 */
-export function gotoContentStep(): void {
-  if (readSelectedAddTags().length === 0) {
-    notice('请至少选择一个类型');
-    return;
-  }
-  // 草稿回填：从第二步「上一步」回来再进时，正文原样还在（取消/保存后草稿为空，不回填）
-  const { contentInput } = addDialogParts();
-  if (contentInput && addDialogDraft) contentInput.value = addDialogDraft;
-  showAddStep(2);
+/** 脏检测：已选类型 / 已写正文 / 日期偏离打开时默认值 = 有未保存输入 */
+function addDialogDirty(): boolean {
+  if (!document.getElementById('add-diary-popup')) return false;
+  if (readSelectedAddTags().length > 0) return true;
+  const contentInput = document.getElementById('add-diary-content') as HTMLTextAreaElement | null;
+  if (contentInput && contentInput.value.trim() !== '') return true;
+  const datetimeInput = document.getElementById('add-diary-datetime') as HTMLInputElement | null;
+  return !!datetimeInput && datetimeInput.value !== addDialogDefaultDateTime;
 }
 
-/** 第二步 → 第一步：保留草稿（返回属流程内导航，不丢已写正文） */
-export function backToTypeStep(): void {
-  const { contentInput } = addDialogParts();
-  addDialogDraft = contentInput ? contentInput.value : '';
-  showAddStep(1);
-}
-
-/** 关闭写日记弹窗（取消语义：遮罩点击/保存完成）：两步都隐藏并丢弃草稿与落点 */
+/** 收壳：uiModal close 自会摘 mask、注销 ESC 层、还原焦点 */
 export function closeAddDialog(): void {
-  const { mask, typePopup, contentPopup } = addDialogParts();
-  addDialogDraft = '';
+  addDialogUi?.close();
+  addDialogUi = null;
+  addDialogSaveBtn = null;
   addDialogSection = ESSAY_HEADING;
-  if (mask) mask.style.display = 'none';
-  if (typePopup) typePopup.style.display = 'none';
-  if (contentPopup) contentPopup.style.display = 'none';
 }
 
-/** 读取第一步选中的类型（saveNewEntry 与「下一步」校验共用同一数据源） */
+/** 关闭意图分流：有输入走 confirmDiscard（放弃确认），无输入直接收（ESC/遮罩/取消共用） */
+function requestCloseAddDialog(): void {
+  if (addDialogDirty()) confirmDiscard(closeAddDialog, undefined, 'bz-diary-flow-dialog');
+  else closeAddDialog();
+}
+
+/** 保存进行中按钮态：禁用 + 「保存中…」，写盘结束（含失败）复位 */
+function setAddSavingUi(saving: boolean): void {
+  const btn = addDialogSaveBtn;
+  if (!btn) return;
+  btn.disabled = saving;
+  const label = btn.querySelector('span') ?? btn;
+  label.textContent = saving ? '保存中…' : '添加';
+}
+
+/** 软键盘避让（上游 D-UI16）：输入聚焦给弹窗加 .keyboard-up 上移档，失焦回落（样式在域 styles.css） */
+function wireKeyboardLift(popup: HTMLElement): void {
+  popup.addEventListener('focusin', (e) => {
+    const t = e.target as HTMLElement;
+    if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) popup.classList.add('keyboard-up');
+  });
+  popup.addEventListener('focusout', () => popup.classList.remove('keyboard-up'));
+}
+
+/** 读取弹窗选中的类型（saveNewEntry 与脏检测共用同一数据源） */
 function readSelectedAddTags(): string[] {
   const typeContainer = document.getElementById('add-diary-type-container');
   const tags: string[] = [];
@@ -700,37 +641,76 @@ export interface AddDialogPreset {
   section?: string;
 }
 
-/** 打开添加日记弹窗（原 3348-3426；preset 供触动点记录等预填入口，无参行为不变） */
+/** 保存进行中标志：大文件写盘慢时双击「添加」会在同小节写重复块，进行中再点直接忽略 */
+let savingNewEntry = false;
+
 export function openAddDialog(preset?: AddDialogPreset) {
-  const mask = document.getElementById('add-diary-mask');
-  const popup = document.getElementById('add-diary-popup');
-  const contentPopup = document.getElementById('add-diary-content-popup');
-  if (!mask || !popup || !contentPopup) return;
-  // 每次从外部打开都是全新一条：丢弃上一条留下的草稿与落点
-  // （「上一步」不经由此处，故草稿与落点得以保留）
-  addDialogDraft = '';
+  // 重开先收旧壳（开即建关即拆，避免叠加；close 幂等）
+  if (addDialogUi) closeAddDialog();
   addDialogSection = preset?.section ?? ESSAY_HEADING;
 
-  // 1. 刷新类型按钮（按排序规则）
-  const typeContainer = document.getElementById('add-diary-type-container');
-  if (typeContainer) {
-    typeContainer.innerHTML = '';
-    const presetTags = new Set(preset?.tags ?? []);
-    const sortedTags = getSortedTagsForAddDialog();
-    for (const tag of sortedTags) {
-      const btn = createTagOptionButton(tag, true);
-      btn.onclick = (e) => {
-        e.preventDefault();
-        btn.classList.toggle('diary-active');
-      };
-      if (presetTags.has(tag)) btn.classList.add('diary-active');
-      typeContainer.appendChild(btn);
-    }
+  const content = document.createElement('div');
+  content.className = 'bz-diary-form';
 
-    // ----- 不预选任何标签（用户确认：默认全部加载，不选择任何标签；preset 场景除外） -----
-  }
+  content.appendChild(createDateTimeControl());
 
-  // 2. 设置日期时间默认值
+  const typeLabel = document.createElement('label');
+  typeLabel.className = 'bz-diary-field-label';
+  typeLabel.textContent = '类型';
+
+  const typeContainer = document.createElement('div');
+  typeContainer.id = 'add-diary-type-container';
+  typeContainer.className = 'diary-tag-selector-buttons bz-diary-chip-scroll';
+
+  content.appendChild(typeLabel);
+  content.appendChild(typeContainer);
+
+  const contentLabel = document.createElement('label');
+  contentLabel.className = 'bz-diary-field-label';
+  contentLabel.textContent = '内容';
+
+  // 正文输入框：弹窗内直写正文，保存即落盘（留空则只写一行时间标题，并按设置打开当天日记）
+  const contentInput = document.createElement('textarea');
+  contentInput.id = 'add-diary-content';
+  contentInput.className = 'bz-diary-add-content';
+  contentInput.placeholder = '写点什么…（留空则保存后打开当天日记）';
+  contentInput.rows = 4;
+
+  content.appendChild(contentLabel);
+  content.appendChild(contentInput);
+
+  // 吸底栏（效率#1）：取消/添加不随 chips 滚走；「添加」口径同上游（新建条目 = 添加）
+  const foot = document.createElement('div');
+  foot.className = 'bz-diary-add-foot';
+  const cancelBtn = uiBtn({ label: '取消', onClick: requestCloseAddDialog });
+  const saveBtn = uiBtn({ label: '添加', tone: 'primary', onClick: () => void saveNewEntry() });
+  saveBtn.id = 'add-diary-save';
+  addDialogSaveBtn = saveBtn;
+  foot.appendChild(cancelBtn);
+  foot.appendChild(saveBtn);
+  content.appendChild(foot);
+
+  const { mask, popup, close } = uiModal({
+    content,
+    maxWidth: 400,
+    head: true,
+    title: '写日记',
+    className: 'bz-diary-add-popup',
+    requestClose: requestCloseAddDialog, // ESC/遮罩关闭统一走脏拦截分流
+  });
+  // 遗留 id 保留在壳上：main.ts 卸载兜底按 id 摘除（D15）；类名走 bz- 域皮
+  mask.id = 'add-diary-mask';
+  popup.id = 'add-diary-popup';
+  addDialogUi = { close };
+  bindFormSubmit(popup, () => void saveNewEntry()); // 效率#2：Ctrl/⌘+Enter 提交
+  wireKeyboardLift(popup);
+
+  // 1. 刷新类型 chips（频次前置；preset 命中即选中态，如触动点入口预选「触动点」）
+  const presetTags = new Set(preset?.tags ?? []);
+  renderAddTagChips(typeContainer, sortTagsByUsage(getSortedTagsForAddDialog()), presetTags);
+  motionSheetDialog(popup);
+
+  // 2. 设置日期时间默认值（本地口径：preset 覆盖 > useFileDateTime 当前日记文件日期 > 现在）
   let defaultDateStr = moment().format('YYYY-MM-DD');
   let defaultTimeStr = moment().format('HH:mm');
 
@@ -738,7 +718,6 @@ export function openAddDialog(preset?: AddDialogPreset) {
     defaultDateStr = preset.date;
     if (preset?.time && /^\d{2}:\d{2}$/.test(preset.time)) defaultTimeStr = preset.time;
   } else if (getUseFileDateTimeSetting()) {
-    // 改为判断 toggle
     const activeView = getApp().workspace.getActiveViewOfType(MarkdownViewFromObsidian) as any;
     if (activeView && activeView.file) {
       const file = activeView.file;
@@ -761,40 +740,27 @@ export function openAddDialog(preset?: AddDialogPreset) {
   if (datetimeInput) {
     datetimeInput.value = defaultDateTime;
   }
+  addDialogDefaultDateTime = defaultDateTime;
 
   // 正文每次打开清空（上一条的正文不应带进下一条）；preset 有预填正文时例外
-  const contentInput = document.getElementById('add-diary-content') as HTMLTextAreaElement | null;
-  if (contentInput) {
-    contentInput.value = preset?.content ?? '';
-  }
-
-  // 两步（ADR-0109）：preset 已带分类（如每日触动点记录预选「触动点」）→ 跳第一步直接进正文；
-  // 否则从类型页起步。第一步的 datetime / 类型容器始终保留在 DOM 里，是保存时的数据源。
-  const presetTags = readSelectedAddTags();
-  showAddStep(presetTags.length > 0 ? 2 : 1);
-  if (presetTags.length === 0) {
-    // 第一步不自动聚焦（移动端此举会顶起软键盘，把还没看见的类型区挤走）
-    if (!isMobileEnv()) setTimeout(() => datetimeInput && datetimeInput.focus(), 100);
-  }
+  contentInput.value = preset?.content ?? '';
 }
-
-/** 保存新日记内容（原 3428-3478；ADR-0114 起按小节落盘，不再建条目） */
 
 /**
  * 保存：把弹窗正文按本次落点写进日记小节，不建条目。
  * - 落点 = `addDialogSection`（写日记 `# 随笔` / 每日触动点记录 `# 当日触动点`），块形态与建节规则见 daily-write；
  * - 通知文案随落点走（命中小节 / 现场新建 / 追加文末）由 daily-write 统一给出，这里不再自己拼；
  * - 面板列表不插卡：新内容不是条目，标签筛选 / 日期筛选 / 索引 / 回忆墙 / 智能猫都看不到它（用户裁定）；
- * - 「保存后进入编辑」降级为**打开该日期日记文件**（设置项名与开关保留，块模型下无条目可跳）。
+ * - 「保存后进入编辑」降级为**打开该日期日记文件**（设置项名与开关保留，块模型下无条目可跳）；
+ *   弹窗里已写正文时不打开——沿用旧行为「写完不打扰」。
  */
 export async function saveNewEntry() {
+  if (savingNewEntry) return; // 防连点：上一笔仍在写盘
   const datetimeInput = document.getElementById('add-diary-datetime') as HTMLInputElement | null;
-  const mask = document.getElementById('add-diary-mask');
-  const popup = document.getElementById('add-diary-popup');
-  if (!datetimeInput || !mask || !popup) return;
+  const typeContainer = document.getElementById('add-diary-type-container');
+  if (!datetimeInput || !typeContainer || !document.getElementById('add-diary-popup')) return;
 
   const userInput = datetimeInput.value.trim();
-  // 数据源仍在第一步（第二步显示期间第一步只是 display:none，DOM 与选中态保留）
   const selTagNames = readSelectedAddTags();
   if (selTagNames.length === 0) {
     notice('请至少选择一个类型');
@@ -814,19 +780,22 @@ export async function saveNewEntry() {
   const contentInput = document.getElementById('add-diary-content') as HTMLTextAreaElement | null;
   const content = contentInput ? contentInput.value.trim() : '';
 
+  savingNewEntry = true;
+  setAddSavingUi(true);
   try {
     const res = await writeDiaryEntry(dateStr, addDialogSection, selTagNames, timeStr, content);
-    // 动作埋点：新增保存成功（载荷形状不变：date/time/tags/content；本期无消费者，emit 即可）
+    // 动作埋点：新增保存成功（载荷形状不变：date/time/tags/content）
     emitDomainEvent('diary:entry-added', { date: dateStr, time: timeStr, tags: selTagNames, content });
-    // 两步都收起并丢弃草稿（ADR-0109）
     closeAddDialog();
 
-    // 保存后立即进入编辑（设置项 diaryJumpToEditAfterSave，关=仅关闭弹窗）；
-    // 弹窗里已写正文时不打开——沿用旧行为「写完不打扰」
+    // 保存后立即进入编辑（设置项 diaryJumpToEditAfterSave，关=仅关闭弹窗）
     if (getJumpToEditAfterSaveSetting() && !content) void openDiaryFile(res.path);
   } catch (error: any) {
     console.error('保存日记失败:', error);
     notice('保存日记失败：' + error.message, 'error');
+  } finally {
+    savingNewEntry = false;
+    setAddSavingUi(false); // 失败路径恢复按钮态（成功路径按钮已随壳摘除，复位为空操作）
   }
 }
 

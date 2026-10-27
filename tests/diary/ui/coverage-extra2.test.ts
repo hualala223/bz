@@ -137,8 +137,8 @@ describe('saveNewEntry 分支', () => {
     const dt = document.getElementById('add-diary-datetime') as HTMLInputElement;
     dt.value = '2024-01-04 10:30';
     await saveNewEntry();
-    // 弹窗关闭 + 无编辑态卡片
-    expect((document.getElementById('add-diary-mask') as HTMLElement).style.display).toBe('none');
+    // 弹窗关闭（壳关即摘）+ 无编辑态卡片
+    expect(document.getElementById('add-diary-mask')).toBeNull();
     expect(state.ui.editingEntryId).toBeNull();
     expect(document.querySelector('.diary-editing')).toBeNull();
   });
@@ -308,10 +308,14 @@ describe('saveNewEntry 插入条件求值（P1-14 回归）', () => {
     expect(state.data.currentFilteredEntries.some((e) => e.date === '2024-01-05')).toBe(false);
     expect(vault.files.get('我的/日记/2024-01-05.md')).toContain('# 随笔');
 
+    // 关壳即摘（票 323 迁 uiModal）：第二笔保存前重新开弹窗
+    openAddDialog();
+    selectTag('日记');
+    const dt2 = document.getElementById('add-diary-datetime') as HTMLInputElement;
     // 搜索关键词不匹配：同样只落盘、不进列表
     state.data.selectedTags.clear();
     state.data.currentSearchKeyword = '绝不匹配的暗号XYZ';
-    dt.value = '2024-01-06 10:30';
+    dt2.value = '2024-01-06 10:30';
     await saveNewEntry();
     expect(state.data.currentFilteredEntries.some((e) => e.date === '2024-01-06')).toBe(false);
     expect(vault.files.get('我的/日记/2024-01-06.md')).toContain('# 随笔');

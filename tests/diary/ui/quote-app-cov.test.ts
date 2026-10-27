@@ -47,9 +47,9 @@ describe('写日记命令注册（quote）', () => {
     expect(writeCmds.length).toBe(1);
     expect(writeCmds[0].name).toBe('写日记');
 
-    // 回调 = openAddDialog：遮罩与弹窗显示
+    // 回调 = openAddDialog：壳挂载即见（票 323 迁 uiModal，无 display 切换）
     writeCmds[0].callback();
-    expect(document.getElementById('add-diary-mask')!.style.display).toBe('block');
-    expect(document.getElementById('add-diary-popup')!.style.display).toBe('block');
+    expect(document.getElementById('add-diary-mask')).toBeTruthy();
+    expect(document.getElementById('add-diary-popup')).toBeTruthy();
   });
 });

@@ -1,92 +1,175 @@
 /* ==================== 日记本域样式（src/diary/styles.css） ==================== */
 /* ==================== 日记本（diary-notebook 合并） ==================== */
-/* 添加日记弹窗样式 */
+/* ==================== 写日记弹窗（票 323：上游视觉移植，单弹窗纸张皮） ====================
+   弹窗壳（遮罩/82vh 限高/焦点圈闭/ESC）由 core uiModal（.bz-overlay-*）单源承载，
+   此处只补域内材料皮与布局：米黄纸张 + 墨字 + 金线标题 + 火漆红主钮 + 吸底栏 + 落纸动效编排。
+   弹窗挂在 document.body 上（不在 .bz-diary-scene 内），场景级 --bz-diary-* 变量取不到，
+   故材料色直接写死（上游同款例外：材料 ≠ 主题表面）。 */
+
+/* 遮罩毛玻璃 token（票 277 契约：diary×3 遮罩显式挂 blur token；壳基座同款，无视觉差异） */
 #add-diary-mask {
   backdrop-filter: blur(var(--bz-overlay-blur));
-    animation: fadeIn 0.2s ease-out;
 }
 
-.add-diary-popup {
-    animation: slideUp 0.3s ease-out;
+.bz-overlay-popup.bz-diary-add-popup {
+  background: linear-gradient(178deg, #f6efdd, #ece2c8);
+  color: #43392b;
+  border: 1px solid rgba(120, 92, 56, .42);
+  border-radius: 3px;
+  box-shadow: 0 18px 44px rgba(20, 12, 5, .55), inset 0 1px 0 rgba(255, 252, 240, .55);
+  overflow: hidden; /* 滚动收进 .bz-dialog-body，底栏吸底常驻 */
 }
 
-/* 写日记弹窗两步骨架（ADR-0109）：body 滚动、foot 吸底——
-   无论第一步类型按钮多到多高，按钮行始终贴在可视区底部，不会被挤出屏幕 */
-.bz-diary-add-popup {
-    overflow: hidden;
+/* 标题栏：墨字 + 一道金线（书页天头界线同款收窄） */
+.bz-diary-add-popup .bz-dialog-head {
+  border-bottom: 1px solid rgba(201, 162, 83, .45);
+  padding-bottom: 9px;
 }
 
-.bz-diary-add-body {
-    max-height: 52vh;
-    overflow-y: auto;
+.bz-diary-add-popup .bz-dialog-title {
+  color: #43392b;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: .06em;
 }
 
-.bz-diary-add-foot {
-    display: flex;
-    gap: 12px;
-    justify-content: flex-end;
-    padding-top: 16px;
+/* 弹窗体滚动区：壳限高 82vh 内表单自滚，吸底栏常驻 */
+.bz-diary-add-popup .bz-dialog-body {
+  overflow-y: auto;
+  min-height: 0;
+  color: #43392b;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.bz-diary-add-popup .bz-dialog-body::-webkit-scrollbar { display: none; }
+
+/* 表单纵向骨架：日期行 + 类型标签 + chips + 正文 + 吸底栏 */
+.bz-diary-form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
-.bz-diary-add-btn {
-    padding: 8px 16px;
-    border-radius: 6px;
-    border: none;
-    background: var(--interactive-accent);
-    color: var(--background-primary);
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
+.bz-diary-field-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: var(--bz-font-body, 14px);
+  color: #6b5f4c;
+  font-weight: 500;
 }
 
-.bz-diary-add-btn-ghost {
-    background: var(--background-secondary);
-    color: var(--text-normal);
+/* chips 滚动区：类型过多时自滚（吸底栏仍常驻） */
+.bz-diary-chip-scroll {
+  overflow-y: auto;
+  margin-bottom: 12px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.bz-diary-chip-scroll::-webkit-scrollbar { display: none; }
+
+/* 类型 chip 附加类：父标签 emoji 角标定位锚点（基础观感走 .diary-tag-selector-btn） */
+.bz-diary-tag-chip {
+  position: relative;
+}
+.bz-diary-tag-badge {
+  font-size: 12px;
+  margin-left: 4px;
+  position: absolute;
+  top: 0;
+  right: 0;
+  translate: 5px -5px;
 }
 
-/* 焦点环统一走 core p3 focus-visible 规则（src/core/styles.css）：此处移除旧 outline:none/box-shadow 环，
-   仅保留 border 高亮，避免输入聚焦双环 */
+/* 输入框 = 纸上一道压痕（日期手输框与正文框同皮） */
+.bz-diary-add-popup input,
+.bz-diary-add-popup textarea {
+  background: rgba(255, 253, 245, .72);
+  border: 1px solid rgba(120, 92, 56, .34);
+  border-radius: 2px;
+  color: #43392b;
+}
+.bz-diary-add-popup input::placeholder,
+.bz-diary-add-popup textarea::placeholder { color: #9a8d74; }
 #add-diary-datetime:focus,
-#add-diary-type:focus,
 #add-diary-content:focus {
-    border-color: var(--interactive-accent);
+  border-color: rgba(178, 58, 42, .55);
 }
 
-/* 写日记弹窗正文输入框：弹窗内直写正文，保存即落盘（不再保存后跳文件编辑） */
+/* 正文输入框布局（配色随上方纸皮） */
 .bz-diary-add-content {
-    width: 100%;
-    min-height: 88px;
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 6px;
-    font-size: 14px;
-    font-family: inherit;
-    line-height: 1.5;
-    box-sizing: border-box;
-    padding: 8px 12px;
-    margin-bottom: 20px;
-    resize: vertical;
-    background: var(--background-primary);
-    color: var(--text-normal);
+  width: 100%;
+  min-height: 88px;
+  font-size: 14px;
+  font-family: inherit;
+  line-height: 1.5;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  resize: vertical;
 }
 
-/* 移动端优化 */
+/* 按钮：纸签（次级）与火漆（主行动）两档 */
+.bz-diary-add-popup .bz-btn:not(.bz-btn--primary):not(.bz-btn--danger) {
+  background: linear-gradient(180deg, #fbf6e8, #efe6cf);
+  border: 1px solid rgba(120, 92, 56, .4);
+  color: #43392b;
+}
+.bz-diary-add-popup .bz-btn--primary {
+  background: linear-gradient(180deg, #b23a2a, #8d2b1d);
+  border: 1px solid rgba(90, 25, 15, .55);
+  color: #fdf3e2;
+}
+@media (hover: hover) {
+  .bz-diary-add-popup .bz-btn--primary:hover { background: linear-gradient(180deg, #c04433, #9c3122); }
+}
+
+/* 吸底栏：取消/添加右对齐、常驻可视区，内容从其下滚过 */
+.bz-diary-add-popup .bz-diary-add-foot {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(120, 92, 56, .28);
+  background: linear-gradient(178deg, #f6efdd, #ece2c8);
+}
+
+/* 软键盘避让（上游 D-UI16）：输入聚焦弹窗整体上移一档，失焦回落 */
+#add-diary-popup.keyboard-up {
+  transform: translateY(-20vh);
+}
+
+/* 放弃确认框同皮：桌角撕下来的一角纸 */
+.bz-flow-dialog.bz-diary-flow-dialog {
+  background: linear-gradient(178deg, #f6efdd, #ece2c8);
+  color: #43392b;
+  border: 1px solid rgba(120, 92, 56, .42);
+  border-radius: 3px;
+  box-shadow: 0 18px 44px rgba(20, 12, 5, .55), inset 0 1px 0 rgba(255, 252, 240, .55);
+}
+.bz-flow-dialog.bz-diary-flow-dialog h4 {
+  color: #43392b;
+  border-bottom: 1px solid rgba(201, 162, 83, .45);
+  padding-bottom: 9px;
+}
+.bz-flow-dialog.bz-diary-flow-dialog p { color: #6b5f4c; }
+
+/* 移动端（上游同款）：底栏纵排、按钮全宽；chips 触控 padding 提档 */
 @media (max-width: 768px) {
-    .add-diary-popup {
-        width: 85%;
-        padding: 20px;
-    }
-
-    /* 移动端写日记弹窗去纵向滚动条（滚动保持）：两步后滚动容器是 body（ADR-0109） */
-    #add-diary-popup,
-    .bz-diary-add-body {
-        scrollbar-width: none;
-        -ms-overflow-style: none;
-    }
-
-    #add-diary-popup::-webkit-scrollbar,
-    .bz-diary-add-body::-webkit-scrollbar {
-        display: none;
-    }
+  .bz-diary-add-popup .bz-diary-add-foot {
+    flex-direction: column-reverse;
+    gap: 8px;
+  }
+  .bz-diary-add-popup .bz-diary-add-foot .bz-btn {
+    width: 100%;
+    text-align: center;
+  }
+  .diary-tag-selector-btn {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
 }
 
 /* 删除按钮样式 */
