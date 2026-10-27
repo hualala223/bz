@@ -4,8 +4,8 @@
  * 缝：状态机纯函数（FSRS 先例）——无 DOM 依赖，node 环境。
  */
 import { describe, it, expect } from 'vitest';
-import { transition, recover, DEFAULT_DURATIONS, DEFAULT_OPTIONS, createInitialState } from '../../src/pomodoro/state';
-import type { PomodoroState } from '../../src/pomodoro/state';
+import { transition, recover, DEFAULT_DURATIONS, DEFAULT_OPTIONS, createInitialState, phaseDurationSec } from '../../src/pomodoro/state';
+import type { PomodoroState, PomodoroEvent } from '../../src/pomodoro/state';
 
 const NOW = 1_000_000_000; // 固定基准时间戳
 const D = DEFAULT_DURATIONS; // 25/5/15、N=4
@@ -390,5 +390,107 @@ describe('任务归属（增强包：待办「专注这个」联动）', () => {
     const r = transition(s, 'tick', NOW + WORK_MS + 1000 + SHORT_MS, D, O);
     expect((r.event as any).historyEntry).toBeUndefined();
     expect(r.state.task).toBeUndefined();
+  });
+});
+
+describe('护眼模式（票 323）：秒级远眺 + 无长休 + 恒自动流转', () => {
+  // 护眼注入形状：workMin=用眼分钟、shortBreakSec=远眺秒；预设/长休字段原值保留但不被消费
+  const D_EYE = { workMin: 20, shortBreakMin: 5, longBreakMin: 15, longBreakInterval: 4, shortBreakSec: 20 };
+  const O_EYE = { forceFocus: false, autoCycle: false, autoSkipBreak: false, eyeMode: true };
+  const EYE_WORK_MS = 20 * 60 * 1000;
+  const REST_MS = 20 * 1000;
+
+  it('DEFAULT_OPTIONS.eyeMode = false（默认关）', () => {
+    expect(DEFAULT_OPTIONS.eyeMode).toBe(false);
+  });
+
+  it('phaseDurationSec：short-break 有秒级注入用秒，无注入回退分钟（正常模式零影响）', () => {
+    expect(phaseDurationSec('short-break', D_EYE)).toBe(20);
+    expect(phaseDurationSec('short-break', D)).toBe(SHORT_MS / 1000);
+    expect(phaseDurationSec('focus', D_EYE)).toBe(20 * 60);
+  });
+
+  it('start：idle → 用眼运行中（endTime = now + 20 分钟）', () => {
+    const r = transition(createInitialState(), 'start', NOW, D_EYE, O_EYE);
+    expect(r.state.phase).toBe('focus');
+    expect(r.state.endTime).toBe(NOW + EYE_WORK_MS);
+    expect(r.event.type).toBe('started');
+  });
+
+  it('用眼自然完成 → 必进短休（远眺）且自动开始；不进长休、循环计数冻结', () => {
+    const running = transition(createInitialState(), 'start', NOW, D_EYE, O_EYE).state;
+    const r = transition(running, 'tick', NOW + EYE_WORK_MS, D_EYE, O_EYE);
+    expect(r.event.type).toBe('phase-completed');
+    const e = r.event as Extract<PomodoroEvent, { type: 'phase-completed' }>;
+    expect(e.completedPhase).toBe('focus');
+    expect(e.nextPhase).toBe('short-break');
+    expect(e.autoStarted).toBe(true);
+    expect(e.longBreak).toBe(false);
+    expect(e.historyEntry).toEqual({ ts: NOW + EYE_WORK_MS, duration: 20 * 60 }); // 用眼照常记史
+    expect(r.state.phase).toBe('short-break');
+    expect(r.state.endTime).toBe(NOW + EYE_WORK_MS + REST_MS); // 远眺 20 秒
+    expect(r.state.cycleFocusCount).toBe(0); // 冻结：护眼账与番茄循环账分开
+  });
+
+  it('连续 5 轮用眼都不进长休（N=4 在护眼模式下失效）', () => {
+    let s = transition(createInitialState(), 'start', NOW, D_EYE, O_EYE).state;
+    let t = NOW;
+    for (let i = 0; i < 5; i++) {
+      t += EYE_WORK_MS;
+      const done = transition(s, 'tick', t, D_EYE, O_EYE);
+      const e = done.event as Extract<PomodoroEvent, { type: 'phase-completed' }>;
+      expect(e.nextPhase).toBe('short-break');
+      expect(done.state.phase).toBe('short-break');
+      t += REST_MS;
+      s = transition(done.state, 'tick', t, D_EYE, O_EYE).state; // 远眺完自动回用眼
+      expect(s.phase).toBe('focus');
+    }
+  });
+
+  it('远眺自然完成 → 自动回用眼', () => {
+    const running = transition(createInitialState(), 'start', NOW, D_EYE, O_EYE).state;
+    const resting = transition(running, 'tick', NOW + EYE_WORK_MS, D_EYE, O_EYE).state;
+    const r = transition(resting, 'tick', NOW + EYE_WORK_MS + REST_MS, D_EYE, O_EYE);
+    const e = r.event as Extract<PomodoroEvent, { type: 'phase-completed' }>;
+    expect(e.completedPhase).toBe('short-break');
+    expect(e.nextPhase).toBe('focus');
+    expect(e.autoStarted).toBe(true);
+    expect(r.state.endTime).toBe(NOW + EYE_WORK_MS + REST_MS + EYE_WORK_MS);
+  });
+
+  it('skip：用眼 → 远眺待开始（秒级 remaining）；远眺 → 用眼待开始', () => {
+    const running = transition(createInitialState(), 'start', NOW, D_EYE, O_EYE).state;
+    const skipFocus = transition(running, 'skip', NOW + 60_000, D_EYE, O_EYE);
+    expect(skipFocus.state.phase).toBe('short-break');
+    expect(skipFocus.state.remaining).toBe(20); // 秒
+    expect(skipFocus.state.endTime).toBeNull(); // skip 不自动开始
+    const skipRest = transition(skipFocus.state, 'skip', NOW + 61_000, D_EYE, O_EYE);
+    expect(skipRest.state.phase).toBe('focus');
+    expect(skipRest.state.remaining).toBe(20 * 60);
+  });
+
+  it('护眼不计循环账：退出护眼后原循环进度原样续用（count=3 的存档再完成一轮 → 长休）', () => {
+    const seasoned = { ...createInitialState(), cycleFocusCount: 3 };
+    // 护眼期间完成一轮：count 不动
+    const eyeRun = transition(seasoned, 'start', NOW, D_EYE, O_EYE).state;
+    const eyeDone = transition(eyeRun, 'tick', NOW + EYE_WORK_MS, D_EYE, O_EYE);
+    expect(eyeDone.state.cycleFocusCount).toBe(3);
+    // 关护眼（正常时长/选项）：远眺先跳过回空闲专注，再正常完成一轮 → count 续到 4 → 长休并清零
+    const skipped = transition(eyeDone.state, 'skip', NOW + EYE_WORK_MS + REST_MS, D, O).state;
+    expect(skipped.phase).toBe('focus');
+    const normalRun = transition(skipped, 'start', NOW + EYE_WORK_MS + REST_MS + 1000, D, O).state;
+    const normalDone = transition(normalRun, 'tick', NOW + EYE_WORK_MS + REST_MS + 1000 + WORK_MS, D, O);
+    const e = normalDone.event as Extract<PomodoroEvent, { type: 'phase-completed' }>;
+    expect(e.longBreak).toBe(true);
+    expect(normalDone.state.phase).toBe('long-break');
+    expect(normalDone.state.cycleFocusCount).toBe(0);
+  });
+
+  it('forceFocus 正交：护眼用眼中 skip/重置仍被拦下', () => {
+    const O_LOCK = { ...O_EYE, forceFocus: true };
+    const running = transition(createInitialState(), 'start', NOW, D_EYE, O_LOCK).state;
+    const r = transition(running, 'skip', NOW + 60_000, D_EYE, O_LOCK);
+    expect(r.state).toBe(running); // 同引用 = 被拦
+    expect(r.event.type).toBe('none');
   });
 });

@@ -351,7 +351,7 @@ export default interface BzSettings {
   /** 第二大脑启用开关（l7A）：仅控制启动时自动加载（常驻监听/面板初始化），关闭后仍可从命令面板手动打开；原 flashEnabled，ticket 103 更名迁移 */
   secondBrainEnabled: boolean;
 
-  // ===== 🍅 番茄钟（9 项，ticket 31）=====
+  // ===== 🍅 番茄钟（12 项，ticket 31；票 323 增护眼三键）=====
   /** 预设方案 id（PRESETS 12 档：11 科学预设 + custom 自定义） */
   pomodoroPreset: string;
   /** 自定义工作时长（分钟） */
@@ -368,6 +368,12 @@ export default interface BzSettings {
   pomodoroAutoCycle: boolean;
   /** 自动跳过休息：连续工作模式 */
   pomodoroAutoSkipBreak: boolean;
+  /** 护眼模式（票 323）：用眼/远眺秒级自动循环，接管时长与流转、不进长休息，直到手动停止 */
+  pomodoroEyeMode: boolean;
+  /** 护眼模式用眼时长（分钟，默认 20） */
+  pomodoroEyeWorkMin: string;
+  /** 护眼模式远眺休息时长（秒，默认 20，5-120） */
+  pomodoroEyeRestSec: string;
   /** 声音提醒（默认开） */
   pomodoroSound: boolean;
   /** 倒数滴答：最后十秒每秒一记轻响（默认开，上游 2026-09-23 特效批） */
@@ -864,7 +870,7 @@ export const DEFAULT_SETTINGS: BzSettings = {
   aiAgentModel: 'deepseek-v4-flash',
   secondBrainEnabled: true,
 
-  // 番茄钟（9 项，ticket 31）
+  // 番茄钟（12 项，ticket 31；票 323 增护眼三键）
   pomodoroPreset: 'classic',
   pomodoroWorkMin: '25',
   pomodoroShortBreakMin: '5',
@@ -873,6 +879,9 @@ export const DEFAULT_SETTINGS: BzSettings = {
   pomodoroForceFocus: false,
   pomodoroAutoCycle: false,
   pomodoroAutoSkipBreak: false,
+  pomodoroEyeMode: false,
+  pomodoroEyeWorkMin: '20',
+  pomodoroEyeRestSec: '20',
   pomodoroSound: true,
   pomodoroTickSound: true,
   pomodoroVolume: 100,

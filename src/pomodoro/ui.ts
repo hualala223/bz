@@ -22,6 +22,8 @@
  * PE3 空闲态跳过禁用 / disposed 旗标统一卸载竞态护栏 / recoveryNotified 恢复通知单发（PA-2）/
  * issues/144 拍板执行项：专注中重置需确认——2026-09-24 改为**按钮内二次确认**（原走 core
  * flow-dialog，那层通用壳不吃番茄钟皮肤，风格化不一致）。
+ * 票 323 护眼模式：durations/options 接管（用眼分钟/远眺秒、恒自动流转、无长休）、阶段文案
+ * 「远眺/护眼」、循环内 toast 静默（声音保留）、圆点行隐藏、设置三键、命令 toggleEyeMode。
  */
 import type { App } from 'obsidian';
 import { setIcon } from 'obsidian';
@@ -127,7 +129,14 @@ function applySkinClass(): void {
   popup.classList.add(want);
 }
 
-/** 时长：按设置预设解析（T31）；自定义/非法值回退默认（经典 25/5/15、N=4） */
+/** 护眼模式开？（票 323）：文案/渲染分支统一读这里；计时接管落在 durations/options */
+function eyeMode(): boolean {
+  return !!tryGetSettings().pomodoroEyeMode;
+}
+
+/** 时长：按设置预设解析（T31）；自定义/非法值回退默认（经典 25/5/15、N=4）。
+ *  护眼模式（票 323）接管：workMin=用眼分钟、shortBreakSec=远眺秒（short-break 相位改秒级）；
+ *  预设/长休字段原值保留在形状里（不被消费，退出护眼即恢复原节奏）。 */
 function durations(): Durations {
   const s = tryGetSettings();
   const num = (v: string | undefined, def: number): number => {
@@ -135,35 +144,44 @@ function durations(): Durations {
     return Number.isFinite(n) && n > 0 ? n : def;
   };
   const preset = s.pomodoroPreset && s.pomodoroPreset !== CUSTOM_PRESET_ID ? PRESETS[s.pomodoroPreset] : null;
-  return {
+  const base: Durations = {
     workMin: preset ? preset.workMin : num(s.pomodoroWorkMin, 25),
     shortBreakMin: preset ? preset.shortBreakMin : num(s.pomodoroShortBreakMin, 5),
     longBreakMin: preset ? preset.longBreakMin : num(s.pomodoroLongBreakMin, 15),
     longBreakInterval: num(s.pomodoroLongBreakInterval, 4),
   };
+  if (!s.pomodoroEyeMode) return base;
+  const restSec = num(s.pomodoroEyeRestSec, 20);
+  return {
+    ...base,
+    workMin: num(s.pomodoroEyeWorkMin, 20),
+    shortBreakSec: Math.min(120, Math.max(5, restSec)),
+  };
 }
 
-/** 选项：读设置（四开关，缺省全关） */
+/** 选项：读设置（五开关，缺省全关；eyeMode 见票 323） */
 function options(): PomodoroOptions {
   const s = tryGetSettings();
   return {
     forceFocus: !!s.pomodoroForceFocus,
     autoCycle: !!s.pomodoroAutoCycle,
     autoSkipBreak: !!s.pomodoroAutoSkipBreak,
+    eyeMode: !!s.pomodoroEyeMode,
   };
 }
 
-/** 弹窗阶段短文案（专注不带 N/M——循环位置由圆点行表达；空闲配 lucide timer 图标，不用 emoji） */
+/** 弹窗阶段短文案（专注不带 N/M——循环位置由圆点行表达；空闲配 lucide timer 图标，不用 emoji）。
+ *  护眼模式（票 323）：休息相位叫「远眺」（行动提示），空闲叫「护眼」；正常模式文案不变。 */
 function phaseLabel(phase: Phase): string {
   if (phase === 'focus') return '专注';
-  if (phase === 'short-break') return '短休息';
+  if (phase === 'short-break') return eyeMode() ? '远眺' : '短休息';
   if (phase === 'long-break') return '长休息';
-  return '番茄钟';
+  return eyeMode() ? '护眼' : '番茄钟';
 }
 
-/** 通知/恢复用阶段文案（带循环位置，如「专注 2/4」） */
+/** 通知/恢复用阶段文案（带循环位置，如「专注 2/4」；护眼模式无循环位置语义，不带 N/M） */
 function phaseText(phase: Phase, count: number, d: Durations): string {
-  if (phase === 'focus') return `专注 ${count + 1}/${d.longBreakInterval}`;
+  if (phase === 'focus') return eyeMode() ? '专注' : `专注 ${count + 1}/${d.longBreakInterval}`;
   return phaseLabel(phase);
 }
 
@@ -186,13 +204,15 @@ function playCeremonySound(): void {
   playSound('ceremony', pomodoroVolume());
 }
 
-/** 阶段开始（手动开始/继续）：toast + 提示音 */
+/** 阶段开始（手动开始/继续）：toast + 提示音（护眼模式短休为秒级远眺，文案按秒说） */
 function notifyPhaseStarted(phase: Phase): void {
   const d = durations();
   if (phase === 'focus') {
     notice('专注开始', 'success');
   } else if (phase === 'long-break') {
     notice(`长休息开始：${d.longBreakMin} 分钟`, 'success');
+  } else if (d.shortBreakSec != null) {
+    notice(`远眺开始：${d.shortBreakSec} 秒`, 'success');
   } else {
     notice(`休息开始：${d.shortBreakMin} 分钟`, 'success');
   }
@@ -227,10 +247,13 @@ function forceFocusHint(paused = false): string {
  */
 function notifyPhaseComplete(e: Extract<PomodoroEvent, { type: 'phase-completed' }>): void {
   const d = durations();
-  // 收工钟：专注完成才敲（休息结束不敲，见 playCeremonySound 注）
+  // 收工钟：专注完成才敲（休息完成不敲，见 playCeremonySound 注）
   if (e.completedPhase === 'focus') playCeremonySound();
   // 声音 = 新阶段开始提示（听声即知状态，无需打开弹窗）
   playPhaseSound(e.nextPhase);
+  // 护眼循环（票 323）：循环内阶段自然流转不弹 toast——声音即提示（听声知该远眺/该回用眼），
+  // 防每小时 6 条刷屏；手动开始/停止/暂停/恢复走各自出口照常提示
+  if (eyeMode()) return;
   // 自动流转（autoCycle/autoSkipBreak）：下一阶段已在计时，toast 只报完成事实
   if (e.autoStarted) {
     if (e.completedPhase === 'focus') {
@@ -512,10 +535,16 @@ function render(): void {
   );
 }
 
-/** 本轮循环位置：N 个 6px 方点，已完成填 accent 色（替代旧「专注 2/4」文字小字） */
+/** 本轮循环位置：N 个 6px 方点，已完成填 accent 色（替代旧「专注 2/4」文字小字）。
+ *  护眼模式（票 323）无长休语义 → 圆点行整行隐藏（正常模式不变）。 */
 function renderCycleDots(d: Durations): void {
   const cycleEl = document.getElementById('pomodoro-cycle');
   if (!cycleEl) return;
+  if (eyeMode()) {
+    if (!cycleEl.hidden) cycleEl.hidden = true; // 深审 PE1：同值不重写
+    return;
+  }
+  if (cycleEl.hidden) cycleEl.hidden = false;
   const total = Math.max(1, d.longBreakInterval);
   if (cycleEl.childElementCount !== total) {
     cycleEl.innerHTML = '';
@@ -798,6 +827,29 @@ export function pomodoroSettingsSchema(): SettingsSchema {
             onChange: () => render(),
           },
           { type: 'number', name: '长休息间隔', desc: '每隔几个专注进入一次长休息', binding: numStrBinding('pomodoroLongBreakInterval', 4), min: 1, max: 20, step: 1, onChange: () => render() },
+          // 护眼两键（票 323）：仅护眼模式开启时显示——秒级远眺是模式内时长，与预设体系并行
+          {
+            type: 'number',
+            name: '护眼用眼分钟数',
+            desc: '护眼模式的用眼阶段分钟数，默认 20 分钟',
+            binding: numStrBinding('pomodoroEyeWorkMin', 20),
+            min: 1,
+            max: 120,
+            step: 1,
+            visibleWhen: (s) => !!s.pomodoroEyeMode,
+            onChange: () => render(),
+          },
+          {
+            type: 'number',
+            name: '护眼休息秒数',
+            desc: '护眼模式的远眺休息秒数',
+            binding: numStrBinding('pomodoroEyeRestSec', 20),
+            min: 5,
+            max: 120,
+            step: 5,
+            visibleWhen: (s) => !!s.pomodoroEyeMode,
+            onChange: () => render(),
+          },
         ],
       },
       {
@@ -807,6 +859,9 @@ export function pomodoroSettingsSchema(): SettingsSchema {
           { type: 'toggle', name: '强制专注模式', desc: '专注进行中无法暂停跳过或重置', binding: { key: 'pomodoroForceFocus' }, onChange: () => render() },
           { type: 'toggle', name: '自动循环', desc: '阶段结束后自动开始下一阶段', binding: { key: 'pomodoroAutoCycle' }, onChange: () => render() },
           { type: 'toggle', name: '自动跳过休息', desc: '专注结束后直接进入下一个专注', binding: { key: 'pomodoroAutoSkipBreak' }, onChange: () => render() },
+          // 护眼模式（票 323）：开启即接管时长（用眼分钟/远眺秒）与流转（恒自动、无长休），
+          // 蕴含自动循环不需另开；强制专注正交照常生效；设置键为唯一真源，命令 bz-pomodoro-eye-toggle 是快捷面
+          { type: 'toggle', name: '护眼模式', desc: '用眼与远眺自动循环，不进长休息，直到手动停止', binding: { key: 'pomodoroEyeMode' }, onChange: () => render() },
           { type: 'toggle', name: '声音提醒', desc: '阶段切换时播放提示音', binding: soundToggle, onChange: () => render() },
           { type: 'toggle', name: '倒数滴答', desc: '最后十秒每秒一记轻响，提醒即将结束', binding: tickToggle, onChange: () => render() },
           // 提示音音量 + 「试听」：行内附加按钮（actions，渲染器统一实现——custom 插槽已退役）
@@ -1159,6 +1214,53 @@ export async function togglePause(app: App): Promise<void> {
   const before = state;
   applyAction(state.paused ? 'resume' : 'pause');
   if (state === before) notice(forceFocusHint(), 'warning');
+}
+
+/**
+ * 护眼模式开关（命令 bz-pomodoro-eye-toggle，票 323）：设置键 pomodoroEyeMode 为唯一真源，命令是快捷面。
+ * - 切到开：空闲（无计时、未暂停）→ 直接开始第一轮用眼（一键进护眼节奏）；
+ *   已有会话（计时/暂停）→ 只切开关不重启会话，提示下一阶段起按护眼节奏（运行中改时长由进度环钳制兜底）。
+ * - 切到关：进行中会话收敛回空闲——休息相位先静默跳过（skip 不记历史不弹 toast），
+ *   用眼相位走重置（不记历史）；forceFocus 锁重置时提示不改状态（与 toggleFocus 同款守卫）。
+ */
+export async function toggleEyeMode(app: App): Promise<void> {
+  await ensurePomodoro(app);
+  if (!loaded) return; // 深审 PF5：加载失败（ensurePomodoro 已报错）→ 不在空内存态上继续
+  const s = getSettings();
+  const turningOn = !s.pomodoroEyeMode;
+  s.pomodoroEyeMode = turningOn;
+  await saveSettings();
+  if (turningOn) {
+    notice('护眼模式已开启');
+    if (state.endTime === null && !state.paused) {
+      applyAction('start'); // 空闲 → 直接开始第一轮用眼（内含通知/落盘/tick 生命周期/渲染）
+    } else {
+      render(); // 已有会话（计时/暂停）→ 只切模式，面板文案/圆点行随新模式刷新
+      notice('当前会话继续，下一阶段起按护眼节奏', 'warning');
+    }
+    return;
+  }
+  // 切到关：进行中会话收敛（用眼走重置；休息相位先静默跳过落回空闲专注）
+  if (state.endTime !== null || state.paused) {
+    if (state.phase === 'focus') {
+      const before = state;
+      applyAction('reset'); // 内含渲染；forceFocus 拦下时返回同引用
+      if (state === before) {
+        notice(forceFocusHint(), 'warning');
+        render(); // 模式标签已变（护眼/番茄钟空闲文案），补一次刷新
+        return;
+      }
+    } else {
+      state = transition(state, 'skip', Date.now(), durations(), options()).state;
+      void save();
+      ensureTick(); // skip 后 endTime 落空，tick 轮询该停
+      render();
+    }
+    notice('护眼模式已关闭，计时已停止');
+  } else {
+    render(); // 空闲切换：阶段文案随模式换（护眼/番茄钟）
+    notice('护眼模式已关闭');
+  }
 }
 
 /** 卸载清理（T32 接入 onunload；测试重置） */

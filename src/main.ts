@@ -51,7 +51,7 @@ import {
   rebuildSecondBrainIndex,
   unloadSecondBrain,
 } from './secondbrain';
-import { openPomodoro, unloadPomodoro, ensurePomodoro, toggleFocus, skipBreak, togglePause } from './pomodoro';
+import { openPomodoro, unloadPomodoro, ensurePomodoro, toggleFocus, skipBreak, togglePause, toggleEyeMode } from './pomodoro';
 import { mountPomodoroStatusBar, unmountPomodoroStatusBar } from './pomodoro/statusbar';
 // 知识盒（knowledge 域，ADR-0072 自 bili-downloader 迁出；网页版已移除，见 tools/bili-downloader）
 import { openKnowledgePanel, openKnowledgeAddTask, openTermNote, unloadKnowledge } from './knowledge';
@@ -213,6 +213,8 @@ const COMMANDS: { id: string; name: string; icon: string; callback: () => void; 
   { id: 'bz-pomodoro-focus-toggle', name: '开始专注', icon: 'timer', callback: () => toggleFocus(getApp()) },
   { id: 'bz-pomodoro-skip', name: '跳过休息', icon: 'skip-forward', callback: () => skipBreak(getApp()) },
   { id: 'bz-pomodoro-pause', name: '暂停/继续专注', icon: 'pause', callback: () => togglePause(getApp()) },
+  // 护眼模式开关（票 323）：切开+空闲直接开始第一轮用眼；设置键为唯一真源，此命令是快捷面
+  { id: 'bz-pomodoro-eye-toggle', name: '开始/停止护眼模式', icon: 'eye', callback: () => toggleEyeMode(getApp()) },
   // 知识盒（knowledge 域：主面板=文献笔记列表 + 视频录入/文字录入/设置；ADR-0072 迁出、ADR-0071 AI 回迁）
   { id: 'bz-knowledge-open', name: '知识盒', icon: 'list-video', callback: () => openKnowledgePanel(getApp()) },
   { id: 'bz-knowledge-note-term', name: '术语生成文献笔记', icon: 'book-type', callback: () => openTermNote(getApp()) },

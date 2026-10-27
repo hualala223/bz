@@ -7,6 +7,9 @@
  * - skip 不记历史、不计循环计数
  * - tick 超时 = 阶段完成（自然完成的专注记 history）
  * - autoCycle：完成自动流转并立即开始下一阶段；autoSkipBreak：专注后直接开始下一专注（自动）
+ * - eyeMode（票 323 护眼模式）：无长休、恒自动流转（远眺绝不跳过）——用眼/远眺无限循环直到手动停；
+ *   循环计数冻结不动（护眼节奏与番茄循环两套账，退出护眼后原循环进度原样续用）；
+ *   秒级远眺由 Durations.shortBreakSec 承载（short-break 相位时长改用秒）
  */
 export type Phase = 'idle' | 'focus' | 'short-break' | 'long-break';
 export type PomodoroAction = 'start' | 'pause' | 'resume' | 'reset' | 'skip' | 'tick';
@@ -36,12 +39,16 @@ export interface Durations {
   longBreakMin: number;
   /** 几个专注后进长休息（N，默认 4） */
   longBreakInterval: number;
+  /** 短休息秒级时长（护眼模式注入，票 323）：存在时 short-break 相位改用秒（无视 shortBreakMin），运行时选项不落盘 */
+  shortBreakSec?: number;
 }
 
 export interface PomodoroOptions {
   forceFocus: boolean;
   autoCycle: boolean;
   autoSkipBreak: boolean;
+  /** 护眼模式（票 323）：无长休、恒自动流转、循环计数冻结；时长接管在 Durations（workMin=用眼分钟、shortBreakSec=远眺秒） */
+  eyeMode: boolean;
 }
 
 export interface HistoryEntry {
@@ -90,7 +97,7 @@ export interface TransitionResult {
 
 /** 默认时长（经典 25/5/15、N=4）——settings 注入由 T31 接入 */
 export const DEFAULT_DURATIONS: Durations = { workMin: 25, shortBreakMin: 5, longBreakMin: 15, longBreakInterval: 4 };
-export const DEFAULT_OPTIONS: PomodoroOptions = { forceFocus: false, autoCycle: false, autoSkipBreak: false };
+export const DEFAULT_OPTIONS: PomodoroOptions = { forceFocus: false, autoCycle: false, autoSkipBreak: false, eyeMode: false };
 
 export function createInitialState(): PomodoroState {
   return { phase: 'idle', endTime: null, remaining: 0, paused: false, cycleFocusCount: 0 };
@@ -112,9 +119,9 @@ function activePhase(phase: Phase): Phase {
   return phase === 'idle' ? 'focus' : phase;
 }
 
-/** 阶段满时长（秒）——UI 进度条/默认显示共用 */
+/** 阶段满时长（秒）——UI 进度条/默认显示共用；短休存在秒级注入（护眼远眺）时以秒为准 */
 export function phaseDurationSec(phase: Phase, d: Durations): number {
-  if (phase === 'short-break') return d.shortBreakMin * 60;
+  if (phase === 'short-break') return d.shortBreakSec ?? d.shortBreakMin * 60;
   if (phase === 'long-break') return d.longBreakMin * 60;
   return d.workMin * 60;
 }
@@ -140,9 +147,12 @@ function completePhase(state: PomodoroState, now: number, d: Durations, o: Pomod
   let historyEntry: HistoryEntry | undefined;
   let longBreak = false;
   if (isFocus) {
-    count += 1;
-    longBreak = count >= d.longBreakInterval;
-    if (longBreak) count = 0;
+    // 护眼模式循环计数冻结：护眼节奏与番茄循环两套账，退出护眼后原循环进度原样续用
+    if (!o.eyeMode) {
+      count += 1;
+      longBreak = count >= d.longBreakInterval;
+      if (longBreak) count = 0;
+    }
     // duration = 活跃专注时长：暂停期间时间不流逝（endTime 顺延），故恒等于名义工作时长
     // 归属：备忘录「专注这个」联动时把任务标题写进历史（统计口径扩展预留）
     historyEntry = { ts: now, duration: d.workMin * 60, ...(state.task ? { task: state.task } : {}) };
@@ -151,7 +161,10 @@ function completePhase(state: PomodoroState, now: number, d: Durations, o: Pomod
   let next: Phase;
   let autoStarted = false;
   if (isFocus) {
-    if (o.autoSkipBreak) {
+    if (o.eyeMode) {
+      next = 'short-break'; // 护眼：用眼后必进远眺（秒级），恒自动
+      autoStarted = true;
+    } else if (o.autoSkipBreak) {
       next = 'focus'; // 连续工作模式：直接开始下一专注（自带自动开始）
       autoStarted = true;
     } else {
@@ -160,7 +173,7 @@ function completePhase(state: PomodoroState, now: number, d: Durations, o: Pomod
     }
   } else {
     next = 'focus';
-    autoStarted = o.autoCycle;
+    autoStarted = o.autoCycle || o.eyeMode; // 护眼：远眺完自动回用眼
   }
   // 专注完成即归属落账，任务标题不流入下一阶段（其余阶段完成时本就无 task）
   const { task: _settled, ...rest } = state;
@@ -221,7 +234,8 @@ export function transition(state: PomodoroState, action: PomodoroAction, now: nu
     if (o.forceFocus && state.phase === 'focus') return { state, event: { type: 'none' } };
     const phase = activePhase(state.phase);
     let next: Phase;
-    if (phase === 'focus') next = o.autoSkipBreak ? 'focus' : breakPhase(state.cycleFocusCount, d);
+    // 护眼模式无长休：跳过用眼必落远眺（不计入循环账，count 不动）
+    if (phase === 'focus') next = o.eyeMode ? 'short-break' : o.autoSkipBreak ? 'focus' : breakPhase(state.cycleFocusCount, d);
     else next = 'focus';
     // 跳过不记历史 → 归属机会随之作废，任务标题一并清除
     const { task: _dropped, ...rest } = state;

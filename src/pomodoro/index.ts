@@ -3,8 +3,9 @@
  * 命令 bz-pomodoro-open 在 main.ts COMMANDS 表注册（域内不重复 addCommand）。
  * ticket 63：移除读书番茄钟与专注目标（导出面同步清理）。
  * 增强包：startFocusForTask——备忘录「专注这个」联动入口（memo 域动态 import，ADR-0002 延迟解析）。
+ * 票 323：toggleEyeMode——护眼模式开关（命令 bz-pomodoro-eye-toggle 快捷面）。
  */
 export {
   openPomodoro, unloadPomodoro, ensurePomodoro, startFocusForTask, toggleFocus,
-  isFocusing, menuPhase, skipBreak, togglePause,
+  isFocusing, menuPhase, skipBreak, togglePause, toggleEyeMode,
 } from './ui';
