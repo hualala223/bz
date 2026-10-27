@@ -4017,6 +4017,9 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
   left: 50% !important;
   top: 50% !important;
   translate: -50% -50% !important;
+  /* core/styles.css:565 另有一份老版 .bz-overlay-popup{fixed+50%+transform 居中}，
+     与本皮的 translate 叠加 = 双份位移（诊断实测 transform=matrix(-200,-296)），此处废掉 */
+  transform: none !important;
   margin: 0 !important;
   width: min(400px, calc(100vw - 32px));
   background: linear-gradient(178deg, #f6efdd, #ece2c8);
@@ -4183,6 +4186,30 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
   .diary-tag-selector-btn {
     padding: 8px 14px;
     font-size: 13px;
+  }
+  /* chips 限高（修订七）：ID 特异性压过老版 .diary-tag-selector-buttons{max-height:none!important}，
+     手机端类型列表不再全量平铺把抽屉撑高 */
+  #add-diary-type-container {
+    max-height: 36vh !important;
+    overflow-y: auto !important;
+    scrollbar-width: thin;
+  }
+  #add-diary-type-container::-webkit-scrollbar { display: block; width: 6px; }
+  #add-diary-type-container::-webkit-scrollbar-thumb { background: rgba(120, 92, 56, .35); border-radius: 3px; }
+  /* 手机端恢复可见细滚动条（用户反馈「没有滚动条」）：弹窗体与正文框滚动可见可拖 */
+  .bz-diary-add-popup .bz-dialog-body,
+  .bz-diary-add-content {
+    scrollbar-width: thin;
+  }
+  .bz-diary-add-popup .bz-dialog-body::-webkit-scrollbar,
+  .bz-diary-add-content::-webkit-scrollbar {
+    display: block;
+    width: 6px;
+  }
+  .bz-diary-add-popup .bz-dialog-body::-webkit-scrollbar-thumb,
+  .bz-diary-add-content::-webkit-scrollbar-thumb {
+    background: rgba(120, 92, 56, .35);
+    border-radius: 3px;
   }
 }
 
