@@ -301,12 +301,12 @@ describe('弹窗守卫与搜索命中分支', () => {
     await saveNewEntry();
   });
 
-  it('写日记弹窗自带类型 chips 与「添加」按钮可用（未选类型提示）', async () => {
+  it('写日记弹窗自带类型 chips 与第二步「确认」按钮可用（未选类型提示）', async () => {
     openAddDialog();
-    // 票 323 单弹窗：吸底栏「取消/添加」，主钮 id 沿用 add-diary-save
+    // 票 323 两步制回归：第二步吸底「上一步/确认」，确认钮 id 沿用 add-diary-save
     const saveBtn = document.getElementById('add-diary-save') as HTMLElement;
     expect(saveBtn).toBeTruthy();
-    expect(saveBtn.textContent).toContain('添加');
+    expect(saveBtn.textContent).toContain('确认');
     saveBtn.click();
     await new Promise((r) => setTimeout(r, 10));
     expect(hasNotice(/至少选择一个类型|至少选择一个标签/)).toBe(true);

@@ -2,17 +2,17 @@
 
 > 进度同步总表（AGENTS.md）。每票一节，状态：计划中 → 进行中 → 门禁 → 已交付。
 
-## 写日记弹窗上游视觉移植：单弹窗纸张皮 + 落纸动效（票 323 / ADR-0121 修订）— 2026-10-27
+## 写日记弹窗上游视觉移植：两步流程保留 + 纸张皮 + 落纸动效（票 323 / ADR-0121 修订）— 2026-10-27
 
-**状态：已交付**（用户解冻日记写界面换肤：今晨被 Syncthing 覆盖为上游 1.33.x 后用户实测其界面优于本地两步弹窗、唯落点错——移植界面、落盘保持 ADR-0114）。
+**状态：已交付**（两轮澄清敲定「样式换上游、流程保两步」：第一步选类型点「添加」→ 第二步正文弹框 → 「确认」落 `# 随笔` 正确位置；落盘保持 ADR-0114）。
 
-- [x] `src/diary/ui/dialogs.ts`：写日记弹窗迁 core uiModal 壳（head 标题行 + 82vh 限高 + 遮罩/ESC/requestClose 全走壳）；两步制（ADR-0109）退役，改单步表单「日期时间 + 类型 chips + 正文」+ 吸底「取消/添加」栏；chips 按使用频次前置（`diary:entry-added` 喂频次表，`resetTagUsageStats` 测试钩子随上游移植）；放弃确认走 `confirmDiscard` 域皮 `bz-diary-flow-dialog`；防连点（「保存中…」禁用）；Ctrl/⌘+Enter 提交（bindFormSubmit）；软键盘避让 `.keyboard-up`（上游 D-UI16）
+- [x] `src/diary/ui/dialogs.ts`：写日记弹窗迁 core uiModal 壳（head 标题行 + 82vh 限高 + 遮罩/ESC/requestClose 全走壳）；**两步制（ADR-0109）保留**——第一步「日期时间 + 类型 chips」点「添加」→ 第二步「正文」点「确认」（视图 `add-diary-step-type` / `add-diary-step-content` 同挂一壳二选一，第一步 DOM 常驻是保存数据源，草稿/上一步语义原样）；chips 按使用频次前置（`diary:entry-added` 喂频次表，`resetTagUsageStats` 测试钩子随上游移植）；放弃确认走 `confirmDiscard` 域皮 `bz-diary-flow-dialog`；防连点（「保存中…」禁用）；Ctrl/⌘+Enter 提交（bindFormSubmit）；软键盘避让 `.keyboard-up`（上游 D-UI16）
 - [x] `src/diary/ui/motion.ts`（新）：上游 motion 编排移植——字段落纸接力 + 章签一枚枚摆上（纯 WAAPI，jsdom/无 WAAPI 直达终态，测试零感知）
 - [x] `src/diary/styles.css`：纸张皮（米黄纸渐变 + 墨字 + 金线标题 + 火漆红主钮 + 撕页确认框同皮；材料色写死，同上游「材料 ≠ 主题表面」例外）；票 277 遮罩 token 契约（#add-diary-mask 显式挂 blur token）保留
-- [x] 冻结面全保留（ADR-0121 修订条款）：`add-diary-mask`/`add-diary-popup` id、`AddDialogPreset` 签名与触动点入口落点路由、`saveNewEntry` 数据源契约、落盘链路 `writeDiaryEntry`（`# 随笔`）零改动、通知文案、`diary:entry-added` 载荷、diaryJumpToEditAfterSave
+- [x] 冻结面全保留（ADR-0121 修订条款）：`add-diary-mask`/`add-diary-popup` id、`AddDialogPreset` 签名与触动点入口落点路由（预选预填直进第二步）、`saveNewEntry` 数据源契约、落盘链路 `writeDiaryEntry`（`# 随笔`）零改动、通知文案、`diary:entry-added` 载荷、diaryJumpToEditAfterSave 门控
 - [x] `src/diary/ui/panel.ts`：ESC 层 add-diary 分支退役（uiModal 壳自带 'bz-modal' 层接管，后开先关，脏表单走 requestClose 分流）
-- [x] 测试：`add-dialog-steps.test.ts` 退役 → `add-dialog-modal.test.ts` 9 例（建壳/落盘/preset 预选预填/脏拦截两态/防连点按钮态/Ctrl+Enter/键盘抬升/频次前置）；display 可见性断言迁「挂载即见/关即摘」口径（dialogs-cov / coverage-extra / coverage-extra2 / panel / panel-cov / quote-app-cov / add-dialog-content 七文件）；落盘类用例（add-dialog-content 落点冻结、dialogs-cov 保存分支、daily-flow 触动点、events 载荷）存活
-- [x] 门禁：tsc 0 错；vitest 全量 356 文件 5455 用例全绿（BZ_TEST_MAX_WORKERS=4；未限流时 encrypt/review/people 三个与 diary 零模块交集的域曾现 50ms 时序抖动——失败文件每轮不同、单跑全过，判环境争抢非代码问题）
+- [x] 测试：`add-dialog-steps.test.ts` → `add-dialog-modal.test.ts` 12 例（建壳第一步/两步导航含冻结文案拦截/上一步草稿/落盘落 `# 随笔`/preset 预选预填直进第二步/脏拦截两态/防连点按钮态/Ctrl+Enter/键盘抬升/频次前置）；display 可见性断言迁「挂载即见/关即摘」口径（dialogs-cov / coverage-extra / coverage-extra2 / panel / panel-cov / quote-app-cov / add-dialog-content 七文件）；落盘类用例（add-dialog-content 落点冻结、dialogs-cov 保存分支、daily-flow 触动点、events 载荷）存活
+- [x] 门禁：tsc 0 错；vitest 全量 356 文件 5457 用例全绿（BZ_TEST_MAX_WORKERS=4；未限流时 encrypt/review/people 三个与 diary 零模块交集的域曾现 50ms 时序抖动——失败文件每轮不同、单跑全过，判环境争抢非代码问题）
 
 ## 文件列表「已入脑」角标：向量化状态可视（票 305 / ADR-0133）— 2026-09-25
 

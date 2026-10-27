@@ -32,6 +32,18 @@ function popup(): HTMLElement {
   return document.getElementById('add-diary-popup')!;
 }
 
+function typeView(): HTMLElement {
+  return document.getElementById('add-diary-step-type')!;
+}
+
+function contentView(): HTMLElement {
+  return document.getElementById('add-diary-step-content')!;
+}
+
+function step(): 1 | 2 {
+  return contentView().style.display !== 'none' ? 2 : 1;
+}
+
 function contentInput(): HTMLTextAreaElement {
   return document.getElementById('add-diary-content') as HTMLTextAreaElement;
 }
@@ -71,7 +83,7 @@ beforeEach(() => {
 });
 
 describe('写日记单弹窗（票 323 上游视觉移植）', () => {
-  it('打开即建壳：遮罩/弹窗挂载，标题「写日记」，表单三件套与吸底栏在位', () => {
+  it('打开停在第一步（类型页）：标题「写日记」，表单与吸底「取消/添加」在位', () => {
     setup();
     createAddDialog(); // 兼容空操作（panel init 契约）
     expect(mask()).toBeNull();
@@ -80,12 +92,38 @@ describe('写日记单弹窗（票 323 上游视觉移植）', () => {
     expect(popup().querySelector('.bz-dialog-title')!.textContent).toBe('写日记');
     expect(document.getElementById('add-diary-datetime')).toBeTruthy();
     expect(document.getElementById('add-diary-type-container')).toBeTruthy();
-    expect(contentInput().tagName).toBe('TEXTAREA');
-    const foot = popup().querySelector('.bz-diary-add-foot')!;
+    expect(step()).toBe(1);
+    const foot = typeView().querySelector('.bz-diary-add-foot')!;
     expect(foot).toBeTruthy();
     const btnTexts = [...foot.querySelectorAll('button')].map((b) => b.textContent);
     expect(btnTexts.some((t) => t!.includes('取消'))).toBe(true);
     expect(btnTexts.some((t) => t!.includes('添加'))).toBe(true);
+  });
+
+  it('两步导航：未选类型点「添加」被拦（冻结文案）；选类型后进第二步正文页', () => {
+    setup();
+    openAddDialog();
+    (document.getElementById('add-diary-next') as HTMLElement).click();
+    expect(step()).toBe(1);
+    expect(hasNotice('请至少选择一个类型')).toBe(true);
+    chip('日记').click();
+    (document.getElementById('add-diary-next') as HTMLElement).click();
+    expect(step()).toBe(2);
+    // 第一步隐藏但 DOM 保留（datetime / 类型容器仍是保存数据源）
+    expect(document.getElementById('add-diary-datetime')).toBeTruthy();
+    expect(document.getElementById('add-diary-type-container')).toBeTruthy();
+  });
+
+  it('上一步保留草稿，再「添加」正文原样回来', () => {
+    setup();
+    openAddDialog();
+    chip('日记').click();
+    (document.getElementById('add-diary-next') as HTMLElement).click();
+    contentInput().value = '写了一半的正文';
+    (document.getElementById('add-diary-back') as HTMLElement).click();
+    expect(step()).toBe(1);
+    (document.getElementById('add-diary-next') as HTMLElement).click();
+    expect(contentInput().value).toBe('写了一半的正文');
   });
 
   it('默认不预选标签；保存落 `# 随笔`，保存后壳摘除', async () => {
@@ -104,12 +142,13 @@ describe('写日记单弹窗（票 323 上游视觉移植）', () => {
     expect(mask()).toBeNull();
   });
 
-  it('preset（每日触动点记录）：预选「触动点」、预填模板、不误选其他标签', () => {
+  it('preset（每日触动点记录）：预选「触动点」、预填模板、直进第二步', () => {
     setup();
     openAddDialog({ tags: ['触动点'], content: REVIEW_TEMPLATE, section: REVIEW_HEADING });
     expect(chip('触动点').classList.contains('diary-active')).toBe(true);
     expect(contentInput().value).toBe(REVIEW_TEMPLATE);
     expect(document.querySelectorAll('#add-diary-type-container .diary-active').length).toBe(1);
+    expect(step()).toBe(2);
   });
 
   it('脏拦截：有输入点遮罩 → 放弃确认弹层（域皮）；点「放弃」才关壳', async () => {
