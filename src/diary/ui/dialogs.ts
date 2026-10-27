@@ -667,27 +667,63 @@ function setAddSavingUi(saving: boolean): void {
 let detachKeyboardLift: (() => void) | null = null;
 
 /**
- * 软键盘避让（上游 D-UI16 + 票 323 修订五，仅移动端）：
- * - 挂载全局 --bz-vvh（bindMobileViewport 幂等；此前全仓无人调用，变量恒空 → CSS 抬底恒 0，键盘挡抽屉）；
- * - 抽屉底边按可视视口实时抬升：遮挡高度 = 布局视口高 − 可视视口高 − 视口纵向偏移，
- *   内联 setProperty(important) 压过样式表同名 !important 规则；
- * - 桌面端不挂（无软键盘）。
+ * 软键盘避让（上游 D-UI16 + 票 323 修订五/九，仅移动端）：
+ * - 挂载全局 --bz-vvh（bindMobileViewport 幂等）；
+ * - 常规路线：遮挡高度 = 布局视口高 − 可视视口高 − 视口偏移（resize 模式 / 标准内核）；
+ * - 兜底路线（修订九）：部分国产内核键盘弹出时可视视口不收缩（平移模式），遮挡恒算 0 →
+ *   正文框聚焦期间抽屉强制抬升 40% 视口高度（实测讯飞带工具栏键盘 ≈39% 视口），失焦回落；
+ * - 每次抬升量变化追加诊断文件（书库/bz弹窗诊断.txt），修毕随整段移除。
  */
 function wireKeyboardLift(popup: HTMLElement): void {
   if (!isMobileEnv()) return;
   bindMobileViewport();
   const vv = window.visualViewport;
-  if (!vv) return;
-  const lift = () => {
-    const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-    popup.style.setProperty('bottom', `${Math.round(overlap)}px`, 'important');
+  let focused = false;
+  let lastLogged = -1;
+  const writeDiag = (bottom: number) => {
+    if (bottom === lastLogged) return;
+    lastLogged = bottom;
+    try {
+      void getApp().vault.adapter.append?.(
+        '书库/bz弹窗诊断.txt',
+        `[${new Date().toLocaleString()}] 抬底 ${bottom}px（聚焦=${focused} 可视高=${Math.round(window.visualViewport?.height ?? 0)} 内高=${window.innerHeight}）\n`
+      );
+    } catch {
+      /* 诊断失败不影响功能 */
+    }
   };
-  lift();
-  vv.addEventListener('resize', lift);
-  vv.addEventListener('scroll', lift);
+  const lift = () => {
+    const overlap = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+    const fallback = focused ? Math.round(window.innerHeight * 0.4) : 0;
+    const bottom = Math.max(overlap, fallback);
+    popup.style.setProperty('bottom', `${bottom}px`, 'important');
+    writeDiag(bottom);
+  };
+  popup.addEventListener('focusin', (e) => {
+    const t = e.target as HTMLElement;
+    if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) {
+      focused = true;
+      lift();
+    }
+  });
+  popup.addEventListener('focusout', () => {
+    focused = false;
+    lift();
+  });
+  const liftAndLog = () => {
+    lift();
+  };
+  if (vv) {
+    vv.addEventListener('resize', liftAndLog);
+    vv.addEventListener('scroll', liftAndLog);
+  }
+  window.addEventListener('resize', liftAndLog);
   detachKeyboardLift = () => {
-    vv.removeEventListener('resize', lift);
-    vv.removeEventListener('scroll', lift);
+    if (vv) {
+      vv.removeEventListener('resize', liftAndLog);
+      vv.removeEventListener('scroll', liftAndLog);
+    }
+    window.removeEventListener('resize', liftAndLog);
     popup.style.removeProperty('bottom');
   };
 }

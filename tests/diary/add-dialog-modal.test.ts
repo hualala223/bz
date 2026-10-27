@@ -221,6 +221,8 @@ describe('写日记单弹窗（票 323 上游视觉移植）', () => {
       removeEventListener: () => {},
     };
     openAddDialog();
+    // 抬升是事件驱动（visualViewport resize）：先触发一次再断言
+    listeners.find(([t]) => t === 'resize')![1](new Event('resize'));
     expect(popup().style.bottom).toBe(`${window.innerHeight - 300}px`);
     // 键盘高度变化（可视视口升高）→ 抬升量实时跟随
     (window as any).visualViewport.height = 500;
