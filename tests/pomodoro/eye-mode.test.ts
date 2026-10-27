@@ -214,6 +214,33 @@ describe('关闭番茄钟：完整休眠（票 323 续）', () => {
   });
 });
 
+describe('面板关闭钮：完整休眠（票 323 续）', () => {
+  it('第一下 → armed 确认态（面板还在）；再点 → 面板与状态栏全收', async () => {
+    const { app } = setup({ pomodoroEyeMode: true });
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    mountPomodoroStatusBar(host, app);
+    await openPomodoro(app);
+    el('pomodoro-btn-close').click();
+    expect(el('pomodoro-btn-close').textContent).toBe('确认'); // 按钮内二次确认
+    expect(document.getElementById('pomodoro-mask')).not.toBeNull(); // 面板还在
+    el('pomodoro-btn-close').click();
+    expect(document.getElementById('pomodoro-mask')).toBeNull();
+    expect(document.querySelector('.pomodoro-statusbar')).toBeNull();
+    host.remove();
+  });
+
+  it('armed 后点别处 → 解除确认态（面板不动）', async () => {
+    const { app } = setup({});
+    await openPomodoro(app);
+    el('pomodoro-btn-close').click();
+    expect(el('pomodoro-btn-close').textContent).toBe('确认');
+    document.body.click();
+    expect(el('pomodoro-btn-close').textContent).toBe('关闭');
+    expect(document.getElementById('pomodoro-mask')).not.toBeNull();
+  });
+});
+
 describe('护眼模式：设置 schema（票 323）', () => {
   it('三行存在：开关 + 用眼分钟 + 休息秒数，两数字行仅护眼开启时可见', () => {
     const schema = pomodoroSettingsSchema();

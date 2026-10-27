@@ -24,6 +24,8 @@
  * flow-dialog，那层通用壳不吃番茄钟皮肤，风格化不一致）。
  * 票 323 护眼模式：durations/options 接管（用眼分钟/远眺秒、恒自动流转、无长休）、阶段文案
  * 「远眺/护眼」、循环内 toast 静默（声音保留）、圆点行隐藏、设置三键、命令 toggleEyeMode。
+ * 票 323 续：面板模式分段钮（选护眼即开跑）、到点单提示音（无倒数滴答/收工钟叠音）、
+ * 关闭番茄钟完整休眠（命令 + 面板「关闭」钮，按钮内二次确认；遮罩/ESC 仍只是收面板后台继续）。
  */
 import type { App } from 'obsidian';
 import { setIcon } from 'obsidian';
@@ -626,6 +628,17 @@ function updateButtons(): void {
     skipBtn.classList.toggle('pomodoro-btn-armed', armed);
     skipBtn.title = armed ? '再点一次即跳过本阶段（不计入历史）' : '跳过本阶段';
   }
+  // 关闭钮（票 323 续）：完整休眠入口（同命令「关闭番茄钟」）——作废运行中会话，同危险动作走按钮内二次确认
+  const closeBtn = document.getElementById('pomodoro-btn-close') as HTMLButtonElement | null;
+  if (closeBtn) {
+    const armed = armedBtn === 'close';
+    const want = armed ? ARM_LABEL : '关闭';
+    if (closeBtn.textContent !== want) closeBtn.textContent = want;
+    closeBtn.classList.toggle('pomodoro-btn-armed', armed);
+    closeBtn.title = armed
+      ? '再点一次即关闭番茄钟（完整休眠：停循环、收状态栏）'
+      : '关闭番茄钟（完整休眠：停循环、收状态栏；命令「番茄钟」可再开）。收起面板请点遮罩或 ESC';
+  }
 }
 
 /** 状态变更统一入口：transition → 落盘（完成事件）→ 通知/声音 → tick 生命周期 → 渲染 */
@@ -914,6 +927,8 @@ function bindEvents(): void {
     if (state.phase === 'idle') return;
     skipWithConfirm();
   });
+  // 关闭钮（票 323 续）：完整休眠（同命令「关闭番茄钟」），按钮内二次确认防误触
+  document.getElementById('pomodoro-btn-close')!.addEventListener('click', () => closeWithConfirm());
   // 统计两档切换（issue 357）：近 7 天明细 / 近 6 月趋势
   document.getElementById('pomodoro-stat-tab-week')?.addEventListener('click', () => setStatMode('week'));
   document.getElementById('pomodoro-stat-tab-month')?.addEventListener('click', () => setStatMode('month'));
@@ -949,7 +964,7 @@ function bindEvents(): void {
  */
 
 /** 已 armed 的按钮（null = 无）；一次只可能有一个在等确认 */
-let armedBtn: 'reset' | 'skip' | null = null;
+let armedBtn: 'reset' | 'skip' | 'close' | null = null;
 /** armed 期间的「点别处即解除」监听（捕获阶段；句柄留存便于精确摘除） */
 let armedOutside: ((e: MouseEvent) => void) | null = null;
 /** 确认态文案：短疑问句 + 警示色（用户 2026-09-24 拍板：不要倒计时自毁） */
@@ -962,12 +977,14 @@ function disarmConfirm(): void {
 }
 
 /** 第一次点 → 按钮变「确认？」；再点 → 执行；点别处 → 解除。一律先问，不看有无进度 */
-function confirmOrRun(kind: 'reset' | 'skip', run: () => void): void {
+function confirmOrRun(kind: 'reset' | 'skip' | 'close', run: () => void): void {
   if (armedBtn === kind) { disarmConfirm(); run(); return; }
   if (armedBtn !== null) disarmConfirm(); // 改点另一个按钮：前一个确认态作废
   armedBtn = kind;
   updateButtons();
-  const btn = document.getElementById(kind === 'reset' ? 'pomodoro-btn-reset' : 'pomodoro-btn-skip');
+  const btn = document.getElementById(
+    kind === 'reset' ? 'pomodoro-btn-reset' : kind === 'skip' ? 'pomodoro-btn-skip' : 'pomodoro-btn-close'
+  );
   armedOutside = (e: MouseEvent) => {
     const t = e.target as Node | null;
     if (btn && t && btn.contains(t)) return; // 点自己 = 执行（由按钮自身的 click 处理）
@@ -982,6 +999,10 @@ function resetWithConfirm(): void {
 
 function skipWithConfirm(): void {
   confirmOrRun('skip', () => applyAction('skip'));
+}
+
+function closeWithConfirm(): void {
+  confirmOrRun('close', () => shutdownPomodoro());
 }
 
 function buildDOM(): void {

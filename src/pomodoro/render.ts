@@ -61,7 +61,7 @@ export function skinClassOf(v: unknown): string {
 
 /**
  * 弹窗骨架（#pomodoro-popup 内部；控件 id 由 ui.ts 接线）
- * ——模式切换（番茄/护眼，票 323）/ 环形进度 / 循环圆点 / 阶段 / 任务 / 时间 / 三按钮 / 今日统计 + 统计两档（近 7 天 / 近 6 月，issue 357）。
+ * ——模式切换（番茄/护眼，票 323）/ 环形进度 / 循环圆点 / 阶段 / 任务 / 时间 / 四按钮（开始/重置/跳过/关闭，关闭=完整休眠，票 323 续）/ 今日统计 + 统计两档（近 7 天 / 近 6 月，issue 357）。
  *
  * 时间字双层（2026-09-23 翻牌机）：`#pomodoro-time` 是可见文本层（读屏与测试锚点，语义不变），
  * `.pomodoro-time-reel` 是同尺寸的视觉层（aria-hidden，四位滚动位由 ui.ts 填充）——翻牌机开着时
@@ -89,6 +89,7 @@ export function panelShellHtml(): string {
         <button id="pomodoro-btn-start" class="pomodoro-btn pomodoro-btn-primary bz-touch-target--sm">开始</button>
         <button id="pomodoro-btn-reset" class="pomodoro-btn bz-touch-target--sm">重置</button>
         <button id="pomodoro-btn-skip" class="pomodoro-btn bz-touch-target--sm">跳过</button>
+        <button id="pomodoro-btn-close" class="pomodoro-btn bz-touch-target--sm">关闭</button>
       </div>
       <div class="pomodoro-stats">
         <div id="pomodoro-today"></div>
