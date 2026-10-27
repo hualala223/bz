@@ -823,6 +823,32 @@ export function openAddDialog(preset?: AddDialogPreset) {
   // 两步（ADR-0109）：preset 已带分类（如每日触动点记录预选「触动点」）→ 直接进正文步；
   // 否则从类型页起步。第一步的 datetime / 类型容器始终保留在 DOM 里，是保存时的数据源。
   showAddStep(readSelectedAddTags().length > 0 ? 2 : 1);
+
+  // 票 323 诊断（临时）：双端各开一次即自动把弹窗真实几何写到 书库/bz弹窗诊断.txt
+  // （Syncthing 汇总），取证完毕后整段移除。
+  setTimeout(() => {
+    try {
+      const p = document.getElementById('add-diary-popup');
+      if (!p) return;
+      const r = p.getBoundingClientRect();
+      const cs = getComputedStyle(p);
+      const tv = document.getElementById('add-diary-step-type');
+      const cv = document.getElementById('add-diary-step-content');
+      const body = p.querySelector('.bz-dialog-body');
+      const chip = document.getElementById('add-diary-type-container');
+      const chipCs = chip ? getComputedStyle(chip) : null;
+      const line = [
+        `[${new Date().toLocaleString()}] ${isMobileEnv() ? '移动端' : '桌面端'} 视口=${window.innerWidth}x${window.innerHeight}`,
+        `popup rect: x=${Math.round(r.x)} y=${Math.round(r.y)} w=${Math.round(r.width)} h=${Math.round(r.height)}`,
+        `computed: pos=${cs.position} left=${cs.left} top=${cs.top} translate=${cs.translate} transform=${cs.transform} maxH=${cs.maxHeight} overflow=${cs.overflow}`,
+        `step1=${tv ? tv.style.display || '(flex)' : '缺失'} step2=${cv ? cv.style.display || '(flex)' : '缺失'} body滚动=${body ? `${(body as HTMLElement).scrollHeight}/${(body as HTMLElement).clientHeight}` : '?'} chips滚动=${chipCs ? `${(chip as HTMLElement).scrollHeight}/${(chip as HTMLElement).clientHeight} maxH=${chipCs.maxHeight}` : '?'}`,
+        `---`,
+      ].join('\n');
+      void getApp().vault.adapter.append?.('书库/bz弹窗诊断.txt', line + '\n');
+    } catch {
+      /* 诊断失败不影响功能 */
+    }
+  }, 400);
 }
 
 /**

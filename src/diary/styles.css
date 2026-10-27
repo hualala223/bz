@@ -66,10 +66,11 @@
   font-weight: 500;
 }
 
-/* chips 滚动区：类型过多时自滚（吸底栏仍常驻） */
+/* chips 滚动区：类型过多时自滚（吸底栏仍常驻）；桌面限高保证标题/日期永远在可视区 */
 .bz-diary-chip-scroll {
   overflow-y: auto;
   margin-bottom: 12px;
+  max-height: 36vh;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
