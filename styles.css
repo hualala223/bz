@@ -4011,6 +4011,14 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
 }
 
 .bz-overlay-popup.bz-diary-add-popup {
+  /* 自带完整定位（票 323 修订二）：不依赖壳/环境/主题的居中机制——移动端曾被环境样式
+     干扰致弹窗横移出屏（left 恒 50% 无校正）。translate 属性与 transform 互不覆盖。 */
+  position: fixed !important;
+  left: 50% !important;
+  top: 50% !important;
+  translate: -50% -50% !important;
+  margin: 0 !important;
+  width: min(400px, calc(100vw - 32px));
   background: linear-gradient(178deg, #f6efdd, #ece2c8);
   color: #43392b;
   border: 1px solid rgba(120, 92, 56, .42);
@@ -4136,9 +4144,10 @@ a.bz-crumb:hover, button.bz-crumb:hover { color: var(--bz-text-1); }
   background: linear-gradient(178deg, #f6efdd, #ece2c8);
 }
 
-/* 软键盘避让（上游 D-UI16）：输入聚焦弹窗整体上移一档，失焦回落 */
+/* 软键盘避让（上游 D-UI16）：仅移动端生效——用 translate 属性整体上移，
+   与居中的 -50% -50% 同属性叠加（写 transform 会覆盖掉居中校正 → 弹窗横移出屏，修订二实测） */
 #add-diary-popup.keyboard-up {
-  transform: translateY(-20vh);
+  translate: -50% calc(-50% - 20vh) !important;
 }
 
 /* 放弃确认框同皮：桌角撕下来的一角纸 */
@@ -7812,6 +7821,20 @@ mark.bz-todo-hit {
        与元素右边缘 368px 重合 = 视口裁切，非滤镜区域。）SVG 根的 UA 默认 overflow 是 hidden，
        显式置 visible 后滤镜输出可绘到框外；面板 padding 24px，够它落。 */
     #pomodoro-ring-svg { width: 160px; height: 160px; margin: var(--bz-space-sm) auto; display: block; overflow: visible; }
+    /* 模式切换（票 323）：番茄/护眼两态分段钮，置顶可选——选中态吃 accent 变量（随皮肤走） */
+    .pomodoro-mode { display: flex; justify-content: center; margin-bottom: var(--bz-space-2xs, 4px); }
+    .pomodoro-mode-btn {
+      appearance: none; border: 1px solid var(--pz-line, var(--background-modifier-border));
+      background: transparent; color: var(--pz-muted, var(--text-muted));
+      font-size: var(--bz-font-ui-small, 12px); padding: 2px 14px; cursor: pointer;
+    }
+    .pomodoro-mode-btn:first-child { border-radius: 8px 0 0 8px; }
+    .pomodoro-mode-btn:last-child { border-radius: 0 8px 8px 0; border-left: none; }
+    .pomodoro-mode-btn-on {
+      background: var(--pz-accent, var(--interactive-accent));
+      border-color: var(--pz-accent, var(--interactive-accent));
+      color: var(--pz-accent-contrast, var(--text-on-accent));
+    }
     .pomodoro-ring-track { fill: none; stroke: var(--pz-line, var(--background-modifier-border)); stroke-width: 8; }
     .pomodoro-ring-progress { fill: none; stroke: var(--pz-accent, var(--interactive-accent)); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 1s linear; }
     /* 本轮循环位置：N 个 6px 方点，已完成填 accent（增强包，替代「专注 2/4」文字小字）；
